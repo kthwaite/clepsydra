@@ -23,7 +23,7 @@ async fn request_above_base64_only_allowance_reaches_archive_validation() {
     let temp = TempDir::new().unwrap();
     let vault_root = temp.path().join("vault");
     let cas_root = temp.path().join("cas");
-    clepsydra::vault::init::init_vault(&vault_root).unwrap();
+    clep_api::vault::init::init_vault(&vault_root).unwrap();
     std::fs::write(
         vault_root.join(".clepsydra/config.toml"),
         format!(

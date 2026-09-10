@@ -9,7 +9,7 @@ name = "clep"
 path = "src/main.rs"
 
 [dependencies]
-clepsydra = { workspace = true }
+clep-api = { workspace = true }
 clep-client = { workspace = true }
 clep-config = { workspace = true }
 clep-doctor = { workspace = true }

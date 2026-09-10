@@ -21,8 +21,8 @@ use super::tasking::{
     BoardKind, TaskRef, classify_ref, deserialize_tri_state, filter_board_project, find_board_id,
     insert_tri_state, page_meta_id, resolve_project_patch,
 };
+use clep_api::vault::kind::Kind;
 use clep_client::client::{ApiClient, encode_vault_path};
-use clepsydra::vault::kind::Kind;
 
 /// The `/pages/{path}` endpoint URL for a vault-relative path.
 fn pages_url(path: &str) -> String {
@@ -750,10 +750,10 @@ impl VaultMcpServer {
             params.folder.as_deref(),
         )?;
 
-        let filename = clepsydra::vault::page_filename::page_filename(
+        let filename = clep_api::vault::page_filename::page_filename(
             chrono::Utc::now(),
             title,
-            &clepsydra::vault::block_id::generate_short_id(),
+            &clep_api::vault::block_id::generate_short_id(),
         );
         let path = format!("{folder}/{filename}");
 
@@ -2001,7 +2001,7 @@ mod tests {
     async fn serve_seeded_vault() -> (VaultMcpServer, tempfile::TempDir) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        clepsydra::vault::init::init_vault(&root).unwrap();
+        clep_api::vault::init::init_vault(&root).unwrap();
 
         let notes = root.join("notes");
         std::fs::create_dir_all(&notes).unwrap();
@@ -2016,11 +2016,11 @@ mod tests {
         )
         .unwrap();
 
-        let state = clepsydra::build_app_state(&root).await.unwrap();
-        let app = clepsydra::build_router(
+        let state = clep_api::build_app_state(&root).await.unwrap();
+        let app = clep_api::build_router(
             state,
             1024 * 1024,
-            clepsydra::api::archive::ArchiveViewConfig::default(),
+            clep_api::api::archive::ArchiveViewConfig::default(),
             true,
             None,
         );
@@ -2343,7 +2343,7 @@ mod tests {
         assert!(path.starts_with("notes/"), "unexpected path: {path}");
         let filename = path.rsplit('/').next().unwrap();
         assert!(
-            clepsydra::vault::path::is_canonical_page_filename(filename),
+            clep_api::vault::path::is_canonical_page_filename(filename),
             "filename not canonical: {filename}"
         );
         assert_eq!(value["meta"]["title"], "Fresh Note");
@@ -3597,7 +3597,7 @@ mod tests {
         );
         let code = value["code"].as_str().unwrap().to_string();
         assert!(
-            clepsydra::vault::code::is_valid_code(&code),
+            clep_api::vault::code::is_valid_code(&code),
             "{code}: {value}"
         );
         assert_eq!(value["path"], format!("tasks/xxii/{code}.md"));
@@ -3802,7 +3802,7 @@ mod tests {
         );
         let first_code = first["code"].as_str().unwrap().to_string();
         assert!(
-            first_code.starts_with("S-") && clepsydra::vault::code::is_valid_code(&first_code),
+            first_code.starts_with("S-") && clep_api::vault::code::is_valid_code(&first_code),
             "{first_code}"
         );
         assert_eq!(first["state"], "PLANNED");
@@ -3818,7 +3818,7 @@ mod tests {
         );
         let second_code = second["code"].as_str().unwrap().to_string();
         assert!(
-            second_code.starts_with("S-") && clepsydra::vault::code::is_valid_code(&second_code),
+            second_code.starts_with("S-") && clep_api::vault::code::is_valid_code(&second_code),
             "{second_code}"
         );
         assert_ne!(first_code, second_code, "codes must be distinct");

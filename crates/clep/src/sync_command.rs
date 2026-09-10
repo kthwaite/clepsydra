@@ -10,15 +10,15 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
-use clep_client::client::{ApiCallError, ApiClient};
-use clep_client::configured_api_client;
-use clepsydra::api::sync::{SyncReportDto, SyncStatusDto};
-use clepsydra::vault::gitsync::Author;
-use clepsydra::vault::gitsync::engine::SyncEngine;
-use clepsydra::vault::gitsync::git::Git;
-use clepsydra::vault::gitsync::init::{
+use clep_api::api::sync::{SyncReportDto, SyncStatusDto};
+use clep_api::vault::gitsync::Author;
+use clep_api::vault::gitsync::engine::SyncEngine;
+use clep_api::vault::gitsync::git::Git;
+use clep_api::vault::gitsync::init::{
     InitOpts, InitReport, LfsPolicy, PromptFn, init, probe_lfs_remote,
 };
+use clep_client::client::{ApiCallError, ApiClient};
+use clep_client::configured_api_client;
 
 /// Rendered command output plus the process exit code that goes with it.
 pub struct RenderedSync {
@@ -69,7 +69,7 @@ pub async fn run_init(args: InitArgs) -> Result<InitReport, Box<dyn std::error::
     if let Some(url) = args.remote.as_deref() {
         probe_lfs_remote(url).await?;
     }
-    let vault = clepsydra::open_vault()?;
+    let vault = clep_api::open_vault()?;
     let author = match (args.author_name, args.author_email) {
         (Some(name), Some(email)) => Some(Author { name, email }),
         (None, None) => None,
@@ -89,7 +89,7 @@ pub async fn run_init(args: InitArgs) -> Result<InitReport, Box<dyn std::error::
         None
     };
     let git = Git::new(vault.root());
-    let legacy_cas = clepsydra::vault::cas_migrate::legacy_store_with_blobs();
+    let legacy_cas = clep_api::vault::cas_migrate::legacy_store_with_blobs();
     let report = tokio::task::spawn_blocking(move || {
         init(
             &vault,
@@ -120,7 +120,7 @@ pub async fn run_sync() -> Result<RenderedSync, Box<dyn std::error::Error>> {
             serde_json::from_value::<SyncReportDto>(value)?
         }
         None => {
-            let vault = clepsydra::open_vault()?;
+            let vault = clep_api::open_vault()?;
             let engine = SyncEngine::open(&vault)?;
             let report = tokio::task::spawn_blocking(move || engine.full_sync()).await??;
             SyncReportDto::from(&report)
@@ -142,7 +142,7 @@ pub async fn run_status() -> Result<RenderedSync, Box<dyn std::error::Error>> {
             (serde_json::from_value::<SyncStatusDto>(value)?, true)
         }
         None => {
-            let vault = clepsydra::open_vault()?;
+            let vault = clep_api::open_vault()?;
             let engine = SyncEngine::open(&vault)?;
             let status = tokio::task::spawn_blocking(move || engine.status()).await??;
             // Nothing is running, so nothing can be pending or in progress.
@@ -427,8 +427,8 @@ pub fn render_init(report: &InitReport) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clepsydra::api::sync::{ConflictCopyDto, JournalMergeDto};
-    use clepsydra::vault::gitsync::Author;
+    use clep_api::api::sync::{ConflictCopyDto, JournalMergeDto};
+    use clep_api::vault::gitsync::Author;
 
     fn report(warnings: Vec<String>) -> InitReport {
         InitReport {

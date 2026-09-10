@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 chrono = { workspace = true }
 clep-client = { workspace = true }
-clepsydra = { workspace = true }
+clep-api = { workspace = true }
 rmcp = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }

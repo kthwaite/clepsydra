@@ -123,12 +123,12 @@ fn residual_body_conflict_leaves_an_unmerged_path_with_frontmatter_intact() {
 /// handover work together, not just the driver in isolation.
 #[test]
 fn full_sync_with_driver_conflicts_hand_over_to_conflict_copies() {
-    use clepsydra::vault::Vault;
-    use clepsydra::vault::gitsync::Author;
-    use clepsydra::vault::gitsync::engine::{MergeSummary, PushStatus, SyncEngine};
-    use clepsydra::vault::gitsync::git::{Git, PushOutcome};
-    use clepsydra::vault::gitsync::init::{InitOpts, LfsPolicy, init};
-    use clepsydra::vault::init::init_vault;
+    use clep_api::vault::Vault;
+    use clep_api::vault::gitsync::Author;
+    use clep_api::vault::gitsync::engine::{MergeSummary, PushStatus, SyncEngine};
+    use clep_api::vault::gitsync::git::{Git, PushOutcome};
+    use clep_api::vault::gitsync::init::{InitOpts, LfsPolicy, init};
+    use clep_api::vault::init::init_vault;
 
     let tmp = TempDir::new().unwrap();
     let global = tmp.path().join("gitconfig");
@@ -184,7 +184,7 @@ fn full_sync_with_driver_conflicts_hand_over_to_conflict_copies() {
     let write_page = |root: &Path, tags: &str, body: &str| {
         std::fs::write(root.join(page_path), page(tags, body)).unwrap();
     };
-    let sync = |root: &Path| -> clepsydra::vault::gitsync::engine::SyncReport {
+    let sync = |root: &Path| -> clep_api::vault::gitsync::engine::SyncReport {
         SyncEngine::open_with_git(&Vault::open(root).unwrap(), isolated(root))
             .unwrap()
             .full_sync()

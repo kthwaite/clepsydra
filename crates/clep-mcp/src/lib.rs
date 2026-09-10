@@ -32,15 +32,15 @@ pub async fn run_mcp(allow_remote: bool) -> Result<(), Box<dyn std::error::Error
 
 #[cfg(test)]
 mod tests {
-    /// The eval fixture (tests/mcp_evals/vault) must stay drift-free: its
+    /// The eval fixture (crates/clep-api/tests/mcp_evals/vault) must stay drift-free: its
     /// declared metadata already matches folder placement, so the serve-time
     /// reconcile sweep moves nothing and the checked-in answers in
     /// evaluation.xml stay valid. Runs over a copy — building the index
     /// writes a cache the checked-in tree must not accumulate.
     #[tokio::test]
     async fn eval_fixture_vault_is_drift_free() {
-        let fixture =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/mcp_evals/vault");
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../clep-api/tests/mcp_evals/vault");
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
         copy_tree(&fixture, &root);
@@ -48,8 +48,8 @@ mod tests {
         let paths_before = markdown_paths(&root);
         assert_eq!(paths_before.len(), 10, "fixture should hold 10 pages");
 
-        let state = clepsydra::build_app_state(&root).await.unwrap();
-        clepsydra::run_startup_reconcile(&state).await;
+        let state = clep_api::build_app_state(&root).await.unwrap();
+        clep_api::run_startup_reconcile(&state).await;
 
         assert_eq!(
             markdown_paths(&root),

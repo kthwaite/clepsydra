@@ -1,0 +1,2245 @@
+mod support;
+
+use std::path::Path;
+use std::str::FromStr;
+use std::sync::Arc;
+
+use axum_test::TestServer;
+use tokio::sync::broadcast;
+
+use clep_api::api::AppState;
+use clep_api::api::board::CycleState;
+use clep_api::api::events::SyncNotification;
+use tempfile::TempDir;
+
+use support::ApiFixture;
+
+fn setup_server_with(pre_index: impl FnOnce(&Path) + 'static) -> (TestServer, TempDir) {
+    ApiFixture::builder()
+        .pre_index_seed(pre_index)
+        .build()
+        .into_server_and_temp()
+}
+
+fn setup_server_with_state(
+    pre_index: impl FnOnce(&Path) + 'static,
+) -> (TestServer, TempDir, Arc<AppState>) {
+    ApiFixture::builder()
+        .pre_index_seed(pre_index)
+        .build()
+        .into_parts()
+}
+
+async fn recv_change(changes: &mut broadcast::Receiver<SyncNotification>) -> SyncNotification {
+    tokio::time::timeout(std::time::Duration::from_secs(5), changes.recv())
+        .await
+        .expect("timed out waiting for index-change notification")
+        .expect("index-change notification channel closed")
+}
+
+#[tokio::test]
+async fn mutation_routes_apply_link_policy_and_emit_exact_notifications() {
+    let (server, _tmp, state) = setup_server_with_state(|root| {
+        std::fs::write(
+            root.join("target.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000090\ntitle: Target\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("cycle-source.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000091\ntitle: Cycle source\n---\n[[S-swift-otter-8m3dr]]\n",
+        )
+        .unwrap();
+    });
+    let mut changes = state.change_tx.subscribe();
+
+    let task: serde_json::Value = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "notified task",
+            "link": "Target"
+        }))
+        .await
+        .json();
+    let task_path = task["path"].as_str().unwrap();
+    let task_id = task["id"].as_str().unwrap();
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
+    assert_eq!(upserted, vec![task_path]);
+    assert!(removed.is_empty());
+
+    let outlinks: Vec<serde_json::Value> = server
+        .get(&format!("/api/vault/index/outlinks/{task_path}"))
+        .await
+        .json();
+    assert_eq!(outlinks.len(), 1);
+    assert_eq!(outlinks[0]["target_raw"], "Target");
+    assert_eq!(outlinks[0]["target_path"], "target.md");
+    let backlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/backlinks/target.md")
+        .await
+        .json();
+    assert_eq!(backlinks.len(), 1);
+    assert_eq!(backlinks[0]["source_path"], task_path);
+
+    server
+        .patch(&format!("/api/vault/board/tasks/{task_id}"))
+        .json(&serde_json::json!({ "link": null }))
+        .await
+        .assert_status_ok();
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
+    assert_eq!(upserted, vec![task_path]);
+    assert!(removed.is_empty());
+    let outlinks: Vec<serde_json::Value> = server
+        .get(&format!("/api/vault/index/outlinks/{task_path}"))
+        .await
+        .json();
+    assert!(outlinks.is_empty());
+    let backlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/backlinks/target.md")
+        .await
+        .json();
+    assert!(
+        backlinks.is_empty(),
+        "clearing the task link must remove its reverse dependency"
+    );
+
+    server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "code": "S-swift-otter-8m3dr",
+            "label": "notified cycle",
+            "start": "2042-05-18",
+            "end": "2042-05-24"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
+    assert_eq!(upserted, vec!["cycles/S-swift-otter-8m3dr.md"]);
+    assert!(removed.is_empty());
+
+    let backlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/backlinks/cycles/S-swift-otter-8m3dr.md")
+        .await
+        .json();
+    assert_eq!(backlinks.len(), 1);
+    assert_eq!(backlinks[0]["source_path"], "cycle-source.md");
+
+    let cycle: serde_json::Value = server.get("/api/vault/board").await.json();
+    let cycle_id = cycle["cycles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["code"] == "S-swift-otter-8m3dr")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    server
+        .patch(&format!("/api/vault/board/cycles/{cycle_id}"))
+        .json(&serde_json::json!({ "goal": "updated policy goal" }))
+        .await
+        .assert_status_ok();
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
+    assert_eq!(upserted, vec!["cycles/S-swift-otter-8m3dr.md"]);
+    assert!(removed.is_empty());
+    let backlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/backlinks/cycles/S-swift-otter-8m3dr.md")
+        .await
+        .json();
+    assert_eq!(backlinks.len(), 1);
+    assert_eq!(backlinks[0]["source_path"], "cycle-source.md");
+    assert!(
+        changes.try_recv().is_err(),
+        "task and cycle routes must emit only the asserted notifications"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Main aggregation test
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn board_aggregates_operations_cycles_tasks() {
+    let (server, _tmp) = setup_server_with(|root| {
+        // projects/op-sig3.md: PROJECT with board: true
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        std::fs::write(
+            root.join("projects/op-sig3.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000001\n\
+             title: SIGNAL-3 MIGRATION\ntype: PROJECT\nproject: op-sig3\n\
+             board: true\nhealth: AMBER\nlead: \"0xC1\"\ntarget: W17\n---\n",
+        )
+        .unwrap();
+
+        // cycles/S-13.md: CYCLE with state ACTIVE
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000002\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n\
+             start: \"2026-04-13\"\nend: \"2026-04-19\"\ngoal: freeze\n---\n",
+        )
+        .unwrap();
+
+        // tasks/op-sig3/TSK-0481.md: TASK with checks
+        std::fs::create_dir_all(root.join("tasks/op-sig3")).unwrap();
+        std::fs::write(
+            root.join("tasks/op-sig3/TSK-0481.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000003\n\
+             title: FREEZE LEGACY SYNC WRITES\ntype: TASK\nproject: op-sig3\n\
+             status: FIELD\npriority: P0\ncycle: S-13\nassignee: \"0xC1\"\n\
+             due: \"2026-04-21\"\n---\n\
+             - [x] a\n- [x] b\n- [ ] c\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+
+    // --- columns ---
+    let columns = body["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 5, "expected 5 columns, got: {columns:?}");
+    assert_eq!(columns[0]["id"], "INTAKE");
+    assert_eq!(columns[0]["label"], "INTAKE");
+    assert_eq!(columns[0]["sub"], "unfiled");
+    assert_eq!(columns[2]["id"], "FIELD");
+    assert_eq!(columns[2]["label"], "IN-FIELD");
+    assert_eq!(columns[2]["sub"], "active");
+    assert_eq!(columns[4]["id"], "SEALED");
+    assert_eq!(columns[4]["sub"], "closed");
+    // WIP limits were removed (TSK-0116): no column carries a `wip` key.
+    for col in columns {
+        assert!(
+            col.get("wip").is_none(),
+            "column {} still exposes a `wip` field: {col:?}",
+            col["id"]
+        );
+    }
+
+    // --- operations ---
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(ops.len(), 1, "expected 1 operation, got: {ops:?}");
+    assert_eq!(ops[0]["code"], "OP-SIG3");
+    assert_eq!(ops[0]["name"], "SIGNAL-3 MIGRATION");
+    assert_eq!(ops[0]["health"], "AMBER");
+
+    // --- cycles ---
+    let cycles = body["cycles"].as_array().unwrap();
+    assert_eq!(cycles.len(), 1, "expected 1 cycle, got: {cycles:?}");
+    assert_eq!(cycles[0]["code"], "S-13");
+    assert_eq!(cycles[0]["state"], "ACTIVE");
+
+    // --- tasks ---
+    let tasks = body["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "expected 1 task, got: {tasks:?}");
+    assert_eq!(tasks[0]["code"], "TSK-0481");
+    assert_eq!(tasks[0]["status"], "FIELD");
+    assert_eq!(tasks[0]["priority"], "P0");
+    let checks = tasks[0]["checks"].as_array().unwrap();
+    assert_eq!(checks[0], 2, "done count should be 2");
+    assert_eq!(checks[1], 3, "total count should be 3");
+}
+
+#[tokio::test]
+async fn board_projects_bounded_body_excerpts_in_bulk_and_mutation_read_back() {
+    const RICH_ID: &str = "01951234-0000-7000-8000-000000000111";
+    const EMPTY_ID: &str = "01951234-0000-7000-8000-000000000112";
+    const LONG_ID: &str = "01951234-0000-7000-8000-000000000113";
+
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0111.md"),
+            format!(
+                "---\nid: {RICH_ID}\ntitle: Rich body\ntype: TASK\n---\n\
+                 # Heading\n\nA [link label](https://example.com) with `code` and <span>inside</span>.\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0112.md"),
+            format!("---\nid: {EMPTY_ID}\ntitle: Empty body\ntype: TASK\n---\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0113.md"),
+            format!(
+                "---\nid: {LONG_ID}\ntitle: Long body\ntype: TASK\n---\n{}",
+                "界".repeat(241)
+            ),
+        )
+        .unwrap();
+    });
+
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    let task = |id: &str| {
+        tasks
+            .iter()
+            .find(|task| task["id"] == id)
+            .unwrap_or_else(|| panic!("missing task {id}"))
+    };
+
+    let rich_excerpt = task(RICH_ID)["body_excerpt"].as_str().unwrap();
+    assert_eq!(rich_excerpt, "Heading A link label with code and inside.");
+    assert!(!rich_excerpt.contains("https://example.com"));
+    assert!(
+        ["#", "`", "<", ">"]
+            .into_iter()
+            .all(|syntax| !rich_excerpt.contains(syntax))
+    );
+    assert_eq!(task(EMPTY_ID)["body_excerpt"], "");
+
+    let long_excerpt = task(LONG_ID)["body_excerpt"].as_str().unwrap();
+    assert_eq!(long_excerpt, format!("{}…", "界".repeat(239)));
+    assert_eq!(long_excerpt.chars().count(), 240);
+
+    let mutation: serde_json::Value = server
+        .patch(&format!("/api/vault/board/tasks/{RICH_ID}"))
+        .json(&serde_json::json!({ "title": "Rich body renamed" }))
+        .await
+        .json();
+    assert_eq!(mutation["body_excerpt"], rich_excerpt);
+}
+
+#[tokio::test]
+async fn checklist_counts_preserve_checkbox_semantics_across_tasks() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+
+        for (name, id, body) in [
+            ("TSK-0001", "01951234-0000-7000-8000-000000000101", ""),
+            (
+                "TSK-0002",
+                "01951234-0000-7000-8000-000000000102",
+                "- [ ] todo\n",
+            ),
+            (
+                "TSK-0003",
+                "01951234-0000-7000-8000-000000000103",
+                "- [x] done\n",
+            ),
+            (
+                "TSK-0004",
+                "01951234-0000-7000-8000-000000000104",
+                "- [-] cancelled\n",
+            ),
+        ] {
+            std::fs::write(
+                root.join(format!("tasks/{name}.md")),
+                format!("---\nid: {id}\ntitle: {name}\ntype: TASK\n---\n{body}"),
+            )
+            .unwrap();
+        }
+    });
+
+    let response = server.get("/api/vault/board").await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let tasks = body["tasks"].as_array().unwrap();
+
+    let counts_for = |code: &str| {
+        tasks
+            .iter()
+            .find(|task| task["code"] == code)
+            .unwrap_or_else(|| panic!("{code} missing from board response: {tasks:?}"))["checks"]
+            .clone()
+    };
+
+    assert_eq!(counts_for("TSK-0001"), serde_json::json!([0, 0]));
+    assert_eq!(counts_for("TSK-0002"), serde_json::json!([0, 1]));
+    assert_eq!(counts_for("TSK-0003"), serde_json::json!([1, 1]));
+    assert_eq!(counts_for("TSK-0004"), serde_json::json!([0, 1]));
+}
+
+// ---------------------------------------------------------------------------
+// PROJECT with board: false is excluded
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn project_with_board_false_excluded() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        // board: false — explicit opt-out, must not appear
+        std::fs::write(
+            root.join("projects/hidden.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000010\n\
+             title: Hidden Op\ntype: PROJECT\nproject: hidden\nboard: false\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert!(
+        ops.is_empty(),
+        "expected no operations when board: false, got: {ops:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PROJECT without a board key is included (opt-out, not opt-in)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn project_without_board_key_included() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        // no board key at all — must appear
+        std::fs::write(
+            root.join("projects/no-board.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000011\n\
+             title: No Board Op\ntype: PROJECT\nproject: no-board\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(
+        ops.len(),
+        1,
+        "expected one operation when board key absent, got: {ops:?}"
+    );
+    assert_eq!(ops[0]["code"], "NO-BOARD");
+    assert_eq!(ops[0]["project"], "no-board");
+    assert_eq!(ops[0]["health"], "GREEN");
+}
+
+// ---------------------------------------------------------------------------
+// PROJECT without a `project` slug is still listed, keyed by its code
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn project_page_without_slug_listed_by_code() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        // no slug, no board key — must appear with a null project
+        std::fs::write(
+            root.join("projects/slugless.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000012\n\
+             title: Slugless Op\ntype: PROJECT\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(
+        ops.len(),
+        1,
+        "expected a slug-less PROJECT page to be listed, got: {ops:?}"
+    );
+    assert_eq!(ops[0]["code"], "SLUGLESS");
+    assert!(ops[0]["project"].is_null(), "ops: {ops:?}");
+}
+
+// ---------------------------------------------------------------------------
+// One operation per project slug: board: true wins over canonical name and
+// path order; canonical name == slug wins over path order.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn one_operation_per_project_slug_prefers_board_flag() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects/atlas")).unwrap();
+        // Earlier in path order AND canonical name == slug, but not flagged.
+        std::fs::write(
+            root.join("projects/atlas/atlas.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000013\n\
+             title: Atlas\ntype: PROJECT\nproject: atlas\n---\n",
+        )
+        .unwrap();
+        // Later in path order, flagged — must be the one operation.
+        std::fs::write(
+            root.join("projects/atlas/zeta.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000014\n\
+             title: Atlas Board\ntype: PROJECT\nproject: atlas\nboard: true\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(
+        ops.len(),
+        1,
+        "expected exactly one operation per slug, got: {ops:?}"
+    );
+    assert_eq!(ops[0]["path"], "projects/atlas/zeta.md", "ops: {ops:?}");
+    assert_eq!(ops[0]["project"], "atlas");
+}
+
+#[tokio::test]
+async fn one_operation_per_project_slug_prefers_canonical_name_then_path() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects/atlas")).unwrap();
+        // Earlier in path order, canonical name "aardvark hub" != slug.
+        std::fs::write(
+            root.join("projects/atlas/aaa.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000015\n\
+             title: Aardvark Hub\ntype: PROJECT\nproject: atlas\n---\n",
+        )
+        .unwrap();
+        // Later in path order, canonical name "atlas" == slug — wins.
+        std::fs::write(
+            root.join("projects/atlas/zzz.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000016\n\
+             title: Atlas\ntype: PROJECT\nproject: atlas\n---\n",
+        )
+        .unwrap();
+        // A second slug with two unflagged, non-matching pages: path order wins.
+        std::fs::create_dir_all(root.join("projects/beacon")).unwrap();
+        std::fs::write(
+            root.join("projects/beacon/first.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000017\n\
+             title: Beacon One\ntype: PROJECT\nproject: beacon\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("projects/beacon/second.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000018\n\
+             title: Beacon Two\ntype: PROJECT\nproject: beacon\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(
+        ops.len(),
+        2,
+        "expected one operation per slug, got: {ops:?}"
+    );
+    let by_slug = |slug: &str| {
+        ops.iter()
+            .find(|op| op["project"] == slug)
+            .unwrap_or_else(|| panic!("no operation for {slug}: {ops:?}"))
+    };
+    assert_eq!(by_slug("atlas")["path"], "projects/atlas/zzz.md");
+    assert_eq!(by_slug("beacon")["path"], "projects/beacon/first.md");
+}
+
+// ---------------------------------------------------------------------------
+// TASK with no project: field still appears with project: null
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn task_without_project_has_null_project() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000020\n\
+             title: Orphan Task\ntype: TASK\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let tasks = body["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "expected 1 task, got: {tasks:?}");
+    assert_eq!(tasks[0]["code"], "TSK-0001");
+    assert!(
+        tasks[0]["project"].is_null(),
+        "expected project to be null, got: {}",
+        tasks[0]["project"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// TASK link with wikilink alias strips brackets AND display text
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn task_link_wikilink_alias_keeps_target_only() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0003.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000040\n\
+             title: Aliased Link Task\ntype: TASK\n\
+             link: \"[[CLP-0901-J|the dossier]]\"\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let tasks = body["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "expected 1 task, got: {tasks:?}");
+    assert_eq!(
+        tasks[0]["link"], "CLP-0901-J",
+        "expected aliased wikilink to yield target only, got: {}",
+        tasks[0]["link"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// TASK with no status/priority defaults to INTAKE/P2
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn task_without_status_priority_defaults() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0002.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000030\n\
+             title: Default Task\ntype: TASK\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let tasks = body["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "expected 1 task, got: {tasks:?}");
+    assert_eq!(
+        tasks[0]["status"], "INTAKE",
+        "expected default status INTAKE, got: {}",
+        tasks[0]["status"]
+    );
+    assert_eq!(
+        tasks[0]["priority"], "P2",
+        "expected default priority P2, got: {}",
+        tasks[0]["priority"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — create task with full fields under a project
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_allocates_code_and_files_under_operation() {
+    let (server, tmp) = setup_server_with(|root| {
+        // projects/op-sig3.md: PROJECT with board: true
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        std::fs::write(
+            root.join("projects/op-sig3.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000001\n\
+             title: SIGNAL-3 MIGRATION\ntype: PROJECT\nproject: op-sig3\n\
+             board: true\n---\n",
+        )
+        .unwrap();
+
+        // cycles/S-13.md: CYCLE
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000002\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n\
+             start: \"2026-04-13\"\nend: \"2026-04-19\"\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "dual-write shim",
+            "project": "op-sig3",
+            "status": "TRIAGE",
+            "priority": "P1",
+            "cycle": "S-13",
+            "checklist": ["shim", "overlap", "verify"]
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let body: serde_json::Value = res.json();
+    let code = body["code"].as_str().unwrap().to_string();
+    assert!(clep_api::vault::code::is_valid_code(&code), "{code}");
+    assert_eq!(
+        body["path"],
+        format!("tasks/op-sig3/{code}.md"),
+        "path: {body}"
+    );
+    assert_eq!(body["status"], "TRIAGE", "status: {body}");
+    assert_eq!(body["priority"], "P1", "priority: {body}");
+    assert_eq!(body["cycle"], "S-13", "cycle: {body}");
+    assert_eq!(body["title"], "dual-write shim", "title: {body}");
+    let checks = body["checks"].as_array().unwrap();
+    assert_eq!(checks[0], 0, "done should be 0");
+    assert_eq!(checks[1], 3, "total should be 3");
+
+    // Verify file exists on disk with the expected frontmatter
+    let vault_root = tmp.path().join("vault");
+    let file_path = vault_root.join(format!("tasks/op-sig3/{code}.md"));
+    assert!(file_path.exists(), "task file should exist on disk");
+    let content = std::fs::read_to_string(&file_path).unwrap();
+    assert!(
+        content.contains("type = \"TASK\""),
+        "should have type: TASK"
+    );
+    assert!(
+        content.contains("status = \"TRIAGE\""),
+        "should have status: TRIAGE"
+    );
+    assert!(
+        content.contains("- [ ] shim"),
+        "should have checklist item 'shim'"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — create task without project goes to tasks root
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_without_project_files_at_tasks_root() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "stray" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let body: serde_json::Value = res.json();
+    let code = body["code"].as_str().unwrap().to_string();
+    assert!(clep_api::vault::code::is_valid_code(&code), "{code}");
+    assert_eq!(body["path"], format!("tasks/{code}.md"), "path: {body}");
+    assert!(body["project"].is_null(), "project should be null: {body}");
+    assert_eq!(body["status"], "INTAKE", "status should default to INTAKE");
+    assert_eq!(body["priority"], "P2", "priority should default to P2");
+
+    let vault_root = tmp.path().join("vault");
+    assert!(
+        vault_root.join(format!("tasks/{code}.md")).exists(),
+        "task file should be at tasks root"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — the brief becomes the page body, above any checklist
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_writes_the_brief_above_the_checklist() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "briefed",
+            "body": "Two paragraphs.\n\nThe second one.",
+            "checklist": ["first step", "second step"]
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let dto: serde_json::Value = res.json();
+    let code = dto["code"].as_str().unwrap();
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{code}.md"))).unwrap();
+    let (_, page_body) = content
+        .split_once("+++\n")
+        .and_then(|(_, rest)| rest.split_once("+++\n"))
+        .unwrap();
+    assert_eq!(
+        page_body.trim_start_matches('\n'),
+        "Two paragraphs.\n\nThe second one.\n\n- [ ] first step\n- [ ] second step\n",
+        "brief, blank line, then the checklist: {page_body:?}"
+    );
+
+    assert_eq!(dto["checks"], serde_json::json!([0, 2]), "dto: {dto}");
+    assert!(
+        dto["body_excerpt"]
+            .as_str()
+            .is_some_and(|excerpt| excerpt.contains("Two paragraphs")),
+        "the board card shows the brief: {dto}"
+    );
+}
+
+#[tokio::test]
+async fn create_task_writes_a_brief_without_a_checklist() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "prose only", "body": "  Just prose.  " }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let code = res.json::<serde_json::Value>()["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{code}.md"))).unwrap();
+    assert!(
+        content.ends_with("Just prose.\n"),
+        "trimmed body: {content:?}"
+    );
+    assert!(!content.contains("- [ ]"), "no checklist: {content:?}");
+}
+
+#[tokio::test]
+async fn create_task_ignores_a_blank_brief() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "blank brief",
+            "body": "   \n  ",
+            "checklist": ["only step"]
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let code = res.json::<serde_json::Value>()["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{code}.md"))).unwrap();
+    let (_, page_body) = content
+        .split_once("+++\n")
+        .and_then(|(_, rest)| rest.split_once("+++\n"))
+        .unwrap();
+    assert_eq!(
+        page_body.trim_start_matches('\n'),
+        "- [ ] only step\n",
+        "a whitespace-only brief leaves the checklist alone: {page_body:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — second create gets a distinct petname code
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn second_create_gets_a_distinct_petname_code() {
+    let (server, _tmp) = setup_server_with(|root| {
+        // Pre-seed an existing task at TSK-0481 (legacy stem — never colliding
+        // with a freshly minted petname code, but must not break minting)
+        std::fs::create_dir_all(root.join("tasks/op-sig3")).unwrap();
+        std::fs::write(
+            root.join("tasks/op-sig3/TSK-0481.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000003\n\
+             title: EXISTING TASK\ntype: TASK\nproject: op-sig3\n\
+             status: FIELD\npriority: P0\n---\n",
+        )
+        .unwrap();
+    });
+
+    let first = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "next task" }))
+        .await;
+    first.assert_status(axum::http::StatusCode::CREATED);
+    let first_code = first.json::<serde_json::Value>()["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let second = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "yet another task" }))
+        .await;
+    second.assert_status(axum::http::StatusCode::CREATED);
+    let second_code = second.json::<serde_json::Value>()["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    assert!(
+        clep_api::vault::code::is_valid_code(&first_code),
+        "{first_code}"
+    );
+    assert!(
+        clep_api::vault::code::is_valid_code(&second_code),
+        "{second_code}"
+    );
+    assert_ne!(first_code, second_code, "codes must be distinct");
+    assert_ne!(first_code, "TSK-0481");
+    assert_ne!(second_code, "TSK-0481");
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — unknown cycle rejected with 400
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_rejects_unknown_cycle() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "x", "cycle": "S-99" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — project must name a PROJECT page declaring that slug
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_rejects_unknown_project() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "x", "project": "ghost" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("unknown project: ghost")),
+        "error should name the unknown project: {body}"
+    );
+    assert!(
+        !tmp.path().join("vault/tasks/ghost").exists(),
+        "a rejected create must not file anything under tasks/ghost/"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — validation failures + BACKLOG sentinel
+// ---------------------------------------------------------------------------
+
+/// Seed a single task (with a cycle S-13 page) and return server + tmp.
+/// Task UUID: 01951234-0000-7000-8000-000000000060.
+fn setup_patch_target() -> (TestServer, TempDir) {
+    setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000002\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n\
+             start: \"2026-04-13\"\nend: \"2026-04-19\"\n---\n",
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0481.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000060\n\
+             title: FREEZE LEGACY SYNC WRITES\ntype: TASK\n\
+             status: FIELD\npriority: P0\ncycle: S-13\n---\n",
+        )
+        .unwrap();
+    })
+}
+
+#[tokio::test]
+async fn patch_task_rejects_unknown_cycle() {
+    let (server, _tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "cycle": "S-99" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn patch_task_rejects_unknown_project() {
+    let (server, tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "project": "ghost" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("unknown project: ghost")),
+        "error should name the unknown project: {body}"
+    );
+
+    // The task must be untouched: still at the root, no project key.
+    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
+    assert!(
+        !content.contains("project"),
+        "a rejected patch must not write a project, got:\n{content}"
+    );
+}
+
+#[tokio::test]
+async fn patch_task_backlog_cycle_clears_like_null() {
+    let (server, tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "cycle": "BACKLOG" }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["cycle"].is_null(),
+        "cycle should be cleared by BACKLOG: {body}"
+    );
+
+    // File frontmatter must no longer carry the cycle key
+    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
+    assert!(
+        !content.contains("cycle:"),
+        "file should not have cycle field, got:\n{content}"
+    );
+}
+
+#[tokio::test]
+async fn patch_task_rejects_bogus_status() {
+    let (server, _tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "status": "BOGUS" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn patch_task_rejects_bogus_priority() {
+    let (server, _tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "priority": "P9" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — all optional fields persist to frontmatter + response
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_persists_all_optional_fields() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "full payload",
+            "assignee": "kit",
+            "estimate": "3d",
+            "due": "2026-04-21",
+            "tags": ["ops", "sync"],
+            "link": "CLP-0901-J"
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    // Response carries all fields
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["assignee"], "kit", "assignee: {body}");
+    assert_eq!(body["estimate"], "3d", "estimate: {body}");
+    assert_eq!(body["due"], "2026-04-21", "due: {body}");
+    assert_eq!(body["link"], "CLP-0901-J", "link: {body}");
+    let tags = body["tags"].as_array().unwrap();
+    let tag_strs: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
+    assert!(tag_strs.contains(&"ops"), "tags should contain ops: {body}");
+    assert!(
+        tag_strs.contains(&"sync"),
+        "tags should contain sync: {body}"
+    );
+
+    // Disk frontmatter carries all fields
+    let code = body["code"].as_str().unwrap();
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{code}.md"))).unwrap();
+    assert!(
+        content.contains("assignee = \"kit\""),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("estimate = \"3d\""),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("due = ") && content.contains("2026-04-21"),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("link = ") && content.contains("CLP-0901-J"),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("\"ops\"") && content.contains("\"sync\""),
+        "frontmatter should list both tags:\n{content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — start date round-trips through create, GET /board
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_with_start_round_trips() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "T",
+            "start": "2026-08-01",
+            "due": "2026-08-15"
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["start"], "2026-08-01", "start: {body}");
+
+    let board_res = server.get("/api/vault/board").await;
+    board_res.assert_status_ok();
+    let board: serde_json::Value = board_res.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "board should have 1 task");
+    assert_eq!(
+        tasks[0]["start"], "2026-08-01",
+        "board task start: {tasks:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — start tri-state (set / clear / leave unchanged)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn patch_task_start_tri_state() {
+    let (server, _tmp) = setup_patch_target();
+
+    // Absent on creation: patching with a value sets it.
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "start": "2026-08-02" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["start"], "2026-08-02", "start should be set: {body}");
+
+    // null clears it — and it should be absent from the GET /board DTO.
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "start": null }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(body["start"].is_null(), "start should be cleared: {body}");
+
+    let board_res = server.get("/api/vault/board").await;
+    board_res.assert_status_ok();
+    let board: serde_json::Value = board_res.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "board should have 1 task");
+    assert!(
+        tasks[0]["start"].is_null(),
+        "board task start should be absent/null after clear: {tasks:?}"
+    );
+
+    // Absent field on the PATCH body: start stays unchanged (still cleared).
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "title": "unrelated update" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["start"].is_null(),
+        "start should remain unchanged (still null): {body}"
+    );
+}
+
+#[tokio::test]
+async fn patch_task_empty_string_clears_a_task_field() {
+    let (server, _tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "assignee": "kit" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["assignee"], "kit", "{body}");
+
+    // "" clears, exactly like null.
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "assignee": "" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["assignee"].is_null(),
+        "assignee should be cleared: {body}"
+    );
+
+    // Whitespace clears too, and the Cycle is no exception (seeded as S-13).
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "cycle": "   " }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(body["cycle"].is_null(), "cycle should be cleared: {body}");
+}
+
+#[tokio::test]
+async fn create_task_treats_an_empty_task_field_as_absent() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "x", "cycle": "", "assignee": "  ", "due": ""
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert!(body["cycle"].is_null(), "{body}");
+    assert!(body["assignee"].is_null(), "{body}");
+    assert!(body["due"].is_null(), "{body}");
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — project change A→B physically moves the file
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn project_assignment_patch_task_moves_to_set_project() {
+    let (server, tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects/op-b")).unwrap();
+        std::fs::write(
+            root.join("projects/op-b/op-b.md"),
+            "---\nid: 01951234-0000-7000-8000-0000000000b0\n\
+             title: OP-B\ntype: PROJECT\nproject: op-b\n---\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("tasks/op-a")).unwrap();
+        std::fs::write(
+            root.join("tasks/op-a/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000070\n\
+             title: MOVE ME\ntype: TASK\nproject: op-a\n\
+             status: TRIAGE\npriority: P2\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000070")
+        .json(&serde_json::json!({ "project": "op-b" }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body["path"], "tasks/op-b/TSK-0001.md",
+        "response path should be under op-b: {body}"
+    );
+    assert_eq!(body["project"], "op-b", "project: {body}");
+
+    let vault_root = tmp.path().join("vault");
+    assert!(
+        vault_root.join("tasks/op-b/TSK-0001.md").exists(),
+        "file should exist under tasks/op-b/"
+    );
+    assert!(
+        !vault_root.join("tasks/op-a/TSK-0001.md").exists(),
+        "file should no longer exist under tasks/op-a/"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — project clear ("") moves the file to tasks root
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn project_assignment_patch_task_explicit_clear_moves_to_root() {
+    let (server, tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks/op-a")).unwrap();
+        std::fs::write(
+            root.join("tasks/op-a/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000071\n\
+             title: UNFILE ME\ntype: TASK\nproject: op-a\n\
+             status: TRIAGE\npriority: P2\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000071")
+        .json(&serde_json::json!({ "project": "" }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body["path"], "tasks/TSK-0001.md",
+        "response path should be at tasks root: {body}"
+    );
+    assert!(body["project"].is_null(), "project should be null: {body}");
+
+    let vault_root = tmp.path().join("vault");
+    assert!(
+        vault_root.join("tasks/TSK-0001.md").exists(),
+        "file should exist at tasks root"
+    );
+    assert!(
+        !vault_root.join("tasks/op-a/TSK-0001.md").exists(),
+        "file should no longer exist under tasks/op-a/"
+    );
+    let content = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
+    assert!(
+        !content.contains("project:"),
+        "frontmatter should not carry project, got:\n{content}"
+    );
+}
+
+#[tokio::test]
+async fn project_assignment_patch_task_destination_collision_returns_409() {
+    let (server, tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects/op-b")).unwrap();
+        std::fs::write(
+            root.join("projects/op-b/op-b.md"),
+            "---\nid: 01951234-0000-7000-8000-0000000000b1\n\
+             title: OP-B\ntype: PROJECT\nproject: op-b\n---\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("tasks/op-a")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/op-b")).unwrap();
+        std::fs::write(
+            root.join("tasks/op-a/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000072\n\
+             title: SOURCE\ntype: TASK\nproject: op-a\n\
+             status: TRIAGE\npriority: P2\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/op-b/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000073\n\
+             title: OCCUPIED\ntype: TASK\nproject: op-b\n\
+             status: TRIAGE\npriority: P2\n---\n",
+        )
+        .unwrap();
+    });
+
+    let response = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000072")
+        .json(&serde_json::json!({ "project": "op-b" }))
+        .await;
+
+    response.assert_status(axum::http::StatusCode::CONFLICT);
+    let vault_root = tmp.path().join("vault");
+    let persisted = std::fs::read_to_string(vault_root.join("tasks/op-a/TSK-0001.md")).unwrap();
+    assert!(
+        persisted.contains("project = \"op-a\""),
+        "a rejected refile must preserve the original project: {persisted}"
+    );
+    assert!(
+        std::fs::read_to_string(vault_root.join("tasks/op-b/TSK-0001.md"))
+            .unwrap()
+            .contains("OCCUPIED"),
+        "the destination must not be overwritten"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — happy path for title + tags + link
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn patch_task_updates_title_tags_and_link() {
+    let (server, tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({
+            "title": "thaw legacy sync writes",
+            "tags": ["ops", "sync"],
+            "link": "CLP-0901-J"
+        }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["title"], "thaw legacy sync writes", "title: {body}");
+    assert_eq!(body["link"], "CLP-0901-J", "link: {body}");
+    let tags = body["tags"].as_array().unwrap();
+    let tag_strs: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
+    assert!(tag_strs.contains(&"ops"), "tags should contain ops: {body}");
+    assert!(
+        tag_strs.contains(&"sync"),
+        "tags should contain sync: {body}"
+    );
+
+    // Disk frontmatter reflects all three
+    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
+    assert!(
+        content.contains("title = \"thaw legacy sync writes\""),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("link = ") && content.contains("CLP-0901-J"),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("\"ops\"") && content.contains("\"sync\""),
+        "frontmatter should list both tags:\n{content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — moves column, clears hold
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn patch_task_moves_column_and_clears_hold() {
+    let (server, tmp) = setup_server_with(|root| {
+        // cycles/S-13.md
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000002\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n\
+             start: \"2026-04-13\"\nend: \"2026-04-19\"\n---\n",
+        )
+        .unwrap();
+
+        // tasks/TSK-0481.md: TASK in FIELD with hold
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0481.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000050\n\
+             title: FREEZE LEGACY SYNC WRITES\ntype: TASK\n\
+             status: FIELD\npriority: P0\ncycle: S-13\n\
+             hold: \"AWAITING X\"\n---\n",
+        )
+        .unwrap();
+    });
+
+    // PATCH the task
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000050")
+        .json(&serde_json::json!({
+            "status": "REVIEW",
+            "hold": null
+        }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["status"], "REVIEW", "status: {body}");
+    assert!(body["hold"].is_null(), "hold should be null: {body}");
+
+    // Verify the board reflects the updated state
+    let board_res = server.get("/api/vault/board").await;
+    board_res.assert_status_ok();
+    let board: serde_json::Value = board_res.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "board should still have 1 task");
+    assert_eq!(tasks[0]["status"], "REVIEW", "board task status: {tasks:?}");
+    assert!(
+        tasks[0]["hold"].is_null(),
+        "board task hold should be null: {tasks:?}"
+    );
+
+    // Verify the file on disk has updated frontmatter
+    let vault_root = tmp.path().join("vault");
+    let file_path = vault_root.join("tasks/TSK-0481.md");
+    let content = std::fs::read_to_string(&file_path).unwrap();
+    assert!(
+        content.contains("status = \"REVIEW\""),
+        "file should have status: REVIEW, got:\n{content}"
+    );
+    assert!(
+        !content.contains("hold:"),
+        "file should not have hold field, got:\n{content}"
+    );
+}
+
+#[test]
+fn cycle_state_parses_valid_values_without_applying_operation_policy() {
+    assert_eq!(
+        CycleState::from_str("PLANNED").unwrap(),
+        CycleState::Planned
+    );
+    assert_eq!(CycleState::from_str("ACTIVE").unwrap(), CycleState::Active);
+    assert_eq!(CycleState::from_str("CLOSED").unwrap(), CycleState::Closed);
+    assert_eq!(
+        CycleState::from_str("BOGUS").unwrap_err(),
+        "unknown state: 'BOGUS'"
+    );
+}
+
+#[tokio::test]
+async fn path_unsafe_explicit_cycle_code_is_rejected_as_bad_request() {
+    // A path-traversal payload like "../outside" is now caught by the
+    // is_valid_code format check before it ever reaches path construction —
+    // the petname format admits no `/` or `.` characters, so this can no
+    // longer surface as a 500 from a malformed generated path.
+    let (server, _tmp) = setup_server_with(|_| {});
+    let response = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "code": "../outside",
+            "label": "Invalid generated path",
+            "start": "2026-07-06",
+            "end": "2026-07-12"
+        }))
+        .await;
+    response.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = response.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("invalid cycle code")),
+        "unexpected error payload: {body}"
+    );
+}
+
+#[tokio::test]
+async fn cycle_state_create_rejects_closed_but_patch_accepts_it() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-aaa000000009\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n---\n",
+        )
+        .unwrap();
+    });
+
+    let create = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "code": "S-14",
+            "label": "CYCLE 14",
+            "start": "2026-07-06",
+            "end": "2026-07-12",
+            "state": "CLOSED"
+        }))
+        .await;
+    create.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let create_body: serde_json::Value = create.json();
+    assert_eq!(
+        create_body["error"],
+        "state 'CLOSED' is not valid at cycle creation time"
+    );
+    let unknown_create = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "code": "S-15",
+            "label": "CYCLE 15",
+            "start": "2026-07-13",
+            "end": "2026-07-19",
+            "state": "BOGUS"
+        }))
+        .await;
+    unknown_create.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let unknown_create_body: serde_json::Value = unknown_create.json();
+    assert_eq!(
+        unknown_create_body["error"],
+        "unknown state: 'BOGUS'; valid values at creation: PLANNED, ACTIVE"
+    );
+
+    let patch = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000009")
+        .json(&serde_json::json!({ "state": "CLOSED" }))
+        .await;
+    patch.assert_status(axum::http::StatusCode::OK);
+    let patch_body: serde_json::Value = patch.json();
+    assert_eq!(patch_body["state"], "CLOSED");
+
+    let unknown_patch = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000009")
+        .json(&serde_json::json!({ "state": "BOGUS" }))
+        .await;
+    unknown_patch.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let unknown_patch_body: serde_json::Value = unknown_patch.json();
+    assert_eq!(
+        unknown_patch_body["error"],
+        "unknown state: 'BOGUS'; valid values: PLANNED, ACTIVE, CLOSED"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/cycles — create cycle with auto-generated code + default state
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_cycle_defaults_code_and_state() {
+    let (server, tmp) = setup_server_with(|root| {
+        // seed an existing cycle S-13
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000002\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n\
+             start: \"2026-04-13\"\nend: \"2026-04-19\"\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "CYCLE 14",
+            "start": "2026-04-20",
+            "end": "2026-04-26"
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let body: serde_json::Value = res.json();
+    let code = body["code"].as_str().unwrap().to_string();
+    assert!(
+        code.starts_with("S-") && clep_api::vault::code::is_valid_code(&code),
+        "{code}"
+    );
+    assert_ne!(code, "S-13", "must not collide with the seeded cycle");
+    assert_eq!(
+        body["state"], "PLANNED",
+        "state should default to PLANNED: {body}"
+    );
+    assert_eq!(body["path"], format!("cycles/{code}.md"), "path: {body}");
+    assert_eq!(body["label"], "CYCLE 14", "label: {body}");
+    assert_eq!(body["start"], "2026-04-20", "start: {body}");
+    assert_eq!(body["end"], "2026-04-26", "end: {body}");
+
+    // File on disk must have correct frontmatter
+    let vault_root = tmp.path().join("vault");
+    let file_path = vault_root.join(format!("cycles/{code}.md"));
+    assert!(file_path.exists(), "cycle file should exist on disk");
+    let content = std::fs::read_to_string(&file_path).unwrap();
+    assert!(
+        content.contains("type = \"CYCLE\""),
+        "should have type: CYCLE, got:\n{content}"
+    );
+    assert!(
+        content.contains("state = \"PLANNED\""),
+        "should have state: PLANNED, got:\n{content}"
+    );
+    assert!(
+        content.contains("title = \"CYCLE 14\""),
+        "should have title, got:\n{content}"
+    );
+    assert!(
+        content.contains("2026-04-20"),
+        "should have start date, got:\n{content}"
+    );
+    assert!(
+        content.contains("2026-04-26"),
+        "should have end date, got:\n{content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/cycles — explicit code and state honored
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_cycle_honors_explicit_code_and_state() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "code": "S-brisk-otter-4h7qz",
+            "label": "CYCLE 20",
+            "start": "2026-06-01",
+            "end": "2026-06-07",
+            "state": "ACTIVE",
+            "goal": "finish the thing"
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["code"], "S-brisk-otter-4h7qz", "code: {body}");
+    assert_eq!(body["state"], "ACTIVE", "state: {body}");
+    assert_eq!(body["goal"], "finish the thing", "goal: {body}");
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/cycles — duplicate code yields 409
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_cycle_rejects_duplicate_code() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-eager-lynx-6t9cy.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000002\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n---\n",
+        )
+        .unwrap();
+    });
+
+    // Explicit code that already exists
+    let res = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "code": "S-eager-lynx-6t9cy",
+            "label": "CYCLE 13 DUP",
+            "start": "2026-04-13",
+            "end": "2026-04-19"
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CONFLICT);
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/cycles/{id} — seal cycle, carry non-sealed tasks to BACKLOG
+// ---------------------------------------------------------------------------
+
+/// Seed two cycles plus one sealed and two open tasks in S-13.
+fn setup_cycle_with_tasks() -> (TestServer, TempDir, Arc<AppState>) {
+    setup_server_with_state(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        // S-13 ACTIVE
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-aaa000000001\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n\
+             start: \"2026-04-13\"\nend: \"2026-04-19\"\n---\n",
+        )
+        .unwrap();
+        // S-14 PLANNED
+        std::fs::write(
+            root.join("cycles/S-14.md"),
+            "---\nid: 01951234-0000-7000-8000-aaa000000002\n\
+             title: CYCLE 14\ntype: CYCLE\nstate: PLANNED\n\
+             start: \"2026-04-20\"\nend: \"2026-04-26\"\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("target.md"),
+            "---\nid: 01951234-0000-7000-8000-ccc000000001\ntitle: Target\n---\n",
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        // SEALED task in S-13 — should stay in S-13 after carryover
+        std::fs::write(
+            root.join("tasks/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-bbb000000001\n\
+             title: Done Task\ntype: TASK\nstatus: SEALED\npriority: P2\ncycle: S-13\n---\n",
+        )
+        .unwrap();
+        // FIELD task in S-13 — should be carried over
+        std::fs::write(
+            root.join("tasks/TSK-0002.md"),
+            "---\nid: 01951234-0000-7000-8000-bbb000000002\n\
+             title: Open Task\ntype: TASK\nstatus: FIELD\npriority: P1\ncycle: S-13\n---\n[[Target]]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0003.md"),
+            "---\nid: 01951234-0000-7000-8000-bbb000000003\n\
+             title: Another Open Task\ntype: TASK\nstatus: TRIAGE\npriority: P2\ncycle: S-13\n---\n",
+        )
+        .unwrap();
+    })
+}
+
+#[tokio::test]
+async fn seal_cycle_routes_carryover_to_backlog() {
+    let (server, tmp, state) = setup_cycle_with_tasks();
+    let mut changes = state.change_tx.subscribe();
+
+    let res = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({
+            "state": "CLOSED",
+            "carry_to": "BACKLOG"
+        }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["state"], "CLOSED", "cycle state: {body}");
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
+    assert_eq!(
+        upserted,
+        vec!["cycles/S-13.md", "tasks/TSK-0002.md", "tasks/TSK-0003.md"]
+    );
+    assert!(removed.is_empty());
+    assert!(
+        changes.try_recv().is_err(),
+        "carryover must emit exactly one sorted batch notification"
+    );
+
+    let vault_root = tmp.path().join("vault");
+
+    // FIELD task (TSK-0002): cycle key should be REMOVED
+    let field_content = std::fs::read_to_string(vault_root.join("tasks/TSK-0002.md")).unwrap();
+    assert!(
+        !field_content.contains("cycle:"),
+        "FIELD task should have cycle removed, got:\n{field_content}"
+    );
+    let outlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/outlinks/tasks/TSK-0002.md")
+        .await
+        .json();
+    let target_link = outlinks
+        .iter()
+        .find(|link| link["target_raw"] == "Target")
+        .expect("carryover reindex must preserve and resolve task links");
+    assert_eq!(target_link["target_path"], "target.md");
+
+    // SEALED task (TSK-0001): cycle should still be S-13
+    let sealed_content = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
+    assert!(
+        sealed_content.contains("cycle = \"S-13\""),
+        "SEALED task should keep cycle S-13, got:\n{sealed_content}"
+    );
+
+    // GET /board should reflect cycle null for the FIELD task
+    let board_res = server.get("/api/vault/board").await;
+    board_res.assert_status_ok();
+    let board: serde_json::Value = board_res.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    let field_task = tasks
+        .iter()
+        .find(|t| t["code"] == "TSK-0002")
+        .expect("TSK-0002 should exist in board");
+    assert!(
+        field_task["cycle"].is_null(),
+        "board: FIELD task cycle should be null after carryover to BACKLOG, got: {}",
+        field_task["cycle"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/cycles/{id} — seal with carry_to next cycle
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn seal_cycle_can_carry_to_next_cycle() {
+    let (server, tmp, _state) = setup_cycle_with_tasks();
+
+    let res = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({
+            "state": "CLOSED",
+            "carry_to": "S-14"
+        }))
+        .await;
+    res.assert_status_ok();
+
+    let vault_root = tmp.path().join("vault");
+
+    // FIELD task: cycle should now be S-14
+    let content = std::fs::read_to_string(vault_root.join("tasks/TSK-0002.md")).unwrap();
+    assert!(
+        content.contains("cycle = \"S-14\""),
+        "FIELD task should now reference S-14, got:\n{content}"
+    );
+
+    // SEALED task: cycle should still be S-13
+    let sealed_content = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
+    assert!(
+        sealed_content.contains("cycle = \"S-13\""),
+        "SEALED task should keep S-13, got:\n{sealed_content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/cycles/{id} — seal without carry_to leaves tasks alone
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn seal_cycle_without_carry_leaves_tasks() {
+    let (server, tmp, _state) = setup_cycle_with_tasks();
+
+    let res = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({ "state": "CLOSED" }))
+        .await;
+    res.assert_status_ok();
+
+    let vault_root = tmp.path().join("vault");
+
+    // FIELD task: cycle should still be S-13
+    let content = std::fs::read_to_string(vault_root.join("tasks/TSK-0002.md")).unwrap();
+    assert!(
+        content.contains("cycle = \"S-13\""),
+        "without carry_to, FIELD task cycle should remain S-13, got:\n{content}"
+    );
+}
+
+#[tokio::test]
+async fn closing_cycle_rolls_back_cycle_and_every_carried_task_on_failure() {
+    let (server, tmp, state) = setup_cycle_with_tasks();
+    let vault_root = tmp.path().join("vault");
+    let cycle_path = vault_root.join("cycles/S-13.md");
+    let first_task_path = vault_root.join("tasks/TSK-0002.md");
+    let second_task_path = vault_root.join("tasks/TSK-0003.md");
+    let original_cycle = std::fs::read(&cycle_path).unwrap();
+    let original_first_task = std::fs::read(&first_task_path).unwrap();
+    let original_second_task = std::fs::read(&second_task_path).unwrap();
+    let mut changes = state.change_tx.subscribe();
+    state
+        .mutation_coordinator
+        .set_batch_publication_fail_after(Some(1));
+
+    let response = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({
+            "state": "CLOSED",
+            "carry_to": "BACKLOG"
+        }))
+        .await;
+
+    response.assert_status_internal_server_error();
+    assert_eq!(std::fs::read(cycle_path).unwrap(), original_cycle);
+    assert_eq!(std::fs::read(first_task_path).unwrap(), original_first_task);
+    assert_eq!(
+        std::fs::read(second_task_path).unwrap(),
+        original_second_task
+    );
+    assert!(
+        changes.try_recv().is_err(),
+        "a rolled-back carryover must not emit a notification"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/cycles/{id} — validation: bogus state + unknown carry target
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn patch_cycle_rejects_bad_state_and_unknown_carry_target() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-aaa000000001\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n---\n",
+        )
+        .unwrap();
+    });
+
+    // Bad state value
+    let res = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({ "state": "BOGUS" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+
+    // Unknown carry_to cycle
+    let res2 = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({ "state": "CLOSED", "carry_to": "S-99" }))
+        .await;
+    res2.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn concurrent_create_requests_reserve_unique_task_and_cycle_codes() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+
+    let task_a = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "task a" }));
+    let task_b = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "task b" }));
+    let cycle_a = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "cycle a",
+            "start": "2026-07-06",
+            "end": "2026-07-12"
+        }));
+    let cycle_b = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "cycle b",
+            "start": "2026-07-13",
+            "end": "2026-07-19"
+        }));
+
+    let (task_a, task_b, cycle_a, cycle_b) = tokio::join!(task_a, task_b, cycle_a, cycle_b);
+    for response in [&task_a, &task_b, &cycle_a, &cycle_b] {
+        assert_eq!(
+            response.status_code(),
+            axum::http::StatusCode::CREATED,
+            "concurrent create failed: {}",
+            response.text()
+        );
+    }
+
+    let mut task_codes = [
+        task_a.json::<serde_json::Value>()["code"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        task_b.json::<serde_json::Value>()["code"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+    ];
+    task_codes.sort();
+    assert_ne!(task_codes[0], task_codes[1], "codes must be distinct");
+    for code in &task_codes {
+        assert!(clep_api::vault::code::is_valid_code(code), "{code}");
+    }
+
+    let mut cycle_codes = [
+        cycle_a.json::<serde_json::Value>()["code"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        cycle_b.json::<serde_json::Value>()["code"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+    ];
+    cycle_codes.sort();
+    assert_ne!(cycle_codes[0], cycle_codes[1], "codes must be distinct");
+    for code in &cycle_codes {
+        assert!(
+            code.starts_with("S-") && clep_api::vault::code::is_valid_code(code),
+            "{code}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — server mints a petname code, used verbatim as stem
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn created_task_gets_petname_code_used_verbatim_as_stem() {
+    // Task projects must be declared by a PROJECT page (develop's
+    // `ensure_project_exists`), so seed one for the slug used below.
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        std::fs::write(
+            root.join("projects/op-sig3.md"),
+            "---\nid: 01951234-0000-7000-8000-0000000000a1\n\
+             title: SIGNAL-3 MIGRATION\ntype: PROJECT\nproject: op-sig3\n---\n",
+        )
+        .unwrap();
+    });
+    let resp = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({"title": "Alpha", "project": "op-sig3"}))
+        .await;
+    resp.assert_status(axum::http::StatusCode::CREATED);
+    let body: serde_json::Value = resp.json();
+    let code = body["code"].as_str().unwrap().to_string();
+    assert!(clep_api::vault::code::is_valid_code(&code), "{code}");
+    assert_eq!(
+        body["path"].as_str().unwrap(),
+        format!("tasks/op-sig3/{code}.md")
+    );
+    // lowercase body survives the round trip through the board listing
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    let listed = board["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["code"] == code);
+    assert!(listed.is_some(), "board lists the exact lowercase code");
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/cycles — server mints a petname code when none is given
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn created_cycle_without_code_gets_petname_code() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let resp = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "Cycle one",
+            "start": "2026-09-01",
+            "end": "2026-09-07"
+        }))
+        .await;
+    resp.assert_status(axum::http::StatusCode::CREATED);
+    let code = resp.json::<serde_json::Value>()["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        code.starts_with("S-") && clep_api::vault::code::is_valid_code(&code),
+        "{code}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/cycles — an explicit code must match the petname format
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn explicit_cycle_code_must_be_valid_format() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let bad = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "x",
+            "code": "S-13",
+            "start": "2026-09-01",
+            "end": "2026-09-07"
+        }))
+        .await;
+    bad.assert_status_bad_request();
+
+    let good = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "x",
+            "code": "S-calm-heron-2xm9p",
+            "start": "2026-09-08",
+            "end": "2026-09-14"
+        }))
+        .await;
+    good.assert_status(axum::http::StatusCode::CREATED);
+    assert_eq!(
+        good.json::<serde_json::Value>()["code"],
+        "S-calm-heron-2xm9p"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — unique-prefix cycle addressing (task 3)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn task_cycle_field_accepts_unique_prefix_and_stores_canonical() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let cyc = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({"label": "c", "code": "S-calm-heron-2xm9p", "start": "2026-09-01", "end": "2026-09-07"}))
+        .await;
+    cyc.assert_status(axum::http::StatusCode::CREATED);
+    let task = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({"title": "t", "cycle": "s-CALM-heron"}))
+        .await;
+    task.assert_status(axum::http::StatusCode::CREATED);
+    assert_eq!(
+        task.json::<serde_json::Value>()["cycle"],
+        "S-calm-heron-2xm9p"
+    );
+}
+
+#[tokio::test]
+async fn ambiguous_cycle_prefix_is_rejected_with_candidates() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    for code in ["S-calm-heron-2xm9p", "S-calm-otter-9k2ma"] {
+        server
+            .post("/api/vault/board/cycles")
+            .json(&serde_json::json!({"label": "c", "code": code, "start": "2026-09-01", "end": "2026-09-07"}))
+            .await
+            .assert_status(axum::http::StatusCode::CREATED);
+    }
+    let task = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({"title": "t", "cycle": "S-calm"}))
+        .await;
+    task.assert_status_bad_request();
+    let msg = task.text();
+    assert!(
+        msg.contains("S-calm-heron-2xm9p") && msg.contains("S-calm-otter-9k2ma"),
+        "{msg}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// GET /board — task ordering by creation time, not random code (task 4)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn board_lists_tasks_in_creation_order_not_code_order() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let mut created = Vec::new();
+    for title in ["first", "second", "third"] {
+        let r = server
+            .post("/api/vault/board/tasks")
+            .json(&serde_json::json!({"title": title}))
+            .await;
+        r.assert_status(axum::http::StatusCode::CREATED);
+        created.push(
+            r.json::<serde_json::Value>()["code"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    let listed: Vec<String> = board["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["code"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        listed, created,
+        "creation order, independent of the random codes"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Operation code is the project slug, not the ADR-0002 filename stem
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn operation_code_is_the_project_slug_not_the_filename_stem() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects/falls")).unwrap();
+        std::fs::write(
+            root.join("projects/falls/20260811.falls.UdpU2tJ3.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000031\n\
+             title: Falls\ntype: PROJECT\nproject: falls\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(ops.len(), 1, "expected one operation, got: {ops:?}");
+    assert_eq!(ops[0]["code"], "FALLS", "code should be the slug: {ops:?}");
+    assert_eq!(ops[0]["name"], "Falls");
+    assert_eq!(ops[0]["project"], "falls");
+}

@@ -42,7 +42,7 @@ Rust 2024 edition. Axum 0.8 + Tokio; rusqlite (bundled, FTS5 powers `grep`); pul
 
 ### API contract
 
-The OpenAPI spec is the typed bridge between backend and frontend: utoipa annotations → `/api/openapi.json` → `bun run openapi` → `ui/src/api/schema.d.ts` → `openapi-fetch` + `openapi-react-query` clients in `ui/src/api/`. **After changing any backend route or DTO, regenerate `schema.d.ts`.** `bun run openapi` needs a running server; to regenerate without one (and without the ambient-config risk of starting `clep` against the live vault), use `cargo run -q -p clepsydra --example openapi > target/openapi.json && (cd ui && bun run openapi:file)`.
+The OpenAPI spec is the typed bridge between backend and frontend: utoipa annotations → `/api/openapi.json` → `bun run openapi` → `ui/src/api/schema.d.ts` → `openapi-fetch` + `openapi-react-query` clients in `ui/src/api/`. **After changing any backend route or DTO, regenerate `schema.d.ts`.** `bun run openapi` needs a running server; to regenerate without one (and without the ambient-config risk of starting `clep` against the live vault), use `cargo run -q -p clep-api --example openapi > target/openapi.json && (cd ui && bun run openapi:file)`.
 
 ### Frontend
 

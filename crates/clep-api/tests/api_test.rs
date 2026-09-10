@@ -1,0 +1,7321 @@
+mod support;
+use std::collections::BTreeSet;
+
+use std::fs;
+use std::future::{Future, poll_fn};
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::Poll;
+
+use axum::body::{Body, Bytes};
+use axum::http::{Request, StatusCode};
+use axum::{Router, routing::get};
+use axum_test::TestServer;
+use tokio::sync::{Barrier, mpsc};
+
+use clep_api::FeatureFlags;
+use clep_api::api::error::{parse_internal_path, parse_request_path};
+use clep_api::api::events::SyncNotification;
+use clep_api::api::openapi::ApiDoc;
+use clep_api::vault::Vault;
+use clep_api::vault::index::VaultIndex;
+use clep_api::vault::index_handle::IndexHandle;
+use support::ApiFixture;
+use tempfile::TempDir;
+use tokio_stream::wrappers::ReceiverStream;
+use tower::ServiceExt;
+use utoipa::OpenApi;
+
+/// Set up a test server backed by a fresh vault in a temporary directory.
+fn setup_server() -> (TestServer, TempDir) {
+    ApiFixture::builder().build().into_server_and_temp()
+}
+
+fn setup_app() -> (Router, TempDir) {
+    let fixture = ApiFixture::builder().build();
+    (fixture.app, fixture.temp_dir)
+}
+
+fn build_test_router_with_features(features: FeatureFlags) -> (TestServer, TempDir) {
+    let fixture = ApiFixture::builder().build();
+    let ApiFixture {
+        app,
+        server,
+        temp_dir,
+        mut state,
+    } = fixture;
+    drop(app);
+    drop(server);
+    Arc::get_mut(&mut state)
+        .expect("fixture state should be exclusively owned after dropping its routers")
+        .features = features;
+
+    let app = Router::new()
+        .route("/api/features", get(clep_api::api::features::get_features))
+        .nest(
+            "/api/vault",
+            clep_api::api::api_router_with_archive_limit(
+                usize::MAX,
+                clep_api::api::archive::ArchiveViewConfig::default(),
+                features,
+            ),
+        )
+        .with_state(state);
+    (TestServer::new(app).unwrap(), temp_dir)
+}
+
+#[tokio::test]
+async fn feature_capabilities_match_all_effective_flag_combinations() {
+    for features in [
+        FeatureFlags {
+            academic: false,
+            feeds: false,
+        },
+        FeatureFlags {
+            academic: true,
+            feeds: false,
+        },
+        FeatureFlags {
+            academic: false,
+            feeds: true,
+        },
+        FeatureFlags {
+            academic: true,
+            feeds: true,
+        },
+    ] {
+        let (server, _temp_dir) = build_test_router_with_features(features);
+        let response = server.get("/api/features").await;
+        response.assert_status(StatusCode::OK);
+        assert_eq!(
+            response.json::<serde_json::Value>(),
+            serde_json::json!({
+                "academic": features.academic,
+                "feeds": features.feeds,
+            })
+        );
+    }
+}
+
+#[tokio::test]
+async fn disabled_feature_routes_are_unknown_while_enabled_routes_are_reachable() {
+    for features in [
+        FeatureFlags {
+            academic: false,
+            feeds: false,
+        },
+        FeatureFlags {
+            academic: true,
+            feeds: false,
+        },
+        FeatureFlags {
+            academic: false,
+            feeds: true,
+        },
+        FeatureFlags {
+            academic: true,
+            feeds: true,
+        },
+    ] {
+        let (server, _temp_dir) = build_test_router_with_features(features);
+        let academic = server.get("/api/vault/academic/works").await;
+        let feeds = server.get("/api/vault/feeds").await;
+
+        if features.academic {
+            assert_ne!(academic.status_code(), StatusCode::NOT_FOUND);
+        } else {
+            academic.assert_status(StatusCode::NOT_FOUND);
+        }
+        if features.feeds {
+            assert_ne!(feeds.status_code(), StatusCode::NOT_FOUND);
+        } else {
+            feeds.assert_status(StatusCode::NOT_FOUND);
+        }
+    }
+}
+
+struct CountingFixedClock {
+    now: chrono::DateTime<chrono::Utc>,
+    calls: AtomicUsize,
+}
+
+impl clep_api::api::Clock for CountingFixedClock {
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.now
+    }
+}
+
+fn markdown_file_count(root: &std::path::Path) -> usize {
+    fs::read_dir(root)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        markdown_file_count(&path)
+                    } else {
+                        usize::from(path.extension().and_then(|value| value.to_str()) == Some("md"))
+                    }
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+async fn indexed_uuid_count(index: &IndexHandle, id: &str) -> i64 {
+    let id = id.to_owned();
+    index
+        .with_index(move |index, _| {
+            index
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pages WHERE id = ?1", [id], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        })
+        .await
+        .unwrap()
+}
+
+async fn advance_request_to_held_path_lock<F>(mut request: Pin<&mut F>, index: &IndexHandle)
+where
+    F: Future,
+{
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(request.as_mut(), context))).await;
+    assert!(
+        first_poll.is_pending(),
+        "request completed before its indexed path lookup"
+    );
+
+    index.with_index(|_, _| ()).await.unwrap();
+
+    let path_poll = poll_fn(|context| Poll::Ready(Future::poll(request.as_mut(), context))).await;
+    assert!(
+        path_poll.is_pending(),
+        "request completed instead of waiting for the held candidate-path lock"
+    );
+}
+
+async fn response_json(response: axum::response::Response) -> serde_json::Value {
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+fn delayed_multipart_request(
+    boundary: &str,
+    payload: Vec<u8>,
+    barrier: Arc<Barrier>,
+) -> Request<Body> {
+    let header = Bytes::from(format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"race.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+    ));
+    let trailer = Bytes::from(format!(
+        "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
+    ));
+    let (sender, receiver) = mpsc::channel(1);
+
+    tokio::spawn(async move {
+        sender.send(Ok::<_, std::io::Error>(header)).await.unwrap();
+        sender
+            .send(Ok::<_, std::io::Error>(Bytes::new()))
+            .await
+            .unwrap();
+        barrier.wait().await;
+        sender.send(Ok(Bytes::from(payload))).await.unwrap();
+        sender.send(Ok(trailer)).await.unwrap();
+    });
+
+    Request::post("/api/vault/attachments/race.bin")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from_stream(ReceiverStream::new(receiver)))
+        .unwrap()
+}
+
+async fn multipart_upload(
+    server: &TestServer,
+    file_name: &str,
+    payload: &[u8],
+    plaintext_acknowledged: Option<bool>,
+) -> axum_test::TestResponse {
+    let boundary = "----attachmentacknowledgementboundary";
+    let mut body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(payload);
+    if let Some(acknowledged) = plaintext_acknowledged {
+        body.extend_from_slice(
+            format!(
+                "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\n{acknowledged}"
+            )
+            .as_bytes(),
+        );
+    }
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    server
+        .post(&format!("/api/vault/attachments/{file_name}"))
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into())
+        .await
+}
+
+fn assert_no_attachment_temporaries(tmp: &TempDir) {
+    let attachment_dir = tmp.path().join("vault/_attachments");
+    let temporary_names = fs::read_dir(attachment_dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .filter(|name| name.to_string_lossy().starts_with(".upload-"))
+        .collect::<Vec<_>>();
+    assert!(
+        temporary_names.is_empty(),
+        "temporary upload files remain: {temporary_names:?}"
+    );
+}
+
+#[tokio::test]
+async fn bcl_endpoint_returns_nulls_when_unconfigured() {
+    let (server, _tmp) = setup_server();
+    let res = server.get("/api/vault/bcl").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    assert!(body["birth_date"].is_null());
+    assert!(body["bcl_date"].is_null());
+    assert!(body["remaining_seconds"].is_null());
+}
+
+#[tokio::test]
+async fn put_location_persists_and_get_reflects_it() {
+    let (server, tmp) = setup_server();
+
+    let res = server
+        .put("/api/vault/location")
+        .json(&serde_json::json!({
+            "latitude": 51.5074,
+            "longitude": -0.1278,
+            "label": "London"
+        }))
+        .await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["latitude"].as_f64(), Some(51.5074));
+    assert_eq!(body["longitude"].as_f64(), Some(-0.1278));
+    assert_eq!(body["label"].as_str(), Some("London"));
+
+    // A subsequent GET reflects the live in-memory update.
+    let get = server.get("/api/vault/location").await;
+    get.assert_status(StatusCode::OK);
+    let get_body: serde_json::Value = get.json();
+    assert_eq!(get_body["latitude"].as_f64(), Some(51.5074));
+    assert_eq!(get_body["longitude"].as_f64(), Some(-0.1278));
+    assert_eq!(get_body["label"].as_str(), Some("London"));
+
+    // The config file was written to disk.
+    let cfg = tmp.path().join("vault/.clepsydra/location.toml");
+    assert!(cfg.is_file(), "expected location.toml at {}", cfg.display());
+    let contents = fs::read_to_string(&cfg).unwrap();
+    assert!(contents.contains("London"), "got:\n{contents}");
+}
+
+#[tokio::test]
+async fn put_location_rejects_out_of_range_latitude() {
+    let (server, _tmp) = setup_server();
+    let res = server
+        .put("/api/vault/location")
+        .json(&serde_json::json!({
+            "latitude": 200.0,
+            "longitude": 0.0,
+            "label": null
+        }))
+        .await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn put_location_write_failure_preserves_in_memory_location() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir(root.join(".clepsydra/location.toml")).unwrap();
+        })
+        .build();
+
+    let response = fixture
+        .server
+        .put("/api/vault/location")
+        .json(&serde_json::json!({
+            "latitude": 51.5074,
+            "longitude": -0.1278,
+            "label": "London"
+        }))
+        .await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = response.json();
+    assert!(body["error"].as_str().unwrap().contains("failed to write"));
+
+    let current = fixture.server.get("/api/vault/location").await;
+    current.assert_status_ok();
+    let current_body: serde_json::Value = current.json();
+    assert!(current_body["latitude"].is_null());
+    assert!(current_body["longitude"].is_null());
+    assert!(current_body["label"].is_null());
+}
+
+#[tokio::test]
+async fn geocode_rejects_blank_query() {
+    let (server, _tmp) = setup_server();
+    // Whitespace-only `q` trims to empty → 400, no network needed.
+    let res = server.get("/api/vault/geocode?q=%20%20").await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn page_mutation_create_preserves_response_dto() {
+    let (server, _tmp) = setup_server();
+
+    // Create a page
+    let res = server
+        .post("/api/vault/pages/hello.md")
+        .json(&serde_json::json!({
+            "title": "Hello World",
+            "tags": ["greeting"],
+            "body": "# Hello\n\nThis is a test page."
+        }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["path"], "hello.md");
+    assert_eq!(body["meta"]["title"], "Hello World");
+    assert_eq!(body["body"], "# Hello\n\nThis is a test page.");
+
+    // Get the page back
+    let res = server.get("/api/vault/pages/hello.md").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["path"], "hello.md");
+    assert_eq!(body["meta"]["title"], "Hello World");
+}
+
+#[tokio::test]
+async fn page_update_rejects_stale_revision_without_changing_file() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/pages/conflict.md")
+        .json(&serde_json::json!({ "title": "Conflict", "body": "one" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let first: serde_json::Value = created.json();
+    let revision = first["revision"].as_str().unwrap();
+
+    let updated = server
+        .put("/api/vault/pages/conflict.md")
+        .json(&serde_json::json!({
+            "body": "two",
+            "expected_revision": revision
+        }))
+        .await;
+    updated.assert_status_ok();
+    let updated: serde_json::Value = updated.json();
+
+    let stale = server
+        .put("/api/vault/pages/conflict.md")
+        .json(&serde_json::json!({
+            "body": "stale overwrite",
+            "expected_revision": revision
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], updated["revision"],);
+
+    let current: serde_json::Value = server.get("/api/vault/pages/conflict.md").await.json();
+    assert_eq!(current["body"], "two");
+}
+
+#[tokio::test]
+async fn page_update_requires_expected_revision() {
+    let (server, _tmp) = setup_server();
+    server
+        .post("/api/vault/pages/revision-required.md")
+        .json(&serde_json::json!({ "title": "Revision", "body": "one" }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .put("/api/vault/pages/revision-required.md")
+        .json(&serde_json::json!({ "body": "two" }))
+        .await
+        .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn page_update_by_id_follows_indexed_identity_after_move() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/pages/by-id.md")
+        .json(&serde_json::json!({ "title": "By ID", "body": "before move" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+    let revision = created["revision"].as_str().unwrap();
+
+    server
+        .post("/api/vault/pages-move/by-id.md")
+        .json(&serde_json::json!({ "destination": "moved/by-id.md" }))
+        .await
+        .assert_status_ok();
+
+    let response = server
+        .put(&format!("/api/vault/pages/by-id/{id}"))
+        .json(&serde_json::json!({
+            "body": "updated after move",
+            "expected_revision": revision
+        }))
+        .await;
+    response.assert_status_ok();
+    let updated: serde_json::Value = response.json();
+    assert_eq!(updated["path"], "moved/by-id.md");
+    assert_eq!(updated["body"], "updated after move");
+
+    let fetched: serde_json::Value = server.get("/api/vault/pages/moved/by-id.md").await.json();
+    assert_eq!(updated, fetched);
+}
+
+#[tokio::test]
+async fn page_update_by_id_returns_not_found_for_missing_uuid() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .put("/api/vault/pages/by-id/01951234-0000-7000-8000-000000000404")
+        .json(&serde_json::json!({
+            "body": "missing",
+            "expected_revision": "0".repeat(64)
+        }))
+        .await
+        .assert_status(StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn page_update_by_id_rejects_stale_revision_without_changing_file() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/pages/by-id-conflict.md")
+        .json(&serde_json::json!({ "title": "By ID Conflict", "body": "one" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+    let first_revision = created["revision"].as_str().unwrap();
+
+    let updated = server
+        .put("/api/vault/pages/by-id-conflict.md")
+        .json(&serde_json::json!({
+            "body": "two",
+            "expected_revision": first_revision
+        }))
+        .await;
+    updated.assert_status_ok();
+    let updated: serde_json::Value = updated.json();
+
+    let stale = server
+        .put(&format!("/api/vault/pages/by-id/{id}"))
+        .json(&serde_json::json!({
+            "body": "stale overwrite",
+            "expected_revision": first_revision
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], updated["revision"]);
+
+    let current: serde_json::Value = server
+        .get("/api/vault/pages/by-id-conflict.md")
+        .await
+        .json();
+    assert_eq!(current["body"], "two");
+}
+
+#[tokio::test]
+async fn page_by_id_get_waits_for_move_lock_before_access() {
+    let fixture = ApiFixture::builder().build();
+    let created = fixture
+        .server
+        .post("/api/vault/pages/get-race.md")
+        .json(&serde_json::json!({ "title": "GET Race", "body": "identity body" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+
+    let candidate = clep_api::vault::path::VaultPath::new("get-race.md").unwrap();
+    let guard = fixture
+        .state
+        .mutation_coordinator
+        .lock_paths(std::slice::from_ref(&candidate))
+        .await;
+    let request = Request::get(format!("/api/vault/pages/by-id/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let mut in_flight = Box::pin(fixture.app.clone().oneshot(request));
+    advance_request_to_held_path_lock(in_flight.as_mut(), &fixture.state.index).await;
+
+    let move_request = Request::post("/api/vault/pages-move/get-race.md")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/get-race.md" })).unwrap(),
+        ))
+        .unwrap();
+    let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    assert!(
+        first_poll.is_pending(),
+        "move completed while candidate lock was held"
+    );
+    drop(guard);
+    let response = in_flight.await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let fetched = response_json(response).await;
+    assert_eq!(fetched["meta"]["id"], id);
+    assert_eq!(fetched["path"], "get-race.md");
+    assert_eq!(fetched["body"], "identity body");
+    let move_response = moving.await.unwrap();
+    assert_eq!(move_response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn page_update_by_id_waits_for_move_lock_before_update() {
+    let fixture = ApiFixture::builder().build();
+    let created = fixture
+        .server
+        .post("/api/vault/pages/put-race.md")
+        .json(&serde_json::json!({ "title": "PUT Race", "body": "before" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+    let original_revision = created["revision"].as_str().unwrap().to_string();
+
+    let candidate = clep_api::vault::path::VaultPath::new("put-race.md").unwrap();
+    let guard = fixture
+        .state
+        .mutation_coordinator
+        .lock_paths(std::slice::from_ref(&candidate))
+        .await;
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "body": "updated after concurrent move",
+        "expected_revision": original_revision
+    }))
+    .unwrap();
+    let request = Request::put(format!("/api/vault/pages/by-id/{id}"))
+        .header("content-type", "application/json")
+        .body(Body::from(payload))
+        .unwrap();
+    let mut in_flight = Box::pin(fixture.app.clone().oneshot(request));
+    advance_request_to_held_path_lock(in_flight.as_mut(), &fixture.state.index).await;
+
+    let move_request = Request::post("/api/vault/pages-move/put-race.md")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/put-race.md" })).unwrap(),
+        ))
+        .unwrap();
+    let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    assert!(
+        first_poll.is_pending(),
+        "move completed while candidate lock was held"
+    );
+    drop(guard);
+    let response = in_flight.await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let updated = response_json(response).await;
+    assert_eq!(updated["meta"]["id"], id);
+    assert_eq!(updated["path"], "put-race.md");
+    assert_eq!(updated["body"], "updated after concurrent move");
+    assert_ne!(updated["revision"], original_revision);
+    let move_response = moving.await.unwrap();
+    assert_eq!(move_response.status(), StatusCode::OK);
+
+    let fetched: serde_json::Value = fixture
+        .server
+        .get(&format!("/api/vault/pages/by-id/{id}"))
+        .await
+        .json();
+    assert_eq!(fetched["meta"]["id"], id);
+    assert_eq!(fetched["path"], "moved/put-race.md");
+    assert_eq!(fetched["body"], updated["body"]);
+    assert_eq!(fetched["revision"], updated["revision"]);
+
+    let stale = fixture
+        .server
+        .put(&format!("/api/vault/pages/by-id/{id}"))
+        .json(&serde_json::json!({
+            "body": "stale overwrite",
+            "expected_revision": original_revision
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], updated["revision"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn page_by_id_get_retries_relocation_between_lookup_and_access() {
+    let fixture = ApiFixture::builder().build();
+    let created = fixture
+        .server
+        .post("/api/vault/pages/get-relocation.md")
+        .json(&serde_json::json!({ "title": "GET Relocation", "body": "identity body" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap().to_string();
+
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
+    let hook_release = Arc::clone(&release_rx);
+    fixture
+        .state
+        .mutation_coordinator
+        .set_after_page_id_lookup_hook(Some(Arc::new(
+            move |path: &clep_api::vault::path::VaultPath| {
+                let _ = entered_tx.send(path.as_str().to_string());
+                let _ = hook_release.lock().recv();
+            },
+        )));
+
+    let request = Request::get(format!("/api/vault/pages/by-id/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let getting = tokio::spawn(fixture.app.clone().oneshot(request));
+    assert_eq!(
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("GET by ID did not pause after its indexed lookup"),
+        "get-relocation.md"
+    );
+
+    let move_request = Request::post("/api/vault/pages-move/get-relocation.md")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/get-relocation.md" }))
+                .unwrap(),
+        ))
+        .unwrap();
+    let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    let move_response = match first_poll {
+        Poll::Ready(response) => response.unwrap(),
+        Poll::Pending => {
+            fixture.state.index.with_index(|_, _| ()).await.unwrap();
+            moving.await.unwrap()
+        }
+    };
+    assert_eq!(move_response.status(), StatusCode::OK);
+
+    fixture
+        .state
+        .mutation_coordinator
+        .set_after_page_id_lookup_hook(None);
+    release_tx.send(()).unwrap();
+
+    let response = getting.await.unwrap().unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let fetched = response_json(response).await;
+    assert_eq!(fetched["meta"]["id"], id);
+    assert_eq!(fetched["path"], "moved/get-relocation.md");
+    assert_eq!(fetched["body"], "identity body");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn page_update_by_id_retries_relocation_between_lookup_and_update() {
+    let fixture = ApiFixture::builder().build();
+    let created = fixture
+        .server
+        .post("/api/vault/pages/put-relocation.md")
+        .json(&serde_json::json!({ "title": "PUT Relocation", "body": "before" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap().to_string();
+    let original_revision = created["revision"].as_str().unwrap().to_string();
+
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
+    let hook_release = Arc::clone(&release_rx);
+    fixture
+        .state
+        .mutation_coordinator
+        .set_after_page_id_lookup_hook(Some(Arc::new(
+            move |path: &clep_api::vault::path::VaultPath| {
+                let _ = entered_tx.send(path.as_str().to_string());
+                let _ = hook_release.lock().recv();
+            },
+        )));
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "body": "updated after concurrent move",
+        "expected_revision": original_revision.clone()
+    }))
+    .unwrap();
+    let request = Request::put(format!("/api/vault/pages/by-id/{id}"))
+        .header("content-type", "application/json")
+        .body(Body::from(payload))
+        .unwrap();
+    let updating = tokio::spawn(fixture.app.clone().oneshot(request));
+    assert_eq!(
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("PUT by ID did not pause after its indexed lookup"),
+        "put-relocation.md"
+    );
+
+    let move_request = Request::post("/api/vault/pages-move/put-relocation.md")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/put-relocation.md" }))
+                .unwrap(),
+        ))
+        .unwrap();
+    let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    let move_response = match first_poll {
+        Poll::Ready(response) => response.unwrap(),
+        Poll::Pending => {
+            fixture.state.index.with_index(|_, _| ()).await.unwrap();
+            moving.await.unwrap()
+        }
+    };
+    assert_eq!(move_response.status(), StatusCode::OK);
+
+    fixture
+        .state
+        .mutation_coordinator
+        .set_after_page_id_lookup_hook(None);
+    release_tx.send(()).unwrap();
+
+    let response = updating.await.unwrap().unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let updated = response_json(response).await;
+    assert_eq!(updated["meta"]["id"], id);
+    assert_eq!(updated["path"], "moved/put-relocation.md");
+    assert_eq!(updated["body"], "updated after concurrent move");
+    assert_ne!(updated["revision"], original_revision);
+
+    let fetched: serde_json::Value = fixture
+        .server
+        .get(&format!("/api/vault/pages/by-id/{id}"))
+        .await
+        .json();
+    assert_eq!(fetched, updated);
+
+    let stale = fixture
+        .server
+        .put(&format!("/api/vault/pages/by-id/{id}"))
+        .json(&serde_json::json!({
+            "body": "stale overwrite",
+            "expected_revision": original_revision
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], updated["revision"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn page_move_waits_for_uuid_update_publish_and_preserves_single_identity() {
+    let fixture = ApiFixture::builder().build();
+    let root = fixture.temp_dir.path().join("vault");
+    let created = fixture
+        .server
+        .post("/api/vault/pages/publish-race.md")
+        .json(&serde_json::json!({ "title": "Publish Race", "body": "before" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap().to_string();
+    let original_revision = created["revision"].as_str().unwrap().to_string();
+
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
+    let hook_release = Arc::clone(&release_rx);
+    fixture
+        .state
+        .mutation_coordinator
+        .set_before_update_publish_hook(Some(Arc::new(
+            move |path: &clep_api::vault::path::VaultPath| {
+                let _ = entered_tx.send(path.as_str().to_string());
+                let _ = hook_release.lock().recv();
+            },
+        )));
+
+    let update_payload = serde_json::to_vec(&serde_json::json!({
+        "body": "published before move",
+        "expected_revision": original_revision.clone()
+    }))
+    .unwrap();
+    let update_request = Request::put(format!("/api/vault/pages/by-id/{id}"))
+        .header("content-type", "application/json")
+        .body(Body::from(update_payload))
+        .unwrap();
+    let updating = tokio::spawn(fixture.app.clone().oneshot(update_request));
+    assert_eq!(
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("UUID update did not reach the pre-publish seam"),
+        "publish-race.md"
+    );
+
+    let move_payload =
+        serde_json::to_vec(&serde_json::json!({ "destination": "moved/publish-race.md" })).unwrap();
+    let move_request = Request::post("/api/vault/pages-move/publish-race.md")
+        .header("content-type", "application/json")
+        .body(Body::from(move_payload))
+        .unwrap();
+    let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    assert!(
+        first_poll.is_pending(),
+        "move completed in its initial router poll"
+    );
+    fixture.state.index.with_index(|_, _| ()).await.unwrap();
+    let synchronized_poll =
+        poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    assert!(
+        synchronized_poll.is_pending(),
+        "move completed while UUID update was paused before publication"
+    );
+
+    release_tx.send(()).unwrap();
+    let update_response = updating.await.unwrap().unwrap();
+    let move_response = moving.await.unwrap();
+    fixture
+        .state
+        .mutation_coordinator
+        .set_before_update_publish_hook(None);
+
+    assert_eq!(update_response.status(), StatusCode::OK);
+    let updated = response_json(update_response).await;
+    assert_eq!(updated["body"], "published before move");
+    assert_ne!(updated["revision"], original_revision);
+
+    let move_status = move_response.status();
+    let moved = response_json(move_response).await;
+    assert_eq!(move_status, StatusCode::OK, "move failed: {moved}");
+    assert_eq!(moved["meta"]["id"], id);
+    assert_eq!(moved["path"], "moved/publish-race.md");
+    assert_eq!(moved["body"], "published before move");
+    assert_eq!(moved["revision"], updated["revision"]);
+
+    assert!(!root.join("publish-race.md").exists());
+    assert!(root.join("moved/publish-race.md").is_file());
+    let matching_identity_files = walkdir::WalkDir::new(&root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().is_file()
+                && entry.path().extension().and_then(|value| value.to_str()) == Some("md")
+        })
+        .filter_map(|entry| {
+            let relative = entry.path().strip_prefix(&root).ok()?.to_str()?;
+            let vault_path = clep_api::vault::path::VaultPath::new(relative).ok()?;
+            clep_api::vault::page::Page::from_file(entry.path(), vault_path).ok()
+        })
+        .filter(|page| page.meta.id.to_string() == id)
+        .count();
+    assert_eq!(matching_identity_files, 1);
+
+    let fetched = fixture
+        .server
+        .get(&format!("/api/vault/pages/by-id/{id}"))
+        .await;
+    fetched.assert_status_ok();
+    assert_eq!(fetched.json::<serde_json::Value>(), moved);
+}
+
+#[tokio::test]
+async fn create_default_page_uses_server_path_trimmed_title_and_one_clock_read() {
+    let clock = Arc::new(CountingFixedClock {
+        now: chrono::DateTime::parse_from_rfc3339("2025-02-16T10:30:45Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc),
+        calls: AtomicUsize::new(0),
+    });
+    let fixture = ApiFixture::builder()
+        .configure(|root| {
+            fs::write(
+                root.join(".clepsydra/config.toml"),
+                "[vault]\ndefault_page_folder = \"notes\"\n",
+            )
+            .unwrap();
+        })
+        .clock(clock.clone())
+        .build();
+    let root = fixture.temp_dir.path().join("vault");
+
+    let response = fixture
+        .server
+        .post("/api/vault/pages")
+        .json(&serde_json::json!({
+            "title": "  Mobile Note  ",
+            "body": "Created on iPhone"
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = response.json();
+    assert_eq!(created["meta"]["title"], "Mobile Note");
+    assert_eq!(created["meta"]["created_at"], "2025-02-16T10:30:45Z");
+    assert_eq!(created["meta"]["updated_at"], "2025-02-16T10:30:45Z");
+    assert_eq!(created["body"], "Created on iPhone");
+    assert_eq!(created["revision"].as_str().unwrap().len(), 64);
+    let path = created["path"].as_str().unwrap();
+    assert!(path.starts_with("notes/20250216.mobile-note."));
+    assert!(clep_api::vault::path::is_canonical_page_filename(
+        path.rsplit('/').next().unwrap()
+    ));
+    assert_eq!(clock.calls.load(Ordering::SeqCst), 1);
+
+    let fetched: serde_json::Value = fixture
+        .server
+        .get(&format!("/api/vault/pages/{path}"))
+        .await
+        .json();
+    assert_eq!(created, fetched);
+    assert!(root.join(path).is_file());
+}
+
+#[tokio::test]
+async fn recipe_kind_create_filter_and_assign() {
+    let (server, _tmp) = setup_server();
+
+    let created_response = server
+        .post("/api/vault/pages/recipes/soup.md")
+        .json(&serde_json::json!({
+            "title": "Soup",
+            "kind": "RECIPE",
+            "body": "INGREDIENTS\n\nSTEPS\n\nNOTES\n"
+        }))
+        .await;
+    created_response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created_response.json();
+    assert_eq!(created["kind"], "RECIPE");
+    let recipe_path = created["path"].as_str().unwrap().to_string();
+    assert!(recipe_path.starts_with("recipes/"));
+
+    let filtered_response = server.get("/api/vault/pages?kind=recipe").await;
+    filtered_response.assert_status_ok();
+    let filtered: serde_json::Value = filtered_response.json();
+    assert!(
+        filtered["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|page| page["path"] == recipe_path),
+        "created recipe missing from filtered listing: {filtered}"
+    );
+
+    let note_response = server
+        .post("/api/vault/pages")
+        .json(&serde_json::json!({ "title": "Ordinary Note" }))
+        .await;
+    note_response.assert_status(StatusCode::CREATED);
+    let note: serde_json::Value = note_response.json();
+    let note_path = note["path"].as_str().unwrap();
+
+    let assigned_response = server
+        .post(&format!("/api/vault/pages-assign/{note_path}"))
+        .json(&serde_json::json!({ "kind": "RECIPE" }))
+        .await;
+    assigned_response.assert_status_ok();
+    let assigned: serde_json::Value = assigned_response.json();
+    assert!(assigned["path"].as_str().unwrap().starts_with("recipes/"));
+}
+
+#[tokio::test]
+async fn create_default_page_rejects_blank_titles_without_creating_markdown() {
+    let fixture = ApiFixture::builder().build();
+    let root = fixture.temp_dir.path().join("vault");
+    let initial_markdown_count = markdown_file_count(&root);
+
+    for title in ["", " \t\n "] {
+        fixture
+            .server
+            .post("/api/vault/pages")
+            .json(&serde_json::json!({ "title": title }))
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        assert_eq!(markdown_file_count(&root), initial_markdown_count);
+    }
+}
+
+#[tokio::test]
+async fn page_detail_mapping_matches_get_for_every_page_endpoint() {
+    let (server, _tmp) = setup_server();
+
+    let response = server
+        .post("/api/vault/pages/detail.md")
+        .json(&serde_json::json!({
+            "title": "Detail",
+            "tags": ["mapping"],
+            "aliases": ["Detail alias"],
+            "body": "Initial body."
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = response.json();
+
+    let response = server.get("/api/vault/pages/detail.md").await;
+    response.assert_status_ok();
+    let fetched: serde_json::Value = response.json();
+    let revision = fetched["revision"].as_str().expect("page detail revision");
+    assert_eq!(revision.len(), 64);
+    assert_eq!(created["revision"], fetched["revision"]);
+    assert_eq!(
+        created, fetched,
+        "create and path GET detail mappings differ"
+    );
+
+    let id = fetched["meta"]["id"].as_str().unwrap();
+    let response = server.get(&format!("/api/vault/pages/by-id/{id}")).await;
+    response.assert_status_ok();
+    assert_eq!(
+        response.json::<serde_json::Value>(),
+        fetched,
+        "by-id and path GET detail mappings differ"
+    );
+
+    let response = server
+        .put("/api/vault/pages/detail.md")
+        .json(&serde_json::json!({
+            "expected_revision": revision,
+            "title": "Updated detail",
+            "tags": ["mapping", "updated"],
+            "aliases": ["Updated alias"],
+            "body": "Updated body."
+        }))
+        .await;
+    response.assert_status_ok();
+    let updated: serde_json::Value = response.json();
+    let response = server.get("/api/vault/pages/detail.md").await;
+    response.assert_status_ok();
+    assert_eq!(
+        updated,
+        response.json::<serde_json::Value>(),
+        "update and path GET detail mappings differ"
+    );
+
+    let response = server
+        .post("/api/vault/pages-move/detail.md")
+        .json(&serde_json::json!({ "destination": "moved/detail.md" }))
+        .await;
+    response.assert_status_ok();
+    let moved: serde_json::Value = response.json();
+    let response = server.get("/api/vault/pages/moved/detail.md").await;
+    response.assert_status_ok();
+    assert_eq!(
+        moved,
+        response.json::<serde_json::Value>(),
+        "move and path GET detail mappings differ"
+    );
+
+    let response = server
+        .post("/api/vault/pages-assign/moved/detail.md")
+        .json(&serde_json::json!({}))
+        .await;
+    response.assert_status_ok();
+    let assigned: serde_json::Value = response.json();
+    let response = server.get("/api/vault/pages/moved/detail.md").await;
+    response.assert_status_ok();
+    assert_eq!(
+        assigned,
+        response.json::<serde_json::Value>(),
+        "assign and path GET detail mappings differ"
+    );
+}
+
+#[tokio::test]
+async fn newly_created_pages_report_unencrypted_in_detail_and_listing() {
+    let (server, _tmp) = setup_server();
+    let created: serde_json::Value = server
+        .post("/api/vault/pages/encryption-state.md")
+        .json(&serde_json::json!({ "title": "Encryption state", "body": "Plain" }))
+        .await
+        .json();
+    assert_eq!(created["encrypted"], false);
+    assert!(created["encryption"].is_null());
+
+    let listing: serde_json::Value = server.get("/api/vault/pages").await.json();
+    let summary = listing["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["path"] == "encryption-state.md")
+        .unwrap();
+    assert_eq!(summary["encrypted"], false);
+}
+
+#[tokio::test]
+async fn page_detail_mapping_matches_get_for_journal_and_link_endpoints() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(
+                root.join("source.md"),
+                "---\ntitle: Source\n---\nSee [[CreatedFromLink]].\n",
+            )
+            .unwrap();
+        })
+        .build();
+    let server = fixture.server;
+
+    let response = server
+        .post("/api/vault/index/create-from-link")
+        .json(&serde_json::json!({
+            "target_raw": "CreatedFromLink",
+            "folder": ""
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let linked: serde_json::Value = response.json();
+    let linked_path = linked["path"].as_str().unwrap();
+    let response = server.get(&format!("/api/vault/pages/{linked_path}")).await;
+    response.assert_status_ok();
+    assert_eq!(
+        linked,
+        response.json::<serde_json::Value>(),
+        "create-from-link and path GET detail mappings differ"
+    );
+
+    let response = server.post("/api/vault/journal/today").await;
+    response.assert_status(StatusCode::CREATED);
+    let response = server.get("/api/vault/journal/today").await;
+    response.assert_status_ok();
+    let mut today: serde_json::Value = response.json();
+    let date = today["meta"]["title"].as_str().unwrap().to_string();
+    let today_path = today["path"].as_str().unwrap().to_string();
+    today
+        .as_object_mut()
+        .unwrap()
+        .remove("carried_forward")
+        .unwrap();
+    let response = server.get(&format!("/api/vault/pages/{today_path}")).await;
+    response.assert_status_ok();
+    let journal_page: serde_json::Value = response.json();
+    assert_eq!(
+        today, journal_page,
+        "journal today and path GET detail mappings differ"
+    );
+
+    let response = server.get(&format!("/api/vault/journal/{date}")).await;
+    response.assert_status_ok();
+    assert_eq!(
+        response.json::<serde_json::Value>(),
+        journal_page,
+        "journal date and path GET detail mappings differ"
+    );
+
+    let response = server
+        .post("/api/vault/journal/today/capture")
+        .json(&serde_json::json!({ "content": "Captured detail." }))
+        .await;
+    response.assert_status_ok();
+    let captured: serde_json::Value = response.json();
+    let response = server.get(&format!("/api/vault/pages/{today_path}")).await;
+    response.assert_status_ok();
+    assert_eq!(
+        captured,
+        response.json::<serde_json::Value>(),
+        "journal capture and path GET detail mappings differ"
+    );
+}
+
+#[tokio::test]
+async fn page_mutation_create_duplicate_returns_409() {
+    let (server, _tmp) = setup_server();
+
+    // Create a page
+    server
+        .post("/api/vault/pages/dup.md")
+        .json(&serde_json::json!({ "title": "Dup" }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    // Try to create the same page again
+    let res = server
+        .post("/api/vault/pages/dup.md")
+        .json(&serde_json::json!({ "title": "Dup Again" }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn get_nonexistent_returns_404() {
+    let (server, _tmp) = setup_server();
+
+    let res = server.get("/api/vault/pages/no-such-page.md").await;
+    res.assert_status(axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_page_archives_without_backlinks() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/ephemeral.md")
+        .json(&serde_json::json!({ "title": "Ephemeral" }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let archived = server.delete("/api/vault/pages/ephemeral.md").await;
+    archived.assert_status(axum::http::StatusCode::CREATED);
+    let archived: serde_json::Value = archived.json();
+    assert_eq!(archived["original_path"], "ephemeral.md");
+    assert!(archived["item_id"].as_str().is_some());
+
+    server
+        .get("/api/vault/pages/ephemeral.md")
+        .await
+        .assert_status(axum::http::StatusCode::NOT_FOUND);
+    server
+        .get(&format!(
+            "/api/vault/rubbish/{}",
+            archived["item_id"].as_str().unwrap()
+        ))
+        .await
+        .assert_status_ok();
+}
+
+#[tokio::test]
+async fn fixture_keeps_configuration_pre_index_seed_and_post_index_mutation_order_explicit() {
+    let fixture = ApiFixture::builder()
+        .configure(|root| fs::write(root.join(".clepsydra/fixture-configured"), "yes").unwrap())
+        .pre_index_seed(|root| {
+            assert!(root.join(".clepsydra/fixture-configured").is_file());
+            fs::write(root.join("indexed.md"), "---\ntitle: Indexed\n---\n").unwrap();
+        })
+        .post_index_mutation(|state| {
+            fs::write(
+                state.vault.root().join("not-indexed.md"),
+                "---\ntitle: Not indexed\n---\n",
+            )
+            .unwrap();
+        })
+        .build();
+
+    let indexed_paths = fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            let mut statement = index
+                .connection()
+                .prepare("SELECT path FROM pages ORDER BY path")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert!(indexed_paths.iter().any(|path| path == "indexed.md"));
+    assert!(!indexed_paths.iter().any(|path| path == "not-indexed.md"));
+}
+
+#[test]
+fn invalid_path_helpers_keep_trust_boundaries_separate() {
+    let request_error = parse_request_path("../outside.md", "invalid path").unwrap_err();
+    assert_eq!(request_error.status, StatusCode::BAD_REQUEST.as_u16());
+    assert!(request_error.error.starts_with("invalid path: "));
+
+    let internal_error =
+        parse_internal_path("../stored-outside.md", "invalid stored path").unwrap_err();
+    assert_eq!(
+        internal_error.status,
+        StatusCode::INTERNAL_SERVER_ERROR.as_u16()
+    );
+    assert!(internal_error.error.starts_with("invalid stored path: "));
+
+    let generated_error =
+        parse_internal_path("generated\\invalid.md", "invalid generated path").unwrap_err();
+    assert_eq!(
+        generated_error.status,
+        StatusCode::INTERNAL_SERVER_ERROR.as_u16()
+    );
+    assert!(
+        generated_error
+            .error
+            .starts_with("invalid generated path: ")
+    );
+}
+
+#[tokio::test]
+async fn invalid_path_in_stored_index_returns_internal_error_from_page_by_id() {
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000099";
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(
+                root.join("stored.md"),
+                format!("---\nid: {PAGE_ID}\ntitle: Stored\n---\n"),
+            )
+            .unwrap();
+        })
+        .build();
+
+    fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            index.connection().execute(
+                "UPDATE pages SET path = '../invalid-stored.md' WHERE id = ?1",
+                [PAGE_ID],
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let response = fixture
+        .server
+        .get(&format!("/api/vault/pages/by-id/{PAGE_ID}"))
+        .await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = response.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("invalid stored path: ")),
+        "unexpected error payload: {body}"
+    );
+}
+
+#[tokio::test]
+async fn invalid_path_in_stored_index_returns_internal_error_from_content_index() {
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000098";
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(
+                root.join("stored-content.md"),
+                format!("---\nid: {PAGE_ID}\ntitle: Stored content\n---\n"),
+            )
+            .unwrap();
+        })
+        .build();
+
+    fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            index.connection().execute(
+                "UPDATE pages SET path = '../invalid-stored.md' WHERE id = ?1",
+                [PAGE_ID],
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let response = fixture.server.get("/api/vault/index/content-index").await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = response.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("invalid stored path: ")),
+        "unexpected error payload: {body}"
+    );
+}
+
+#[tokio::test]
+async fn invalid_path_in_request_returns_bad_request() {
+    let (server, _tmp) = setup_server();
+
+    // Use an encoded backslash so the router preserves the wildcard route and
+    // request-boundary VaultPath validation is responsible for the rejection.
+    let res = server
+        .post("/api/vault/pages/bad%5Cpath.md")
+        .json(&serde_json::json!({ "title": "Evil" }))
+        .await;
+
+    res.assert_status(StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("invalid path: ")),
+        "unexpected error payload: {body}"
+    );
+}
+
+#[tokio::test]
+async fn list_pages() {
+    let (server, _tmp) = setup_server_with_files(&[
+        (
+            "alpha.md",
+            "---\ntitle: Alpha\naliases:\n  - Design\n  - Blueprint\n---\nAlpha body.\n",
+        ),
+        ("beta.md", "---\ntitle: Beta\n---\nBeta body.\n"),
+    ]);
+
+    let res = server.get("/api/vault/pages").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["path"], "alpha.md");
+    assert_eq!(
+        items[0]["aliases"],
+        serde_json::json!(["Design", "Blueprint"])
+    );
+    assert_eq!(items[1]["path"], "beta.md");
+    assert_eq!(items[1]["aliases"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn list_pages_and_folders_reject_non_array_alias_metadata() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("topic")).unwrap();
+            fs::write(root.join("topic/malformed.md"), "# Malformed\n").unwrap();
+        })
+        .build();
+
+    for (case, meta_json) in [
+        (
+            "scalar string containing array syntax",
+            r#"{"aliases":"[\"Masquerade\"]"}"#,
+        ),
+        ("explicit null", r#"{"aliases":null}"#),
+    ] {
+        let meta_json = meta_json.to_string();
+        fixture
+            .state
+            .index
+            .with_index(move |index, _vault| {
+                index.connection().execute(
+                    "UPDATE pages SET meta_json = ?1 WHERE path = 'topic/malformed.md'",
+                    [meta_json],
+                )
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        let list_response = fixture.server.get("/api/vault/pages").await;
+        assert_eq!(
+            list_response.status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "list pages must reject {case}"
+        );
+
+        let folder_response = fixture.server.get("/api/vault/folders/topic").await;
+        assert_eq!(
+            folder_response.status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "folder pages must reject {case}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn create_and_list_folder() {
+    let (server, _tmp) = setup_server();
+
+    // Create a folder
+    let res = server.post("/api/vault/folders/notes").await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    // List top-level folders
+    let res = server.get("/api/vault/folders").await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+
+    // Should contain our "notes" folder (and maybe "_attachments" but that's excluded by default)
+    let folder_names: Vec<&str> = body.iter().filter_map(|f| f["name"].as_str()).collect();
+    assert!(
+        folder_names.contains(&"notes"),
+        "expected 'notes' in folders, got: {folder_names:?}"
+    );
+}
+
+#[tokio::test]
+async fn folder_create_parent_file_failure_writes_no_directory() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(root.join("blocked"), b"existing file").unwrap();
+        })
+        .build();
+    let root = fixture.temp_dir.path().join("vault");
+
+    fixture
+        .server
+        .post("/api/vault/folders/blocked/child")
+        .await
+        .assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+
+    assert_eq!(fs::read(root.join("blocked")).unwrap(), b"existing file");
+    assert!(!root.join("blocked/child").exists());
+}
+
+#[tokio::test]
+async fn lists_folder_contents_sorted() {
+    let (server, _tmp) = setup_server_with_files(&[
+        ("topic/Beta.md", "# Beta\n"),
+        ("topic/Alpha.md", "# Alpha\n"),
+        ("topic/sub/Child.md", "# Child\n"),
+    ]);
+    let resp = server.get("/api/vault/folders/topic").await;
+    resp.assert_status_ok();
+    let body: serde_json::Value = resp.json();
+    // exactly the two md files in topic/ (sub/Child.md is one level deeper)
+    let pages = body["pages"].as_array().expect("pages array");
+    assert_eq!(
+        pages.len(),
+        2,
+        "expected exactly 2 pages in topic/: {pages:?}"
+    );
+    let paths: Vec<&str> = pages.iter().filter_map(|p| p["path"].as_str()).collect();
+    assert!(paths.iter().any(|p| p.ends_with("Alpha.md")));
+    assert!(paths.iter().any(|p| p.ends_with("Beta.md")));
+    // pages sorted by path: Alpha before Beta
+    let alpha = paths.iter().position(|p| p.ends_with("Alpha.md")).unwrap();
+    let beta = paths.iter().position(|p| p.ends_with("Beta.md")).unwrap();
+    assert!(alpha < beta, "Alpha should sort before Beta: {paths:?}");
+    // exactly the one subfolder
+    let folders = body["folders"].as_array().expect("folders array");
+    assert_eq!(
+        folders.len(),
+        1,
+        "expected exactly 1 subfolder: {folders:?}"
+    );
+    assert!(folders.iter().any(|f| f["name"].as_str() == Some("sub")));
+}
+
+#[tokio::test]
+async fn folder_authority_uses_filesystem_membership_and_index_enrichment() {
+    const INDEXED_ID: &str = "01951234-0000-7000-8000-000000000101";
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("topic")).unwrap();
+            fs::write(
+                root.join("topic/indexed.md"),
+                format!(
+                    "---\nid: {INDEXED_ID}\ntitle: Indexed title\naliases:\n  - Design\n  - Blueprint\ntags:\n  - indexed\nproject: alpha\n---\nIndexed body.\n"
+                ),
+            )
+            .unwrap();
+            fs::write(
+                root.join("topic/stale.md"),
+                "---\ntitle: Stale title\n---\nStale body.\n",
+            )
+            .unwrap();
+        })
+        .post_index_mutation(|state| {
+            fs::remove_file(state.vault.root().join("topic/stale.md")).unwrap();
+            fs::write(
+                state.vault.root().join("topic/filesystem-only.md"),
+                "---\ntitle: Unindexed title\n---\nUnindexed body.\n",
+            )
+            .unwrap();
+        })
+        .build();
+
+    let response = fixture.server.get("/api/vault/folders/topic").await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let pages = body["pages"].as_array().expect("pages array");
+
+    assert_eq!(
+        pages
+            .iter()
+            .map(|page| page["path"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["topic/filesystem-only.md", "topic/indexed.md"],
+        "filesystem membership should omit stale index rows and remain path-sorted"
+    );
+
+    let indexed = pages
+        .iter()
+        .find(|page| page["path"] == "topic/indexed.md")
+        .unwrap();
+    assert_eq!(indexed["id"], INDEXED_ID);
+    assert_eq!(indexed["title"], "Indexed title");
+    assert_eq!(indexed["canonical_name"], "indexed title");
+    assert_eq!(indexed["project"], "alpha");
+    assert_eq!(indexed["tags"], serde_json::json!(["indexed", "note"]));
+    assert_eq!(indexed["computed_tags"], serde_json::json!(["note"]));
+    assert_eq!(
+        indexed["aliases"],
+        serde_json::json!(["Design", "Blueprint"])
+    );
+
+    let filesystem_only = pages
+        .iter()
+        .find(|page| page["path"] == "topic/filesystem-only.md")
+        .unwrap();
+    assert_eq!(filesystem_only["aliases"], serde_json::json!([]));
+    assert_eq!(
+        filesystem_only,
+        &serde_json::json!({
+            "id": "",
+            "path": "topic/filesystem-only.md",
+            "title": null,
+            "canonical_name": "filesystem-only",
+            "kind": "NOTE",
+            "inferred": true,
+            "encrypted": false,
+            "tags": ["note"],
+            "computed_tags": ["note"],
+            "aliases": []
+        }),
+        "filesystem-only pages should use the deterministic fallback summary"
+    );
+}
+
+#[tokio::test]
+async fn folder_authority_propagates_index_row_type_errors_as_internal_errors() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("topic")).unwrap();
+            fs::write(
+                root.join("topic/corrupted.md"),
+                "---\ntitle: Corrupted\n---\nCorrupted body.\n",
+            )
+            .unwrap();
+        })
+        .build();
+
+    fixture
+        .state
+        .index
+        .with_index(|index, _vault| {
+            index.connection().execute(
+                "UPDATE pages SET title = x'80' WHERE path = 'topic/corrupted.md'",
+                [],
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let response = fixture.server.get("/api/vault/folders/topic").await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["status"], 500);
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("Invalid column type Blob")),
+        "expected the SQLite row-mapping error, got: {body}"
+    );
+}
+
+#[tokio::test]
+async fn list_attachments_empty() {
+    let (server, _tmp) = setup_server();
+
+    let res = server.get("/api/vault/attachments").await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+    assert!(body.is_empty(), "expected empty attachments list");
+}
+
+// ---------------------------------------------------------------------------
+// Move page tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn move_page_keeps_title_links_and_rewrites_stem_links() {
+    let (server, tmp) = setup_server();
+    let vault_root = tmp.path().join("vault");
+
+    // Create target page
+    server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Create source page that links to target by title and by filename stem
+    server
+        .post("/api/vault/pages/source.md")
+        .json(
+            &serde_json::json!({"title": "Source", "body": "See [[Target]] and [[target]] here."}),
+        )
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild index to register links
+    let res = server.post("/api/vault/index/rebuild").await;
+    res.assert_status_ok();
+
+    // Move target.md -> renamed.md
+    let res = server
+        .post("/api/vault/pages-move/target.md")
+        .json(&serde_json::json!({"destination": "renamed.md"}))
+        .await;
+    assert_eq!(res.status_code(), StatusCode::OK);
+
+    // Verify file moved
+    assert!(
+        !vault_root.join("target.md").exists(),
+        "target.md should not exist after move"
+    );
+    assert!(
+        vault_root.join("renamed.md").exists(),
+        "renamed.md should exist after move"
+    );
+
+    // The title link still resolves through the page's title-derived canonical
+    // name, so it must be left alone; only the stem link follows the file.
+    let content = fs::read_to_string(vault_root.join("source.md")).unwrap();
+    assert!(
+        content.contains("[[Target]]"),
+        "title link must survive the move, but found: {content}"
+    );
+    assert!(
+        content.contains("[[renamed]]") && !content.contains("[[target]]"),
+        "stem link should follow the file, but found: {content}"
+    );
+
+    // And the moved page still lists source.md among its backlinks.
+    let res = server.get("/api/vault/index/backlinks/renamed.md").await;
+    res.assert_status_ok();
+    let backlinks: serde_json::Value = res.json();
+    let sources: Vec<&str> = backlinks
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|b| b["source_path"].as_str())
+        .collect();
+    assert!(
+        sources.contains(&"source.md"),
+        "source.md should still backlink renamed.md: {backlinks}"
+    );
+}
+
+#[tokio::test]
+async fn page_move_commits_primary_and_backlink_rewrite_before_one_notification() {
+    let fixture = ApiFixture::builder().build();
+    let vault_root = fixture.temp_dir.path().join("vault");
+    fixture
+        .server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/pages/source.md")
+        // Stem-form link: it follows the renamed file, so the move carries a
+        // backlink rewrite. A title-form [[Target]] would be left alone.
+        .json(&serde_json::json!({"title": "Source", "body": "See [[target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    fixture
+        .server
+        .post("/api/vault/pages-move/target.md")
+        .json(&serde_json::json!({"destination": "renamed.md"}))
+        .await
+        .assert_status(StatusCode::OK);
+
+    assert!(!vault_root.join("target.md").exists());
+    assert!(vault_root.join("renamed.md").exists());
+    let backlink = fs::read_to_string(vault_root.join("source.md")).unwrap();
+    assert!(!backlink.contains("[[target]]"));
+    assert!(backlink.contains("[[renamed]]"));
+    match notifications.try_recv().expect("move notification") {
+        SyncNotification::IndexChanged { upserted, removed } => {
+            assert_eq!(
+                upserted.into_iter().collect::<BTreeSet<_>>(),
+                BTreeSet::from(["renamed.md".to_string(), "source.md".to_string()])
+            );
+            assert_eq!(removed, vec!["target.md"]);
+        }
+        notification => panic!("unexpected move notification: {notification:?}"),
+    }
+    assert!(
+        notifications.try_recv().is_err(),
+        "page move must publish exactly one notification"
+    );
+}
+
+#[tokio::test]
+async fn delete_page_archives_primary_without_backlink_rewrite_before_one_notification() {
+    let fixture = ApiFixture::builder().build();
+    let vault_root = fixture.temp_dir.path().join("vault");
+    fixture
+        .server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/pages/linker.md")
+        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+    let backlink_before = fs::read(vault_root.join("linker.md")).unwrap();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    fixture
+        .server
+        .delete("/api/vault/pages/target.md")
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    assert!(!vault_root.join("target.md").exists());
+    assert_eq!(
+        fs::read(vault_root.join("linker.md")).unwrap(),
+        backlink_before
+    );
+    match notifications.try_recv().expect("archive notification") {
+        SyncNotification::IndexChanged { upserted, removed } => {
+            assert!(upserted.is_empty());
+            assert_eq!(removed, vec!["target.md"]);
+        }
+        notification => panic!("unexpected archive notification: {notification:?}"),
+    }
+    assert!(
+        notifications.try_recv().is_err(),
+        "page archive must publish exactly one notification"
+    );
+}
+
+#[tokio::test]
+async fn move_page_nonexistent_returns_404() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/pages-move/nonexistent.md")
+        .json(&serde_json::json!({"destination": "new.md"}))
+        .await;
+    assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn move_page_destination_exists_returns_409() {
+    let (server, _tmp) = setup_server();
+
+    // Create two pages
+    server
+        .post("/api/vault/pages/a.md")
+        .json(&serde_json::json!({"title": "A"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/b.md")
+        .json(&serde_json::json!({"title": "B"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Try to move a.md -> b.md (b.md already exists)
+    let res = server
+        .post("/api/vault/pages-move/a.md")
+        .json(&serde_json::json!({"destination": "b.md"}))
+        .await;
+    assert_eq!(res.status_code(), StatusCode::CONFLICT);
+}
+
+// ---------------------------------------------------------------------------
+// Index query endpoint tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn index_backlinks() {
+    let (server, _tmp) = setup_server();
+
+    // Create target and linker pages
+    server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/linker.md")
+        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild to register links
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    // Query backlinks for target.md
+    let res = server.get("/api/vault/index/backlinks/target.md").await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+    assert_eq!(body.len(), 1, "expected 1 backlink, got: {body:?}");
+    assert_eq!(body[0]["source_path"], "linker.md");
+    assert!(
+        body[0]["context"].as_str().unwrap().contains("[[Target]]"),
+        "expected context to contain [[Target]], got: {}",
+        body[0]["context"]
+    );
+}
+
+#[tokio::test]
+async fn index_tags() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/a.md")
+        .json(&serde_json::json!({"title": "A", "tags": ["rust", "web"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/b.md")
+        .json(&serde_json::json!({"title": "B", "tags": ["rust"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild index so tags are fresh
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let res = server.get("/api/vault/index/tags").await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+
+    // "rust" should appear with count 2, "web" with count 1
+    let rust_entry = body.iter().find(|e| e["tag"] == "rust");
+    assert!(rust_entry.is_some(), "expected 'rust' tag, got: {body:?}");
+    assert_eq!(rust_entry.unwrap()["count"], 2);
+
+    let web_entry = body.iter().find(|e| e["tag"] == "web");
+    assert!(web_entry.is_some(), "expected 'web' tag, got: {body:?}");
+    assert_eq!(web_entry.unwrap()["count"], 1);
+}
+
+#[tokio::test]
+async fn index_stats() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({"title": "Alpha", "tags": ["t1"], "body": "See [[Beta]]."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/beta.md")
+        .json(&serde_json::json!({"title": "Beta", "tags": ["t2"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let res = server.get("/api/vault/index/stats").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+
+    assert_eq!(body["pages"], 2);
+    assert!(body["links_total"].as_i64().unwrap() >= 1);
+    assert_eq!(body["tags"], 3); // t1, t2, and the computed note tag
+}
+
+#[tokio::test]
+async fn stats_returns_last_indexed_at_when_pages_exist() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({"title": "Alpha"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/beta.md")
+        .json(&serde_json::json!({"title": "Beta"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let res = server.get("/api/vault/index/stats").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["last_indexed_at"].is_string(),
+        "expected last_indexed_at to be set when pages exist; got {body:?}",
+    );
+}
+
+#[tokio::test]
+async fn stats_returns_null_last_indexed_at_for_empty_vault() {
+    let (server, _tmp) = setup_server();
+    let res = server.get("/api/vault/index/stats").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["last_indexed_at"].is_null(),
+        "expected last_indexed_at to be null on empty vault; got {body:?}",
+    );
+}
+
+#[tokio::test]
+async fn similar_returns_pages_sharing_tags() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/a.md")
+        .json(&serde_json::json!({"title": "A", "tags": ["foo", "bar"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/b.md")
+        .json(&serde_json::json!({"title": "B", "tags": ["foo", "bar", "baz"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/c.md")
+        .json(&serde_json::json!({"title": "C", "tags": ["foo"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/d.md")
+        .json(&serde_json::json!({"title": "D", "tags": ["unrelated"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let res = server.get("/api/vault/index/similar/a.md").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().expect("items array");
+    let paths: Vec<&str> = items.iter().map(|i| i["path"].as_str().unwrap()).collect();
+
+    assert_eq!(
+        paths,
+        vec!["b.md", "c.md", "d.md"],
+        "expected stored-tag matches before the computed Kind-only match; got {paths:?}"
+    );
+}
+
+#[tokio::test]
+async fn similar_uses_computed_kind_tag_for_pages_without_stored_tags() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/a.md")
+        .json(&serde_json::json!({"title": "A"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/b.md")
+        .json(&serde_json::json!({"title": "B", "tags": ["foo"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let res = server.get("/api/vault/index/similar/a.md").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1, "expected the computed note tag to match");
+    assert_eq!(items[0]["path"], "b.md");
+    assert_eq!(items[0]["shared_tags"], serde_json::json!(["note"]));
+}
+
+#[tokio::test]
+async fn index_rebuild() {
+    let (server, _tmp) = setup_server();
+
+    // Create a page first
+    server
+        .post("/api/vault/pages/test.md")
+        .json(&serde_json::json!({"title": "Test"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    let res = server.post("/api/vault/index/rebuild").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(body["pages_indexed"].as_i64().unwrap() >= 0);
+}
+
+// ---------------------------------------------------------------------------
+// Get page by UUID test
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn get_page_by_uuid() {
+    let (server, _tmp) = setup_server();
+
+    // Create a page
+    let res = server
+        .post("/api/vault/pages/uuid-test.md")
+        .json(&serde_json::json!({"title": "UUID Test", "body": "Content here."}))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = res.json();
+
+    // The page ID should be in the meta
+    let page_id = created["meta"]["id"].as_str().unwrap();
+
+    // Fetch by UUID
+    let res = server
+        .get(&format!("/api/vault/pages/by-id/{page_id}"))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["path"], "uuid-test.md");
+    assert_eq!(body["meta"]["title"], "UUID Test");
+    assert_eq!(body["body"], "Content here.");
+}
+
+// ---------------------------------------------------------------------------
+// Folder move test
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn move_folder_rewrites_all_contained_pages() {
+    let (server, tmp) = setup_server();
+    let vault_root = tmp.path().join("vault");
+
+    // Create folder with a page inside
+    server
+        .post("/api/vault/folders/notes")
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/notes/design.md")
+        .json(&serde_json::json!({"title": "Design Notes", "body": "Some design notes."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Create external page that links to the page inside the folder, by
+    // title (resolves through the page's title, survives the move) and by
+    // relative path (must follow the file).
+    server
+        .post("/api/vault/pages/index.md")
+        .json(&serde_json::json!({
+            "title": "Index",
+            "body": "See [[Design Notes]] and [the file](notes/design.md) for details."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild index
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    // Move the folder
+    let res = server
+        .post("/api/vault/folders-move/notes")
+        .json(&serde_json::json!({"destination": "docs"}))
+        .await;
+    assert_eq!(
+        res.status_code(),
+        StatusCode::OK,
+        "move folder failed: {:?}",
+        res.text()
+    );
+
+    // Verify old folder is gone, new folder exists
+    assert!(
+        !vault_root.join("notes").exists(),
+        "old folder should not exist"
+    );
+    assert!(
+        vault_root.join("docs/design.md").exists(),
+        "page should exist in new folder"
+    );
+
+    // The path link follows the folder; the title link is left as written.
+    let content = fs::read_to_string(vault_root.join("index.md")).unwrap();
+    assert!(
+        content.contains("(docs/design.md)") && !content.contains("(notes/design.md)"),
+        "relative link should follow the folder, but found: {content}"
+    );
+    assert!(
+        content.contains("[[Design Notes]]"),
+        "title link must survive the folder move, but found: {content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Helper: set up a test server from pre-written markdown files
+// ---------------------------------------------------------------------------
+
+/// Create a vault with pre-populated markdown files, build the index, and
+/// return a test server. Each entry is `(relative_path, content)`.
+fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
+    let files: Vec<(String, String)> = files
+        .iter()
+        .map(|(path, content)| ((*path).to_string(), (*content).to_string()))
+        .collect();
+    ApiFixture::builder()
+        .pre_index_seed(move |root| {
+            for (path, content) in files {
+                let abs = root.join(path);
+                if let Some(parent) = abs.parent() {
+                    fs::create_dir_all(parent).unwrap();
+                }
+                fs::write(abs, content).unwrap();
+            }
+        })
+        .build()
+        .into_server_and_temp()
+}
+
+fn seeded_reference_issue_server() -> (TestServer, TempDir) {
+    setup_server_with_files(&[
+        (
+            "notes/source-a.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000601\ntitle: Source A\ntype: NOTE\nproject: alpha\n---\nBroken ((abc123DEF0)); missing [[Missing Page]].\n",
+        ),
+        (
+            "notes/source-b.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000602\ntitle: Source B\ntype: NOTE\nproject: alpha\n---\nBroken ((fed987CBA0)).\n",
+        ),
+        (
+            "notes/ambiguous-source.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000603\ntitle: Ambiguous Source\ntype: NOTE\nproject: beta\n---\nSee [[Twin]].\n",
+        ),
+        (
+            "notes/twin-a.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000604\ntitle: Twin\ntype: NOTE\nproject: beta\n---\nFirst.\n",
+        ),
+        (
+            "notes/twin-b.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000605\ntitle: Twin\ntype: NOTE\nproject: beta\n---\nSecond.\n",
+        ),
+    ])
+}
+
+#[tokio::test]
+async fn reference_issues_filter_before_paginating() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let response = server
+        .get(
+            "/api/vault/index/issues?kind=broken_block_ref&project=alpha&page_kind=NOTE&actionable=false&limit=1&offset=0",
+        )
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    assert_eq!(response["total"], 2);
+    assert_eq!(response["limit"], 1);
+    assert_eq!(response["offset"], 0);
+    assert_eq!(response["items"].as_array().unwrap().len(), 1);
+    assert_eq!(response["items"][0]["kind"], "broken_block_ref");
+    assert_eq!(
+        response["items"][0]["actions"],
+        serde_json::json!(["open_source"])
+    );
+}
+
+#[tokio::test]
+async fn reference_issues_normalize_repeated_and_comma_separated_kinds() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let response = server
+        .get(
+            "/api/vault/index/issues?kind=broken_block_ref,unresolved_page_link&kind=ambiguous_page_link&limit=200",
+        )
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    assert_eq!(response["total"], 4);
+    let kinds = response["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|issue| issue["kind"].as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        kinds,
+        BTreeSet::from([
+            "ambiguous_page_link",
+            "broken_block_ref",
+            "unresolved_page_link",
+        ])
+    );
+}
+
+#[tokio::test]
+async fn reference_issues_expose_ranked_candidate_evidence() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let response = server
+        .get("/api/vault/index/issues?kind=ambiguous_page_link")
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    assert_eq!(response["total"], 1);
+    let candidates = response["items"][0]["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0]["path"], "notes/twin-a.md");
+    assert_eq!(candidates[0]["title"], "Twin");
+    assert!(candidates[0]["page_id"].as_str().is_some());
+    assert!(candidates[0]["rationale"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn reference_issues_reject_invalid_filters_and_limits() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let misspelled_kind = server
+        .get("/api/vault/index/issues?kind=broken_block_reff")
+        .await;
+    misspelled_kind.assert_status_bad_request();
+    assert!(
+        !misspelled_kind
+            .json::<serde_json::Value>()
+            .to_string()
+            .contains("broken_block_reff")
+    );
+
+    for query in [
+        "project=",
+        "page_kind=NOT_A_KIND",
+        "actionable=sometimes",
+        "limit=0",
+        "limit=201",
+        "limit=lots",
+        "offset=-1",
+    ] {
+        let response = server
+            .get(&format!("/api/vault/index/issues?{query}"))
+            .await;
+        response.assert_status_bad_request();
+    }
+}
+
+#[tokio::test]
+async fn reference_issues_hide_encrypted_reference_evidence() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("notes")).unwrap();
+            fs::write(
+                root.join("notes/private.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000606\ntitle: Private\ntype: NOTE\n---\nDo not expose ((sec123RET0)).\n",
+            )
+            .unwrap();
+        })
+        .post_index_mutation(|state| {
+            let connection =
+                rusqlite::Connection::open(state.vault.root().join(".clepsydra/cache.db")).unwrap();
+            connection
+                .execute(
+                    "UPDATE pages SET encrypted = 1 WHERE id = ?1",
+                    ["019fd000-0000-7000-8000-000000000606"],
+                )
+                .unwrap();
+        })
+        .build();
+    let response = fixture
+        .server
+        .get("/api/vault/index/issues?kind=broken_block_ref")
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    let issue = &response["items"][0];
+    assert_eq!(response["total"], 1);
+    assert!(issue["snippet"].is_null());
+    assert!(issue["target_raw"].is_null());
+    assert!(issue["source_field"].is_null());
+    assert!(issue["span_start"].is_null());
+    assert!(issue["span_end"].is_null());
+    assert_eq!(issue["candidates"], serde_json::json!([]));
+    assert_eq!(issue["actions"], serde_json::json!(["open_source"]));
+}
+
+#[tokio::test]
+async fn reference_issues_return_stable_ordering_and_fingerprints() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let path = "/api/vault/index/issues?limit=200";
+    let first: serde_json::Value = server.get(path).await.json();
+    let second: serde_json::Value = server.get(path).await.json();
+
+    assert_eq!(first, second);
+    assert!(first["items"].as_array().unwrap().iter().all(|issue| {
+        issue["fingerprint"]
+            .as_str()
+            .is_some_and(|value| value.len() == 64)
+    }));
+}
+
+#[tokio::test]
+async fn reference_issues_do_not_expose_projection_failures() {
+    let fixture = ApiFixture::builder()
+        .post_index_mutation(|state| {
+            let connection =
+                rusqlite::Connection::open(state.vault.root().join(".clepsydra/cache.db")).unwrap();
+            connection.execute_batch("DROP TABLE links").unwrap();
+        })
+        .build();
+    let response = fixture.server.get("/api/vault/index/issues").await;
+    response.assert_status_internal_server_error();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(body["error"], "reference issue inventory unavailable");
+    assert!(!body.to_string().contains("links"));
+    assert!(!body.to_string().contains("sqlite"));
+}
+
+#[test]
+fn reference_issues_openapi_registers_route_parameters_and_schemas() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    let operation = &openapi["paths"]["/api/vault/index/issues"]["get"];
+    let parameters = operation["parameters"].as_array().unwrap();
+    let names = parameters
+        .iter()
+        .map(|parameter| parameter["name"].as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        names,
+        BTreeSet::from([
+            "actionable",
+            "kind",
+            "limit",
+            "offset",
+            "page_kind",
+            "project"
+        ])
+    );
+    let limit = parameters
+        .iter()
+        .find(|parameter| parameter["name"] == "limit")
+        .unwrap();
+    assert_eq!(limit["schema"]["minimum"], 1);
+    assert_eq!(limit["schema"]["maximum"], 200);
+    assert_eq!(
+        operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/ReferenceIssuesResponse"
+    );
+    for schema in [
+        "ReferenceCandidateDto",
+        "ReferenceIssueActionDto",
+        "ReferenceIssueDto",
+        "ReferenceIssueKindDto",
+        "ReferenceIssuesResponse",
+    ] {
+        assert!(
+            openapi["components"]["schemas"].get(schema).is_some(),
+            "missing OpenAPI schema {schema}"
+        );
+    }
+    assert_eq!(
+        openapi["components"]["schemas"]["ReferenceIssueKindDto"]["enum"],
+        serde_json::json!([
+            "unresolved_page_link",
+            "ambiguous_page_link",
+            "broken_block_ref",
+            "invalid_relation_target",
+            "orphan_page",
+            "isolated_page"
+        ])
+    );
+    assert_eq!(
+        openapi["components"]["schemas"]["ReferenceIssueActionDto"]["enum"],
+        serde_json::json!(["create", "replace", "open_source", "none"])
+    );
+}
+
+fn reference_repair_fixture() -> ApiFixture {
+    ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("notes")).unwrap();
+            for (path, content) in [
+                (
+                    "source.md",
+                    "---\nid: 019fd000-0000-7000-8000-000000000610\ntitle: Repair Source\n---\nSee [[Twin|the chosen twin]] and [[Missing Page]].\n",
+                ),
+                (
+                    "twin-a.md",
+                    "---\nid: 019fd000-0000-7000-8000-000000000611\ntitle: Twin\n---\nFirst.\n",
+                ),
+                (
+                    "twin-b.md",
+                    "---\nid: 019fd000-0000-7000-8000-000000000612\ntitle: Twin\n---\nSecond.\n",
+                ),
+            ] {
+                fs::write(root.join("notes").join(path), content).unwrap();
+            }
+        })
+        .build()
+}
+
+fn reference_repair_server() -> (TestServer, TempDir) {
+    reference_repair_fixture().into_server_and_temp()
+}
+
+async fn reference_repair_issue(
+    server: &TestServer,
+    kind: &str,
+    target: &str,
+) -> serde_json::Value {
+    let response = server
+        .get(&format!("/api/vault/index/issues?kind={kind}&limit=200"))
+        .await;
+    response.assert_status_ok();
+    response.json::<serde_json::Value>()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|issue| issue["target_raw"] == target)
+        .unwrap()
+        .clone()
+}
+
+fn reference_repair_replace_request(
+    issue: &serde_json::Value,
+    candidate_page_id: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "fingerprint": issue["fingerprint"],
+        "source_revision": issue["source_revision"],
+        "action": {
+            "type": "replace",
+            "candidate_page_id": candidate_page_id,
+        },
+    })
+}
+
+fn reference_repair_create_request(issue: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "fingerprint": issue["fingerprint"],
+        "source_revision": issue["source_revision"],
+        "action": {
+            "type": "create",
+            "folder": "notes",
+            "body": "Created through reference repair.\n",
+        },
+    })
+}
+
+async fn reference_repair_apply_through_app(
+    app: Router,
+    request: serde_json::Value,
+) -> axum::response::Response {
+    app.oneshot(
+        Request::post("/api/vault/index/issues/apply")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&request).unwrap()))
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn reference_repair_preview_and_apply_report_the_same_text_edit() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "ambiguous_page_link", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+
+    let preview = server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await;
+    preview.assert_status_ok();
+    let preview: serde_json::Value = preview.json();
+    assert_eq!(preview["fingerprint"], issue["fingerprint"]);
+    assert_eq!(preview["before"], "[[Twin|the chosen twin]]");
+    assert_eq!(
+        preview["after"],
+        format!("[[{candidate_id}|the chosen twin]]")
+    );
+    assert_eq!(
+        preview["plan"]["text_edits"][0]["old_text"],
+        preview["before"]
+    );
+    assert_eq!(
+        preview["plan"]["text_edits"][0]["new_text"],
+        preview["after"]
+    );
+
+    let apply = server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await;
+    apply.assert_status_ok();
+    let apply: serde_json::Value = apply.json();
+    assert_eq!(apply["fingerprint"], issue["fingerprint"]);
+    assert_eq!(
+        apply["notification"]["upserted"],
+        serde_json::json!(["notes/source.md"])
+    );
+    assert_eq!(apply["notification"]["removed"], serde_json::json!([]));
+
+    let source = fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap();
+    assert!(source.contains(preview["after"].as_str().unwrap()));
+}
+
+#[tokio::test]
+async fn reference_repair_apply_rejects_source_changed_after_preview() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "ambiguous_page_link", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source_path = tmp.path().join("vault/notes/source.md");
+    let changed_source = "---\nid: 019fd000-0000-7000-8000-000000000610\ntitle: Repair Source\n---\nChanged after preview.\n";
+    fs::write(&source_path, changed_source).unwrap();
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status(StatusCode::CONFLICT);
+    assert_eq!(fs::read_to_string(source_path).unwrap(), changed_source);
+}
+
+#[tokio::test]
+async fn reference_repair_source_missing_after_preview_is_stale() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let request = reference_repair_create_request(&issue);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    fs::remove_file(tmp.path().join("vault/notes/source.md")).unwrap();
+    let response = server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await;
+    response.assert_status(StatusCode::CONFLICT);
+    assert!(!tmp.path().join("vault/notes/Missing Page.md").exists());
+}
+
+#[tokio::test]
+async fn reference_repair_genuine_source_io_error_remains_internal() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let request = reference_repair_create_request(&issue);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source_path = tmp.path().join("vault/notes/source.md");
+    fs::remove_file(&source_path).unwrap();
+    fs::create_dir(&source_path).unwrap();
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status_internal_server_error();
+    assert!(!tmp.path().join("vault/notes/Missing Page.md").exists());
+}
+
+#[tokio::test]
+async fn reference_repair_candidate_deleted_after_projection_is_stale() {
+    let fixture = reference_repair_fixture();
+    let issue = reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let candidate = issue["candidates"][0].clone();
+    let request = reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
+    fixture
+        .server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+    let exclusion = fixture.state.mutation_coordinator.exclude_mutations().await;
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let apply = tokio::spawn(reference_repair_apply_through_app(
+        fixture.app.clone(),
+        request.clone(),
+    ));
+    tokio::task::yield_now().await;
+    let source_path = fixture.temp_dir.path().join("vault/notes/source.md");
+    let source_before = fs::read_to_string(&source_path).unwrap();
+    fs::remove_file(
+        fixture
+            .temp_dir
+            .path()
+            .join("vault")
+            .join(candidate["path"].as_str().unwrap()),
+    )
+    .unwrap();
+    let removed_path =
+        clep_api::vault::path::VaultPath::new(candidate["path"].as_str().unwrap()).unwrap();
+    fixture
+        .state
+        .index
+        .with_index(move |index, _| {
+            index.remove_page(&removed_path)?;
+            index.resolve_links()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    drop(exclusion);
+    let response = apply.await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(notifications.try_recv().is_err());
+    assert_eq!(fs::read_to_string(source_path).unwrap(), source_before);
+}
+
+#[tokio::test]
+async fn reference_repair_candidate_changed_after_projection_is_stale() {
+    let fixture = reference_repair_fixture();
+    let issue = reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let candidate = issue["candidates"][0].clone();
+    let request = reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
+    fixture
+        .server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+    let exclusion = fixture.state.mutation_coordinator.exclude_mutations().await;
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let apply = tokio::spawn(reference_repair_apply_through_app(
+        fixture.app.clone(),
+        request.clone(),
+    ));
+    tokio::task::yield_now().await;
+    let candidate_path = candidate["path"].as_str().unwrap();
+    fs::write(
+        fixture.temp_dir.path().join("vault").join(candidate_path),
+        format!(
+            "---\nid: {}\ntitle: No Longer Twin\n---\nChanged.\n",
+            candidate["page_id"].as_str().unwrap()
+        ),
+    )
+    .unwrap();
+    let indexed_path = clep_api::vault::path::VaultPath::new(candidate_path).unwrap();
+    fixture
+        .state
+        .index
+        .with_index(move |index, vault| {
+            index.index_page(vault, &indexed_path)?;
+            index.resolve_links()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    drop(exclusion);
+    let response = apply.await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(notifications.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn reference_repair_competing_canonical_target_after_projection_is_stale() {
+    let fixture = reference_repair_fixture();
+    let issue = reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let request = reference_repair_replace_request(
+        &issue,
+        issue["candidates"][0]["page_id"].as_str().unwrap(),
+    );
+    fixture
+        .server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+    let exclusion = fixture.state.mutation_coordinator.exclude_mutations().await;
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let apply = tokio::spawn(reference_repair_apply_through_app(
+        fixture.app.clone(),
+        request.clone(),
+    ));
+    tokio::task::yield_now().await;
+    let source_path = fixture.temp_dir.path().join("vault/notes/source.md");
+    let source_before = fs::read_to_string(&source_path).unwrap();
+    fs::write(
+        fixture.temp_dir.path().join("vault/notes/twin-c.md"),
+        "---\nid: 019fd000-0000-7000-8000-000000000622\ntitle: Twin\n---\nThird.\n",
+    )
+    .unwrap();
+    let added_path = clep_api::vault::path::VaultPath::new("notes/twin-c.md").unwrap();
+    fixture
+        .state
+        .index
+        .with_index(move |index, vault| {
+            index.index_page(vault, &added_path)?;
+            index.resolve_links()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    drop(exclusion);
+    let response = apply.await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(notifications.try_recv().is_err());
+    assert_eq!(fs::read_to_string(source_path).unwrap(), source_before);
+}
+
+#[tokio::test]
+async fn reference_repair_create_resolves_original_no_match_after_indexing() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let mut request = reference_repair_create_request(&issue);
+    request["action"]["folder"] = serde_json::json!("new/nested");
+
+    let preview = server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await;
+    preview.assert_status_ok();
+    let preview: serde_json::Value = preview.json();
+    assert_eq!(preview["before"], "[[Missing Page]]");
+    assert_eq!(preview["after"], "[[Missing Page]]");
+    assert_eq!(preview["plan"]["text_edits"], serde_json::json!([]));
+    let file_ops = preview["plan"]["file_ops"].as_array().unwrap();
+    assert!(
+        file_ops
+            .iter()
+            .any(|op| { op["kind"] == "create_dir" && op["path"] == "new" })
+    );
+    assert!(
+        file_ops
+            .iter()
+            .any(|op| { op["kind"] == "create_dir" && op["path"] == "new/nested" })
+    );
+    let create_file = file_ops
+        .iter()
+        .find(|op| op["kind"] == "create_file")
+        .unwrap();
+    assert_eq!(create_file["path"], "new/nested/Missing Page.md");
+    let previewed_hash = create_file["content_hash"].as_str().unwrap();
+    assert_eq!(previewed_hash.len(), 64);
+
+    let second_preview: serde_json::Value = server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .json();
+    assert_eq!(
+        second_preview["plan"]["file_ops"], preview["plan"]["file_ops"],
+        "the immutable created-page identity must not be regenerated"
+    );
+    let apply = server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await;
+    apply.assert_status_ok();
+    let apply: serde_json::Value = apply.json();
+    assert_eq!(
+        apply["notification"]["upserted"],
+        serde_json::json!(["new/nested/Missing Page.md", "notes/source.md"])
+    );
+    let created_path = tmp.path().join("vault/new/nested/Missing Page.md");
+    let created = fs::read(&created_path).unwrap();
+    assert_eq!(
+        blake3::hash(&created).to_hex().as_str(),
+        previewed_hash,
+        "apply must publish the exact previewed bytes"
+    );
+    let issues: serde_json::Value = server
+        .get("/api/vault/index/issues?kind=unresolved_page_link&limit=200")
+        .await
+        .json();
+    assert!(
+        issues["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|current| current["fingerprint"] != issue["fingerprint"])
+    );
+}
+
+#[tokio::test]
+async fn reference_repair_ambiguous_replacement_is_an_explicit_target() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "ambiguous_page_link", "Twin").await;
+    let candidate_id = issue["candidates"][1]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source = fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap();
+    assert!(source.contains(&format!("[[{candidate_id}|the chosen twin]]")));
+    let issues: serde_json::Value = server
+        .get("/api/vault/index/issues?kind=ambiguous_page_link&limit=200")
+        .await
+        .json();
+    assert_eq!(issues["total"], 0);
+}
+
+#[tokio::test]
+async fn reference_repair_encrypted_source_has_no_preview_or_apply_action() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("notes")).unwrap();
+            fs::write(
+                root.join("notes/private.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000613\ntitle: Private\n---\nSecret [[Twin]].\n",
+            )
+            .unwrap();
+            fs::write(
+                root.join("notes/twin-a.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000614\ntitle: Twin\n---\nFirst.\n",
+            )
+            .unwrap();
+            fs::write(
+                root.join("notes/twin-b.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000615\ntitle: Twin\n---\nSecond.\n",
+            )
+            .unwrap();
+        })
+        .post_index_mutation(|state| {
+            let connection =
+                rusqlite::Connection::open(state.vault.root().join(".clepsydra/cache.db")).unwrap();
+            connection
+                .execute(
+                    "UPDATE pages SET encrypted = 1 WHERE id = ?1",
+                    ["019fd000-0000-7000-8000-000000000613"],
+                )
+                .unwrap();
+        })
+        .build();
+    let response: serde_json::Value = fixture
+        .server
+        .get("/api/vault/index/issues?kind=ambiguous_page_link")
+        .await
+        .json();
+    let issue = &response["items"][0];
+    assert_eq!(issue["actions"], serde_json::json!(["open_source"]));
+    let request = reference_repair_replace_request(issue, "019fd000-0000-7000-8000-000000000614");
+
+    for endpoint in ["preview", "apply"] {
+        let response = fixture
+            .server
+            .post(&format!("/api/vault/index/issues/{endpoint}"))
+            .json(&request)
+            .await;
+        response.assert_status_bad_request();
+        let body = response.text();
+        assert!(!body.contains("Secret"));
+        assert!(!body.contains("Twin"));
+    }
+}
+
+#[tokio::test]
+async fn reference_repair_create_is_atomic_when_destination_becomes_occupied() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let request = reference_repair_create_request(&issue);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source_path = tmp.path().join("vault/notes/source.md");
+    let source_before = fs::read_to_string(&source_path).unwrap();
+    let destination = tmp.path().join("vault/notes/Missing Page.md");
+    fs::write(&destination, "occupied outside the index\n").unwrap();
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status(StatusCode::CONFLICT);
+    assert_eq!(fs::read_to_string(source_path).unwrap(), source_before);
+    assert_eq!(
+        fs::read_to_string(destination).unwrap(),
+        "occupied outside the index\n"
+    );
+}
+
+#[tokio::test]
+async fn reference_repair_property_reference_uses_format_preserving_patch() {
+    let source = "+++\nid = \"019fd000-0000-7000-8000-000000000616\"\ntitle = \"Property Source\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n# preserve this comment\nlink = [\"[[Twin|chosen]]\", \"Other\"]\nstatus = \"draft\" # and this one\n+++\nBody stays byte-for-byte.\n";
+    let twin_a = "+++\nid = \"019fd000-0000-7000-8000-000000000617\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nFirst.\n";
+    let twin_b = "+++\nid = \"019fd000-0000-7000-8000-000000000618\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nSecond.\n";
+    let (server, tmp) = setup_server_with_files(&[
+        ("notes/property-source.md", source),
+        ("notes/property-twin-a.md", twin_a),
+        ("notes/property-twin-b.md", twin_b),
+    ]);
+    let issue = reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let content = fs::read_to_string(tmp.path().join("vault/notes/property-source.md")).unwrap();
+    assert!(content.contains("# preserve this comment"));
+    assert!(content.contains("status = \"draft\" # and this one"));
+    assert!(content.contains("Body stays byte-for-byte."));
+    assert!(content.contains(&format!("[[{candidate_id}|chosen]]")));
+    assert!(!content.contains("[[Twin|chosen]]"));
+}
+
+#[tokio::test]
+async fn reference_repair_property_reference_can_patch_linkable_system_arrays() {
+    let source = "+++\nid = \"019fd000-0000-7000-8000-000000000619\"\ntitle = \"Tagged Source\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\ntags = [\"[[Twin|chosen]]\", \"other\"]\n+++\nBody.\n";
+    let twin_a = "+++\nid = \"019fd000-0000-7000-8000-000000000620\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nFirst.\n";
+    let twin_b = "+++\nid = \"019fd000-0000-7000-8000-000000000621\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nSecond.\n";
+    let (server, tmp) = setup_server_with_files(&[
+        ("notes/tagged-source.md", source),
+        ("notes/tagged-twin-a.md", twin_a),
+        ("notes/tagged-twin-b.md", twin_b),
+    ]);
+    let issue = reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&reference_repair_replace_request(&issue, candidate_id))
+        .await
+        .assert_status_ok();
+
+    let content = fs::read_to_string(tmp.path().join("vault/notes/tagged-source.md")).unwrap();
+    assert!(content.contains(&format!("[[{candidate_id}|chosen]]")));
+    assert!(content.contains("\"other\""));
+}
+
+#[test]
+fn reference_repair_openapi_registers_typed_contracts() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    for endpoint in ["preview", "apply"] {
+        assert!(
+            openapi["paths"][format!("/api/vault/index/issues/{endpoint}")]
+                .get("post")
+                .is_some()
+        );
+    }
+    for schema in [
+        "ReferenceRepairActionDto",
+        "ReferenceRepairApplyResponse",
+        "ReferenceRepairPreviewResponse",
+        "ReferenceRepairRequest",
+    ] {
+        assert!(
+            openapi["components"]["schemas"].get(schema).is_some(),
+            "missing OpenAPI schema {schema}"
+        );
+    }
+    assert!(
+        openapi["components"]["schemas"]["FileOpKind"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("create_file"))
+    );
+    assert!(
+        openapi["components"]["schemas"]["PlannedFileOp"]["properties"]
+            .get("content_hash")
+            .is_some()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Preview mutation (dry-run)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn preview_mutation_returns_plan() {
+    let page_a = "\
+---
+id: 00000000-0000-0000-0000-000000000120
+title: Alpha
+---
+Link to [[Beta]].
+";
+    let page_b = "\
+---
+id: 00000000-0000-0000-0000-000000000121
+title: Beta
+---
+Content.
+";
+
+    let (server, _tmp) = setup_server_with_files(&[("alpha.md", page_a), ("beta.md", page_b)]);
+
+    let body = serde_json::json!({
+        "operation": "move_page",
+        "source": "beta.md",
+        "destination": "archive/beta.md"
+    });
+
+    let resp = server
+        .post("/api/vault/index/preview-mutation")
+        .json(&body)
+        .await;
+    resp.assert_status_ok();
+
+    let plan: serde_json::Value = resp.json();
+
+    // Should have file_ops
+    let file_ops = plan["file_ops"].as_array().unwrap();
+    assert!(!file_ops.is_empty());
+    assert_eq!(file_ops[0]["kind"], "rename");
+    assert_eq!(file_ops[0]["path"], "beta.md");
+
+    // Should have text_edits (may be empty if only wikilinks and stem doesn't change)
+    assert!(plan["text_edits"].is_array());
+}
+
+#[tokio::test]
+async fn preview_mutation_rejects_legacy_page_delete_and_rewrite_contract() {
+    let target = "\
+---
+id: 00000000-0000-0000-0000-000000000122
+title: Target
+---
+Target body.
+";
+    let (server, _tmp) = setup_server_with_files(&[("target.md", target)]);
+
+    server
+        .post("/api/vault/index/preview-mutation")
+        .json(&serde_json::json!({
+            "operation": "delete_page",
+            "source": "target.md"
+        }))
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+
+    server
+        .post("/api/vault/index/preview-mutation")
+        .json(&serde_json::json!({
+            "operation": "move_page",
+            "source": "target.md",
+            "destination": "moved.md",
+            "rewrite": "plain_text"
+        }))
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn preview_mutation_openapi_excludes_legacy_page_delete_contract() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    let schemas = &openapi["components"]["schemas"];
+    let request = &schemas["PreviewMutationRequest"];
+    let properties = request["properties"].as_object().unwrap();
+
+    assert!(
+        !properties.contains_key("rewrite"),
+        "legacy rewrite input remains in PreviewMutationRequest: {request}"
+    );
+    assert_eq!(
+        properties["operation"]["$ref"],
+        "#/components/schemas/PreviewMutationOperation"
+    );
+    assert_eq!(
+        schemas["PreviewMutationOperation"]["enum"],
+        serde_json::json!(["move_page", "move_folder"])
+    );
+    assert!(
+        !serde_json::to_string(request)
+            .unwrap()
+            .contains("delete_page"),
+        "legacy delete_page operation remains in PreviewMutationRequest: {request}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Reference intelligence: enriched unresolved endpoint
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn unresolved_endpoint_includes_candidates() {
+    let linker = "\
+---
+id: 00000000-0000-0000-0000-000000000090
+title: Linker
+---
+See [[Ambig]].
+";
+    let ambig_a = "\
+---
+id: 00000000-0000-0000-0000-000000000091
+title: Ambig
+---
+First.
+";
+    let ambig_b = "\
+---
+id: 00000000-0000-0000-0000-000000000092
+title: Ambig
+---
+Second.
+";
+
+    let (server, _tmp) = setup_server_with_files(&[
+        ("linker.md", linker),
+        ("ambig-a.md", ambig_a),
+        ("subdir/ambig-b.md", ambig_b),
+    ]);
+
+    let resp = server.get("/api/vault/index/unresolved").await;
+    resp.assert_status_ok();
+
+    let body: serde_json::Value = resp.json();
+    let items = body.as_array().unwrap();
+
+    let ambig_item = items
+        .iter()
+        .find(|item| item["target_raw"].as_str() == Some("Ambig"))
+        .expect("should find unresolved link to Ambig");
+
+    assert_eq!(ambig_item["reason"], "ambiguous");
+    let candidates = ambig_item["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2);
+    assert!(
+        candidates
+            .iter()
+            .any(|c| c["path"].as_str() == Some("ambig-a.md"))
+    );
+    assert!(
+        candidates
+            .iter()
+            .any(|c| c["path"].as_str() == Some("subdir/ambig-b.md"))
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Reference intelligence: enriched backlinks endpoint
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn backlinks_endpoint_includes_context() {
+    let page_a = "\
+---
+id: 00000000-0000-0000-0000-000000000095
+title: Alpha
+---
+First paragraph here.
+
+This line references [[Beta]] explicitly.
+
+Final paragraph.
+";
+    let page_b = "\
+---
+id: 00000000-0000-0000-0000-000000000096
+title: Beta
+---
+Just content.
+";
+
+    let (server, _tmp) = setup_server_with_files(&[("alpha.md", page_a), ("beta.md", page_b)]);
+
+    let resp = server.get("/api/vault/index/backlinks/beta.md").await;
+    resp.assert_status_ok();
+
+    let body: serde_json::Value = resp.json();
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+
+    let item = &items[0];
+    assert_eq!(item["source_path"], "alpha.md");
+    assert!(
+        item["context"].as_str().unwrap().contains("[[Beta]]"),
+        "expected context to contain [[Beta]], got: {}",
+        item["context"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Reference intelligence: create page from unresolved link
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_from_link_creates_page_and_resolves() {
+    let page_a = "\
+---
+id: 00000000-0000-0000-0000-000000000097
+title: Alpha
+---
+See [[Nonexistent]].
+";
+
+    let (server, _tmp) = setup_server_with_files(&[("alpha.md", page_a)]);
+
+    // Verify link is unresolved
+    let resp = server.get("/api/vault/index/unresolved").await;
+    let body: serde_json::Value = resp.json();
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["target_raw"], "Nonexistent");
+
+    // Create from link
+    let create_body = serde_json::json!({
+        "target_raw": "Nonexistent",
+        "folder": ""
+    });
+    let resp = server
+        .post("/api/vault/index/create-from-link")
+        .json(&create_body)
+        .await;
+    resp.assert_status(StatusCode::CREATED);
+
+    let created: serde_json::Value = resp.json();
+    assert_eq!(created["meta"]["title"], "Nonexistent");
+    assert!(created["path"].as_str().unwrap().ends_with(".md"));
+
+    // Verify link is now resolved
+    let resp = server.get("/api/vault/index/unresolved").await;
+    let body: serde_json::Value = resp.json();
+    let items = body.as_array().unwrap();
+    assert!(
+        items.is_empty() || !items.iter().any(|i| i["target_raw"] == "Nonexistent"),
+        "link should be resolved, but found: {items:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Unified indexing tests
+// ---------------------------------------------------------------------------
+
+/// Set up a test server with a custom config.toml written before Vault::open.
+fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
+    let config_content = config_content.to_string();
+    ApiFixture::builder()
+        .configure(move |root| {
+            fs::write(root.join(".clepsydra/config.toml"), config_content).unwrap();
+        })
+        .build()
+        .into_server_and_temp()
+}
+
+#[tokio::test]
+async fn create_page_indexes_property_links() {
+    let (server, _tmp) = setup_server_with_config("[vault]\nlinkable_properties = []\n");
+
+    let res = server
+        .post("/api/vault/pages/props.md")
+        .json(&serde_json::json!({
+            "title": "Property Test",
+            "tags": ["concept", "rust"],
+            "body": "Some body text."
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    // With linkable_properties disabled via config, tags must not emit
+    // property_ref links.
+    let res = server.get("/api/vault/index/unresolved").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    let links = body.as_array().unwrap();
+    let property_links: Vec<&serde_json::Value> = links
+        .iter()
+        .filter(|l| l["kind"] == "property_ref")
+        .collect();
+    assert!(
+        property_links.is_empty(),
+        "expected no property_ref links when linkable_properties is empty, got {}",
+        property_links.len()
+    );
+}
+
+#[tokio::test]
+async fn attachment_list_path_round_trips_to_get() {
+    let (server, tmp) = setup_server();
+
+    // Create an attachment file directly on disk
+    let att_dir = tmp.path().join("vault/_attachments");
+    fs::create_dir_all(&att_dir).unwrap();
+    fs::write(att_dir.join("photo.png"), b"fake png data").unwrap();
+
+    // List attachments
+    let res = server.get("/api/vault/attachments").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    let attachments = body.as_array().unwrap();
+    assert_eq!(attachments.len(), 1);
+
+    let listed_path = attachments[0]["path"].as_str().unwrap();
+
+    // Use the listed path to GET the attachment
+    let get_url = format!("/api/vault/attachments/{listed_path}");
+    let res = server.get(&get_url).await;
+    res.assert_status(StatusCode::OK);
+    assert_eq!(res.as_bytes().as_ref(), b"fake png data");
+}
+
+#[tokio::test]
+async fn delete_folder_cleans_up_index() {
+    let (server, _tmp) = setup_server();
+
+    // Create pages inside a folder
+    server
+        .post("/api/vault/pages/notes/a.md")
+        .json(&serde_json::json!({
+            "title": "Note A",
+            "body": "First note."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/notes/b.md")
+        .json(&serde_json::json!({
+            "title": "Note B",
+            "body": "Second note."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Verify both appear in listing
+    let res = server.get("/api/vault/pages").await;
+    let body: serde_json::Value = res.json();
+    let pages = body["items"].as_array().unwrap();
+    assert_eq!(pages.len(), 2);
+
+    // Delete the folder recursively
+    let res = server
+        .delete("/api/vault/folders/notes?recursive=true")
+        .await;
+    res.assert_status(StatusCode::NO_CONTENT);
+
+    // Verify index is clean — no ghost entries
+    let res = server.get("/api/vault/pages").await;
+    let body: serde_json::Value = res.json();
+    let pages = body["items"].as_array().unwrap();
+    assert_eq!(
+        pages.len(),
+        0,
+        "deleted folder pages should be gone from index"
+    );
+}
+
+#[tokio::test]
+async fn create_page_resolves_links() {
+    let (server, _tmp) = setup_server();
+    server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({
+            "title": "Target Page",
+            "body": "I am the target."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/source.md")
+        .json(&serde_json::json!({
+            "title": "Source Page",
+            "body": "Link to [[Target Page]]."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    let res = server.get("/api/vault/index/backlinks/target.md").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    let backlinks = body.as_array().unwrap();
+    assert_eq!(
+        backlinks.len(),
+        1,
+        "expected 1 backlink to target.md, got {}",
+        backlinks.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Contract tests: edge cases
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn page_mutation_update_resolves_links_bidirectionally() {
+    let (server, _tmp) = setup_server();
+
+    // Create source with no links
+    let source = server
+        .post("/api/vault/pages/source.md")
+        .json(&serde_json::json!({
+            "title": "Source",
+            "body": "No links yet."
+        }))
+        .await;
+    source.assert_status(StatusCode::CREATED);
+    let source: serde_json::Value = source.json();
+
+    // Create target
+    server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({
+            "title": "Target",
+            "body": "I am the target."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Update source to add a link to target
+    let res = server
+        .put("/api/vault/pages/source.md")
+        .json(&serde_json::json!({
+            "expected_revision": source["revision"],
+            "body": "Now linking to [[Target]]."
+        }))
+        .await;
+    res.assert_status(StatusCode::OK);
+
+    // Verify backlink exists immediately (no rebuild needed)
+    let res = server.get("/api/vault/index/backlinks/target.md").await;
+    res.assert_status(StatusCode::OK);
+    let backlinks: Vec<serde_json::Value> = res.json();
+    assert_eq!(backlinks.len(), 1);
+    assert_eq!(backlinks[0]["source_path"], "source.md");
+}
+
+#[tokio::test]
+async fn journal_kind_assignment_rejects_reclassification_and_project_assignment() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000223
+title: Daily
+type: JOURNAL
+---
+Daily body.
+";
+    let (server, tmp) = setup_server_with_files(&[("journals/daily.md", source)]);
+    let vault_root = tmp.path().join("vault");
+    let source_path = vault_root.join("journals/daily.md");
+    let original = fs::read(&source_path).unwrap();
+
+    let rejected = server
+        .post("/api/vault/pages-assign/journals/daily.md")
+        .json(&serde_json::json!({ "kind": "NOTE" }))
+        .await;
+
+    rejected.assert_status_bad_request();
+    let error: serde_json::Value = rejected.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("journal kind cannot be changed")),
+        "unexpected error payload: {error}"
+    );
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        original,
+        "a rejected assignment must not modify the journal"
+    );
+    assert!(
+        !vault_root.join("notes/daily.md").exists(),
+        "a rejected assignment must not publish a NOTE destination"
+    );
+
+    let retained = server
+        .post("/api/vault/pages-assign/journals/daily.md")
+        .json(&serde_json::json!({ "kind": "JOURNAL" }))
+        .await;
+    retained.assert_status_ok();
+    let retained: serde_json::Value = retained.json();
+    let retained_path = retained["path"].as_str().unwrap();
+    assert_eq!(retained["kind"], "JOURNAL");
+    let before_project_attempt = fs::read(&source_path).unwrap();
+
+    let project_rejected = server
+        .post(&format!("/api/vault/pages-assign/{retained_path}"))
+        .json(&serde_json::json!({ "project": "personal" }))
+        .await;
+    project_rejected.assert_status_bad_request();
+    let error: serde_json::Value = project_rejected.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("journal pages cannot join a project")),
+        "unexpected error payload: {error}"
+    );
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        before_project_attempt,
+        "a rejected project assignment must not relocate the journal"
+    );
+}
+
+#[tokio::test]
+async fn inferred_journal_kind_assignment_rejects_reclassification() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000224
+title: Inferred
+---
+Inferred journal body.
+";
+    let (server, tmp) = setup_server_with_files(&[("journals/inferred.md", source)]);
+    let vault_root = tmp.path().join("vault");
+    let source_path = vault_root.join("journals/inferred.md");
+    let original = fs::read(&source_path).unwrap();
+
+    let response = server
+        .post("/api/vault/pages-assign/journals/inferred.md")
+        .json(&serde_json::json!({ "kind": "NOTE" }))
+        .await;
+
+    response.assert_status_bad_request();
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("journal kind cannot be changed")),
+        "unexpected error payload: {error}"
+    );
+    assert_eq!(
+        fs::read(source_path).unwrap(),
+        original,
+        "a rejected assignment must not modify an inferred journal"
+    );
+}
+
+#[tokio::test]
+async fn non_journal_can_be_assigned_to_journal() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000225
+title: Log
+type: NOTE
+---
+Log body.
+";
+    let (server, tmp) = setup_server_with_files(&[("notes/log.md", source)]);
+
+    let response = server
+        .post("/api/vault/pages-assign/notes/log.md")
+        .json(&serde_json::json!({ "kind": "JOURNAL" }))
+        .await;
+
+    response.assert_status_ok();
+    let assigned: serde_json::Value = response.json();
+    assert_eq!(assigned["kind"], "JOURNAL");
+    assert_eq!(assigned["path"], "journals/log.md");
+    assert!(tmp.path().join("vault/journals/log.md").exists());
+}
+
+#[tokio::test]
+async fn page_mutation_project_assignment_destination_collision_returns_409() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000199
+title: Source
+type: NOTE
+---
+Source body.
+";
+    let destination = "\
+---
+id: 00000000-0000-0000-0000-000000000200
+title: Occupied
+type: NOTE
+project: occupied
+---
+Destination body.
+";
+    let (server, tmp) = setup_server_with_files(&[
+        ("notes/source.md", source),
+        ("notes/occupied/source.md", destination),
+    ]);
+    support::seed_project(&server, "occupied").await;
+
+    let response = server
+        .post("/api/vault/pages-assign/notes/source.md")
+        .json(&serde_json::json!({ "project": "occupied" }))
+        .await;
+
+    response.assert_status(StatusCode::CONFLICT);
+    let vault_root = tmp.path().join("vault");
+    let persisted = fs::read_to_string(vault_root.join("notes/source.md")).unwrap();
+    assert!(
+        !persisted.contains("project: occupied"),
+        "a rejected assignment must not modify the source: {persisted}"
+    );
+    assert!(
+        fs::read_to_string(vault_root.join("notes/occupied/source.md"))
+            .unwrap()
+            .contains("Destination body."),
+        "the collision destination must not be overwritten"
+    );
+}
+
+#[tokio::test]
+async fn bulk_kind_assignment_rejects_journal_reclassification_atomically() {
+    let ordinary = "\
+---
+id: 00000000-0000-0000-0000-000000000226
+title: Ordinary
+type: NOTE
+---
+Ordinary body.
+";
+    let journal = "\
+---
+id: 00000000-0000-0000-0000-000000000227
+title: Daily
+type: JOURNAL
+---
+Daily body.
+";
+    let (server, tmp) = setup_server_with_files(&[
+        ("notes/ordinary.md", ordinary),
+        ("journals/daily.md", journal),
+    ]);
+    let vault_root = tmp.path().join("vault");
+    let ordinary_path = vault_root.join("notes/ordinary.md");
+    let journal_path = vault_root.join("journals/daily.md");
+    let original_ordinary = fs::read(&ordinary_path).unwrap();
+    let original_journal = fs::read(&journal_path).unwrap();
+
+    let response = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["notes/ordinary.md", "journals/daily.md"],
+            "kind": "QUOTE"
+        }))
+        .await;
+
+    response.assert_status_bad_request();
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("journal kind cannot be changed")),
+        "unexpected error payload: {error}"
+    );
+    assert_eq!(
+        fs::read(ordinary_path).unwrap(),
+        original_ordinary,
+        "a rejected bulk assignment must not modify an ordinary source"
+    );
+    assert_eq!(
+        fs::read(journal_path).unwrap(),
+        original_journal,
+        "a rejected bulk assignment must not modify a journal source"
+    );
+    assert!(
+        !vault_root.join("quotes/ordinary.md").exists(),
+        "a rejected bulk assignment must not publish the ordinary destination"
+    );
+    assert!(
+        !vault_root.join("quotes/daily.md").exists(),
+        "a rejected bulk assignment must not publish the journal destination"
+    );
+}
+
+#[tokio::test]
+async fn bulk_assign_rolls_back() {
+    let first = "\
+---
+id: 00000000-0000-0000-0000-000000000220
+title: First
+type: NOTE
+---
+First body.
+";
+    let second = "\
+---
+id: 00000000-0000-0000-0000-000000000221
+title: Second
+type: NOTE
+---
+Second body.
+";
+    let (server, tmp) =
+        setup_server_with_files(&[("notes/first.md", first), ("notes/second.md", second)]);
+    let vault_root = tmp.path().join("vault");
+    let first_path = vault_root.join("notes/first.md");
+    let original_first = fs::read(&first_path).unwrap();
+    fs::remove_file(vault_root.join("notes/second.md")).unwrap();
+
+    let response = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["notes/first.md", "notes//second.md"],
+            "kind": "QUOTE"
+        }))
+        .await;
+
+    response.assert_status(StatusCode::CONFLICT);
+    assert_eq!(
+        fs::read(first_path).unwrap(),
+        original_first,
+        "a stale second page must leave the first assignment unchanged"
+    );
+    assert!(
+        !vault_root.join("quotes/first.md").exists(),
+        "the first page must not be relocated"
+    );
+}
+
+#[tokio::test]
+async fn bulk_assign_reports_canonical_paths_for_normalizing_aliases() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000222
+title: Aliased
+type: NOTE
+---
+Aliased body.
+";
+    let (server, tmp) = setup_server_with_files(&[("notes/aliased.md", source)]);
+
+    let response = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["notes//aliased.md"],
+            "kind": "QUOTE"
+        }))
+        .await;
+
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(
+        body["moved"],
+        serde_json::json!([["notes/aliased.md", "quotes/aliased.md"]])
+    );
+    assert_eq!(body["unchanged"], serde_json::json!([]));
+    assert!(
+        tmp.path().join("vault/quotes/aliased.md").exists(),
+        "the canonical destination must be published"
+    );
+}
+
+#[tokio::test]
+async fn page_mutation_project_assignment_set_clear_and_unchanged_preserve_contracts() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000202
+title: Source
+type: NOTE
+---
+Source body.
+";
+    let (server, tmp) = setup_server_with_files(&[("notes/source.md", source)]);
+    support::seed_project(&server, "project-a").await;
+    let original = fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap();
+
+    let unchanged = server
+        .post("/api/vault/pages-assign/notes/source.md")
+        .json(&serde_json::json!({}))
+        .await;
+    unchanged.assert_status_ok();
+    assert_eq!(
+        unchanged.json::<serde_json::Value>()["path"],
+        "notes/source.md"
+    );
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap(),
+        original,
+        "an unchanged assignment must not stamp or rewrite the page"
+    );
+
+    let assigned = server
+        .post("/api/vault/pages-assign/notes/source.md")
+        .json(&serde_json::json!({ "project": "project-a" }))
+        .await;
+    assigned.assert_status_ok();
+    let assigned_body: serde_json::Value = assigned.json();
+    assert_eq!(assigned_body["path"], "notes/project-a/source.md");
+    assert_eq!(assigned_body["project"], "project-a");
+
+    let cleared = server
+        .post("/api/vault/pages-assign/notes/project-a/source.md")
+        .json(&serde_json::json!({ "clear_project": true }))
+        .await;
+    cleared.assert_status_ok();
+    let cleared_body: serde_json::Value = cleared.json();
+    assert_eq!(cleared_body["path"], "notes/source.md");
+    assert!(cleared_body["project"].is_null());
+    assert!(
+        !fs::read_to_string(tmp.path().join("vault/notes/source.md"))
+            .unwrap()
+            .contains("project:"),
+        "explicit clear must remove project frontmatter"
+    );
+}
+
+#[tokio::test]
+async fn page_create_rolls_back_file_and_exact_uuid_when_index_publication_fails() {
+    use clep_api::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationError, MutationNotification,
+    };
+    use clep_api::vault::page::PageMeta;
+    use clep_api::vault::path::VaultPath;
+
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000501";
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    handle
+        .with_index(|index, _| {
+            index
+                .connection()
+                .execute_batch(&format!(
+                    "CREATE TRIGGER reject_fixed_create
+                     BEFORE INSERT ON pages
+                     WHEN NEW.id = '{PAGE_ID}'
+                     BEGIN
+                       SELECT RAISE(FAIL, 'injected during-index failure');
+                     END;"
+                ))
+                .unwrap();
+        })
+        .await
+        .unwrap();
+
+    let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let notified = Arc::clone(&notified);
+        move |_: MutationNotification| {
+            notified.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    let mut meta = PageMeta::new();
+    meta.id = uuid::Uuid::parse_str(PAGE_ID).unwrap();
+    let error = MutationCoordinator::new()
+        .create_page(
+            &vault,
+            &handle,
+            CreatePageCommand {
+                path: VaultPath::new("failure.md").unwrap(),
+                meta,
+                body: "persisted".to_string(),
+            },
+            notify,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        MutationError::Index {
+            filesystem_applied: false,
+            ..
+        }
+    ));
+    assert!(
+        !tmp.path().join("failure.md").exists(),
+        "failed index publication must roll back the created file"
+    );
+    assert_eq!(indexed_uuid_count(&handle, PAGE_ID).await, 0);
+    assert!(
+        !notified.load(std::sync::atomic::Ordering::SeqCst),
+        "notification must follow successful indexing"
+    );
+}
+
+#[tokio::test]
+async fn page_create_rolls_back_exact_path_and_uuid_after_publication_failure() {
+    use clep_api::vault::atomic_file::AtomicPublicationError;
+    use clep_api::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationError, MutationNotification,
+    };
+    use clep_api::vault::page::PageMeta;
+    use clep_api::vault::path::VaultPath;
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000502";
+
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    coordinator.set_create_publication_hook(Some(Arc::new(|path, content| {
+        fs::write(path, content).unwrap();
+        Err(AtomicPublicationError::PublishedButNotDurable(
+            std::io::Error::other("injected parent directory sync failure"),
+        ))
+    })));
+
+    let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let notified = Arc::clone(&notified);
+        move |_: MutationNotification| {
+            notified.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    let mut meta = PageMeta::new();
+    meta.id = uuid::Uuid::parse_str(PAGE_ID).unwrap();
+    let error = coordinator
+        .create_page(
+            &vault,
+            &handle,
+            CreatePageCommand {
+                path: VaultPath::new("not-durable.md").unwrap(),
+                meta,
+                body: "not durable".to_owned(),
+            },
+            notify,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        &error,
+        MutationError::Filesystem {
+            filesystem_applied: false,
+            source,
+            ..
+        } if source.to_string().contains("injected parent directory sync failure")
+    ));
+    assert!(!tmp.path().join("not-durable.md").exists());
+    assert_eq!(indexed_uuid_count(&handle, PAGE_ID).await, 0);
+    assert!(
+        !notified.load(std::sync::atomic::Ordering::SeqCst),
+        "notification must follow a durable filesystem and index publication"
+    );
+}
+
+#[tokio::test]
+async fn page_create_injected_pre_publication_failure_leaves_exact_path_and_uuid_absent() {
+    use clep_api::vault::atomic_file::AtomicPublicationError;
+    use clep_api::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationError, MutationNotification,
+    };
+    use clep_api::vault::page::PageMeta;
+    use clep_api::vault::path::VaultPath;
+
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000503";
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    coordinator.set_create_publication_hook(Some(Arc::new(|_, _| {
+        Err(AtomicPublicationError::NotPublished(std::io::Error::other(
+            "injected before-publication failure",
+        )))
+    })));
+    let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let notified = Arc::clone(&notified);
+        move |_| {
+            notified.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    let mut meta = PageMeta::new();
+    meta.id = uuid::Uuid::parse_str(PAGE_ID).unwrap();
+
+    let error = coordinator
+        .create_page(
+            &vault,
+            &handle,
+            CreatePageCommand {
+                path: VaultPath::new("before-publication.md").unwrap(),
+                meta,
+                body: String::new(),
+            },
+            notify,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        MutationError::Filesystem {
+            filesystem_applied: false,
+            ..
+        }
+    ));
+    assert!(!tmp.path().join("before-publication.md").exists());
+    assert_eq!(indexed_uuid_count(&handle, PAGE_ID).await, 0);
+    assert!(!notified.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn page_create_reports_primary_and_rollback_sync_failures_without_indexing() {
+    use clep_api::vault::atomic_file::AtomicPublicationError;
+    use clep_api::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationError, MutationNotification,
+    };
+    use clep_api::vault::page::PageMeta;
+    use clep_api::vault::path::VaultPath;
+
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    coordinator.set_create_publication_hook(Some(Arc::new(|path, content| {
+        fs::write(path, content).unwrap();
+        Err(AtomicPublicationError::PublishedButNotDurable(
+            std::io::Error::other("injected publication durability failure"),
+        ))
+    })));
+    coordinator.set_create_rollback_sync_hook(Some(Arc::new(|_| {
+        Err(std::io::Error::other(
+            "injected rollback directory sync failure",
+        ))
+    })));
+
+    let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let notified = Arc::clone(&notified);
+        move |_: MutationNotification| {
+            notified.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    let error = coordinator
+        .create_page(
+            &vault,
+            &handle,
+            CreatePageCommand {
+                path: VaultPath::new("rollback-sync-failure.md").unwrap(),
+                meta: PageMeta::new(),
+                body: String::new(),
+            },
+            notify,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        &error,
+        MutationError::FilesystemRollback {
+            source,
+            rollback,
+            ..
+        } if source.to_string().contains("injected publication durability failure")
+            && rollback.to_string().contains("injected rollback directory sync failure")
+    ));
+    assert!(
+        !tmp.path().join("rollback-sync-failure.md").exists(),
+        "unlink succeeded even though rollback directory sync failed"
+    );
+    let page_count: i64 = handle
+        .with_index(|index, _| {
+            index
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(page_count, 0);
+    assert!(!notified.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn page_create_pre_publication_cancellation_leaves_exact_path_and_uuid_absent() {
+    use clep_api::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationNotification,
+    };
+    use clep_api::vault::page::PageMeta;
+    use clep_api::vault::path::VaultPath;
+
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000504";
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let path = VaultPath::new("cancelled-before-publication.md").unwrap();
+    let held = coordinator.lock_paths(std::slice::from_ref(&path)).await;
+    let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let notified = Arc::clone(&notified);
+        move |_| {
+            notified.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    let mut meta = PageMeta::new();
+    meta.id = uuid::Uuid::parse_str(PAGE_ID).unwrap();
+    let worker = Arc::clone(&coordinator);
+    let worker_vault = vault.clone();
+    let worker_handle = handle.clone();
+    let creating = tokio::spawn(async move {
+        worker
+            .create_page(
+                &worker_vault,
+                &worker_handle,
+                CreatePageCommand {
+                    path,
+                    meta,
+                    body: String::new(),
+                },
+                notify,
+            )
+            .await
+    });
+
+    tokio::task::yield_now().await;
+    assert!(!creating.is_finished());
+    creating.abort();
+    let _ = creating.await;
+    drop(held);
+
+    assert!(!tmp.path().join("cancelled-before-publication.md").exists());
+    assert_eq!(indexed_uuid_count(&handle, PAGE_ID).await, 0);
+    assert!(!notified.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn page_create_post_publication_cancellation_commits_exact_path_uuid_and_one_notification() {
+    use clep_api::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationNotification,
+    };
+    use clep_api::vault::page::PageMeta;
+    use clep_api::vault::path::VaultPath;
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000505";
+
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let entered_tx = Arc::new(parking_lot::Mutex::new(Some(entered_tx)));
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
+    coordinator.set_create_publication_hook(Some(Arc::new({
+        let entered_tx = Arc::clone(&entered_tx);
+        let release_rx = Arc::clone(&release_rx);
+        move |path, content| {
+            let publication = clep_api::vault::atomic_file::atomic_create(path, content);
+            if let Some(entered_tx) = entered_tx.lock().take() {
+                let _ = entered_tx.send(());
+            }
+            release_rx.lock().recv().unwrap();
+            publication
+        }
+    })));
+
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let event_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let event_count = Arc::clone(&event_count);
+        move |notification| {
+            event_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = event_tx.send(notification);
+        }
+    });
+    let mut meta = PageMeta::new();
+    meta.id = uuid::Uuid::parse_str(PAGE_ID).unwrap();
+
+    let worker = Arc::clone(&coordinator);
+    let worker_vault = vault.clone();
+    let worker_handle = handle.clone();
+    let creating = tokio::spawn(async move {
+        worker
+            .create_page(
+                &worker_vault,
+                &worker_handle,
+                CreatePageCommand {
+                    path: VaultPath::new("cancelled-create.md").unwrap(),
+                    meta,
+                    body: "durable".to_owned(),
+                },
+                notify,
+            )
+            .await
+    });
+
+    entered_rx.await.unwrap();
+    creating.abort();
+    let _ = creating.await;
+    release_tx.send(()).unwrap();
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), event_rx.recv())
+        .await
+        .expect("shielded mutation did not notify after caller cancellation")
+        .unwrap();
+    assert_eq!(event.upserted, vec!["cancelled-create.md"]);
+    assert!(event.removed.is_empty());
+    assert_eq!(event_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(event_rx.try_recv().is_err());
+    assert!(tmp.path().join("cancelled-create.md").exists());
+    let indexed: i64 = handle
+        .with_index(|index, _| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM pages WHERE path = 'cancelled-create.md'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(indexed, 1);
+    assert_eq!(indexed_uuid_count(&handle, PAGE_ID).await, 1);
+}
+#[tokio::test]
+async fn page_mutation_projected_move_invokes_hook_before_notification() {
+    use clep_api::vault::hooks::PostMoveHook;
+    use clep_api::vault::mutation_coordinator::{
+        MutationCoordinator, MutationNotification, ProjectAssignment, UpdatePageCommand,
+    };
+    use clep_api::vault::page::Page;
+    use clep_api::vault::path::VaultPath;
+
+    struct OrderingHook {
+        events: Arc<parking_lot::Mutex<Vec<&'static str>>>,
+    }
+
+    impl PostMoveHook for OrderingHook {
+        fn on_page_moved(
+            &self,
+            _old_path: &VaultPath,
+            _new_path: &VaultPath,
+            _page_id: &uuid::Uuid,
+            _vault: &Vault,
+            _index: &VaultIndex,
+        ) -> Result<Vec<VaultPath>, Box<dyn std::error::Error>> {
+            self.events.lock().push("hook");
+            Ok(Vec::new())
+        }
+    }
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("notes")).unwrap();
+    fs::write(
+        tmp.path().join("notes/source.md"),
+        "---\nid: 00000000-0000-0000-0000-000000000201\n\
+         title: Source\ntype: NOTE\n---\nbody\n",
+    )
+    .unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let mut index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let path = VaultPath::new("notes/source.md").unwrap();
+    let expected_content = fs::read_to_string(vault.resolve(&path)).unwrap();
+    let mut page = Page::from_file(&vault.resolve(&path), path.clone()).unwrap();
+    page.meta.project = Some("project-a".to_string());
+    let events = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let hooks: Arc<Vec<Box<dyn PostMoveHook>>> = Arc::new(vec![Box::new(OrderingHook {
+        events: Arc::clone(&events),
+    })]);
+    let notify = |_: MutationNotification| events.lock().push("notify");
+
+    let result = MutationCoordinator::new()
+        .update_page(
+            &vault,
+            &handle,
+            hooks,
+            UpdatePageCommand {
+                path,
+                expected_content,
+                meta: page.meta,
+                body: page.body,
+                project: ProjectAssignment::Set("project-a".to_string()),
+                reconcile: true,
+            },
+            &notify,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.path.as_str(), "notes/project-a/source.md");
+    assert_eq!(*events.lock(), vec!["hook", "notify"]);
+}
+
+#[tokio::test]
+async fn list_pages_returns_sorted() {
+    let (server, _tmp) = setup_server();
+
+    // Create pages in non-alphabetical order
+    for name in ["zebra.md", "alpha.md", "middle.md"] {
+        server
+            .post(&format!("/api/vault/pages/{name}"))
+            .json(&serde_json::json!({
+                "title": name.trim_end_matches(".md"),
+                "body": "content"
+            }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+
+    let res = server.get("/api/vault/pages").await;
+    let body: serde_json::Value = res.json();
+    let pages = body["items"].as_array().unwrap();
+    let paths: Vec<&str> = pages.iter().map(|p| p["path"].as_str().unwrap()).collect();
+    assert_eq!(paths, vec!["alpha.md", "middle.md", "zebra.md"]);
+}
+
+// ---------------------------------------------------------------------------
+// Pagination
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_pages_pagination() {
+    let (server, _tmp) = setup_server();
+
+    for i in 0..5 {
+        server
+            .post(&format!("/api/vault/pages/page-{i}.md"))
+            .json(&serde_json::json!({ "title": format!("Page {i}") }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+
+    // Default returns all
+    let res = server.get("/api/vault/pages").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 5);
+    assert_eq!(body["items"].as_array().unwrap().len(), 5);
+
+    // With limit=2, offset=0
+    let res = server.get("/api/vault/pages?limit=2&offset=0").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 5);
+    assert_eq!(body["items"].as_array().unwrap().len(), 2);
+    assert_eq!(body["limit"], 2);
+    assert_eq!(body["offset"], 0);
+
+    // With limit=2, offset=3
+    let res = server.get("/api/vault/pages?limit=2&offset=3").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 5);
+    assert_eq!(body["items"].as_array().unwrap().len(), 2);
+
+    // With offset past end
+    let res = server.get("/api/vault/pages?limit=2&offset=10").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 5);
+    assert_eq!(body["items"].as_array().unwrap().len(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// SSE events endpoint
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn sse_events_endpoint_returns_stream() {
+    use std::time::Duration;
+
+    let fixture = ApiFixture::builder().build();
+    let request = Request::builder()
+        .uri("/api/vault/events")
+        .body(Body::empty())
+        .unwrap();
+
+    // SSE streams never complete, so use a timeout for the initial response.
+    // Keep the fixture alive while the response is inspected so its temporary
+    // vault and shared state outlive the stream setup.
+    let response =
+        tokio::time::timeout(Duration::from_secs(2), fixture.app.clone().oneshot(request))
+            .await
+            .expect("SSE response timed out")
+            .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .expect("missing content-type header")
+        .to_str()
+        .unwrap();
+    assert!(
+        content_type.contains("text/event-stream"),
+        "expected text/event-stream, got: {content_type}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Graph endpoint test
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn graph_returns_nodes_and_edges() {
+    let (server, _tmp) = setup_server();
+
+    // Create two pages that link to each other
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({
+            "title": "Alpha",
+            "body": "Link to [[Beta]]"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/beta.md")
+        .json(&serde_json::json!({
+            "title": "Beta",
+            "body": "Link to [[Alpha]]"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild to ensure links are resolved
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let response = server.get("/api/vault/index/graph").await;
+    response.assert_status_ok();
+
+    let body: serde_json::Value = response.json();
+    let nodes = body["nodes"].as_array().unwrap();
+    let edges = body["edges"].as_array().unwrap();
+    assert!(
+        nodes.len() >= 2,
+        "expected at least 2 nodes, got {}",
+        nodes.len()
+    );
+    assert!(!edges.is_empty(), "expected at least 1 edge");
+
+    // Verify node structure
+    let node = &nodes[0];
+    assert!(node.get("id").is_some());
+    assert!(node.get("path").is_some());
+    assert!(node.get("title").is_some());
+
+    // Verify edge structure
+    let edge = &edges[0];
+    assert!(edge.get("source").is_some());
+    assert!(edge.get("target").is_some());
+    assert!(edge.get("kind").is_some());
+}
+
+// ---------------------------------------------------------------------------
+// SyncNotification serialization
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn sync_notification_serializes_to_json() {
+    use clep_api::api::events::SyncNotification;
+
+    let notif = SyncNotification::IndexChanged {
+        upserted: vec!["notes/foo.md".to_string()],
+        removed: vec!["archive/old.md".to_string()],
+    };
+    let json = serde_json::to_string(&notif).unwrap();
+    assert!(json.contains("index_changed"));
+    assert!(json.contains("notes/foo.md"));
+    assert!(json.contains("archive/old.md"));
+}
+
+// ---------------------------------------------------------------------------
+// Mutation handlers emit SyncNotification
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_page_emits_sync_notification() {
+    let fixture = ApiFixture::builder().build();
+    let mut rx = fixture.state.change_tx.subscribe();
+
+    fixture
+        .server
+        .post("/api/vault/pages/test-notify.md")
+        .json(&serde_json::json!({
+            "title": "Notify Test",
+            "body": "content"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Should have received a notification
+    let notification = rx.try_recv().expect("expected sync notification");
+    match notification {
+        clep_api::api::events::SyncNotification::IndexChanged { upserted, .. } => {
+            assert!(upserted.contains(&"test-notify.md".to_string()));
+        }
+        other => panic!("expected IndexChanged, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Content index endpoint
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn content_index_returns_page_details() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/indexed.md")
+        .json(&serde_json::json!({
+            "title": "Indexed Page",
+            "tags": ["rust", "test"],
+            "body": "This is the body content for indexing."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild to ensure tags are indexed
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let response = server.get("/api/vault/index/content-index").await;
+    response.assert_status_ok();
+
+    let body: serde_json::Value = response.json();
+    let items = body["items"].as_array().unwrap();
+    assert!(!items.is_empty(), "expected at least one entry");
+
+    let entry = items
+        .iter()
+        .find(|e| e["path"] == "indexed.md")
+        .expect("expected to find indexed.md in content index");
+    assert_eq!(entry["title"], "Indexed Page");
+    let tags = entry["tags"].as_array().unwrap();
+    assert!(tags.contains(&serde_json::json!("rust")));
+    assert!(tags.contains(&serde_json::json!("test")));
+    assert!(
+        entry["description"]
+            .as_str()
+            .unwrap()
+            .contains("body content")
+    );
+}
+
+#[tokio::test]
+async fn content_index_groups_tags_and_links_per_page() {
+    // Multiple pages with distinct tags and a wikilink graph. The handler must
+    // attribute each tag and outbound link to the correct source page; a
+    // misgrouped bulk-query refactor would corrupt these per-entry sets.
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/page-a.md")
+        .json(&serde_json::json!({
+            "title": "Page A",
+            "tags": ["alpha", "shared"],
+            "body": "Links to [[Page B]] and [[Page C]]."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/page-b.md")
+        .json(&serde_json::json!({
+            "title": "Page B",
+            "tags": ["beta"],
+            "body": "Mentions [[Page C]]."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/page-c.md")
+        .json(&serde_json::json!({
+            "title": "Page C",
+            "tags": ["gamma", "shared"],
+            "body": "Has no outbound links."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let res = server.get("/api/vault/index/content-index").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+
+    let by_path: std::collections::HashMap<&str, &serde_json::Value> = items
+        .iter()
+        .filter_map(|e| e["path"].as_str().map(|p| (p, e)))
+        .collect();
+
+    let tags_of = |p: &str| -> Vec<String> {
+        by_path.get(p).unwrap_or_else(|| panic!("missing {p}"))["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.as_str().map(String::from))
+            .collect()
+    };
+    let mut a_tags = tags_of("page-a.md");
+    a_tags.sort();
+    assert_eq!(
+        a_tags,
+        vec![
+            "alpha".to_string(),
+            "note".to_string(),
+            "shared".to_string()
+        ]
+    );
+    assert_eq!(
+        tags_of("page-b.md"),
+        vec!["beta".to_string(), "note".to_string()]
+    );
+    let mut c_tags = tags_of("page-c.md");
+    c_tags.sort();
+    assert_eq!(
+        c_tags,
+        vec![
+            "gamma".to_string(),
+            "note".to_string(),
+            "shared".to_string()
+        ]
+    );
+
+    let links_of = |p: &str| -> Vec<String> {
+        by_path[p]["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.as_str().map(String::from))
+            .collect()
+    };
+    assert!(
+        !links_of("page-a.md").is_empty(),
+        "page-a has outbound links"
+    );
+    assert!(
+        !links_of("page-b.md").is_empty(),
+        "page-b has outbound links"
+    );
+    assert!(
+        links_of("page-c.md").is_empty(),
+        "page-c has no outbound links"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Page archive and folder delete link-resolution behavior
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn delete_page_archives_despite_unresolved_backlinks_without_rewriting_them() {
+    let target_a = "\
+---
+id: 00000000-0000-0000-0000-000000000180
+title: Target
+---
+I am the target.
+";
+    let target_b = "\
+---
+id: 00000000-0000-0000-0000-000000000181
+title: Target
+---
+I am the duplicate.
+";
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000182
+title: Source
+---
+See [[Target]].
+";
+
+    let (server, tmp) = setup_server_with_files(&[
+        ("target.md", target_a),
+        ("sub/target.md", target_b),
+        ("source.md", source),
+    ]);
+    let source_before = fs::read(tmp.path().join("vault/source.md")).unwrap();
+
+    server
+        .delete("/api/vault/pages/target.md")
+        .await
+        .assert_status(StatusCode::CREATED);
+    assert_eq!(
+        fs::read(tmp.path().join("vault/source.md")).unwrap(),
+        source_before
+    );
+}
+
+#[tokio::test]
+async fn delete_folder_re_resolves_affected_links() {
+    // Use setup_server_with_files so all pages exist when the index is built
+    // in a single pass. This ensures the ambiguity is properly detected
+    // (both "Shared" pages exist when resolve_links() runs).
+    let main_page = "\
+---
+id: 00000000-0000-0000-0000-000000000200
+title: Main
+---
+See [[Shared]].
+";
+    let shared_outside = "\
+---
+id: 00000000-0000-0000-0000-000000000201
+title: Shared
+---
+I am the real Shared.
+";
+    let shared_in_folder = "\
+---
+id: 00000000-0000-0000-0000-000000000202
+title: Shared
+---
+I am the duplicate Shared.
+";
+
+    let (server, _tmp) = setup_server_with_files(&[
+        ("main.md", main_page),
+        ("shared.md", shared_outside),
+        ("dups/shared.md", shared_in_folder),
+    ]);
+
+    // At this point [[Shared]] is ambiguous (2 candidates), so the link is unresolved
+    let res = server.get("/api/vault/index/unresolved").await;
+    let unresolved: Vec<serde_json::Value> = res.json();
+    let shared_unresolved = unresolved.iter().any(|u| u["target_raw"] == "Shared");
+    assert!(
+        shared_unresolved,
+        "[[Shared]] should be unresolved due to ambiguity"
+    );
+
+    // Delete the folder with the duplicate
+    server
+        .delete("/api/vault/folders/dups?recursive=true")
+        .await
+        .assert_status(StatusCode::NO_CONTENT);
+
+    // Now [[Shared]] should resolve (only one candidate remains)
+    let res = server.get("/api/vault/index/unresolved").await;
+    let unresolved: Vec<serde_json::Value> = res.json();
+    let shared_still_unresolved = unresolved.iter().any(|u| u["target_raw"] == "Shared");
+    assert!(
+        !shared_still_unresolved,
+        "[[Shared]] should resolve after ambiguity broken by folder delete"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Academic API: BibTeX import
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn import_bibtex_creates_works() {
+    let (server, _tmp) = setup_server();
+
+    let bibtex = r#"
+@article{vaswani2017attention,
+  title = {Attention Is All You Need},
+  author = {Vaswani, Ashish and Shazeer, Noam},
+  journal = {NeurIPS},
+  year = {2017},
+  doi = {10.48550/arXiv.1706.03762}
+}
+@book{bishop2006pattern,
+  title = {Pattern Recognition and Machine Learning},
+  author = {Bishop, Christopher M.},
+  year = {2006},
+  publisher = {Springer},
+  isbn = {978-0-387-31073-2}
+}
+"#;
+
+    let response = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex)
+        .await;
+    response.assert_status(StatusCode::OK);
+
+    let body: serde_json::Value = response.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0]["status"], "created");
+    assert_eq!(results[0]["cite_key"], "vaswani2017attention");
+    assert_eq!(results[1]["status"], "created");
+    assert_eq!(results[1]["cite_key"], "bishop2006pattern");
+
+    // Verify works exist via list endpoint
+    let list = server.get("/api/vault/academic/works").await;
+    let body: serde_json::Value = list.json();
+    let works = body["items"].as_array().unwrap();
+    assert_eq!(works.len(), 2);
+}
+
+#[tokio::test]
+async fn import_bibtex_skips_duplicates() {
+    let (server, _tmp) = setup_server();
+
+    let bibtex = r#"
+@article{test2024,
+  title = {Test Paper},
+  author = {Test, Author},
+  year = {2024}
+}
+"#;
+
+    // First import
+    let r1 = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex)
+        .await;
+    r1.assert_status(StatusCode::OK);
+    let body1: serde_json::Value = r1.json();
+    assert_eq!(body1["results"][0]["status"], "created");
+
+    // Second import — same cite_key -> skipped
+    let r2 = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex)
+        .await;
+    r2.assert_status(StatusCode::OK);
+    let body2: serde_json::Value = r2.json();
+    assert_eq!(body2["results"][0]["status"], "skipped");
+}
+
+#[tokio::test]
+async fn import_bibtex_invalid_returns_400() {
+    let (server, _tmp) = setup_server();
+
+    let response = server
+        .post("/api/vault/academic/import/bibtex")
+        .text("@article{broken, title = {missing closing")
+        .await;
+    response.assert_status(StatusCode::BAD_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
+// Academic API: create work
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_work_page() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Attention Is All You Need",
+            "authors": ["Ashish Vaswani", "Noam Shazeer"],
+            "year": 2017,
+            "venue": "NeurIPS",
+            "cite_key": "vaswani2017attention"
+        }))
+        .await;
+
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["title"], "Attention Is All You Need");
+    assert_eq!(body["work_type"], "paper");
+    assert_eq!(body["cite_key"], "vaswani2017attention");
+    assert!(body["path"].as_str().unwrap().ends_with(".md"));
+    // Should be in the papers folder
+    assert!(
+        body["path"]
+            .as_str()
+            .unwrap()
+            .starts_with("library/papers/"),
+        "expected path in library/papers/, got: {}",
+        body["path"]
+    );
+}
+
+#[tokio::test]
+async fn create_work_book_goes_to_books_folder() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "book",
+            "title": "The Art of Computer Programming"
+        }))
+        .await;
+
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["path"].as_str().unwrap().starts_with("library/books/"),
+        "expected path in library/books/, got: {}",
+        body["path"]
+    );
+}
+
+#[tokio::test]
+async fn create_work_invalid_rating_returns_422() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Bad Rating",
+            "rating": 6
+        }))
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn create_work_duplicate_cite_key_returns_409() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Paper A",
+            "cite_key": "samekey"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Paper B",
+            "cite_key": "samekey"
+        }))
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
+}
+
+// ---------------------------------------------------------------------------
+// Academic API: list and get works
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_works_with_filters() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "ML Paper",
+            "year": 2020,
+            "status": "unread",
+            "tags": ["ml"]
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "book",
+            "title": "ML Book",
+            "year": 2019,
+            "status": "done"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // List all works
+    let res = server.get("/api/vault/academic/works").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+
+    // Filter by work_type=paper
+    let res = server
+        .get("/api/vault/academic/works?work_type=paper")
+        .await;
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["title"], "ML Paper");
+
+    // Filter by year=2020
+    let res = server.get("/api/vault/academic/works?year=2020").await;
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+
+    // Filter by status=done
+    let res = server.get("/api/vault/academic/works?status=done").await;
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["title"], "ML Book");
+}
+
+#[tokio::test]
+async fn get_work_by_uuid() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Get Test Paper",
+            "authors": ["Alice"],
+            "year": 2021
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = res.json();
+    let uuid = created["id"].as_str().unwrap();
+
+    let res = server
+        .get(&format!("/api/vault/academic/works/by-id/{uuid}"))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["title"], "Get Test Paper");
+    assert_eq!(body["work_type"], "paper");
+    assert_eq!(body["year"], 2021);
+}
+
+// ---------------------------------------------------------------------------
+// Academic API: update work
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn update_work_changes_status() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Update Test",
+            "status": "unread"
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = res.json();
+    let uuid = created["id"].as_str().unwrap();
+
+    let res = server
+        .put(&format!("/api/vault/academic/works/by-id/{uuid}"))
+        .json(&serde_json::json!({ "status": "reading", "rating": 4 }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["status"], "reading");
+    assert_eq!(body["rating"], 4);
+    assert_eq!(body["title"], "Update Test");
+}
+
+#[tokio::test]
+async fn update_work_clears_optional_metadata_with_null() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Clear Metadata Test",
+            "year": 2024,
+            "venue": "Example Venue",
+            "publisher": "Example Publisher",
+            "status": "reading",
+            "rating": 4,
+            "cite_key": "clear-metadata-test"
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = res.json();
+    let uuid = created["id"].as_str().unwrap();
+
+    let res = server
+        .put(&format!("/api/vault/academic/works/by-id/{uuid}"))
+        .json(&serde_json::json!({
+            "year": null,
+            "venue": null,
+            "publisher": null,
+            "status": null,
+            "rating": null,
+            "cite_key": null
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(body["year"].is_null());
+    assert!(body["venue"].is_null());
+    assert!(body["publisher"].is_null());
+    assert!(body["status"].is_null());
+    assert!(body["rating"].is_null());
+    assert!(body["cite_key"].is_null());
+}
+
+#[tokio::test]
+async fn update_work_duplicate_cite_key_returns_409() {
+    let (server, _tmp) = setup_server();
+
+    let first = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "First",
+            "cite_key": "duplicate-key"
+        }))
+        .await;
+    first.assert_status(StatusCode::CREATED);
+
+    let second = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Second",
+            "cite_key": "second-key"
+        }))
+        .await;
+    second.assert_status(StatusCode::CREATED);
+    let second_body: serde_json::Value = second.json();
+    let second_id = second_body["id"].as_str().unwrap();
+
+    let res = server
+        .put(&format!("/api/vault/academic/works/by-id/{second_id}"))
+        .json(&serde_json::json!({ "cite_key": "duplicate-key" }))
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
+}
+
+// ---------------------------------------------------------------------------
+// Academic API: annotations
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_and_list_annotations() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Annotated Paper"
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let work: serde_json::Value = res.json();
+    let work_id = work["id"].as_str().unwrap();
+
+    let res = server
+        .post("/api/vault/academic/annotations")
+        .json(&serde_json::json!({
+            "work_id": work_id,
+            "annotation_type": "highlight",
+            "source_location": {"page": 4, "quote": "Important finding"},
+            "tags": ["key-result"],
+            "body": "This is the core contribution."
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let ann: serde_json::Value = res.json();
+    assert_eq!(ann["work_id"], work_id);
+    assert_eq!(ann["annotation_type"], "highlight");
+
+    let res = server
+        .get(&format!(
+            "/api/vault/academic/works/by-id/{work_id}/annotations"
+        ))
+        .await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+    assert_eq!(body.len(), 1);
+    assert_eq!(body[0]["annotation_type"], "highlight");
+}
+
+#[tokio::test]
+async fn move_folder_updates_annotation_work_paths_for_moved_works() {
+    let (server, _tmp) = setup_server();
+
+    let work_a = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Paper A"
+        }))
+        .await;
+    work_a.assert_status(StatusCode::CREATED);
+    let work_a_body: serde_json::Value = work_a.json();
+    let work_a_id = work_a_body["id"].as_str().unwrap().to_string();
+
+    let work_b = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Paper B"
+        }))
+        .await;
+    work_b.assert_status(StatusCode::CREATED);
+    let work_b_body: serde_json::Value = work_b.json();
+    let work_b_id = work_b_body["id"].as_str().unwrap().to_string();
+
+    server
+        .post("/api/vault/academic/annotations")
+        .json(&serde_json::json!({
+            "work_id": work_a_id.clone(),
+            "annotation_type": "highlight",
+            "body": "A"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/academic/annotations")
+        .json(&serde_json::json!({
+            "work_id": work_b_id.clone(),
+            "annotation_type": "note",
+            "body": "B"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/folders-move/library/papers")
+        .json(&serde_json::json!({ "destination": "archive/papers" }))
+        .await
+        .assert_status(StatusCode::OK);
+
+    let ann_a = server
+        .get(&format!(
+            "/api/vault/academic/works/by-id/{work_a_id}/annotations"
+        ))
+        .await;
+    ann_a.assert_status(StatusCode::OK);
+    let ann_a_body: Vec<serde_json::Value> = ann_a.json();
+    assert_eq!(ann_a_body.len(), 1);
+    assert!(
+        ann_a_body[0]["work_path"]
+            .as_str()
+            .unwrap()
+            .starts_with("archive/papers/"),
+        "expected updated work_path for annotation A, got: {:?}",
+        ann_a_body[0]["work_path"]
+    );
+
+    let ann_b = server
+        .get(&format!(
+            "/api/vault/academic/works/by-id/{work_b_id}/annotations"
+        ))
+        .await;
+    ann_b.assert_status(StatusCode::OK);
+    let ann_b_body: Vec<serde_json::Value> = ann_b.json();
+    assert_eq!(ann_b_body.len(), 1);
+    assert!(
+        ann_b_body[0]["work_path"]
+            .as_str()
+            .unwrap()
+            .starts_with("archive/papers/"),
+        "expected updated work_path for annotation B, got: {:?}",
+        ann_b_body[0]["work_path"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Academic library: full lifecycle integration test
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn academic_lifecycle_integration() {
+    let (server, _tmp) = setup_server();
+
+    // 1. Create a paper with cite_key
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Attention Is All You Need",
+            "authors": ["Vaswani", "Shazeer", "Parmar"],
+            "year": 2017,
+            "venue": "NeurIPS",
+            "cite_key": "vaswani2017attention",
+            "status": "unread",
+            "tags": ["transformers", "nlp"],
+            "body": "The dominant sequence transduction models..."
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let work: serde_json::Value = res.json();
+    let work_id = work["id"].as_str().unwrap().to_string();
+    let work_path = work["path"].as_str().unwrap().to_string();
+    assert_eq!(work["title"], "Attention Is All You Need");
+    assert_eq!(work["work_type"], "paper");
+    assert_eq!(work["cite_key"], "vaswani2017attention");
+    assert!(work_path.starts_with("library/papers/"));
+
+    // 2. Create a regular page that references the work via [[cite_key]]
+    server
+        .post("/api/vault/pages/notes/ml-notes.md")
+        .json(&serde_json::json!({
+            "title": "ML Notes",
+            "body": "Key paper: [[vaswani2017attention]]"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // 3. Rebuild index to ensure all links are resolved
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    // 4. Verify cite_key resolves — check backlinks for the work
+    let res = server
+        .get(&format!("/api/vault/index/backlinks/{work_path}"))
+        .await;
+    res.assert_status_ok();
+    let backlinks: Vec<serde_json::Value> = res.json();
+    assert!(
+        backlinks
+            .iter()
+            .any(|b| b["source_path"] == "notes/ml-notes.md"),
+        "expected backlink from ml-notes.md via cite_key, got: {backlinks:?}"
+    );
+
+    // 5. Create an annotation on the paper
+    let res = server
+        .post("/api/vault/academic/annotations")
+        .json(&serde_json::json!({
+            "work_id": work_id,
+            "annotation_type": "highlight",
+            "source_location": {"page": 4, "quote": "self-attention mechanism"},
+            "tags": ["key-concept"],
+            "body": "The self-attention mechanism is the core innovation."
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let ann: serde_json::Value = res.json();
+    assert_eq!(ann["work_id"], work_id);
+    assert_eq!(ann["annotation_type"], "highlight");
+
+    // 6. List annotations for the work — verify 1 result
+    let res = server
+        .get(&format!(
+            "/api/vault/academic/works/by-id/{work_id}/annotations"
+        ))
+        .await;
+    res.assert_status_ok();
+    let annotations: Vec<serde_json::Value> = res.json();
+    assert_eq!(annotations.len(), 1);
+    assert_eq!(annotations[0]["annotation_type"], "highlight");
+
+    // 7. Update work status to "reading" and add a rating
+    let res = server
+        .put(&format!("/api/vault/academic/works/by-id/{work_id}"))
+        .json(&serde_json::json!({
+            "status": "reading",
+            "rating": 5
+        }))
+        .await;
+    res.assert_status_ok();
+    let updated: serde_json::Value = res.json();
+    assert_eq!(updated["status"], "reading");
+    assert_eq!(updated["rating"], 5);
+    // Title and cite_key should be unchanged
+    assert_eq!(updated["title"], "Attention Is All You Need");
+    assert_eq!(updated["cite_key"], "vaswani2017attention");
+
+    // 8. Get work by UUID — verify all fields
+    let res = server
+        .get(&format!("/api/vault/academic/works/by-id/{work_id}"))
+        .await;
+    res.assert_status_ok();
+    let fetched: serde_json::Value = res.json();
+    assert_eq!(fetched["title"], "Attention Is All You Need");
+    assert_eq!(fetched["work_type"], "paper");
+    assert_eq!(fetched["status"], "reading");
+    assert_eq!(fetched["rating"], 5);
+    assert_eq!(fetched["year"], 2017);
+    assert_eq!(fetched["venue"], "NeurIPS");
+    assert_eq!(fetched["cite_key"], "vaswani2017attention");
+
+    // 9. List all works — verify 1 work
+    let res = server.get("/api/vault/academic/works").await;
+    res.assert_status_ok();
+    let works_body: serde_json::Value = res.json();
+    let works = works_body["items"].as_array().unwrap();
+    assert_eq!(works.len(), 1);
+    assert_eq!(works[0]["title"], "Attention Is All You Need");
+
+    // 10. Verify cite_key still resolves after update
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let res = server
+        .get(&format!("/api/vault/index/backlinks/{work_path}"))
+        .await;
+    res.assert_status_ok();
+    let backlinks: Vec<serde_json::Value> = res.json();
+    assert!(
+        backlinks
+            .iter()
+            .any(|b| b["source_path"] == "notes/ml-notes.md"),
+        "cite_key should still resolve after update, backlinks: {backlinks:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Import lifecycle: BibTeX dedup and verification
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn import_lifecycle_bibtex_dedup_and_verify() {
+    let (server, _tmp) = setup_server();
+
+    // 1. Import two entries via BibTeX
+    let bibtex = r#"
+@article{alpha2020first,
+  title = {First Paper},
+  author = {Alpha, Ann},
+  year = {2020},
+  journal = {Journal A},
+  doi = {10.1234/first}
+}
+@book{beta2021second,
+  title = {Second Book},
+  author = {Beta, Bob},
+  year = {2021},
+  publisher = {Publisher B},
+  isbn = {978-1-234-56789-0}
+}
+"#;
+
+    let r = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex)
+        .await;
+    r.assert_status(StatusCode::OK);
+    let body: serde_json::Value = r.json();
+    assert_eq!(body["results"][0]["status"], "created");
+    assert_eq!(body["results"][1]["status"], "created");
+
+    // 2. Re-import same BibTeX — both should be skipped (cite_key dedup)
+    let r2 = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex)
+        .await;
+    r2.assert_status(StatusCode::OK);
+    let body2: serde_json::Value = r2.json();
+    assert_eq!(body2["results"][0]["status"], "skipped");
+    assert_eq!(body2["results"][1]["status"], "skipped");
+
+    // 3. Import different entry with same DOI — should be skipped (DOI dedup)
+    let bibtex_dup_doi = r#"
+@article{different_key,
+  title = {Different Title},
+  author = {Gamma, Charlie},
+  year = {2020},
+  doi = {10.1234/first}
+}
+"#;
+    let r3 = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex_dup_doi)
+        .await;
+    r3.assert_status(StatusCode::OK);
+    let body3: serde_json::Value = r3.json();
+    assert_eq!(
+        body3["results"][0]["status"], "skipped",
+        "DOI dedup should skip entry with matching DOI regardless of cite_key"
+    );
+
+    // 4. Verify works list shows exactly 2
+    let list = server.get("/api/vault/academic/works").await;
+    let list_body: serde_json::Value = list.json();
+    let works = list_body["items"].as_array().unwrap();
+    assert_eq!(works.len(), 2, "expected exactly 2 works after dedup");
+
+    // 5. Verify metadata on the paper
+    let paper = works
+        .iter()
+        .find(|w| w["cite_key"] == "alpha2020first")
+        .unwrap();
+    assert_eq!(paper["work_type"], "paper");
+    assert_eq!(paper["year"], 2020);
+
+    // 6. Verify metadata on the book
+    let book = works
+        .iter()
+        .find(|w| w["cite_key"] == "beta2021second")
+        .unwrap();
+    assert_eq!(book["work_type"], "book");
+    assert_eq!(book["year"], 2021);
+}
+
+// ---------------------------------------------------------------------------
+// Attachment upload tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn attachment_upload_requires_plaintext_acknowledgement() {
+    let (server, _tmp) = setup_server();
+
+    let missing = multipart_upload(&server, "missing.txt", b"secret", None).await;
+    missing.assert_status_bad_request();
+    assert_eq!(
+        missing.json::<serde_json::Value>()["error"],
+        "attachment plaintext storage must be acknowledged"
+    );
+
+    let false_ack = multipart_upload(&server, "false.txt", b"secret", Some(false)).await;
+    false_ack.assert_status_bad_request();
+    assert_eq!(
+        false_ack.json::<serde_json::Value>()["error"],
+        "attachment plaintext storage must be acknowledged"
+    );
+
+    multipart_upload(&server, "accepted.txt", b"secret", Some(true))
+        .await
+        .assert_status(StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn rejected_attachment_upload_leaves_no_destination_or_temporary_file() {
+    let (server, tmp) = setup_server();
+
+    multipart_upload(&server, "rejected.bin", b"bytes", None)
+        .await
+        .assert_status_bad_request();
+
+    assert!(!tmp.path().join("vault/_attachments/rejected.bin").exists());
+    assert_no_attachment_temporaries(&tmp);
+}
+
+#[tokio::test]
+async fn attachment_upload_accepts_fields_in_arbitrary_order() {
+    let (server, tmp) = setup_server();
+    let boundary = "----acknowledgementfirstboundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"ordered.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nbytes\r\n--{boundary}--\r\n"
+    );
+
+    server
+        .post("/api/vault/attachments/ordered.bin")
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into_bytes().into())
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    assert_eq!(
+        fs::read(tmp.path().join("vault/_attachments/ordered.bin")).unwrap(),
+        b"bytes"
+    );
+}
+
+#[tokio::test]
+async fn attachment_upload_rejects_duplicate_named_fields_and_unknown_binary_fields() {
+    let cases = [
+        (
+            "duplicate-file.bin",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"one.bin\"\r\nContent-Type: application/octet-stream\r\n\r\none\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"two.bin\"\r\nContent-Type: application/octet-stream\r\n\r\ntwo\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue",
+        ),
+        (
+            "duplicate-ack.bin",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"one.bin\"\r\nContent-Type: application/octet-stream\r\n\r\none\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue",
+        ),
+        (
+            "unknown-binary.bin",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"one.bin\"\r\nContent-Type: application/octet-stream\r\n\r\none\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"unexpected\"; filename=\"other.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nother\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue",
+        ),
+    ];
+
+    for (destination, parts) in cases {
+        let (server, tmp) = setup_server();
+        let boundary = "----invalidnamedfieldsboundary";
+        let body = format!(
+            "--{boundary}\r\n{}\r\n--{boundary}--\r\n",
+            parts.replace("{boundary}", boundary)
+        );
+
+        server
+            .post(&format!("/api/vault/attachments/{destination}"))
+            .content_type(&format!("multipart/form-data; boundary={boundary}"))
+            .bytes(body.into_bytes().into())
+            .await
+            .assert_status_bad_request();
+
+        assert!(
+            !tmp.path()
+                .join("vault/_attachments")
+                .join(destination)
+                .exists()
+        );
+        assert_no_attachment_temporaries(&tmp);
+    }
+}
+
+#[tokio::test]
+async fn attachment_upload_rejects_filename_less_unknown_binary_field() {
+    let (server, tmp) = setup_server();
+    let boundary = "----filenamelessunknownbinaryboundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"payload.bin\"\r\nContent-Type: application/octet-stream\r\n\r\npayload\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"unexpected\"\r\nContent-Type: application/octet-stream\r\n\r\nother\r\n--{boundary}--\r\n"
+    );
+
+    server
+        .post("/api/vault/attachments/filenameless.bin")
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into_bytes().into())
+        .await
+        .assert_status_bad_request();
+
+    assert!(
+        !tmp.path()
+            .join("vault/_attachments/filenameless.bin")
+            .exists()
+    );
+    assert_no_attachment_temporaries(&tmp);
+}
+
+#[tokio::test]
+async fn attachment_upload_openapi_documents_named_multipart_fields() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    let schema = &openapi["paths"]["/api/vault/attachments/{path}"]["post"]["requestBody"]["content"]
+        ["multipart/form-data"]["schema"];
+    assert_eq!(schema["$ref"], "#/components/schemas/AttachmentUploadForm");
+    let form = &openapi["components"]["schemas"]["AttachmentUploadForm"];
+    assert_eq!(form["type"], "object");
+    assert_eq!(
+        form["required"],
+        serde_json::json!(["file", "plaintext_acknowledged"])
+    );
+    assert_eq!(form["additionalProperties"], false);
+    assert_eq!(form["properties"]["file"]["type"], "string");
+    assert_eq!(form["properties"]["file"]["format"], "binary");
+    assert_eq!(
+        form["properties"]["plaintext_acknowledged"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        form["properties"]["plaintext_acknowledged"]["enum"],
+        serde_json::json!([true])
+    );
+}
+
+#[tokio::test]
+async fn upload_and_retrieve_attachment() {
+    let (server, _tmp) = setup_server();
+
+    let boundary = "----testboundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\nContent-Type: text/plain\r\n\r\nhello world\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
+    );
+
+    let res = server
+        .post("/api/vault/attachments/test.txt")
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into_bytes().into())
+        .await;
+
+    res.assert_status(StatusCode::CREATED);
+    let info: serde_json::Value = res.json();
+    assert_eq!(info["name"], "test.txt");
+    assert_eq!(info["path"], "test.txt");
+
+    // Retrieve it
+    let res = server.get("/api/vault/attachments/test.txt").await;
+    res.assert_status(StatusCode::OK);
+    assert_eq!(res.text(), "hello world");
+}
+
+#[tokio::test]
+async fn upload_attachment_conflict() {
+    let (server, _tmp) = setup_server();
+
+    let boundary = "----testboundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"dup.txt\"\r\nContent-Type: text/plain\r\n\r\nfirst\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
+    );
+    let ct = format!("multipart/form-data; boundary={boundary}");
+
+    server
+        .post("/api/vault/attachments/dup.txt")
+        .content_type(&ct)
+        .bytes(body.clone().into_bytes().into())
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/attachments/dup.txt")
+        .content_type(&ct)
+        .bytes(body.into_bytes().into())
+        .await
+        .assert_status(StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn simultaneous_attachment_uploads_install_exactly_one_payload() {
+    let (app, tmp) = setup_app();
+    let boundary = "----concurrentattachmentboundary";
+    let first_payload = vec![b'a'; 1024 * 1024];
+    let second_payload = vec![b'b'; 1024 * 1024];
+    let barrier = Arc::new(Barrier::new(2));
+
+    let first_request =
+        delayed_multipart_request(boundary, first_payload.clone(), Arc::clone(&barrier));
+    let second_request =
+        delayed_multipart_request(boundary, second_payload.clone(), Arc::clone(&barrier));
+    let first = app.clone().oneshot(first_request);
+    let second = app.oneshot(second_request);
+
+    let (first_response, second_response) = tokio::join!(first, second);
+    let first_response = first_response.unwrap();
+    let second_response = second_response.unwrap();
+    let statuses = [first_response.status(), second_response.status()];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|&&status| status == StatusCode::CREATED)
+            .count(),
+        1,
+        "expected exactly one successful upload, got {statuses:?}"
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|&&status| status == StatusCode::CONFLICT)
+            .count(),
+        1,
+        "expected exactly one conflict, got {statuses:?}"
+    );
+
+    let expected_payload = if first_response.status() == StatusCode::CREATED {
+        &first_payload
+    } else {
+        &second_payload
+    };
+    let stored = fs::read(tmp.path().join("vault/_attachments/race.bin")).unwrap();
+    assert_eq!(&stored, expected_payload);
+}
+
+#[tokio::test]
+async fn interrupted_attachment_upload_leaves_no_partial_files() {
+    let (server, tmp) = setup_server();
+    let boundary = "----interruptedattachmentboundary";
+    let incomplete_body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"partial.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nincomplete"
+    );
+
+    let response = server
+        .post("/api/vault/attachments/partial.bin")
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(incomplete_body.into_bytes().into())
+        .await;
+
+    assert_eq!(response.status_code(), StatusCode::BAD_REQUEST);
+    let attachment_dir = tmp.path().join("vault/_attachments");
+    let remaining_files = fs::read_dir(attachment_dir)
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(remaining_files, 0, "temporary upload file was not removed");
+}
+
+#[tokio::test]
+async fn cancelled_attachment_upload_removes_temporary_file() {
+    let (app, tmp) = setup_app();
+    let boundary = "----cancelledattachmentboundary";
+    let header = Bytes::from(format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"cancel.bin\"\r\nContent-Type: application/octet-stream\r\n\r\npartial"
+    ));
+    let (sender, receiver) = mpsc::channel(1);
+    sender.send(Ok::<_, std::io::Error>(header)).await.unwrap();
+    let request = Request::post("/api/vault/attachments/cancel.bin")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from_stream(ReceiverStream::new(receiver)))
+        .unwrap();
+    let upload = tokio::spawn(app.oneshot(request));
+    let attachment_dir = tmp.path().join("vault/_attachments");
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if fs::read_dir(&attachment_dir)
+                .map(|mut entries| entries.next().is_some())
+                .unwrap_or(false)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("upload did not create a temporary file");
+
+    let temporary_name = fs::read_dir(&attachment_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .file_name()
+        .into_string()
+        .unwrap();
+    assert!(temporary_name.starts_with(".upload-"));
+    assert_eq!(temporary_name.len(), ".upload-".len() + 32);
+
+    upload.abort();
+    assert!(upload.await.unwrap_err().is_cancelled());
+    drop(sender);
+
+    let remaining_files = fs::read_dir(attachment_dir)
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        remaining_files, 0,
+        "cancelling the handler must synchronously unlink its temporary file"
+    );
+}
+
+#[tokio::test]
+async fn attachment_upload_with_long_valid_basename_uses_bounded_temporary_name() {
+    let (server, _tmp) = setup_server();
+    let boundary = "----longattachmentboundary";
+    let file_name = format!("{}.bin", "a".repeat(240));
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\npayload\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
+    );
+
+    server
+        .post(&format!("/api/vault/attachments/{file_name}"))
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into_bytes().into())
+        .await
+        .assert_status(StatusCode::CREATED);
+}
+
+// ---------------------------------------------------------------------------
+// Full-text search
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn search_pages() {
+    let (server, _tmp) = setup_server();
+    for slug in ["languages", "cellar", "brewery", "laboratory"] {
+        support::seed_project(&server, slug).await;
+    }
+
+    for (path, page) in [
+        (
+            "rust.md",
+            serde_json::json!({
+                "title": "Rust Programming",
+                "kind": "NOTE",
+                "tags": ["research"],
+                "project": "languages",
+                "body": "Rust is a systems programming language focused on safety."
+            }),
+        ),
+        (
+            "python.md",
+            serde_json::json!({
+                "title": "Python Programming",
+                "kind": "NOTE",
+                "tags": ["scripting"],
+                "project": "languages",
+                "body": "Python is a dynamic scripting language."
+            }),
+        ),
+        (
+            "recipes/beer.md",
+            serde_json::json!({
+                "title": "Beer Tasting",
+                "kind": "RECIPE",
+                "tags": ["beer"],
+                "project": "cellar",
+                "body": "A tasting guide for malt."
+            }),
+        ),
+        (
+            "notes/wine.md",
+            serde_json::json!({
+                "title": "Wine Tasting",
+                "kind": "NOTE",
+                "tags": ["wine"],
+                "project": "cellar",
+                "body": "A tasting guide for grapes."
+            }),
+        ),
+        (
+            "notes/beer-only.md",
+            serde_json::json!({
+                "title": "Beer Fermentation",
+                "kind": "NOTE",
+                "tags": ["beer"],
+                "project": "brewery",
+                "body": "Fermentation notes."
+            }),
+        ),
+        (
+            "notes/tasting-only.md",
+            serde_json::json!({
+                "title": "Tasting Research",
+                "kind": "NOTE",
+                "tags": ["research"],
+                "project": "laboratory",
+                "body": "General tasting notes."
+            }),
+        ),
+    ] {
+        server
+            .post(&format!("/api/vault/pages/{path}"))
+            .json(&page)
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    // Plain text remains a compatible query.
+    let res = server.get("/api/vault/index/search?q=safety").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .map(|hit| hit["path"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["rust.md"]
+    );
+
+    let res = server.get("/api/vault/index/search?q=programming").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body.as_array().unwrap().len(), 2);
+
+    let res = server
+        .get("/api/vault/index/search?q=programming&limit=1")
+        .await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body.as_array().unwrap().len(), 1);
+
+    let res = server.get("/api/vault/index/search?q=kind%3ARECIPE").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let paths = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(paths, vec!["recipes/beer.md"]);
+
+    let res = server
+        .get("/api/vault/index/search?q=%28tag%3Abeer+%7C+tag%3Awine%29+tasting")
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let mut paths = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    paths.sort_unstable();
+    assert_eq!(paths, vec!["notes/wine.md", "recipes/beer.md"]);
+}
+
+#[tokio::test]
+async fn search_query_errors_have_a_stable_contract() {
+    let (server, _tmp) = setup_server();
+
+    let res = server.get("/api/vault/index/search?q=knd%3Arecipe").await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "status": 400,
+            "error": "unknown search field 'knd' at column 1",
+            "detail": {
+                "code": "invalid_search_query",
+                "span": { "start": 0, "end": 3 },
+                "kind": "unknown_field"
+            }
+        })
+    );
+
+    for (query, span, kind) in [
+        ("kind%3Aunknown", (5, 12), "unknown_kind"),
+        ("attendees%3Amany", (10, 14), "invalid_field_value"),
+        ("attendees%3A-1", (10, 12), "invalid_field_value"),
+        ("%28", (0, 1), "unmatched_parenthesis"),
+        ("tasting+%7C", (8, 9), "dangling_or"),
+    ] {
+        let res = server
+            .get(&format!("/api/vault/index/search?q={query}"))
+            .await;
+        res.assert_status(StatusCode::BAD_REQUEST);
+        let body: serde_json::Value = res.json();
+        assert_eq!(body["status"], 400);
+        assert_eq!(body["detail"]["code"], "invalid_search_query");
+        assert_eq!(body["detail"]["span"]["start"], span.0);
+        assert_eq!(body["detail"]["span"]["end"], span.1);
+        assert_eq!(body["detail"]["kind"], kind);
+    }
+
+    let oversized = "a".repeat(4097);
+    let res = server
+        .get(&format!("/api/vault/index/search?q={oversized}"))
+        .await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["detail"]["code"], "invalid_search_query");
+    assert_eq!(body["detail"]["kind"], "query_too_complex");
+    assert_eq!(
+        body["detail"]["span"],
+        serde_json::json!({
+            "start": 4096,
+            "end": 4097
+        })
+    );
+
+    let res = server.get("/api/vault/index/search").await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["error"], "missing 'q' query parameter");
+    assert!(body.get("detail").is_none());
+}
+
+#[tokio::test]
+async fn search_internal_errors_are_generic() {
+    let fixture = ApiFixture::builder().build();
+    let (server, _tmp, state) = fixture.into_parts();
+    state
+        .index
+        .with_index(|index, _vault| index.connection().execute_batch("DROP TABLE pages_fts"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let res = server.get("/api/vault/index/search?q=text").await;
+    res.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["error"], "search failed");
+    assert!(!body.to_string().contains("sqlite"));
+    assert!(!body.to_string().contains("no such table"));
+}
+
+// ---------------------------------------------------------------------------
+// Pagination: works and content-index
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_works_pagination() {
+    let (server, _tmp) = setup_server();
+
+    for i in 0..3 {
+        server
+            .post("/api/vault/academic/works")
+            .json(&serde_json::json!({
+                "title": format!("Work {i}"),
+                "work_type": "paper",
+                "authors": [format!("Author {i}")],
+            }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+
+    let res = server.get("/api/vault/academic/works").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 3);
+    assert_eq!(body["items"].as_array().unwrap().len(), 3);
+
+    let res = server.get("/api/vault/academic/works?limit=1").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 3);
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn content_index_pagination() {
+    let (server, _tmp) = setup_server();
+
+    for i in 0..3 {
+        server
+            .post(&format!("/api/vault/pages/p{i}.md"))
+            .json(&serde_json::json!({ "title": format!("P{i}") }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+
+    let res = server.get("/api/vault/index/content-index?limit=2").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 3);
+    assert_eq!(body["items"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn content_index_includes_word_count() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({
+            "title": "Alpha",
+            "body": "the quick brown fox jumps"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let res = server.get("/api/vault/index/content-index").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let alpha = body["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|i| i["path"] == "alpha.md"))
+        .expect("alpha entry");
+    assert_eq!(
+        alpha["word_count"], 5,
+        "expected 5 words for body 'the quick brown fox jumps'; got {alpha:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Archive compensation audit tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn archive_post_cas_publication_failure_compensates_every_reference() {
+    let fixture = ApiFixture::builder().build();
+    fixture
+        .state
+        .mutation_coordinator
+        .set_create_publication_hook(Some(Arc::new(|_, _| {
+            Err(
+                clep_api::vault::atomic_file::AtomicPublicationError::NotPublished(
+                    std::io::Error::other("injected archive page publication failure"),
+                ),
+            )
+        })));
+
+    // One inlined image plus the snapshot itself: two blobs per attempt. Both
+    // attempts touch the same bytes, so this still pins "one zero-reference row
+    // per unique blob" rather than one per attempt.
+    let image = b"archive post-CAS image";
+    let markdown = "# Post-CAS failure";
+    let content_hash = clep_api::vault::cas::ContentStore::hash_bytes(markdown.as_bytes());
+    let encode = |bytes: &[u8]| {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    };
+    let snapshot_html = format!(
+        r#"<html><body><img src="data:image/png;base64,{}"></body></html>"#,
+        encode(image)
+    );
+
+    for _ in 0..2 {
+        let response = fixture
+            .server
+            .post("/api/vault/archive")
+            .json(&serde_json::json!({
+                "url": "https://example.com/post-cas",
+                "domain": "example.com",
+                "title": "Post-CAS failure",
+                "captured_at": "2026-08-11T00:00:00Z",
+                "content_hash": content_hash,
+                "snapshot_html": snapshot_html,
+                "markdown_body": markdown,
+                "tags": ["archive"],
+            }))
+            .await;
+        response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    let root = fixture.temp_dir.path().join("vault");
+    assert!(
+        !root
+            .join("archive/example.com/post-cas-failure.md")
+            .exists(),
+        "a failed page publication must not leave an archive page"
+    );
+    let pruned = fixture
+        .state
+        .cas
+        .lock()
+        .gc(std::time::Duration::ZERO)
+        .unwrap();
+    assert_eq!(
+        pruned, 2,
+        "repeated compensation must leave one zero-reference row per unique blob"
+    );
+}
+
+#[tokio::test]
+async fn archive_post_page_publication_failure_removes_page_and_cas_references() {
+    let fixture = ApiFixture::builder().build();
+    fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            index.connection().execute_batch(
+                "CREATE TRIGGER fail_archive_index_insert
+                 BEFORE INSERT ON pages
+                 BEGIN
+                   SELECT RAISE(FAIL, 'injected after archive page publication');
+                 END;",
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    // No inlined resources, so the snapshot itself is the only blob touched —
+    // matching the single zero-reference row asserted below.
+    let markdown = "# Post-page failure";
+    let content_hash = clep_api::vault::cas::ContentStore::hash_bytes(markdown.as_bytes());
+    let snapshot_html = "<html><body><p>ok</p></body></html>";
+    let response = fixture
+        .server
+        .post("/api/vault/archive")
+        .json(&serde_json::json!({
+            "url": "https://example.com/post-page",
+            "domain": "example.com",
+            "title": "Post-page failure",
+            "captured_at": "2026-08-11T00:00:00Z",
+            "content_hash": content_hash,
+            "snapshot_html": snapshot_html,
+            "markdown_body": markdown,
+            "tags": ["archive"],
+        }))
+        .await;
+
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("injected after archive page publication"),
+        "the primary index failure must remain actionable: {error}"
+    );
+    let root = fixture.temp_dir.path().join("vault");
+    assert!(
+        !root
+            .join("archive/example.com/post-page-failure.md")
+            .exists(),
+        "page compensation must remove the published archive page"
+    );
+    assert_eq!(
+        fixture
+            .state
+            .cas
+            .lock()
+            .gc(std::time::Duration::ZERO)
+            .unwrap(),
+        1,
+        "page failure must compensate the CAS reference"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Zotero import tests
+// ---------------------------------------------------------------------------
+
+/// Create a minimal Zotero-schema SQLite DB for API testing.
+fn create_mock_zotero_db_for_api(path: &std::path::Path) {
+    use rusqlite::Connection;
+    let conn = Connection::open(path).unwrap();
+    conn.execute_batch(
+        "
+        CREATE TABLE itemTypes (itemTypeID INTEGER PRIMARY KEY, typeName TEXT);
+        INSERT INTO itemTypes VALUES (1, 'attachment');
+        INSERT INTO itemTypes VALUES (2, 'book');
+        INSERT INTO itemTypes VALUES (4, 'journalArticle');
+
+        CREATE TABLE fields (fieldID INTEGER PRIMARY KEY, fieldName TEXT);
+        INSERT INTO fields VALUES (14, 'date');
+        INSERT INTO fields VALUES (26, 'DOI');
+        INSERT INTO fields VALUES (110, 'title');
+        INSERT INTO fields VALUES (11, 'ISBN');
+        INSERT INTO fields VALUES (12, 'publisher');
+        INSERT INTO fields VALUES (37, 'publicationTitle');
+
+        CREATE TABLE libraries (libraryID INTEGER PRIMARY KEY, type TEXT);
+        INSERT INTO libraries VALUES (1, 'user');
+
+        CREATE TABLE items (
+            itemID INTEGER PRIMARY KEY, itemTypeID INT, dateAdded TEXT,
+            dateModified TEXT, clientDateModified TEXT, libraryID INT,
+            key TEXT, version INT DEFAULT 0, synced INT DEFAULT 0
+        );
+        CREATE TABLE itemData (itemID INT, fieldID INT, valueID INT, PRIMARY KEY(itemID, fieldID));
+        CREATE TABLE itemDataValues (valueID INTEGER PRIMARY KEY, value TEXT UNIQUE);
+        CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY);
+
+        CREATE TABLE creators (creatorID INTEGER PRIMARY KEY, firstName TEXT, lastName TEXT, fieldMode INT);
+        CREATE TABLE creatorTypes (creatorTypeID INTEGER PRIMARY KEY, creatorType TEXT);
+        INSERT INTO creatorTypes VALUES (1, 'author');
+        CREATE TABLE itemCreators (itemID INT, creatorID INT, creatorTypeID INT, orderIndex INT);
+
+        CREATE TABLE tags (tagID INTEGER PRIMARY KEY, name TEXT UNIQUE);
+        CREATE TABLE itemTags (itemID INT, tagID INT, type INT);
+
+        CREATE TABLE collections (
+            collectionID INTEGER PRIMARY KEY, collectionName TEXT,
+            parentCollectionID INT, libraryID INT, key TEXT, version INT DEFAULT 0, synced INT DEFAULT 0,
+            clientDateModified TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE collectionItems (collectionID INT, itemID INT, orderIndex INT);
+
+        CREATE TABLE itemAttachments (
+            itemID INTEGER PRIMARY KEY, parentItemID INT, linkMode INT,
+            contentType TEXT, charsetID INT, path TEXT,
+            syncState INT DEFAULT 0, storageModTime INT, storageHash TEXT
+        );
+
+        -- Insert a journal article
+        INSERT INTO items VALUES (1, 4, '2024-01-01', '2024-06-15', '2024-06-15', 1, 'ABC12345', 1, 0);
+        INSERT INTO itemDataValues VALUES (1, 'Test Article');
+        INSERT INTO itemDataValues VALUES (2, '2023');
+        INSERT INTO itemDataValues VALUES (3, '10.1234/test.article');
+        INSERT INTO itemDataValues VALUES (4, 'Test Journal');
+        INSERT INTO itemData VALUES (1, 110, 1);
+        INSERT INTO itemData VALUES (1, 14, 2);
+        INSERT INTO itemData VALUES (1, 26, 3);
+        INSERT INTO itemData VALUES (1, 37, 4);
+
+        INSERT INTO creators VALUES (1, 'Alice', 'Smith', 0);
+        INSERT INTO itemCreators VALUES (1, 1, 1, 0);
+
+        -- Insert a book
+        INSERT INTO items VALUES (2, 2, '2024-01-01', '2024-03-01', '2024-03-01', 1, 'DEF67890', 1, 0);
+        INSERT INTO itemDataValues VALUES (5, 'Test Book');
+        INSERT INTO itemDataValues VALUES (6, '2022');
+        INSERT INTO itemDataValues VALUES (7, '978-1234567890');
+        INSERT INTO itemDataValues VALUES (8, 'Test Publisher');
+        INSERT INTO itemData VALUES (2, 110, 5);
+        INSERT INTO itemData VALUES (2, 14, 6);
+        INSERT INTO itemData VALUES (2, 11, 7);
+        INSERT INTO itemData VALUES (2, 12, 8);
+
+        INSERT INTO creators VALUES (2, 'Bob', 'Jones', 0);
+        INSERT INTO itemCreators VALUES (2, 2, 1, 0);
+        "
+    ).unwrap();
+}
+
+#[tokio::test]
+async fn import_zotero_creates_works() {
+    let (server, tmp) = setup_server();
+
+    // Create mock Zotero DB
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // Import
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy()
+        }))
+        .await;
+
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2, "should import 2 items");
+
+    // Verify both were created
+    assert!(results.iter().all(|r| r["status"] == "created"));
+    assert_eq!(results[0]["cite_key"], "smith2023test");
+    assert_eq!(results[1]["cite_key"], "jones2022test");
+
+    // Verify provenance in frontmatter
+    let vault_root = tmp.path().join("vault");
+    let article_path = results[0]["page_path"].as_str().unwrap();
+    let content = fs::read_to_string(vault_root.join(article_path)).unwrap();
+    assert!(
+        content.contains("source = \"zotero\""),
+        "should have import source"
+    );
+    assert!(
+        content.contains("zotero_key = \"ABC12345\""),
+        "should have zotero_key"
+    );
+    assert!(
+        content.contains("zotero_item_id = 1"),
+        "should have zotero_item_id"
+    );
+}
+
+#[tokio::test]
+async fn import_zotero_dry_run() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "dry_run": true
+        }))
+        .await;
+
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+
+    // Verify all would be created
+    assert!(results.iter().all(|r| r["status"] == "would_create"));
+
+    // Verify no works were actually created
+    let res = server.get("/api/vault/academic/works").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 0, "dry run should not create works");
+}
+
+#[tokio::test]
+async fn import_zotero_is_idempotent() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // First import (disable checkpoint so second import sees all items)
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert!(results.iter().all(|r| r["status"] == "created"));
+
+    // Second import — should skip all (dedup by zotero_key)
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(
+        results.iter().all(|r| r["status"] == "skipped"),
+        "second import should skip all items"
+    );
+}
+
+#[tokio::test]
+async fn import_zotero_source_wins_updates() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // First import — creates works
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let first_results = body["results"].as_array().unwrap();
+    assert!(first_results.iter().all(|r| r["status"] == "created"));
+
+    // Second import with source_wins — should update (live, not dry_run)
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false,
+            "conflict_policy": "source_wins"
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2, "should have results for both items");
+    assert!(
+        results.iter().all(|r| r["status"] == "updated"),
+        "source_wins live mode should produce 'updated' status; got: {:?}",
+        results.iter().map(|r| &r["status"]).collect::<Vec<_>>()
+    );
+
+    // Page paths should still be populated
+    for r in results {
+        assert!(
+            r["page_path"].is_string(),
+            "page_path should be set for updated items"
+        );
+    }
+}
+
+#[tokio::test]
+async fn import_zotero_source_wins_dry_run_would_update() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // First import — creates works
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
+        }))
+        .await;
+    res.assert_status_ok();
+
+    // Second import dry_run + source_wins — should report would_update
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false,
+            "dry_run": true,
+            "conflict_policy": "source_wins"
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(
+        results.iter().all(|r| r["status"] == "would_update"),
+        "dry_run source_wins should produce 'would_update'"
+    );
+}
+
+#[tokio::test]
+async fn import_zotero_manual_reports_skipped_when_no_diffs() {
+    // The mock DB items are imported, then re-imported with manual policy.
+    // Because the data is identical (same mock DB), the second import should
+    // report "skipped" (no diffs between source and local).
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // First import
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["status"] == "created")
+    );
+
+    // Second import with manual policy — no changes in source, so expect "skipped"
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false,
+            "conflict_policy": "manual"
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    // Identical source data ⇒ no diffs ⇒ manual policy skips silently.
+    for r in results {
+        assert_eq!(
+            r["status"].as_str().unwrap(),
+            "skipped",
+            "manual policy with no diffs should produce 'skipped'"
+        );
+    }
+}
+
+/// Create a Zotero mock DB with only the journal article (has DOI), and also
+/// pre-create the matching work via the API so that the zotero_key path is NOT
+/// set (no import provenance). The subsequent Zotero import must go through the
+/// DOI/cite_key dedup path (handle_doi_existing).
+#[tokio::test]
+async fn import_zotero_doi_path_skip() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // Pre-create the article via the works API (no Zotero provenance).
+    // The mock article has DOI "10.1234/test.article".
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "title": "Test Article",
+            "work_type": "paper",
+            "authors": ["Alice Smith"],
+            "year": 2023,
+            "venue": "Test Journal",
+            "external_ids": { "doi": "10.1234/test.article" }
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    // Now import from Zotero — the article should be matched by DOI (not zotero_key)
+    // and skipped (default policy = skip).
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+
+    // The article (DOI match) should be skipped; the book (no DOI pre-existing) created.
+    let article = results.iter().find(|r| {
+        r["cite_key"]
+            .as_str()
+            .map(|k| k.contains("smith") || k.contains("2023"))
+            .unwrap_or(false)
+    });
+    assert!(article.is_some(), "should find article result");
+    assert_eq!(
+        article.unwrap()["status"],
+        "skipped",
+        "DOI-matched article should be skipped"
+    );
+}
+
+#[tokio::test]
+async fn import_zotero_doi_path_source_wins() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // Pre-create the article via the works API (no Zotero provenance).
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "title": "Test Article Old Title",
+            "work_type": "paper",
+            "authors": ["Alice Smith"],
+            "year": 2023,
+            "external_ids": { "doi": "10.1234/test.article" }
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    // Import with source_wins — the article should be updated via DOI path.
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false,
+            "conflict_policy": "source_wins"
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+
+    // The article should be updated; the book should be created (new).
+    let article = results.iter().find(|r| {
+        r["status"].as_str() == Some("updated") || r["status"].as_str() == Some("created")
+    });
+    assert!(
+        article.is_some(),
+        "should have at least one updated or created result"
+    );
+
+    // Verify that the article was updated (source_wins live mode).
+    let updated = results.iter().filter(|r| r["status"] == "updated").count();
+    assert!(
+        updated >= 1,
+        "at least the DOI-matched article should be 'updated'"
+    );
+}
+
+#[tokio::test]
+async fn import_zotero_doi_path_manual() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // Pre-create the article with identical content (no diffs expected).
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "title": "Test Article",
+            "work_type": "paper",
+            "authors": ["Alice Smith"],
+            "year": 2023,
+            "venue": "Test Journal",
+            "external_ids": { "doi": "10.1234/test.article" }
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    // Import with manual policy — should report skipped or conflict for article.
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false,
+            "conflict_policy": "manual"
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+
+    // Find the article result — it should be skipped or conflict from DOI path.
+    let doi_result = results.iter().find(|r| {
+        let ck = r["cite_key"].as_str().unwrap_or("");
+        ck.contains("smith") || ck.contains("2023")
+    });
+    assert!(doi_result.is_some(), "should find article result");
+    let status = doi_result.unwrap()["status"].as_str().unwrap();
+    assert_eq!(
+        status, "skipped",
+        "manual policy on DOI path with matching fields should yield 'skipped'"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_create_from_link_is_exclusive() {
+    let (server, _tmp) = setup_server();
+    let first = server
+        .post("/api/vault/index/create-from-link")
+        .json(&serde_json::json!({
+            "target_raw": "Concurrent Link",
+            "folder": "notes",
+            "body": "first"
+        }));
+    let second = server
+        .post("/api/vault/index/create-from-link")
+        .json(&serde_json::json!({
+            "target_raw": "Concurrent Link",
+            "folder": "notes",
+            "body": "second"
+        }));
+    let (first, second) = tokio::join!(first, second);
+    let statuses = [first.status_code(), second.status_code()];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CREATED)
+            .count(),
+        1
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CONFLICT)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn concurrent_academic_work_create_is_exclusive() {
+    let (server, _tmp) = setup_server();
+    let request = serde_json::json!({
+        "work_type": "paper",
+        "title": "Concurrent Academic Work"
+    });
+    let first = server.post("/api/vault/academic/works").json(&request);
+    let second = server.post("/api/vault/academic/works").json(&request);
+    let (first, second) = tokio::join!(first, second);
+    let statuses = [first.status_code(), second.status_code()];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CREATED)
+            .count(),
+        1
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CONFLICT)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn concurrent_academic_updates_return_one_stale_conflict() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Concurrent Update"
+        }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["id"].as_str().unwrap();
+    let first = server
+        .put(&format!("/api/vault/academic/works/by-id/{id}"))
+        .json(&serde_json::json!({ "rating": 4 }));
+    let second = server
+        .put(&format!("/api/vault/academic/works/by-id/{id}"))
+        .json(&serde_json::json!({ "rating": 5 }));
+    let (first, second) = tokio::join!(first, second);
+    let statuses = [first.status_code(), second.status_code()];
+    assert_eq!(
+        statuses.iter().filter(|status| status.is_success()).count(),
+        1
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CONFLICT)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn folder_move_waits_for_descendant_mutation_guard() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("source")).unwrap();
+            fs::write(
+                root.join("source/page.md"),
+                "---\nid: 01960000-0000-7000-8000-000000000001\ntitle: Page\n---\nbody",
+            )
+            .unwrap();
+        })
+        .build();
+    let (server, _tmp, state) = fixture.into_parts();
+    let descendant = clep_api::vault::path::VaultPath::new("source/page.md").unwrap();
+    let guard = state
+        .mutation_coordinator
+        .lock_paths(std::slice::from_ref(&descendant))
+        .await;
+    let request = server
+        .post("/api/vault/folders-move/source")
+        .json(&serde_json::json!({ "destination": "destination" }));
+    let mut request = Box::pin(async move { request.await });
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut request)
+            .await
+            .is_err(),
+        "folder move completed while a descendant mutation guard was held"
+    );
+
+    drop(guard);
+    let response = tokio::time::timeout(std::time::Duration::from_secs(1), &mut request)
+        .await
+        .expect("folder move remained blocked after descendant guard released");
+    response.assert_status(StatusCode::OK);
+    assert!(state.vault.root().join("destination/page.md").is_file());
+}
+
+#[tokio::test]
+async fn create_recipe_page_without_body_writes_the_section_scaffold() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/pages/recipes/scaffold.md")
+        .json(&serde_json::json!({ "title": "Scaffold", "kind": "RECIPE" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    let res = server.get("/api/vault/pages/recipes/scaffold.md").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["body"], "## Ingredients\n\n## Steps\n\n## Notes\n");
+}
+
+#[tokio::test]
+async fn create_recipe_page_keeps_a_supplied_body() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/pages/recipes/supplied.md")
+        .json(&serde_json::json!({
+            "title": "Supplied",
+            "kind": "RECIPE",
+            "body": "Already written.\n"
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    let res = server.get("/api/vault/pages/recipes/supplied.md").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["body"], "Already written.\n");
+}
+
+#[tokio::test]
+async fn create_non_recipe_page_without_body_stays_empty() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/pages/notes/plain.md")
+        .json(&serde_json::json!({ "title": "Plain", "kind": "NOTE" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    let res = server.get("/api/vault/pages/notes/plain.md").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["body"], "");
+}
+
+// ---------------------------------------------------------------------------
+// `project` must name a slug some PROJECT page declares
+// ---------------------------------------------------------------------------
+
+fn assert_unknown_project(error: &serde_json::Value, slug: &str) {
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains(&format!("unknown project: {slug}"))),
+        "error should name the unknown project: {error}"
+    );
+}
+
+#[tokio::test]
+async fn create_page_rejects_a_project_no_project_page_declares() {
+    let (server, tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/pages/notes/orphan.md")
+        .json(&serde_json::json!({ "title": "Orphan", "kind": "NOTE", "project": "ghost" }))
+        .await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert_unknown_project(&res.json(), "ghost");
+    assert!(
+        !tmp.path().join("vault/notes/ghost").exists()
+            && !tmp.path().join("vault/notes/orphan.md").exists(),
+        "a rejected create must write nothing"
+    );
+}
+
+#[tokio::test]
+async fn create_page_accepts_a_project_a_project_page_declares() {
+    let (server, tmp) = setup_server();
+    support::seed_project(&server, "atlas").await;
+
+    let res = server
+        .post("/api/vault/pages/notes/filed.md")
+        .json(&serde_json::json!({ "title": "Filed", "kind": "NOTE", "project": "atlas" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["meta"]["project"], "atlas", "{body}");
+    assert_eq!(body["project"], "atlas", "{body}");
+    // An explicit-path create keeps the path it was given; projection under
+    // `notes/atlas/` is the caller's job (the MCP tool derives it).
+    assert_eq!(body["path"], "notes/filed.md", "{body}");
+    assert!(
+        fs::read_to_string(tmp.path().join("vault/notes/filed.md"))
+            .unwrap()
+            .contains("atlas")
+    );
+}
+
+#[tokio::test]
+async fn a_project_page_may_declare_its_own_slug_on_create() {
+    let (server, _tmp) = setup_server();
+
+    // Declared PROJECT kind: the page defines the project.
+    let res = server
+        .post("/api/vault/pages/projects/fresh/hub.md")
+        .json(&serde_json::json!({ "title": "Fresh", "kind": "PROJECT", "project": "fresh" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    assert_eq!(res.json::<serde_json::Value>()["meta"]["project"], "fresh");
+
+    // Kind inferred from the `projects/` folder, none declared.
+    let res = server
+        .post("/api/vault/pages/projects/inferred/hub.md")
+        .json(&serde_json::json!({ "title": "Inferred", "project": "inferred" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    assert_eq!(
+        res.json::<serde_json::Value>()["meta"]["project"],
+        "inferred"
+    );
+}
+
+#[tokio::test]
+async fn assign_rejects_an_undeclared_project() {
+    let (server, tmp) = setup_server();
+    server
+        .post("/api/vault/pages/notes/loose.md")
+        .json(&serde_json::json!({ "title": "Loose", "kind": "NOTE" }))
+        .await
+        .assert_status(StatusCode::CREATED);
+    let before = fs::read_to_string(tmp.path().join("vault/notes/loose.md")).unwrap();
+
+    let res = server
+        .post("/api/vault/pages-assign/notes/loose.md")
+        .json(&serde_json::json!({ "project": "ghost" }))
+        .await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert_unknown_project(&res.json(), "ghost");
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("vault/notes/loose.md")).unwrap(),
+        before,
+        "a rejected assignment must not touch the page"
+    );
+    assert!(!tmp.path().join("vault/notes/ghost").exists());
+}
+
+#[tokio::test]
+async fn assign_declaring_project_kind_and_a_new_slug_together_succeeds() {
+    let (server, tmp) = setup_server();
+    server
+        .post("/api/vault/pages/notes/becoming.md")
+        .json(&serde_json::json!({ "title": "Becoming", "kind": "NOTE" }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    let res = server
+        .post("/api/vault/pages-assign/notes/becoming.md")
+        .json(&serde_json::json!({ "kind": "PROJECT", "project": "brand-new" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["kind"], "PROJECT", "{body}");
+    assert_eq!(body["project"], "brand-new", "{body}");
+    assert_eq!(body["path"], "projects/brand-new/becoming.md", "{body}");
+    assert!(
+        tmp.path()
+            .join("vault/projects/brand-new/becoming.md")
+            .exists()
+    );
+
+    // The slug is declared now, so an ordinary page may name it.
+    let res = server
+        .post("/api/vault/pages/notes/follower.md")
+        .json(&serde_json::json!({ "title": "Follower", "kind": "NOTE", "project": "brand-new" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn assign_bulk_rejects_an_undeclared_project_and_changes_nothing() {
+    let (server, tmp) = setup_server();
+    for (path, kind) in [("notes/plain.md", "NOTE"), ("projects/hub.md", "PROJECT")] {
+        server
+            .post(&format!("/api/vault/pages/{path}"))
+            .json(&serde_json::json!({ "title": path, "kind": kind }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+    let vault_root = tmp.path().join("vault");
+    let note_before = fs::read_to_string(vault_root.join("notes/plain.md")).unwrap();
+    let hub_before = fs::read_to_string(vault_root.join("projects/hub.md")).unwrap();
+
+    let res = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["projects/hub.md", "notes/plain.md"],
+            "project": "ghost"
+        }))
+        .await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert_unknown_project(&res.json(), "ghost");
+
+    assert_eq!(
+        fs::read_to_string(vault_root.join("notes/plain.md")).unwrap(),
+        note_before,
+        "the NOTE must be untouched"
+    );
+    assert_eq!(
+        fs::read_to_string(vault_root.join("projects/hub.md")).unwrap(),
+        hub_before,
+        "the PROJECT page must be untouched even though it alone would have been allowed"
+    );
+    assert!(!vault_root.join("notes/ghost").exists());
+    assert!(!vault_root.join("projects/ghost").exists());
+}
+
+#[tokio::test]
+async fn assign_bulk_of_project_pages_may_declare_a_new_slug() {
+    let (server, tmp) = setup_server();
+    for path in ["projects/hub.md", "projects/second.md"] {
+        server
+            .post(&format!("/api/vault/pages/{path}"))
+            .json(&serde_json::json!({ "title": path, "kind": "PROJECT" }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+
+    let res = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["projects/hub.md", "projects/second.md"],
+            "project": "minted"
+        }))
+        .await;
+    res.assert_status_ok();
+    let vault_root = tmp.path().join("vault");
+    assert!(vault_root.join("projects/minted/hub.md").exists());
+    assert!(vault_root.join("projects/minted/second.md").exists());
+}

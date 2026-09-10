@@ -11,10 +11,10 @@ use std::{
 
 use clap::{Parser, Subcommand};
 
+use clep_api::backup::create_backup;
+use clep_api::vault::init::init_vault;
+use clep_api::{ServeOverrides, open_vault_and_index, run_server};
 use clep_doctor::{self as doctor, DoctorOpts};
-use clepsydra::backup::create_backup;
-use clepsydra::vault::init::init_vault;
-use clepsydra::{ServeOverrides, open_vault_and_index, run_server};
 use new_note_command::create_new_note;
 
 #[derive(Debug, Parser)]
@@ -417,9 +417,8 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         }
         Commands::Backup { destination } => {
             let cwd = std::env::current_dir()?;
-            let (settings, config_path) = clepsydra::Settings::load(&cwd)?;
-            let vault_root =
-                clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+            let (settings, config_path) = clep_api::Settings::load(&cwd)?;
+            let vault_root = clep_api::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
             let archive = create_backup(&vault_root, &destination, chrono::Utc::now())?;
             println!("{}", archive.display());
             Ok(0)
@@ -487,7 +486,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         }
         Commands::OpenUrl { url, print } => {
             let cwd = std::env::current_dir()?;
-            let (settings, _config_path) = clepsydra::Settings::load(&cwd)?;
+            let (settings, _config_path) = clep_api::Settings::load(&cwd)?;
             let scheme = if settings.server.tls.enabled {
                 "https"
             } else {
@@ -497,7 +496,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 "{scheme}://{}:{}",
                 settings.server.host, settings.server.port
             );
-            let target = clepsydra::deeplink::deeplink_http_url(&base, &url);
+            let target = clep_api::deeplink::deeplink_http_url(&base, &url);
             if print || !cfg!(target_os = "macos") {
                 println!("{target}");
             } else {
@@ -528,7 +527,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             // resolved) via the same config path the server uses, so inbound
             // wikilinks get rewritten on rename.
             let (vault, mut index) = open_vault_and_index()?;
-            let report = clepsydra::vault::relabel::relabel(&vault, &mut index, dry_run)?;
+            let report = clep_api::vault::relabel::relabel(&vault, &mut index, dry_run)?;
             println!(
                 "relabel: {} renamed, {} skipped{}",
                 report.renamed,
@@ -539,15 +538,14 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         }
         Commands::Migrate { write } => {
             let cwd = std::env::current_dir()?;
-            let (settings, config_path) = clepsydra::Settings::load(&cwd)?;
-            let vault_root =
-                clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
-            let vault = clepsydra::vault::Vault::open(&vault_root)?;
+            let (settings, config_path) = clep_api::Settings::load(&cwd)?;
+            let vault_root = clep_api::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+            let vault = clep_api::vault::Vault::open(&vault_root)?;
 
             println!(
                 "Converting legacy YAML frontmatter to TOML. YAML comments inside frontmatter are not preserved — commit your vault before running with --write."
             );
-            let report = clepsydra::vault::migrate::migrate(&vault, write);
+            let report = clep_api::vault::migrate::migrate(&vault, write);
             let verb = if report.dry_run {
                 "would convert"
             } else {
@@ -574,10 +572,10 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         Commands::Cas { command } => match command {
             CasCommands::Backfill { write } => {
                 let cwd = std::env::current_dir()?;
-                let (settings, config_path) = clepsydra::Settings::load(&cwd)?;
+                let (settings, config_path) = clep_api::Settings::load(&cwd)?;
                 let vault_root =
-                    clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
-                let vault = clepsydra::vault::Vault::open(&vault_root)?;
+                    clep_api::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+                let vault = clep_api::vault::Vault::open(&vault_root)?;
                 let cas_path = vault.cas_root();
                 let cas_db = cas_path.join("cas.db");
 
@@ -585,7 +583,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                     "Backfilling {{hash, type}} blob entries in archive pages from {}.",
                     cas_db.display()
                 );
-                let report = clepsydra::vault::archive_backfill::backfill(&vault, &cas_db, write);
+                let report = clep_api::vault::archive_backfill::backfill(&vault, &cas_db, write);
                 let verb = if report.dry_run {
                     "would update"
                 } else {
@@ -611,10 +609,10 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             }
             CasCommands::Rebuild { write } => {
                 let cwd = std::env::current_dir()?;
-                let (settings, config_path) = clepsydra::Settings::load(&cwd)?;
+                let (settings, config_path) = clep_api::Settings::load(&cwd)?;
                 let vault_root =
-                    clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
-                let vault = clepsydra::vault::Vault::open(&vault_root)?;
+                    clep_api::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+                let vault = clep_api::vault::Vault::open(&vault_root)?;
                 let cas_path = vault.cas_root();
 
                 println!(
@@ -622,12 +620,12 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                     cas_path.join("cas.db").display(),
                     cas_path.display()
                 );
-                let scan = clepsydra::vault::cas_scan::scan_archive_refs(&vault);
+                let scan = clep_api::vault::cas_scan::scan_archive_refs(&vault);
                 for warning in &scan.warnings {
                     println!("  warning {warning}");
                 }
 
-                let store = clepsydra::vault::cas::ContentStore::open(&cas_path)?;
+                let store = clep_api::vault::cas::ContentStore::open(&cas_path)?;
                 let report = store.rebuild_metadata(&scan, write)?;
                 for hash in &report.untyped_blobs {
                     println!("  untyped {hash}");
@@ -662,15 +660,15 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             }
             CasCommands::Migrate { from, write } => {
                 let cwd = std::env::current_dir()?;
-                let (settings, config_path) = clepsydra::Settings::load(&cwd)?;
+                let (settings, config_path) = clep_api::Settings::load(&cwd)?;
                 let vault_root =
-                    clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
-                let vault = clepsydra::vault::Vault::open(&vault_root)?;
+                    clep_api::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+                let vault = clep_api::vault::Vault::open(&vault_root)?;
 
                 let source = from.unwrap_or_else(|| {
-                    clepsydra::expand_tilde(clepsydra::vault::cas_migrate::LEGACY_DEFAULT_CAS_PATH)
+                    clep_api::expand_tilde(clep_api::vault::cas_migrate::LEGACY_DEFAULT_CAS_PATH)
                         .unwrap_or_else(|| {
-                            PathBuf::from(clepsydra::vault::cas_migrate::LEGACY_DEFAULT_CAS_PATH)
+                            PathBuf::from(clep_api::vault::cas_migrate::LEGACY_DEFAULT_CAS_PATH)
                         })
                 });
 
@@ -679,7 +677,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                     source.display(),
                     vault.cas_root().display()
                 );
-                let report = clepsydra::vault::cas_migrate::migrate(&vault, &source, write)?;
+                let report = clep_api::vault::cas_migrate::migrate(&vault, &source, write)?;
                 let verb = if report.dry_run {
                     "would copy"
                 } else {
@@ -732,7 +730,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 println!(
                     "Recoding legacy TASK/CYCLE pages to petname codes. This is a one-time, irreversible clean break — commit or back up the vault before running with --write."
                 );
-                let report = clepsydra::vault::recode::recode(&vault, &mut index, write)?;
+                let report = clep_api::vault::recode::recode(&vault, &mut index, write)?;
                 for (old, new) in &report.renamed {
                     println!("  {old} -> {new}");
                 }
@@ -787,7 +785,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             ours,
             theirs,
             pathname: _,
-        } => Ok(clepsydra::vault::gitsync::merge_driver::run_cli(
+        } => Ok(clep_api::vault::gitsync::merge_driver::run_cli(
             &base, &ours, &theirs,
         )),
         Commands::Grep {
@@ -797,28 +795,28 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             json,
         } => {
             let (_vault, index) = open_vault_and_index()?;
-            let results = clepsydra::vault::grep::run(&index, &query, limit, raw)?;
+            let results = clep_api::vault::grep::run(&index, &query, limit, raw)?;
             if json {
-                clepsydra::vault::grep::render_json(&results, &mut std::io::stdout().lock())?;
+                clep_api::vault::grep::render_json(&results, &mut std::io::stdout().lock())?;
             } else {
                 let mut stdout = anstream::AutoStream::auto(std::io::stdout().lock());
-                clepsydra::vault::grep::render_human(
+                clep_api::vault::grep::render_human(
                     &results,
                     &mut stdout,
-                    clepsydra::VESSEL_ACCENT,
+                    clep_api::VESSEL_ACCENT,
                 )?;
             }
             Ok(0)
         }
         Commands::Tree { json } => {
             let (vault, index) = open_vault_and_index()?;
-            let meta = clepsydra::vault::tree::load_note_meta(&index)?;
-            let root = clepsydra::vault::tree::build(&vault, &meta);
+            let meta = clep_api::vault::tree::load_note_meta(&index)?;
+            let root = clep_api::vault::tree::build(&vault, &meta);
             if json {
-                clepsydra::vault::tree::render_json(&root, &mut std::io::stdout().lock())?;
+                clep_api::vault::tree::render_json(&root, &mut std::io::stdout().lock())?;
             } else {
                 let mut stdout = anstream::AutoStream::auto(std::io::stdout().lock());
-                clepsydra::vault::tree::render_human(&root, &mut stdout, clepsydra::VESSEL_ACCENT)?;
+                clep_api::vault::tree::render_human(&root, &mut stdout, clep_api::VESSEL_ACCENT)?;
             }
             Ok(0)
         }
@@ -866,7 +864,7 @@ mod cli_tests {
             ),
         )
         .unwrap();
-        drop(clepsydra::vault::cas::ContentStore::open(&cas).unwrap());
+        drop(clep_api::vault::cas::ContentStore::open(&cas).unwrap());
         std::fs::write(
             root.join("config.toml"),
             format!("[vault]\nroot = \"{}\"\n", root.display()),
