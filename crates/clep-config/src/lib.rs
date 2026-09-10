@@ -421,6 +421,7 @@ mod tests {
         assert_feature_defaults(Settings::load_from(&config).unwrap().features);
     }
 
+    #[serial_test::serial]
     #[test]
     fn settings_read_independent_feature_values() {
         let tmp = tempfile::TempDir::new().unwrap();
