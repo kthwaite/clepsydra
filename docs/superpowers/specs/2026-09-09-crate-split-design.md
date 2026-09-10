@@ -130,6 +130,9 @@ lives inside `clep-api` (it re-exports `clep-vault`, `clep-index`,
 rewritten those call sites to depend on `clep-vault` directly yet.
 Rewriting `clep-mcp` to depend on the leaf crates it actually needs,
 instead of reaching through `clep-api`, is a follow-up (see §5).
+This edge is not new: `clep-mcp` has carried the server library as a
+normal dependency since its Phase 1 extraction (a72901fd, when it was
+still `clepsydra`); Phase 3 only renamed the dependency to `clep-api`.
 
 Dev-dependency edges, as measured (`cargo tree -e normal --depth 1`
 gives the table above; these are the `[dev-dependencies]` edges on top of
