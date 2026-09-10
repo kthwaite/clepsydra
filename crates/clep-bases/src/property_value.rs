@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use thiserror::Error;
 
-use super::base::{PropertyDefinition, PropertyType};
+use crate::base::{PropertyDefinition, PropertyType};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum PropertyValueError {
@@ -183,7 +183,7 @@ fn datetime_value(
 mod tests {
     use serde_json::{Value, json};
 
-    use crate::vault::base::{PropertyDefinition, PropertyType};
+    use crate::base::{PropertyDefinition, PropertyType};
 
     use super::coerce_property_value;
 

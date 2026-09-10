@@ -1,9 +1,9 @@
 use std::fs;
 
-use clepsydra::vault::Vault;
-use clepsydra::vault::base::{BaseLinkableProperties, BaseRegistry, effective_linkable_properties};
-use clepsydra::vault::index::{ConfigLinkableProperties, VaultIndex, linkable_epoch};
-use clepsydra::vault::path::VaultPath;
+use clep_bases::base::{BaseLinkableProperties, BaseRegistry, effective_linkable_properties};
+use clep_index::index::{ConfigLinkableProperties, VaultIndex, linkable_epoch};
+use clep_vault::Vault;
+use clep_vault::path::VaultPath;
 
 const SERIES_PAGE: &str = "+++\nid = \"0190f8a0-0000-7000-8000-0000000000e1\"\ntitle = \"Book\"\nseries = [\"[[Solar Cycle]]\"]\n+++\nbody\n";
 const SERIES_BASE: &str = "name = \"Reading\"\n\n[properties]\nseries = { type = \"relation\" }\n";

@@ -2,15 +2,15 @@ use std::fs;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use clepsydra::vault::Vault;
-use clepsydra::vault::config::DisambiguationStrategy;
-use clepsydra::vault::derivation::{Deriver, IndexedPage};
-use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex};
-use clepsydra::vault::init::init_vault;
-use clepsydra::vault::path::VaultPath;
-use clepsydra::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
-use clepsydra::vault::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
-use clepsydra::vault::tree::load_note_meta;
+use clep_bases::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
+use clep_index::derivation::{Deriver, IndexedPage};
+use clep_index::index::{IndexError, UnresolvedReason, VaultIndex};
+use clep_index::tree::load_note_meta;
+use clep_vault::Vault;
+use clep_vault::config::DisambiguationStrategy;
+use clep_vault::init::init_vault;
+use clep_vault::path::VaultPath;
+use clep_vault::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
 use rusqlite::Connection;
 use tempfile::TempDir;
 

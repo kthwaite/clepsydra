@@ -1,9 +1,9 @@
-use crate::vault::base::{
+use crate::base::{
     BaseDefinition, CandidateLinkTargets, Filter, MetaFilterContext, Op, ViewDefinition,
     candidate_link_targets, filter_matches_meta, fixed_candidate_comparison_matches,
 };
-use crate::vault::page::PageMeta;
-use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
+use crate::query::{QueryContext, ResolvedField, SysField, resolve_field};
+use clep_vault::page::PageMeta;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -629,13 +629,13 @@ fn collect_contributors(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::Vault;
-    use crate::vault::base::{BaseDefinition, Op, parse_base};
-    use crate::vault::base_embed::{EmbedOverrides, validate_embed_overrides};
-    use crate::vault::index::VaultIndex;
-    use crate::vault::kind::Kind;
-    use crate::vault::page::PageMeta;
-    use crate::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
+    use crate::base::{BaseDefinition, Op, parse_base};
+    use crate::base_embed::{EmbedOverrides, validate_embed_overrides};
+    use crate::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
+    use clep_index::index::VaultIndex;
+    use clep_vault::Vault;
+    use clep_vault::kind::Kind;
+    use clep_vault::page::PageMeta;
     use std::path::Path;
 
     fn base(source: &str) -> BaseDefinition {
@@ -893,7 +893,7 @@ layout = "table"
         let vault = Vault::open(temp.path()).unwrap();
         let mut index = VaultIndex::open(&temp.path().join(".clepsydra/index.db"))
             .unwrap()
-            .with_linkable_properties(Box::new(crate::vault::base::BaseLinkableProperties));
+            .with_linkable_properties(Box::new(crate::base::BaseLinkableProperties));
         index.build(&vault).unwrap();
         index.resolve_links().unwrap();
         let base = base(SOURCE);

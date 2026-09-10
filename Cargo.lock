@@ -535,6 +535,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "clep-bases"
+version = "0.0.0"
+dependencies = [
+ "blake3",
+ "chrono",
+ "clep-index",
+ "clep-test-support",
+ "clep-vault",
+ "pulldown-cmark",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "toml 0.8.23",
+ "toml_edit",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
 name = "clep-client"
 version = "0.0.0"
 dependencies = [
@@ -665,6 +686,7 @@ dependencies = [
  "blake3",
  "bytes",
  "chrono",
+ "clep-bases",
  "clep-config",
  "clep-index",
  "clep-test-support",

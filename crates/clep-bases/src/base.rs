@@ -14,8 +14,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::vault::Vault;
-use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+use crate::query::{QueryContext, ResolvedField, resolve_field};
+use clep_vault::Vault;
 use utoipa::ToSchema;
 
 /// System fields addressable in filters/sorts/columns without declaration.
@@ -547,7 +547,7 @@ pub type CandidateLinkTargets = HashMap<String, Vec<CandidateLinkTarget>>;
 /// Public for the workspace split; not part of the stable API.
 pub fn candidate_link_targets<E>(
     base: &BaseDefinition,
-    meta: &crate::vault::page::PageMeta,
+    meta: &clep_vault::page::PageMeta,
     mut resolve_target_id: impl FnMut(&str) -> Result<Option<String>, E>,
 ) -> Result<CandidateLinkTargets, E> {
     let mut targets = CandidateLinkTargets::new();
@@ -567,13 +567,12 @@ pub fn candidate_link_targets<E>(
                 .collect(),
             _ => Vec::new(),
         };
-        let links = crate::vault::link::extract_property_refs(field, &values)
+        let links = clep_vault::link::extract_property_refs(field, &values)
             .into_iter()
             .map(|link| {
-                let target_canonical =
-                    crate::vault::canonical::CanonicalName::new(&link.target_raw)
-                        .as_str()
-                        .to_owned();
+                let target_canonical = clep_vault::canonical::CanonicalName::new(&link.target_raw)
+                    .as_str()
+                    .to_owned();
                 let target_id = resolve_target_id(&target_canonical)?;
                 Ok(CandidateLinkTarget {
                     target_canonical,
@@ -588,7 +587,7 @@ pub fn candidate_link_targets<E>(
 
 pub(crate) struct MetaFilterContext<'a> {
     pub base: &'a BaseDefinition,
-    pub meta: &'a crate::vault::page::PageMeta,
+    pub meta: &'a clep_vault::page::PageMeta,
     pub path: &'a str,
     pub word_count: Option<u32>,
     pub journal_date: Option<chrono::NaiveDate>,
@@ -608,7 +607,7 @@ pub(crate) struct MetaFilterContext<'a> {
 /// evaluation date (an API request's clock) call [`base_matches_meta_on`].
 pub fn base_matches_meta(
     base: &BaseDefinition,
-    meta: &crate::vault::page::PageMeta,
+    meta: &clep_vault::page::PageMeta,
     path: &str,
 ) -> bool {
     base_matches_meta_on(base, meta, path, chrono::Utc::now().date_naive())
@@ -617,7 +616,7 @@ pub fn base_matches_meta(
 /// [`base_matches_meta`] with an explicit evaluation date.
 pub fn base_matches_meta_on(
     base: &BaseDefinition,
-    meta: &crate::vault::page::PageMeta,
+    meta: &clep_vault::page::PageMeta,
     path: &str,
     today: chrono::NaiveDate,
 ) -> bool {
@@ -656,7 +655,7 @@ pub(crate) fn fixed_candidate_comparison_matches(
     value: &serde_json::Value,
     today: chrono::NaiveDate,
 ) -> Option<bool> {
-    use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
+    use crate::query::{QueryContext, ResolvedField, SysField, resolve_field};
 
     let context = QueryContext::for_base(base);
     let resolved = resolve_field(field, &context).ok()?;
@@ -721,7 +720,7 @@ fn cmp_matches_meta(
     value: &serde_json::Value,
     context: &MetaFilterContext<'_>,
 ) -> bool {
-    use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
+    use crate::query::{QueryContext, ResolvedField, SysField, resolve_field};
 
     let query_context = QueryContext::for_base(context.base);
     let Ok(resolved) = resolve_field(field, &query_context) else {
@@ -729,8 +728,8 @@ fn cmp_matches_meta(
     };
     match resolved {
         ResolvedField::Sys(SysField::Tags) => {
-            let kind = crate::vault::kind::resolve(context.path, context.meta.kind).0;
-            let effective = crate::vault::kind::effective_tags(kind, &context.meta.tags);
+            let kind = clep_vault::kind::resolve(context.path, context.meta.kind).0;
+            let effective = clep_vault::kind::effective_tags(kind, &context.meta.tags);
             membership_matches(&effective, op, value, false)
         }
         ResolvedField::Sys(SysField::Aliases) => {
@@ -761,8 +760,8 @@ fn cmp_matches_meta(
 /// `updated_at` are text everywhere else, but they hold ISO timestamps, so
 /// relative-date predicates read them as datetimes — mirroring
 /// `SysField::supports_relative_date` so SQL and in-memory stay in parity.
-fn system_match_type(sys: crate::vault::query::SysField, op: Op) -> PropertyType {
-    use crate::vault::query::SysField;
+fn system_match_type(sys: crate::query::SysField, op: Op) -> PropertyType {
+    use crate::query::SysField;
 
     if op.is_relative_date() && sys.supports_relative_date() {
         return match sys {
@@ -774,10 +773,10 @@ fn system_match_type(sys: crate::vault::query::SysField, op: Op) -> PropertyType
 }
 
 fn system_scalar<'a>(
-    sys: crate::vault::query::SysField,
+    sys: crate::query::SysField,
     context: &'a MetaFilterContext<'_>,
 ) -> Option<Comparable<'a>> {
-    use crate::vault::query::SysField;
+    use crate::query::SysField;
 
     match sys {
         SysField::Id => Some(Comparable::Text(Cow::Owned(context.meta.id.to_string()))),
@@ -788,7 +787,7 @@ fn system_scalar<'a>(
             .as_deref()
             .map(|value| Comparable::Text(Cow::Borrowed(value))),
         SysField::Kind => Some(Comparable::Text(Cow::Owned(
-            crate::vault::kind::resolve(context.path, context.meta.kind)
+            clep_vault::kind::resolve(context.path, context.meta.kind)
                 .0
                 .as_str()
                 .to_string(),
@@ -844,9 +843,9 @@ fn membership_contains(current: &[String], expected: &str, canonicalize: bool) -
     if !canonicalize {
         return current.iter().any(|item| item == expected);
     }
-    let expected = crate::vault::canonical::CanonicalName::from_title(expected);
+    let expected = clep_vault::canonical::CanonicalName::from_title(expected);
     current.iter().any(|item| {
-        crate::vault::canonical::CanonicalName::from_title(item).as_str() == expected.as_str()
+        clep_vault::canonical::CanonicalName::from_title(item).as_str() == expected.as_str()
     })
 }
 
@@ -878,7 +877,7 @@ fn property_matches(
         let Some(expected) = value.as_str() else {
             return false;
         };
-        let expected = crate::vault::link::normalize_links_to_target(expected);
+        let expected = clep_vault::link::normalize_links_to_target(expected);
         return link_targets.is_some_and(|targets| {
             targets.iter().any(|target| {
                 target.target_id.as_deref() == Some(expected.target_id.as_str())
@@ -1190,7 +1189,7 @@ impl BaseRegistry {
     }
 }
 
-use crate::vault::index::{LinkablePropertiesProvider, merge_linkable_properties};
+use clep_index::index::{LinkablePropertiesProvider, merge_linkable_properties};
 
 /// Config, built-ins and every `type = "relation"` property declared in
 /// `bases/*.base.toml`. The server, LSP and doctor inject this into the index.
@@ -1492,11 +1491,8 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
         }
         if let Some(group_by) = &view.group_by
             && matches!(
-                crate::vault::query::resolve_field(
-                    group_by,
-                    &crate::vault::query::QueryContext::for_base(base)
-                ),
-                Err(crate::vault::query::QueryError::ProjectionOnlyBody)
+                crate::query::resolve_field(group_by, &crate::query::QueryContext::for_base(base)),
+                Err(crate::query::QueryError::ProjectionOnlyBody)
             )
         {
             push(
@@ -1505,7 +1501,7 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                 format!(
                     "view `{}` group: {}",
                     view.name,
-                    crate::vault::query::QueryError::ProjectionOnlyBody
+                    crate::query::QueryError::ProjectionOnlyBody
                 ),
             );
         }
@@ -1528,11 +1524,8 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
         for (aggregate_index, aggregate) in view.aggregates.iter().enumerate() {
             if aggregate.field.as_deref().is_some_and(|field| {
                 matches!(
-                    crate::vault::query::resolve_field(
-                        field,
-                        &crate::vault::query::QueryContext::for_base(base)
-                    ),
-                    Err(crate::vault::query::QueryError::ProjectionOnlyBody)
+                    crate::query::resolve_field(field, &crate::query::QueryContext::for_base(base)),
+                    Err(crate::query::QueryError::ProjectionOnlyBody)
                 )
             }) {
                 push(
@@ -1543,7 +1536,7 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                     format!(
                         "view `{}` aggregate: {}",
                         view.name,
-                        crate::vault::query::QueryError::ProjectionOnlyBody
+                        crate::query::QueryError::ProjectionOnlyBody
                     ),
                 );
             }
@@ -1561,19 +1554,16 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                 );
             }
             if let Some(field) = aggregate.field.as_deref()
-                && let Ok(resolved) = crate::vault::query::resolve_field(
-                    field,
-                    &crate::vault::query::QueryContext::for_base(base),
-                )
+                && let Ok(resolved) =
+                    crate::query::resolve_field(field, &crate::query::QueryContext::for_base(base))
             {
                 let path = Some(format!(
                     "views[{view_index}].aggregates[{aggregate_index}].field"
                 ));
                 if matches!(
                     resolved,
-                    crate::vault::query::ResolvedField::Sys(
-                        crate::vault::query::SysField::Tags
-                            | crate::vault::query::SysField::Aliases
+                    crate::query::ResolvedField::Sys(
+                        crate::query::SysField::Tags | crate::query::SysField::Aliases
                     )
                 ) {
                     push(
@@ -1587,8 +1577,8 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                     );
                 } else if aggregate.function.is_fold() {
                     let ty = match resolved {
-                        crate::vault::query::ResolvedField::Prop { ty, .. } => ty,
-                        crate::vault::query::ResolvedField::Sys(sys) => sys.property_type(),
+                        crate::query::ResolvedField::Prop { ty, .. } => ty,
+                        crate::query::ResolvedField::Sys(sys) => sys.property_type(),
                     };
                     if !matches!(
                         ty,
@@ -1616,8 +1606,8 @@ fn validate_projection_field(
     path: &str,
     context: &str,
     push: &mut impl FnMut(BaseDiagnosticSeverity, Option<String>, String),
-) -> Option<crate::vault::query::ProjectionFieldIdentity> {
-    use crate::vault::query::{ProjectionFieldIdentity, resolve_projection_field};
+) -> Option<crate::query::ProjectionFieldIdentity> {
+    use crate::query::{ProjectionFieldIdentity, resolve_projection_field};
 
     match resolve_projection_field(field) {
         Ok(identity) => {
@@ -1652,7 +1642,7 @@ fn validate_sort_field(
     context: &str,
     push: &mut impl FnMut(BaseDiagnosticSeverity, Option<String>, String),
 ) {
-    use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+    use crate::query::{QueryContext, ResolvedField, resolve_field};
 
     match resolve_field(field, &QueryContext::for_base(base)) {
         Ok(ResolvedField::Sys(sys)) if !sys.is_scalar_sortable() => push(
@@ -1722,7 +1712,7 @@ fn validate_filter(
                 );
             }
             if matches!(op, Op::Contains | Op::NotContains) {
-                use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+                use crate::query::{QueryContext, ResolvedField, resolve_field};
 
                 let query_context = QueryContext::for_base(base);
                 let supported = match resolve_field(field, &query_context) {
@@ -1743,7 +1733,7 @@ fn validate_filter(
                 }
             }
             if op.is_relative_date() {
-                use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+                use crate::query::{QueryContext, ResolvedField, resolve_field};
 
                 let supported = match resolve_field(field, &QueryContext::for_base(base)) {
                     Ok(ResolvedField::Sys(sys)) => sys.supports_relative_date(),
@@ -1763,7 +1753,7 @@ fn validate_filter(
                 }
             }
             if op.is_affix() {
-                use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+                use crate::query::{QueryContext, ResolvedField, resolve_field};
 
                 let supported = match resolve_field(field, &QueryContext::for_base(base)) {
                     Ok(ResolvedField::Sys(sys)) => sys.supports_affix(),
@@ -1783,7 +1773,7 @@ fn validate_filter(
                 }
             }
             if *op == Op::LinksTo {
-                use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+                use crate::query::{QueryContext, ResolvedField, resolve_field};
 
                 let query_context = QueryContext::for_base(base);
                 let supported = matches!(
@@ -1809,7 +1799,7 @@ fn validate_filter(
                     return;
                 }
             }
-            use crate::vault::query::{QueryContext, QueryError, ResolvedField, resolve_field};
+            use crate::query::{QueryContext, QueryError, ResolvedField, resolve_field};
 
             match resolve_field(field, &QueryContext::for_base(base)) {
                 Ok(ResolvedField::Sys(_)) => {}

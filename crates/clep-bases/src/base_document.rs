@@ -16,11 +16,11 @@ use thiserror::Error;
 use toml_edit::{Array, ArrayOfTables, Decor, DocumentMut, InlineTable, Item, Table, Value};
 use utoipa::ToSchema;
 
-use super::atomic_file::{AtomicPublicationError, atomic_create, atomic_replace};
-use super::base::{
+use crate::base::{
     BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, ValidationResult, parse_base,
     validate_definition,
 };
+use clep_vault::atomic_file::{AtomicPublicationError, atomic_create, atomic_replace};
 
 const MANAGED_KEYS: &[&str] = &[
     "name",
@@ -1465,7 +1465,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::vault::base::{BaseFile, PreviewFieldDefinition, PropertyDefinition, PropertyType};
+    use crate::base::{BaseFile, PreviewFieldDefinition, PropertyDefinition, PropertyType};
     use std::sync::mpsc;
     use std::thread;
 

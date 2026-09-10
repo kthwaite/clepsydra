@@ -1,5 +1,5 @@
-use super::base::{BaseDefinition, Filter, Op, PropertyType, SortKey, ViewDefinition};
-use super::query::{
+use crate::base::{BaseDefinition, Filter, Op, PropertyType, SortKey, ViewDefinition};
+use crate::query::{
     GroupRowLimit, QueryContext, QuerySpec, ResolvedField, SysField, resolve_field,
 };
 
@@ -493,7 +493,7 @@ fn validate_group_semantics(
 ) {
     match resolve_declared_field(base, group_by) {
         Err(message) => diagnostics.push(diagnostic(Some("group_by"), None, message)),
-        Ok(resolved) if !super::query::is_groupable(&resolved) => diagnostics.push(diagnostic(
+        Ok(resolved) if !crate::query::is_groupable(&resolved) => diagnostics.push(diagnostic(
             Some("group_by"),
             None,
             format!("field `{group_by}` cannot group"),
@@ -588,11 +588,11 @@ mod tests {
         EMBED_WINDOW_ROWS, EmbedOverrides, GroupOverride, composed_query_spec, group_override,
         validate_embed_overrides, validate_embed_window,
     };
-    use crate::vault::base::{
+    use crate::base::{
         Aggregate, AggregateFn, BaseDefinition, BaseFile, Filter, Op, PropertyDefinition,
         PropertyType, SortDir, SortKey, ViewDefinition,
     };
-    use crate::vault::query::GroupRowLimit;
+    use crate::query::GroupRowLimit;
     use serde_json::{Value, json};
 
     fn property(property_type: PropertyType) -> PropertyDefinition {

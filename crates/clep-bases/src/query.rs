@@ -14,15 +14,15 @@ use pulldown_cmark::{Event, Parser, TagEnd};
 use rusqlite::Connection;
 use thiserror::Error;
 
-use super::base::{
+use crate::base::{
     Aggregate, AggregateFn, BODY_COLUMN, BaseDefinition, Filter, Op, PropertyType, SortDir,
     SortKey, is_body_field_reference, relative_date_window,
 };
-use super::canonical::CanonicalName;
-use super::link::normalize_links_to_target;
-use super::markdown::markdown_options;
-use super::page::Page;
-use super::toml_json::toml_value_to_json;
+use clep_vault::canonical::CanonicalName;
+use clep_vault::link::normalize_links_to_target;
+use clep_vault::markdown::markdown_options;
+use clep_vault::page::Page;
+use clep_vault::toml_json::toml_value_to_json;
 
 // ---------------------------------------------------------------------------
 // Field resolution
@@ -64,7 +64,8 @@ impl SysField {
         })
     }
 
-    pub(crate) fn as_str(self) -> &'static str {
+    /// Public for the workspace split; not part of the stable API.
+    pub fn as_str(self) -> &'static str {
         match self {
             SysField::Id => "id",
             SysField::Path => "path",
@@ -300,7 +301,7 @@ pub fn project_page_field_value(
         ProjectionFieldIdentity::System(SysField::Kind) => (
             true,
             Some(serde_json::Value::String(
-                crate::vault::kind::resolve(path, page.meta.kind)
+                clep_vault::kind::resolve(path, page.meta.kind)
                     .0
                     .as_str()
                     .to_string(),
@@ -310,11 +311,11 @@ pub fn project_page_field_value(
             optional_string(page.meta.project.clone())
         }
         ProjectionFieldIdentity::System(SysField::Tags) => {
-            let kind = crate::vault::kind::resolve(path, page.meta.kind).0;
+            let kind = clep_vault::kind::resolve(path, page.meta.kind).0;
             (
                 true,
                 Some(serde_json::Value::Array(
-                    crate::vault::kind::effective_tags(kind, &page.meta.tags)
+                    clep_vault::kind::effective_tags(kind, &page.meta.tags)
                         .into_iter()
                         .map(serde_json::Value::String)
                         .collect(),
@@ -389,7 +390,7 @@ fn page_journal_date(path: &str) -> Option<&str> {
     let stem = filename.strip_suffix(".md").unwrap_or(filename);
     let candidate = if stem.len() == 10 {
         stem
-    } else if crate::vault::path::is_canonical_page_filename(filename) {
+    } else if clep_vault::path::is_canonical_page_filename(filename) {
         stem.split('.').nth(1)?
     } else {
         return None;
@@ -1708,10 +1709,10 @@ fn fetch_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::Vault;
-    use crate::vault::index::VaultIndex;
-    use crate::vault::page::{Page, PageMeta};
-    use crate::vault::path::VaultPath;
+    use clep_index::index::VaultIndex;
+    use clep_vault::Vault;
+    use clep_vault::page::{Page, PageMeta};
+    use clep_vault::path::VaultPath;
 
     // -- Task 3.1: AST + field resolution ---------------------------------
 
@@ -2047,12 +2048,12 @@ moment  = { type = "datetime" }
 
         let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db"))
             .unwrap()
-            .with_linkable_properties(Box::new(crate::vault::base::BaseLinkableProperties));
+            .with_linkable_properties(Box::new(crate::base::BaseLinkableProperties));
         let vault = Vault::open(tmp.path()).unwrap();
         index.build(&vault).unwrap();
         index.resolve_links().unwrap();
 
-        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let registry = crate::base::BaseRegistry::load(tmp.path());
         let base = registry.get("reading").unwrap().clone();
         (tmp, index, base)
     }
@@ -2079,7 +2080,7 @@ moment  = { type = "datetime" }
         let vault = Vault::open(tmp.path()).unwrap();
         index.build(&vault).unwrap();
 
-        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let registry = crate::base::BaseRegistry::load(tmp.path());
         let base = registry.get("reading").unwrap().clone();
         (tmp, index, base)
     }
@@ -2129,8 +2130,8 @@ moment  = { type = "datetime" }
     #[test]
     fn in_memory_matching_has_sql_parity_for_contains_and_aliases() {
         let (_tmp, index, mut base) = fixture();
-        let mut meta = crate::vault::page::PageMeta::new();
-        meta.kind = Some(crate::vault::kind::Kind::Book);
+        let mut meta = clep_vault::page::PageMeta::new();
+        meta.kind = Some(clep_vault::kind::Kind::Book);
         meta.title = Some("Book A".into());
         meta.tags.push("sf".into());
         meta.aliases.push("Science Fiction".into());
@@ -2347,7 +2348,7 @@ moment  = { type = "datetime" }
         for (filter_json, expected) in cases {
             let filter: Filter = serde_json::from_value(filter_json.clone()).unwrap();
             base.file.filter = Some(filter);
-            let in_memory = crate::vault::base::base_matches_meta_on(&base, &meta, "a.md", today);
+            let in_memory = crate::base::base_matches_meta_on(&base, &meta, "a.md", today);
             let spec = QuerySpec {
                 filter: Some(serde_json::from_value(filter_json.clone()).unwrap()),
                 ..Default::default()
@@ -2465,7 +2466,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
         let vault = Vault::open(tmp.path()).unwrap();
         index.build(&vault).unwrap();
 
-        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let registry = crate::base::BaseRegistry::load(tmp.path());
         let base = registry.get("dates").unwrap().clone();
         (tmp, index, base)
     }
@@ -3149,7 +3150,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
         let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
         let vault = Vault::open(tmp.path()).unwrap();
         index.build(&vault).unwrap();
-        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let registry = crate::base::BaseRegistry::load(tmp.path());
         let base = registry.get("reading").unwrap().clone();
         (tmp, index, base)
     }
@@ -3322,7 +3323,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
         let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
         let vault = Vault::open(tmp.path()).unwrap();
         index.build(&vault).unwrap();
-        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let registry = crate::base::BaseRegistry::load(tmp.path());
         let base = registry.get("reading").unwrap();
         let output = evaluate(
             index.connection(),
@@ -3545,7 +3546,7 @@ started = { type = "date" }
         let vault = Vault::open(tmp.path()).unwrap();
         index.build(&vault).unwrap();
 
-        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let registry = crate::base::BaseRegistry::load(tmp.path());
         let base = registry.get("totals").unwrap().clone();
         (tmp, index, base)
     }
@@ -3576,7 +3577,7 @@ started = { type = "date" }
         let vault = Vault::open(tmp.path()).unwrap();
         index.build(&vault).unwrap();
 
-        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let registry = crate::base::BaseRegistry::load(tmp.path());
         let base = registry.get("totals").unwrap().clone();
         (tmp, index, base)
     }

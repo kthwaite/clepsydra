@@ -17,6 +17,7 @@ base64 = { workspace = true }
 biblatex = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true }
+clep-bases = { workspace = true }
 clep-config = { workspace = true }
 clep-index = { workspace = true }
 clep-vault = { workspace = true }
@@ -82,6 +83,7 @@ edition = "2024"
 
 [workspace.dependencies]
 clep-test-support = { path = "crates/clep-test-support" }
+clep-bases = { path = "crates/clep-bases" }
 clep-config = { path = "crates/clep-config" }
 clep-client = { path = "crates/clep-client" }
 clep-frontend-assets = { path = "crates/clep-frontend-assets" }
