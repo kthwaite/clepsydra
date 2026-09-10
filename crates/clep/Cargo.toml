@@ -13,6 +13,7 @@ clepsydra = { workspace = true }
 clep-client = { workspace = true }
 clep-config = { workspace = true }
 clep-frontend-assets = { workspace = true }
+clep-lsp = { workspace = true }
 clep-mcp = { workspace = true }
 clap = { workspace = true }
 anstream = { workspace = true }

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use tower_lsp::lsp_types::Url;
 
-use crate::vault::path::VaultPath;
+use clep_vault::path::VaultPath;
 
 /// Resolve a vault path to a `file://` URL against the vault root.
 /// Returns `None` if the absolute path is not representable as a URL.

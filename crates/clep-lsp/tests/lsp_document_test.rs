@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use clepsydra::lsp::diagnostics::compute_link_diagnostics;
-use clepsydra::lsp::document::Document;
-use clepsydra::vault::link::LinkKind;
+use clep_lsp::diagnostics::compute_link_diagnostics;
+use clep_lsp::document::Document;
+use clep_vault::link::LinkKind;
 use tower_lsp::lsp_types::{DiagnosticSeverity, Position};
 
 const SIMPLE_DOC: &str = "\

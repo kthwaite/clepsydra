@@ -1,0 +1,28 @@
+[package]
+name = "clep-lsp"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+chrono = { workspace = true }
+clep-bases = { workspace = true }
+clep-config = { workspace = true }
+clep-index = { workspace = true }
+clep-vault = { workspace = true }
+notify-debouncer-mini = { workspace = true }
+pulldown-cmark = { workspace = true }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+tower-lsp = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+ropey = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+clep-test-support = { workspace = true }
+serial_test = { workspace = true }
+tempfile = { workspace = true }

@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::InitializeParams;
 
-use crate::vault::Vault;
-use crate::vault::index::VaultIndex;
-use crate::vault::index_handle::IndexHandle;
+use clep_index::index::VaultIndex;
+use clep_index::index_handle::IndexHandle;
+use clep_vault::Vault;
 
 pub struct LspState {
     pub vault: Vault,
@@ -23,7 +23,7 @@ pub fn open_lsp_state(root: &Path) -> Result<LspState, Box<dyn std::error::Error
     let vault = Vault::open(root)
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
     let mut index = VaultIndex::open_in_memory()?
-        .with_linkable_properties(Box::new(crate::vault::base::BaseLinkableProperties));
+        .with_linkable_properties(Box::new(clep_bases::base::BaseLinkableProperties));
     index.build(&vault)?;
     index.resolve_links()?;
     let index = IndexHandle::spawn(index, vault.clone());
@@ -55,10 +55,10 @@ pub(crate) fn resolve_lsp_root(params: &InitializeParams, cwd: &Path) -> Result<
             }
         }
     }
-    let (settings, config_path) = crate::Settings::load(cwd).map_err(|e| {
+    let (settings, config_path) = clep_config::Settings::load(cwd).map_err(|e| {
         format!("no .clepsydra directory in the workspace and no config.toml found: {e}")
     })?;
-    Ok(crate::resolve_vault_root(
+    Ok(clep_config::resolve_vault_root(
         &settings.vault.root,
         &config_path,
         cwd,
@@ -75,7 +75,7 @@ mod tests {
     fn opens_vault_with_in_memory_index() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         std::fs::write(root.join("Note.md"), "# Note\n\nbody\n").unwrap();
 
         let state = open_lsp_state(&root).unwrap();
@@ -89,7 +89,7 @@ mod tests {
     fn resolves_workspace_folder_with_marker() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let sub = root.join("notes");
         std::fs::create_dir_all(&sub).unwrap();
 
@@ -109,7 +109,7 @@ mod tests {
     fn falls_back_to_config_lookup_without_marker() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         std::fs::write(
             tmp.path().join("config.toml"),
             format!("[vault]\nroot = \"{}\"\n", root.display()),

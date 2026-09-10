@@ -14,7 +14,7 @@ use clap::{Parser, Subcommand};
 use clepsydra::backup::create_backup;
 use clepsydra::doctor::{self, DoctorOpts};
 use clepsydra::vault::init::init_vault;
-use clepsydra::{ServeOverrides, open_vault_and_index, run_lsp_standalone, run_server};
+use clepsydra::{ServeOverrides, open_vault_and_index, run_server};
 use new_note_command::create_new_note;
 
 #[derive(Debug, Parser)]
@@ -478,7 +478,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             Ok(0)
         }
         Commands::Lsp => {
-            run_lsp_standalone().await;
+            clep_lsp::run_standalone().await;
             Ok(0)
         }
         Commands::Mcp { allow_remote } => {

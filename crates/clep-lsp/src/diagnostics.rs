@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::{
     Url,
 };
 
-use crate::lsp::document::Document;
+use crate::document::Document;
 
 /// Compute LSP diagnostics for a document's links given a snapshot of the
 /// canonical-name → paths map and the vault root. Pure: no I/O, no `self`.
@@ -37,13 +37,13 @@ pub fn compute_link_diagnostics(
         if link.span.start == 0 && link.span.end == 0 {
             continue; // skip property ref links
         }
-        if link.kind == crate::vault::link::LinkKind::BlockRef {
+        if link.kind == clep_vault::link::LinkKind::BlockRef {
             // Block refs are resolved by id elsewhere (goto-definition,
             // hover), never by canonical page name — flagging them here
             // would misreport every valid `((block-id))` as unresolved.
             continue;
         }
-        let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
+        let canonical = clep_vault::canonical::CanonicalName::from_title(&link.target_raw);
         let cn_str = canonical.as_str();
 
         match canonical_names.get(cn_str) {
@@ -63,7 +63,7 @@ pub fn compute_link_diagnostics(
                 let related: Vec<DiagnosticRelatedInformation> = paths
                     .iter()
                     .filter_map(|p| {
-                        let vp = crate::vault::path::VaultPath::new(p).ok()?;
+                        let vp = clep_vault::path::VaultPath::new(p).ok()?;
                         let abs = vault_root.join(vp.as_str());
                         let file_uri = Url::from_file_path(&abs).ok()?;
                         Some(DiagnosticRelatedInformation {
@@ -107,7 +107,7 @@ pub fn compute_link_diagnostics(
 // Frontmatter property diagnostics
 // ---------------------------------------------------------------------------
 
-use crate::vault::base::{BaseRegistry, PropertyType, base_matches_meta};
+use clep_bases::base::{BaseRegistry, PropertyType, base_matches_meta};
 
 /// Type-check declared properties against a document's native TOML values,
 /// per base whose filter matches the page. Native types make every finding a
@@ -243,7 +243,7 @@ pub fn compute_property_diagnostics(
                             .and_then(|s| s.strip_suffix("]]"))
                             .map(|inner| inner.split_once('|').map(|(t, _)| t).unwrap_or(inner))
                             .unwrap_or(raw.trim());
-                        let canonical = crate::vault::canonical::CanonicalName::from_title(target);
+                        let canonical = clep_vault::canonical::CanonicalName::from_title(target);
                         if !canonical_names.contains_key(canonical.as_str()) {
                             // Same shape as body-link diagnostics.
                             diagnostics.push(warn(
@@ -303,7 +303,7 @@ fn key_line_range(doc: &Document, key: &str) -> Option<Range> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lsp::document::Document;
+    use crate::document::Document;
 
     #[test]
     fn unresolved_link_yields_a_diagnostic() {
@@ -365,7 +365,7 @@ mod tests {
     }
 
     fn registry_with(base_toml: &str) -> BaseRegistry {
-        let (base, _) = crate::vault::base::parse_base(
+        let (base, _) = clep_bases::base::parse_base(
             std::path::Path::new("bases/reading.base.toml"),
             base_toml,
         );

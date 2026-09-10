@@ -1,3 +1,7 @@
+//! The standalone `clep lsp` language server: tower-lsp backend, document
+//! model, and the completion/hover/diagnostics/rename/references providers
+//! it drives over a private, read-only vault index.
+
 pub mod code_action;
 pub mod completion;
 pub mod diagnostics;
@@ -20,8 +24,30 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use crate::vault::path::VaultPath;
-use crate::vault::sync::ChangeEvent;
+use clep_index::sync::ChangeEvent;
+use clep_vault::path::VaultPath;
+
+/// Initialize tracing/logging to stderr only.
+///
+/// `clep lsp` speaks the LSP protocol on stdout, so tracing output must never
+/// land there. Uses try_init so repeated calls (e.g. in tests) don't panic.
+fn init_logging_stderr() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new(tracing::Level::INFO.to_string())
+            }),
+        )
+        .with_writer(std::io::stderr)
+        .try_init();
+}
+
+/// Entry point for `clep lsp`: LSP on stdio, logging strictly to stderr
+/// (stdout carries the LSP protocol).
+pub async fn run_standalone() {
+    init_logging_stderr();
+    run_lsp().await;
+}
 
 /// LSP backend holding the per-document data and late-initialized vault state.
 ///
@@ -41,7 +67,7 @@ pub struct LspBackend {
     /// The debounced filesystem watcher keeping the read-only index fresh
     /// (`spawn_vault_watcher`, started from `initialized`). `None` before
     /// `initialized` runs and in tests that don't exercise the watcher.
-    pub watcher: std::sync::Mutex<Option<crate::vault::sync::watcher::VaultWatcher>>,
+    pub watcher: std::sync::Mutex<Option<clep_index::sync::watcher::VaultWatcher>>,
 }
 
 impl LspBackend {
@@ -219,11 +245,11 @@ impl LanguageServer for LspBackend {
         // drift (a page whose declared kind/project no longer matches its
         // folder). This just keeps completion/diagnostics fresh.
         let reconcile_path = path.clone();
-        match crate::vault::path::VaultPath::new(&reconcile_path) {
+        match clep_vault::path::VaultPath::new(&reconcile_path) {
             Ok(vp) => {
                 let _ = state
                     .index
-                    .process_sync_events(vec![crate::vault::sync::ChangeEvent::Upsert(vp)])
+                    .process_sync_events(vec![clep_index::sync::ChangeEvent::Upsert(vp)])
                     .await;
             }
             Err(e) => tracing::warn!("did_save reindex failed for {reconcile_path}: {e}"),
@@ -265,13 +291,13 @@ impl LanguageServer for LspBackend {
             None => return Ok(None),
         };
 
-        if link.kind == crate::vault::link::LinkKind::BlockRef {
+        if link.kind == clep_vault::link::LinkKind::BlockRef {
             let state = self.state()?;
-            let Some(hit) = crate::lsp::queries::block_by_id(&state.index, &link.target_raw).await
+            let Some(hit) = crate::queries::block_by_id(&state.index, &link.target_raw).await
             else {
                 return Ok(None);
             };
-            let vp = crate::vault::path::VaultPath::new(&hit.path)
+            let vp = clep_vault::path::VaultPath::new(&hit.path)
                 .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
             let abs_path = state.vault.resolve(&vp);
             let target_uri = Url::from_file_path(&abs_path)
@@ -288,9 +314,9 @@ impl LanguageServer for LspBackend {
         }
 
         let state = self.state()?;
-        let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
+        let canonical = clep_vault::canonical::CanonicalName::from_title(&link.target_raw);
         let target_path =
-            crate::lsp::queries::canonical_to_vault_path(&state.index, canonical.as_str()).await;
+            crate::queries::canonical_to_vault_path(&state.index, canonical.as_str()).await;
 
         let target_path = match target_path {
             Some(p) => p,
@@ -298,7 +324,7 @@ impl LanguageServer for LspBackend {
         };
 
         let abs_path = state.vault.resolve(
-            &crate::vault::path::VaultPath::new(&target_path)
+            &clep_vault::path::VaultPath::new(&target_path)
                 .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
         );
         let target_uri = Url::from_file_path(&abs_path)
@@ -328,14 +354,12 @@ impl LanguageServer for LspBackend {
 
         let state = self.state()?;
 
-        if link.kind == crate::vault::link::LinkKind::BlockRef {
-            let content = match crate::lsp::queries::block_by_id(&state.index, &link.target_raw)
-                .await
-            {
+        if link.kind == clep_vault::link::LinkKind::BlockRef {
+            let content = match crate::queries::block_by_id(&state.index, &link.target_raw).await {
                 Some(hit) => {
-                    crate::lsp::hover::format_hover_block(&link.target_raw, &hit.path, &hit.content)
+                    crate::hover::format_hover_block(&link.target_raw, &hit.path, &hit.content)
                 }
-                None => crate::lsp::hover::format_hover_block_unresolved(&link.target_raw),
+                None => crate::hover::format_hover_block_unresolved(&link.target_raw),
             };
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -346,13 +370,12 @@ impl LanguageServer for LspBackend {
             }));
         }
 
-        let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
-        let path =
-            crate::lsp::queries::canonical_to_vault_path(&state.index, canonical.as_str()).await;
+        let canonical = clep_vault::canonical::CanonicalName::from_title(&link.target_raw);
+        let path = crate::queries::canonical_to_vault_path(&state.index, canonical.as_str()).await;
 
         let content = match path {
             Some(path) => {
-                let vault_path = crate::vault::path::VaultPath::new(&path)
+                let vault_path = clep_vault::path::VaultPath::new(&path)
                     .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
                 let abs_path = state.vault.resolve(&vault_path);
                 let backlink_count = state
@@ -364,19 +387,19 @@ impl LanguageServer for LspBackend {
                 let (title, preview) = match tokio::fs::read_to_string(&abs_path).await {
                     Ok(file_content) => {
                         let target = document::Document::from_text(&file_content, 0);
-                        let preview = crate::lsp::hover::extract_preview(&target.body, 10);
+                        let preview = crate::hover::extract_preview(&target.body, 10);
                         (target.meta.title, preview)
                     }
                     Err(_) => (None, String::new()),
                 };
-                crate::lsp::hover::format_hover_resolved(
+                crate::hover::format_hover_resolved(
                     &path,
                     title.as_deref(),
                     &preview,
                     backlink_count,
                 )
             }
-            None => crate::lsp::hover::format_hover_unresolved(&link.target_raw),
+            None => crate::hover::format_hover_unresolved(&link.target_raw),
         };
 
         Ok(Some(Hover {
@@ -501,8 +524,8 @@ impl LanguageServer for LspBackend {
                 .map(|l| (l.target_raw.clone(), l.kind.clone()))
         };
 
-        if let Some((target_raw, crate::vault::link::LinkKind::BlockRef)) = &link_info {
-            let sources = crate::lsp::queries::block_ref_sources(&state.index, target_raw).await;
+        if let Some((target_raw, clep_vault::link::LinkKind::BlockRef)) = &link_info {
+            let sources = crate::queries::block_ref_sources(&state.index, target_raw).await;
             let mut locations = Vec::new();
             for s in &sources {
                 if let Some(loc) = self
@@ -523,13 +546,12 @@ impl LanguageServer for LspBackend {
             let link_target = link_info.map(|(raw, _)| raw);
 
             if let Some(target_raw) = link_target {
-                let canonical = crate::vault::canonical::CanonicalName::from_title(&target_raw);
+                let canonical = clep_vault::canonical::CanonicalName::from_title(&target_raw);
                 let path =
-                    crate::lsp::queries::canonical_to_vault_path(&state.index, canonical.as_str())
-                        .await;
+                    crate::queries::canonical_to_vault_path(&state.index, canonical.as_str()).await;
 
                 match path {
-                    Some(p) => match crate::vault::path::VaultPath::new(&p) {
+                    Some(p) => match clep_vault::path::VaultPath::new(&p) {
                         Ok(vp) => vp,
                         Err(_) => return Ok(None),
                     },
@@ -552,12 +574,11 @@ impl LanguageServer for LspBackend {
         let vault_root = state.vault.root();
         let mut locations = Vec::new();
         for bl in &backlinks {
-            let source_vp = match crate::vault::path::VaultPath::new(&bl.source_path) {
+            let source_vp = match clep_vault::path::VaultPath::new(&bl.source_path) {
                 Ok(vp) => vp,
                 Err(_) => continue,
             };
-            let source_uri = match crate::lsp::references::vault_path_to_uri(vault_root, &source_vp)
-            {
+            let source_uri = match crate::references::vault_path_to_uri(vault_root, &source_vp) {
                 Some(uri) => uri,
                 None => continue,
             };
@@ -620,7 +641,7 @@ impl LanguageServer for LspBackend {
         let symbols: Vec<SymbolInformation> = results
             .into_iter()
             .filter_map(|(path, title)| {
-                let vp = crate::vault::path::VaultPath::new(&path).ok()?;
+                let vp = clep_vault::path::VaultPath::new(&path).ok()?;
                 let abs_path = vault_root.join(vp.as_str());
                 let uri = Url::from_file_path(&abs_path).ok()?;
                 Some(SymbolInformation {
@@ -681,7 +702,7 @@ impl LanguageServer for LspBackend {
         let state = self.state()?;
         let vault_path_str = lens.data.as_ref().and_then(|v| v.as_str()).unwrap_or("");
 
-        let count = if let Ok(vp) = crate::vault::path::VaultPath::new(vault_path_str) {
+        let count = if let Ok(vp) = clep_vault::path::VaultPath::new(vault_path_str) {
             state
                 .index
                 .backlinks(vp, 0)
@@ -727,7 +748,7 @@ impl LanguageServer for LspBackend {
 
         // Case 1: Cursor on a wikilink
         if let Some(link) = doc.link_at_position(pos)
-            && link.kind == crate::vault::link::LinkKind::Wiki
+            && link.kind == clep_vault::link::LinkKind::Wiki
         {
             let range = doc.link_to_range(link);
             return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
@@ -888,11 +909,11 @@ impl LanguageServer for LspBackend {
                 Some(d) => d,
                 None => return Ok(None),
             };
-            let links: Vec<(crate::vault::link::Link, Range)> = doc
+            let links: Vec<(clep_vault::link::Link, Range)> = doc
                 .links
                 .iter()
                 .filter(|l| {
-                    l.kind == crate::vault::link::LinkKind::Wiki
+                    l.kind == clep_vault::link::LinkKind::Wiki
                         && !(l.span.start == 0 && l.span.end == 0)
                 })
                 .map(|l| (l.clone(), doc.link_to_range(l)))
@@ -924,7 +945,7 @@ impl LanguageServer for LspBackend {
                 }
                 "ambiguous-link" => {
                     let canonical =
-                        crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
+                        clep_vault::canonical::CanonicalName::from_title(&link.target_raw);
                     let names = self.canonical_names.read().await;
 
                     if let Some(candidate_paths) = names.get(canonical.as_str())
@@ -1038,11 +1059,11 @@ impl LspBackend {
         &self,
         state: Arc<state::LspState>,
     ) -> std::result::Result<
-        crate::vault::sync::watcher::VaultWatcher,
+        clep_index::sync::watcher::VaultWatcher,
         notify_debouncer_mini::notify::Error,
     > {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let watcher = crate::vault::sync::watcher::VaultWatcher::start(
+        let watcher = clep_index::sync::watcher::VaultWatcher::start(
             state.vault.root().to_path_buf(),
             std::time::Duration::from_millis(500),
             tx,
@@ -1082,7 +1103,7 @@ impl LspBackend {
         &self,
         uri: &Url,
         pos: Position,
-    ) -> Result<Option<crate::vault::path::VaultPath>> {
+    ) -> Result<Option<clep_vault::path::VaultPath>> {
         let docs = self.documents.lock().await;
         let doc = match docs.get(uri) {
             Some(d) => d,
@@ -1091,12 +1112,12 @@ impl LspBackend {
 
         // Case A: cursor on a wikilink
         if let Some(link) = doc.link_at_position(pos) {
-            if link.kind == crate::vault::link::LinkKind::Wiki {
+            if link.kind == clep_vault::link::LinkKind::Wiki {
                 let target_raw = link.target_raw.clone();
                 drop(docs);
 
                 // Resolve target_raw to a VaultPath via canonical name lookup
-                let canonical = crate::vault::canonical::CanonicalName::from_title(&target_raw);
+                let canonical = clep_vault::canonical::CanonicalName::from_title(&target_raw);
                 let target_path: Option<String> = self
                     .state()?
                     .index
@@ -1120,7 +1141,7 @@ impl LspBackend {
 
                 match target_path {
                     Some(p) => {
-                        let vp = crate::vault::path::VaultPath::new(&p)
+                        let vp = clep_vault::path::VaultPath::new(&p)
                             .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
                         Ok(Some(vp))
                     }
@@ -1193,7 +1214,7 @@ impl LspBackend {
         };
         let mut ops: Vec<DocumentChangeOperation> = Vec::new();
         for ref_path_str in referring_paths {
-            let ref_vp = match crate::vault::path::VaultPath::new(ref_path_str) {
+            let ref_vp = match clep_vault::path::VaultPath::new(ref_path_str) {
                 Ok(vp) => vp,
                 Err(_) => continue,
             };
@@ -1385,13 +1406,13 @@ impl LspBackend {
     fn complete_property_keys(
         &self,
         prefix: &str,
-        meta: &crate::vault::page::PageMeta,
+        meta: &clep_vault::page::PageMeta,
         uri: &Url,
     ) -> Vec<CompletionItem> {
         let Some(state) = self.state_opt() else {
             return Vec::new();
         };
-        let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
+        let registry = clep_bases::base::BaseRegistry::load(state.vault.root());
         let path = self
             .uri_to_vault_path(uri)
             .map(|vp| vp.as_str().to_string())
@@ -1401,7 +1422,7 @@ impl LspBackend {
         let mut best: std::collections::HashMap<String, (CompletionItem, char)> =
             std::collections::HashMap::new();
         for base in &registry.bases {
-            let rank = if crate::vault::base::base_matches_meta(base, meta, &path) {
+            let rank = if clep_bases::base::base_matches_meta(base, meta, &path) {
                 '0'
             } else {
                 '1'
@@ -1439,9 +1460,9 @@ impl LspBackend {
         key: &str,
         prefix: &str,
     ) -> Result<Vec<CompletionItem>> {
-        use crate::vault::base::PropertyType;
+        use clep_bases::base::PropertyType;
         let state = self.state()?;
-        let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
+        let registry = clep_bases::base::BaseRegistry::load(state.vault.root());
 
         let mut options: Vec<String> = Vec::new();
         let mut open_vocabulary = false;
@@ -1505,7 +1526,7 @@ impl LspBackend {
     async fn backlink_to_range(
         &self,
         source_uri: &Url,
-        bl: &crate::vault::index::BacklinkWithContext,
+        bl: &clep_index::index::BacklinkWithContext,
     ) -> Range {
         // Property refs or invalid spans: return default range
         if bl.span_start < 0 || bl.span_end < 0 {
@@ -1546,7 +1567,7 @@ impl LspBackend {
             return None;
         }
         let state = self.state_opt()?;
-        let vp = crate::vault::path::VaultPath::new(source_path).ok()?;
+        let vp = clep_vault::path::VaultPath::new(source_path).ok()?;
         let abs = state.vault.resolve(&vp);
         let uri = Url::from_file_path(&abs).ok()?;
         let (start, end) = (span_start as usize, span_end as usize);
@@ -1660,15 +1681,15 @@ async fn publish_diagnostics_for(
 ) {
     let names = canonical_names.read().await;
     let mut diagnostics =
-        crate::lsp::diagnostics::compute_link_diagnostics(doc, &names, state.vault.root());
+        crate::diagnostics::compute_link_diagnostics(doc, &names, state.vault.root());
 
     if !doc.encrypted {
         // Frontmatter property diagnostics against the base registry.
-        let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
+        let registry = clep_bases::base::BaseRegistry::load(state.vault.root());
         let path = vault_path_for_uri(state, uri)
             .map(|vp| vp.as_str().to_string())
             .unwrap_or_default();
-        diagnostics.extend(crate::lsp::diagnostics::compute_property_diagnostics(
+        diagnostics.extend(crate::diagnostics::compute_property_diagnostics(
             doc, &registry, &path, &names,
         ));
     }
@@ -1808,7 +1829,7 @@ mod tests {
     async fn initialize_opens_vault_from_root_uri() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         std::fs::write(root.join("Note.md"), "# Note\n").unwrap();
 
         let backend = make_uninitialized_backend();
@@ -2022,7 +2043,7 @@ mod tests {
     async fn lsp_never_rewrites_vault_files_to_repair_frontmatter() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
 
         // No frontmatter fences at all.
         let loose = "# Loose\n\nneedleloose\n";
@@ -2312,7 +2333,7 @@ mod tests {
         let diagnostics = {
             let docs = backend.documents.lock().await;
             let doc = docs.get(&uri).unwrap();
-            crate::lsp::diagnostics::compute_link_diagnostics(
+            crate::diagnostics::compute_link_diagnostics(
                 doc,
                 &names,
                 backend.state().unwrap().vault.root(),
@@ -2479,8 +2500,8 @@ mod tests {
             Arc::clone(&state),
             Arc::clone(&backend.documents),
             Arc::clone(&backend.canonical_names),
-            vec![crate::vault::sync::ChangeEvent::Upsert(
-                crate::vault::path::VaultPath::new("Fresh.md").unwrap(),
+            vec![clep_index::sync::ChangeEvent::Upsert(
+                clep_vault::path::VaultPath::new("Fresh.md").unwrap(),
             )],
         )
         .await;
@@ -2600,7 +2621,7 @@ mod tests {
     async fn initialize_advertises_paren_trigger() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let backend = make_uninitialized_backend();
         #[allow(deprecated)]
         let params = InitializeParams {

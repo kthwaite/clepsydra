@@ -1,5 +1,5 @@
 //! Shared index queries used by multiple LSP request handlers.
-use crate::vault::index_handle::IndexHandle;
+use clep_index::index_handle::IndexHandle;
 
 /// Resolve a canonical name to the vault path of the first matching page.
 /// Returns `None` if there is no match or the query fails (matching the
@@ -101,7 +101,7 @@ pub async fn block_ref_sources(index: &IndexHandle, block_id: &str) -> Vec<Block
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lsp::test_support::make_backend;
+    use crate::test_support::make_backend;
 
     #[tokio::test]
     async fn resolves_known_canonical_name() {

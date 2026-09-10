@@ -3,7 +3,6 @@ pub mod backup;
 pub mod deeplink;
 pub mod doctor;
 pub use clep_feeds as feeds;
-pub mod lsp;
 pub mod sync_runtime;
 pub mod vault;
 
@@ -136,30 +135,6 @@ pub(crate) fn init_logging() {
                 .unwrap_or_else(|_| EnvFilter::new(Level::INFO.to_string())),
         )
         .try_init();
-}
-
-/// Initialize tracing/logging to stderr only.
-///
-/// `clep lsp` speaks the LSP protocol on stdout, so tracing output must never
-/// land there. `init_logging` defaults to stdout, which is exactly right for
-/// `clep serve` and exactly wrong here — hence a separate initializer rather
-/// than a flag on the shared one. Uses try_init so repeated calls (e.g. in
-/// tests) don't panic.
-pub(crate) fn init_logging_stderr() {
-    let _ = fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(Level::INFO.to_string())),
-        )
-        .with_writer(std::io::stderr)
-        .try_init();
-}
-
-/// Entry point for `clep lsp`: LSP on stdio, logging strictly to stderr
-/// (stdout carries the LSP protocol).
-pub async fn run_lsp_standalone() {
-    init_logging_stderr();
-    lsp::run_lsp().await;
 }
 
 /// Parse a host + port into a SocketAddr for IP-literal hosts (127.0.0.1, 0.0.0.0, ::1).

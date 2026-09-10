@@ -2,11 +2,11 @@ use tower_lsp::lsp_types::{
     AnnotatedTextEdit, OneOf, Position, PrepareRenameResponse, Range, TextEdit,
 };
 
-use crate::lsp::document::Document;
-use crate::vault::canonical::CanonicalName;
-use crate::vault::link::LinkKind;
-use crate::vault::page::{parse_or_repair_frontmatter, write_page_content};
-use crate::vault::path::VaultPath;
+use crate::document::Document;
+use clep_vault::canonical::CanonicalName;
+use clep_vault::link::LinkKind;
+use clep_vault::page::{parse_or_repair_frontmatter, write_page_content};
+use clep_vault::path::VaultPath;
 
 /// Rewrite a wikilink span text with a new target, preserving display text.
 ///
@@ -413,7 +413,7 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_canonical_names_returns_page_names() {
-        use crate::lsp::test_support::make_backend;
+        use crate::test_support::make_backend;
         let (backend, _tmp) =
             make_backend(&[("Target.md", "---\ntitle: Target Page\n---\nbody\n")]);
         let names = backend
@@ -435,7 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_canonical_names_missing_page_errors() {
-        use crate::lsp::test_support::make_backend;
+        use crate::test_support::make_backend;
         let (backend, _tmp) = make_backend(&[("A.md", "# A\n")]);
         let result = backend
             .state()
@@ -453,7 +453,7 @@ mod tests {
 
     #[tokio::test]
     async fn find_referring_paths_finds_referrer() {
-        use crate::lsp::test_support::make_backend;
+        use crate::test_support::make_backend;
         let (backend, _tmp) = make_backend(&[
             ("Target.md", "---\ntitle: Target\n---\nbody\n"),
             ("A.md", "# A\n\n[[Target]]\n"),
@@ -486,7 +486,7 @@ mod tests {
 
     #[tokio::test]
     async fn find_referring_paths_excludes_self() {
-        use crate::lsp::test_support::make_backend;
+        use crate::test_support::make_backend;
         // Self-referential link: Target links to itself
         let (backend, _tmp) =
             make_backend(&[("Target.md", "---\ntitle: Target\n---\n[[Target]]\n")]);
@@ -518,7 +518,7 @@ mod tests {
 
     #[test]
     fn build_wikilink_text_edits_rewrites_matching_link() {
-        use crate::lsp::document::Document;
+        use crate::document::Document;
         let doc = Document::from_text("# A\n\n[[Old]] and [[Other]]\n", 0);
         let old_cns = vec!["old".to_string()];
         let edits = build_wikilink_text_edits(&doc, &old_cns, "New");
@@ -535,7 +535,7 @@ mod tests {
 
     #[test]
     fn build_wikilink_text_edits_skips_non_matching() {
-        use crate::lsp::document::Document;
+        use crate::document::Document;
         let doc = Document::from_text("# A\n\n[[Other]]\n", 0);
         let old_cns = vec!["old".to_string()];
         let edits = build_wikilink_text_edits(&doc, &old_cns, "New");
@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn build_wikilink_text_edits_preserves_display_text() {
-        use crate::lsp::document::Document;
+        use crate::document::Document;
         let doc = Document::from_text("# A\n\n[[Old|shown]]\n", 0);
         let old_cns = vec!["old".to_string()];
         let edits = build_wikilink_text_edits(&doc, &old_cns, "New Name");

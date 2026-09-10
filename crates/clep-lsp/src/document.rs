@@ -1,7 +1,7 @@
 use tower_lsp::lsp_types::{Position, Range};
 
-use crate::vault::link::{Link, extract_links};
-use crate::vault::page::{PageMeta, parse_or_repair_frontmatter};
+use clep_vault::link::{Link, extract_links};
+use clep_vault::page::{PageMeta, parse_or_repair_frontmatter};
 
 /// An open document tracked by the LSP server.
 ///

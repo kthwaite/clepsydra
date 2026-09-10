@@ -1,7 +1,7 @@
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 use tower_lsp::lsp_types::*;
 
-use crate::vault::markdown::markdown_options;
+use clep_vault::markdown::markdown_options;
 
 /// A parsed heading with its level and byte span in the body.
 #[derive(Debug)]

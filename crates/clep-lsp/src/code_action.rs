@@ -20,16 +20,16 @@ pub fn build_create_page_action(
     vault_root: &Path,
     diag: &Diagnostic,
 ) -> Option<CodeActionOrCommand> {
-    let new_vp = crate::vault::path::VaultPath::from_title(target);
+    let new_vp = clep_vault::path::VaultPath::from_title(target);
     // Resolve against vault_root by replicating what Vault::resolve does:
     // the VaultPath's slug is a relative path string.
     let new_abs = vault_root.join(new_vp.as_str());
     let new_uri = Url::from_file_path(&new_abs).ok()?;
 
     // Build frontmatter scaffold
-    let mut meta = crate::vault::page::PageMeta::new();
+    let mut meta = clep_vault::page::PageMeta::new();
     meta.title = Some(target.to_string());
-    let content = crate::vault::page::write_page_content(&meta, "\n");
+    let content = clep_vault::page::write_page_content(&meta, "\n");
 
     let ops: Vec<DocumentChangeOperation> = vec![
         DocumentChangeOperation::Op(ResourceOp::Create(CreateFile {
@@ -93,7 +93,7 @@ pub fn build_disambiguate_actions(
 
     for path in candidate_paths {
         let path_stem = path.strip_suffix(".md").unwrap_or(path);
-        let new_text = crate::lsp::rename::rewrite_wikilink(raw_text, path_stem);
+        let new_text = crate::rename::rewrite_wikilink(raw_text, path_stem);
 
         let edit = TextEdit {
             range: link_range,

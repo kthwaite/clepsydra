@@ -31,15 +31,12 @@ clep-vault = { workspace = true }
 dirs = { workspace = true }
 glob = { workspace = true }
 mime_guess = { workspace = true }
-notify-debouncer-mini = { workspace = true }
 owo-colors = { workspace = true }
 parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
-pulldown-cmark = { workspace = true }
 regex = { workspace = true }
 quick-xml = { workspace = true }
 reqwest = { workspace = true }
-ropey = { workspace = true }
 rusqlite = { workspace = true }
 rustix = { workspace = true }
 serde = { workspace = true }
@@ -54,7 +51,6 @@ toml = { workspace = true }
 toml_edit = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
-tower-lsp = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true }
@@ -97,6 +93,7 @@ clep-feeds = { path = "crates/clep-feeds" }
 clep-frontend-assets = { path = "crates/clep-frontend-assets" }
 clep-gitsync = { path = "crates/clep-gitsync" }
 clep-index = { path = "crates/clep-index" }
+clep-lsp = { path = "crates/clep-lsp" }
 clep-mcp = { path = "crates/clep-mcp" }
 clep-mutate = { path = "crates/clep-mutate" }
 clep-vault = { path = "crates/clep-vault" }

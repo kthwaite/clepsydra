@@ -519,6 +519,7 @@ dependencies = [
  "clep-client",
  "clep-config",
  "clep-frontend-assets",
+ "clep-lsp",
  "clep-mcp",
  "clepsydra",
  "dirs",
@@ -722,6 +723,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "clep-lsp"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "clep-bases",
+ "clep-config",
+ "clep-index",
+ "clep-test-support",
+ "clep-vault",
+ "notify-debouncer-mini",
+ "pulldown-cmark",
+ "ropey",
+ "rusqlite",
+ "serde_json",
+ "serial_test",
+ "tempfile",
+ "tokio",
+ "toml 0.8.23",
+ "tower-lsp",
+ "tracing",
+ "tracing-subscriber",
+ "walkdir",
+]
+
+[[package]]
 name = "clep-mcp"
 version = "0.0.0"
 dependencies = [
@@ -824,15 +850,12 @@ dependencies = [
  "glob",
  "http-body",
  "mime_guess",
- "notify-debouncer-mini",
  "owo-colors",
  "parking_lot",
  "percent-encoding",
- "pulldown-cmark",
  "quick-xml 0.37.5",
  "regex",
  "reqwest",
- "ropey",
  "rusqlite",
  "rustix",
  "serde",
@@ -848,7 +871,6 @@ dependencies = [
  "toml_edit",
  "tower 0.5.3",
  "tower-http",
- "tower-lsp",
  "tracing",
  "tracing-subscriber",
  "url",

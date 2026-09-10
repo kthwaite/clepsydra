@@ -9,10 +9,10 @@ use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService};
 
-use crate::lsp::LspBackend;
-use crate::lsp::document::Document;
-use crate::lsp::state::open_lsp_state;
-use crate::vault::init::init_vault;
+use crate::LspBackend;
+use crate::document::Document;
+use crate::state::open_lsp_state;
+use clep_vault::init::init_vault;
 
 /// Minimal `LanguageServer` impl whose only purpose is to let `LspService::new`
 /// hand us a live `Client` we can clone out.
