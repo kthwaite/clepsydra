@@ -255,8 +255,9 @@ Facts that shape the later phases but need no change:
 `keyring_test` and `encryption_test` only use `clep-vault` and `clep-index`
 respectively, so Phase 2 moved them there instead of to the bin. The
 `private-note.age` fixture the encryption tests need has one canonical copy
-at `tests/support/fixtures/`; crate tests include it by relative path
-(`../../../tests/support/fixtures/…`).
+at `crates/clep-test-support/fixtures/`, exposed as
+`clep_test_support::PRIVATE_NOTE_AGE`, so no test crate reaches outside its
+own tree for it.
 
 ## 6. Decisions
 
