@@ -11,8 +11,8 @@ use std::{
 
 use clap::{Parser, Subcommand};
 
+use clep_doctor::{self as doctor, DoctorOpts};
 use clepsydra::backup::create_backup;
-use clepsydra::doctor::{self, DoctorOpts};
 use clepsydra::vault::init::init_vault;
 use clepsydra::{ServeOverrides, open_vault_and_index, run_server};
 use new_note_command::create_new_note;

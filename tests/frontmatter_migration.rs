@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 
-use clepsydra::doctor::{self, DoctorOpts, Status};
+use clep_doctor::{self as doctor, DoctorOpts, Status};
 use clepsydra::vault::Vault;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::migrate::{legacy_pages, migrate};

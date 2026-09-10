@@ -1,7 +1,6 @@
 pub mod api;
 pub mod backup;
 pub mod deeplink;
-pub mod doctor;
 pub use clep_feeds as feeds;
 pub mod sync_runtime;
 pub mod vault;

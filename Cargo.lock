@@ -518,6 +518,7 @@ dependencies = [
  "clap",
  "clep-client",
  "clep-config",
+ "clep-doctor",
  "clep-frontend-assets",
  "clep-lsp",
  "clep-mcp",
@@ -635,6 +636,33 @@ dependencies = [
  "serial_test",
  "tempfile",
  "url",
+]
+
+[[package]]
+name = "clep-doctor"
+version = "0.0.0"
+dependencies = [
+ "axum-server",
+ "chrono",
+ "clep-archive",
+ "clep-bases",
+ "clep-config",
+ "clep-gitsync",
+ "clep-index",
+ "clep-mutate",
+ "clep-test-support",
+ "clep-vault",
+ "dirs",
+ "glob",
+ "owo-colors",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]
@@ -840,6 +868,7 @@ dependencies = [
  "clep-archive",
  "clep-bases",
  "clep-config",
+ "clep-doctor",
  "clep-feeds",
  "clep-gitsync",
  "clep-index",
@@ -847,10 +876,8 @@ dependencies = [
  "clep-test-support",
  "clep-vault",
  "dirs",
- "glob",
  "http-body",
  "mime_guess",
- "owo-colors",
  "parking_lot",
  "percent-encoding",
  "quick-xml 0.37.5",

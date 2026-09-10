@@ -20,13 +20,13 @@ const SYNC_LISTED: usize = 10;
 /// merges, or writes configuration — and on a vault that has no `.git` at
 /// all it never runs git in the first place.
 pub(super) fn check_sync(vault: &Vault, report: &mut Report) {
-    use crate::vault::gitsync::git::Git;
+    use clep_gitsync::git::Git;
 
     // A vault with no `.git` at its root is simply not initialised (D3) —
     // answer from the filesystem rather than spawning git on every `clep
     // doctor` run in every non-syncing vault. The nesting case still gets its
     // own error, walked out of the filesystem rather than asked of git.
-    if !crate::vault::gitsync::has_git_entry(vault.root()) {
+    if !clep_gitsync::has_git_entry(vault.root()) {
         report.push(match enclosing_repo(vault.root()) {
             Some(outer) => nested_repo_result(&outer),
             None => info(
@@ -90,7 +90,7 @@ fn enclosing_repo(root: &Path) -> Option<PathBuf> {
     root.ancestors()
         .skip(1)
         .filter(|ancestor| !ancestor.as_os_str().is_empty())
-        .find(|ancestor| crate::vault::gitsync::has_git_entry(ancestor))
+        .find(|ancestor| clep_gitsync::has_git_entry(ancestor))
         .map(Path::to_path_buf)
 }
 
@@ -98,12 +98,8 @@ fn enclosing_repo(root: &Path) -> Option<PathBuf> {
 /// meaningful: only an initialised repository (D3 — vault root is the
 /// toplevel *and* the marker is set) has a branch, a remote or a worktree to
 /// talk about.
-fn check_sync_repo(
-    vault: &Vault,
-    git: &crate::vault::gitsync::git::Git,
-    report: &mut Report,
-) -> bool {
-    use crate::vault::gitsync::INIT_MARKER_KEY;
+fn check_sync_repo(vault: &Vault, git: &clep_gitsync::git::Git, report: &mut Report) -> bool {
+    use clep_gitsync::INIT_MARKER_KEY;
 
     let toplevel = match git.toplevel() {
         Ok(toplevel) => toplevel,
@@ -162,7 +158,7 @@ fn check_sync_repo(
 
 /// Sync only ever pushes and merges the one configured branch, so a repository
 /// sitting on a different one would sync nothing.
-fn check_sync_branch(vault: &Vault, git: &crate::vault::gitsync::git::Git, report: &mut Report) {
+fn check_sync_branch(vault: &Vault, git: &clep_gitsync::git::Git, report: &mut Report) {
     let configured = vault.config().sync.branch.clone();
     match git.current_branch() {
         Ok(Some(actual)) if actual == configured => {
@@ -206,7 +202,7 @@ fn check_sync_branch(vault: &Vault, git: &crate::vault::gitsync::git::Git, repor
 fn check_sync_managed_files(vault: &Vault, report: &mut Report) {
     use std::collections::HashSet;
 
-    use crate::vault::gitsync::{MANAGED_GITATTRIBUTES, MANAGED_GITIGNORE};
+    use clep_gitsync::{MANAGED_GITATTRIBUTES, MANAGED_GITIGNORE};
 
     let mut missing: Vec<String> = Vec::new();
     for (file, managed) in [
@@ -250,8 +246,8 @@ fn check_sync_managed_files(vault: &Vault, report: &mut Report) {
 /// The `*.md merge=clep` driver is only as good as `merge.clep.driver` being
 /// registered (spec §5) — `clep sync init` writes it, but it lives in local
 /// git config, so nothing stops a hand-edit or a fresh clone from dropping it.
-fn check_sync_driver(git: &crate::vault::gitsync::git::Git, report: &mut Report) {
-    match git.config_get_local(crate::vault::gitsync::MERGE_DRIVER_KEY) {
+fn check_sync_driver(git: &clep_gitsync::git::Git, report: &mut Report) {
+    match git.config_get_local(clep_gitsync::MERGE_DRIVER_KEY) {
         Ok(Some(_)) => {
             report.push(ok(SYNC_SECTION, "driver", "markdown merge driver registered"));
             report.push(driver_path_result(std::env::var_os("PATH").as_deref()));
@@ -317,7 +313,7 @@ fn is_executable_file(path: &Path) -> bool {
 /// merge (D-series design): the loser survives beside the winner so nothing
 /// is silently dropped. They pile up if nobody folds them back by hand.
 fn check_sync_conflict_copies(vault: &Vault, report: &mut Report) {
-    let copies = crate::vault::gitsync::conflict_copy::find_conflict_copies(vault.root());
+    let copies = clep_gitsync::conflict_copy::find_conflict_copies(vault.root());
     if copies.is_empty() {
         report.push(ok(SYNC_SECTION, "conflict-copies", "none"));
         return;
@@ -344,7 +340,7 @@ fn check_sync_conflict_copies(vault: &Vault, report: &mut Report) {
 
 /// git-lfs is mandatory for sync (spec §3): attachments and the CAS store are
 /// tracked through its filters.
-fn check_sync_lfs(git: &crate::vault::gitsync::git::Git, report: &mut Report) {
+fn check_sync_lfs(git: &clep_gitsync::git::Git, report: &mut Report) {
     match git.lfs_version() {
         Ok(Some(version)) => report.push(ok(SYNC_SECTION, "lfs", version)),
         Ok(None) => report.push(
@@ -367,8 +363,8 @@ fn check_sync_lfs(git: &crate::vault::gitsync::git::Git, report: &mut Report) {
 
 /// Sync talks to exactly one remote. Having none is a valid single-device
 /// setup, so both outcomes are informational.
-fn check_sync_remote(git: &crate::vault::gitsync::git::Git, report: &mut Report) {
-    use crate::vault::gitsync::REMOTE_NAME;
+fn check_sync_remote(git: &clep_gitsync::git::Git, report: &mut Report) {
+    use clep_gitsync::REMOTE_NAME;
 
     match git.remote_url(REMOTE_NAME) {
         Ok(Some(url)) => report.push(info(SYNC_SECTION, "remote", url)),
@@ -384,7 +380,7 @@ fn check_sync_remote(git: &crate::vault::gitsync::git::Git, report: &mut Report)
 /// Uncommitted files are ordinary (the server commits them after the
 /// autocommit debounce); unmerged files are not — sync never leaves them
 /// behind, so they mean a hand-run `git merge` stopped half way.
-fn check_sync_worktree(git: &crate::vault::gitsync::git::Git, report: &mut Report) {
+fn check_sync_worktree(git: &clep_gitsync::git::Git, report: &mut Report) {
     let unmerged = match git.unmerged() {
         Ok(unmerged) => unmerged,
         Err(e) => {
@@ -433,7 +429,7 @@ fn check_sync_worktree(git: &crate::vault::gitsync::git::Git, report: &mut Repor
 /// `.git/**` must stay out of the index: git's own object files are not
 /// pages, and indexing them would churn on every commit.
 fn check_sync_exclusions(vault: &Vault, report: &mut Report) {
-    use crate::vault::path::VaultPath;
+    use clep_vault::path::VaultPath;
 
     let probe = match VaultPath::new(".git/x.md") {
         Ok(probe) => probe,
@@ -497,9 +493,9 @@ mod tests {
     /// Run `gitsync::init` over an existing repository root (a `TestRepos`
     /// clone) so it carries the managed `.gitignore`/`.gitattributes` blocks,
     /// then re-open the vault: `init` rewrites `.clepsydra/config.toml`.
-    fn sync_initialised_vault(root: &Path) -> crate::vault::Vault {
-        use crate::vault::gitsync::{init, testing};
-        let vault = crate::vault::Vault::open(root).unwrap();
+    fn sync_initialised_vault(root: &Path) -> clep_vault::Vault {
+        use clep_gitsync::{init, testing};
+        let vault = clep_vault::Vault::open(root).unwrap();
         init::init(
             &vault,
             &testing::git(root),
@@ -512,7 +508,7 @@ mod tests {
             },
         )
         .unwrap();
-        crate::vault::Vault::open(root).unwrap()
+        clep_vault::Vault::open(root).unwrap()
     }
 
     #[test]
@@ -520,8 +516,8 @@ mod tests {
     fn sync_check_reports_uninitialised_vault_as_info() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("v");
-        crate::vault::init::init_vault(&root).unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
 
         let mut report = Report::default();
         check_sync(&vault, &mut report);
@@ -556,8 +552,8 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn sync_check_passes_on_an_initialised_clean_vault_and_flags_unmerged() {
-        use crate::vault::gitsync::testing;
-        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
+        use clep_gitsync::testing;
+        let _env = clep_gitsync::testing::isolate_git_process_wide();
         let repos = testing::TestRepos::new();
         let vault = sync_initialised_vault(&repos.a);
 
@@ -598,7 +594,7 @@ mod tests {
             "the hand-made merge should leave exactly one unmerged path"
         );
 
-        let conflicted = crate::vault::Vault::open(&repos.b).unwrap();
+        let conflicted = clep_vault::Vault::open(&repos.b).unwrap();
         let mut report = Report::default();
         check_sync(&conflicted, &mut report);
         let worktree = sync_result(&report, "worktree");
@@ -616,8 +612,8 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn sync_check_flags_missing_managed_lines_and_nested_repo() {
-        use crate::vault::gitsync::{MANAGED_GITIGNORE, testing};
-        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
+        use clep_gitsync::{MANAGED_GITIGNORE, testing};
+        let _env = clep_gitsync::testing::isolate_git_process_wide();
         let repos = testing::TestRepos::new();
         let vault = sync_initialised_vault(&repos.a);
 
@@ -658,8 +654,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         testing::git(tmp.path()).init("main").unwrap();
         let inner = tmp.path().join("inner");
-        crate::vault::init::init_vault(&inner).unwrap();
-        let nested = crate::vault::Vault::open(&inner).unwrap();
+        clep_vault::init::init_vault(&inner).unwrap();
+        let nested = clep_vault::Vault::open(&inner).unwrap();
 
         let mut report = Report::default();
         check_sync(&nested, &mut report);
@@ -680,8 +676,8 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn sync_check_warns_when_dot_git_is_not_excluded() {
-        use crate::vault::gitsync::testing;
-        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
+        use clep_gitsync::testing;
+        let _env = clep_gitsync::testing::isolate_git_process_wide();
         let repos = testing::TestRepos::new();
         sync_initialised_vault(&repos.a);
 
@@ -690,7 +686,7 @@ mod tests {
         let without_git = config.replace("    \".git/**\",\n", "");
         assert_ne!(config, without_git, "the default config excludes .git/**");
         std::fs::write(&config_path, without_git).unwrap();
-        let vault = crate::vault::Vault::open(&repos.a).unwrap();
+        let vault = clep_vault::Vault::open(&repos.a).unwrap();
 
         let mut report = Report::default();
         check_sync(&vault, &mut report);
@@ -709,13 +705,13 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn sync_check_reports_a_repo_without_the_marker_as_uninitialised() {
-        use crate::vault::gitsync::testing;
-        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
+        use clep_gitsync::testing;
+        let _env = clep_gitsync::testing::isolate_git_process_wide();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("v");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         testing::git(&root).init("main").unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
 
         let mut report = Report::default();
         check_sync(&vault, &mut report);
@@ -739,9 +735,9 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn sync_check_ignores_a_marker_inherited_from_the_global_config() {
-        use crate::vault::gitsync::INIT_MARKER_KEY;
-        use crate::vault::gitsync::git::Git;
-        use crate::vault::gitsync::testing;
+        use clep_gitsync::INIT_MARKER_KEY;
+        use clep_gitsync::git::Git;
+        use clep_gitsync::testing;
         let tmp = TempDir::new().unwrap();
         // A private global config carrying the marker, pointed at process-wide
         // because `check_sync` builds its own `Git::new`.
@@ -751,9 +747,9 @@ mod tests {
         let _nosystem = clep_test_support::EnvGuard::set("GIT_CONFIG_NOSYSTEM", "1");
 
         let root = tmp.path().join("v");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         testing::git(&root).init("main").unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         assert_eq!(
             Git::new(&root)
                 .config_get(INIT_MARKER_KEY)
@@ -783,8 +779,8 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn sync_check_warns_when_the_checked_out_branch_is_not_the_configured_one() {
-        use crate::vault::gitsync::testing;
-        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
+        use clep_gitsync::testing;
+        let _env = clep_gitsync::testing::isolate_git_process_wide();
         let repos = testing::TestRepos::new();
         let vault = sync_initialised_vault(&repos.a);
         testing::git(&repos.a)
@@ -810,12 +806,12 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn driver_check_warns_until_init_registers_it() {
-        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
+        let _env = clep_gitsync::testing::isolate_git_process_wide();
         // `sync_initialised_vault` runs `gitsync::init`, which now registers
         // the merge driver (Task 3) -> ok. Unset it by hand -> warn.
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("v");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let vault = sync_initialised_vault(&root);
         let mut report = Report::default();
         check_sync(&vault, &mut report);
@@ -826,7 +822,7 @@ mod tests {
             report.results
         );
 
-        let git = crate::vault::gitsync::git::Git::new(vault.root());
+        let git = clep_gitsync::git::Git::new(vault.root());
         git.run(&["config", "--unset", "merge.clep.driver"])
             .unwrap();
 
@@ -888,10 +884,10 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn conflict_copies_check_lists_copies() {
-        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
+        let _env = clep_gitsync::testing::isolate_git_process_wide();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("v");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let vault = sync_initialised_vault(&root);
         std::fs::create_dir_all(vault.root().join("notes")).unwrap();
         std::fs::write(vault.root().join("notes/p.conflict.abc1234.md"), "x").unwrap();

@@ -29,9 +29,7 @@ clep-index = { workspace = true }
 clep-mutate = { workspace = true }
 clep-vault = { workspace = true }
 dirs = { workspace = true }
-glob = { workspace = true }
 mime_guess = { workspace = true }
-owo-colors = { workspace = true }
 parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
 regex = { workspace = true }
@@ -69,6 +67,7 @@ axum-test = { workspace = true }
 serial_test = { workspace = true }
 wiremock = { workspace = true }
 clep-archive = { workspace = true, features = ["test-failpoints"] }
+clep-doctor = { workspace = true }
 clep-feeds = { workspace = true, features = ["test-failpoints"] }
 clep-gitsync = { workspace = true, features = ["test-support"] }
 clep-test-support = { workspace = true }
@@ -89,6 +88,7 @@ clep-archive = { path = "crates/clep-archive" }
 clep-bases = { path = "crates/clep-bases" }
 clep-config = { path = "crates/clep-config" }
 clep-client = { path = "crates/clep-client" }
+clep-doctor = { path = "crates/clep-doctor" }
 clep-feeds = { path = "crates/clep-feeds" }
 clep-frontend-assets = { path = "crates/clep-frontend-assets" }
 clep-gitsync = { path = "crates/clep-gitsync" }

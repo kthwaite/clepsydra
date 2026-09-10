@@ -14,14 +14,14 @@ use axum_server::tls_rustls::RustlsConfig;
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
-use crate::Settings;
-use crate::VESSEL_ACCENT as ACCENT;
-use crate::app_config;
-use crate::default_tls_paths;
-use crate::expand_tilde;
-use crate::resolve_vault_root;
-use crate::vault::Vault;
-use crate::vault::config::VaultConfig;
+use clep_config::Settings;
+use clep_config::VESSEL_ACCENT as ACCENT;
+use clep_config::app_config;
+use clep_config::default_tls_paths;
+use clep_config::expand_tilde;
+use clep_config::resolve_vault_root;
+use clep_vault::Vault;
+use clep_vault::config::VaultConfig;
 
 /// Status of a single check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -549,7 +549,7 @@ fn evaluate_tls(facts: &TlsFacts, mkcert_available: bool) -> Vec<CheckResult> {
     out
 }
 
-async fn gather_tls_facts(tls: &crate::TlsSettings) -> Result<TlsFacts, CheckResult> {
+async fn gather_tls_facts(tls: &clep_config::TlsSettings) -> Result<TlsFacts, CheckResult> {
     let (cert_path, key_path, explicit) = match default_tls_paths(tls) {
         Ok(Some(t)) => t,
         Ok(None) => {
@@ -1066,9 +1066,9 @@ async fn run_index_dry_build(vault: &Vault, report: &mut Report) {
     // the tokio runtime on large vaults.
     let vault = vault.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<_, String> {
-        let mut index = crate::vault::index::VaultIndex::open(&tmp_db)
+        let mut index = clep_index::index::VaultIndex::open(&tmp_db)
             .map_err(|e| format!("open: {e}"))?
-            .with_linkable_properties(Box::new(crate::vault::base::BaseLinkableProperties));
+            .with_linkable_properties(Box::new(clep_bases::base::BaseLinkableProperties));
         index.build(&vault).map_err(|e| format!("build: {e}"))
     })
     .await;
@@ -1143,7 +1143,7 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
 
     if let Some(hint) = legacy_store_hint(
         &path,
-        crate::vault::cas_migrate::legacy_store_with_blobs().as_deref(),
+        clep_archive::cas_migrate::legacy_store_with_blobs().as_deref(),
     ) {
         report.push(hint);
     }
@@ -1251,7 +1251,7 @@ fn legacy_store_hint(store: &Path, legacy: Option<&Path>) -> Option<CheckResult>
     // first touch, which would otherwise silence this hint during exactly
     // the installed-and-restarted-before-migrating window it exists to
     // catch.
-    if !crate::vault::cas::list_blob_hashes(store).is_empty() || !legacy.join("cas.db").is_file() {
+    if !clep_archive::cas::list_blob_hashes(store).is_empty() || !legacy.join("cas.db").is_file() {
         return None;
     }
     // Canonicalize both sides when they exist so a symlinked home doesn't
@@ -1291,7 +1291,7 @@ fn verify_cas_refs(vault: &Vault, conn: &Connection, cas_path: &Path, report: &m
     const SECTION: &str = "cas";
     const LISTED: usize = 10;
 
-    let scan = crate::vault::cas_scan::scan_archive_refs(vault);
+    let scan = clep_archive::cas_scan::scan_archive_refs(vault);
     if !scan.warnings.is_empty() {
         report.push(warn(
             SECTION,
@@ -1479,8 +1479,8 @@ fn subtract_released_rubbish_refs(
         let Ok(content) = std::fs::read_to_string(&page_path) else {
             continue; // item already purged (or never had this dir); nothing to subtract
         };
-        let (meta, _, _, _) = crate::vault::page::parse_or_repair_frontmatter(&content);
-        for hash in crate::vault::archive_hook::captured_archive_hashes(&meta) {
+        let (meta, _, _, _) = clep_vault::page::parse_or_repair_frontmatter(&content);
+        for hash in clep_archive::archive_hook::captured_archive_hashes(&meta) {
             if let Some(count) = expected.get_mut(&hash) {
                 *count = (*count - 1).max(0);
             }
@@ -1493,13 +1493,13 @@ fn subtract_released_rubbish_refs(
 /// `"sha256:<hex>"` hash. Delegates to `cas::blob_relative_path`. Returns
 /// `None` for a hash that doesn't match the expected shape.
 fn cas_blob_path(cas_root: &Path, hash: &str) -> Option<PathBuf> {
-    crate::vault::cas::blob_relative_path(hash).map(|rel| cas_root.join(rel))
+    clep_archive::cas::blob_relative_path(hash).map(|rel| cas_root.join(rel))
 }
 
 /// Walk the CAS root's two-level fan-out directories and list every blob file
 /// found, as `"sha256:<hex>"` hashes. Delegates to `cas::list_blob_hashes`.
 fn list_cas_blob_files(cas_root: &Path) -> Vec<String> {
-    crate::vault::cas::list_blob_hashes(cas_root)
+    clep_archive::cas::list_blob_hashes(cas_root)
 }
 
 // ---------------------------------------------------------------------------
@@ -1616,7 +1616,7 @@ fn read_bcl_date(path: &Path) -> Option<chrono::NaiveDate> {
 /// Base file validation, property/system-field shadowing, and a
 /// type-violation census. Read-only over the base files and the index DB.
 fn check_bases(vault: &Vault, report: &mut Report) {
-    use crate::vault::base::{BaseRegistry, PropertyType, SYSTEM_FIELDS};
+    use clep_bases::base::{BaseRegistry, PropertyType, SYSTEM_FIELDS};
 
     const SECTION: &str = "bases";
 
@@ -1743,7 +1743,7 @@ fn check_frontmatter(vault: &Vault, report: &mut Report) {
     const SECTION: &str = "frontmatter";
     const LISTED: usize = 10;
 
-    let legacy = crate::vault::migrate::legacy_pages(vault);
+    let legacy = clep_mutate::migrate::legacy_pages(vault);
     if legacy.is_empty() {
         report.push(ok(
             SECTION,
@@ -1776,7 +1776,7 @@ fn check_frontmatter(vault: &Vault, report: &mut Report) {
 fn check_conflicts(vault: &Vault, report: &mut Report) {
     const SECTION: &str = "conflicts";
     const LISTED: usize = 10;
-    let conflicted = crate::vault::conflict::conflicted_pages(vault);
+    let conflicted = clep_vault::conflict::conflicted_pages(vault);
     if conflicted.is_empty() {
         report.push(ok(
             SECTION,
@@ -1802,7 +1802,7 @@ fn check_conflicts(vault: &Vault, report: &mut Report) {
     }
 
     // Check for unparseable frontmatter
-    let unparseable = crate::vault::conflict::unparseable_pages(vault);
+    let unparseable = clep_vault::conflict::unparseable_pages(vault);
     if unparseable.is_empty() {
         report.push(ok(SECTION, "unparseable", "all frontmatter parseable"));
     } else {
@@ -1832,7 +1832,7 @@ fn check_journals(vault: &Vault, report: &mut Report) {
     const SECTION: &str = "journals";
     const LISTED: usize = 10;
 
-    let groups = crate::vault::gitsync::journal_merge::duplicate_journal_groups(vault.root());
+    let groups = clep_gitsync::journal_merge::duplicate_journal_groups(vault.root());
     if groups.is_empty() {
         report.push(ok(SECTION, "duplicates", "one page per journal date"));
         return;
@@ -1867,9 +1867,9 @@ fn check_journals(vault: &Vault, report: &mut Report) {
 // ---------------------------------------------------------------------------
 
 /// Visit every readable, non-excluded markdown page under the vault root.
-fn for_each_page(vault: &Vault, mut visit: impl FnMut(&crate::vault::page::Page)) {
-    use crate::vault::page::Page;
-    use crate::vault::path::VaultPath;
+fn for_each_page(vault: &Vault, mut visit: impl FnMut(&clep_vault::page::Page)) {
+    use clep_vault::page::Page;
+    use clep_vault::path::VaultPath;
 
     for entry in walkdir::WalkDir::new(vault.root())
         .into_iter()
@@ -1899,7 +1899,7 @@ fn for_each_page(vault: &Vault, mut visit: impl FnMut(&crate::vault::page::Page)
 
 /// Two things can be wrong with the `project` slugs a vault carries.
 ///
-/// A slug can be malformed — a shape [`crate::vault::project::validate_slug`]
+/// A slug can be malformed — a shape [`clep_vault::project::validate_slug`]
 /// refuses. Every write path checks that shape, so such a slug reached the
 /// vault by hand and now breaks writes against the project it names: creating
 /// a task under it, or assigning a page to it, is a 400. That is a warning.
@@ -1909,8 +1909,8 @@ fn for_each_page(vault: &Vault, mut visit: impl FnMut(&crate::vault::page::Page)
 fn check_projects(vault: &Vault, report: &mut Report) {
     use std::collections::{BTreeMap, BTreeSet};
 
-    use crate::vault::kind::{Kind, resolve};
-    use crate::vault::project::validate_slug;
+    use clep_vault::kind::{Kind, resolve};
+    use clep_vault::project::validate_slug;
 
     const SECTION: &str = "projects";
     const LISTED: usize = 10;
@@ -1992,9 +1992,9 @@ fn check_projects(vault: &Vault, report: &mut Report) {
 /// information rather than breakage. (A 1:1 is a MEETING tagged `1:1`; it may
 /// name any number of people, so nothing here counts attendees.)
 fn check_meetings(vault: &Vault, report: &mut Report) {
-    use crate::vault::attendance;
-    use crate::vault::kind::resolve;
-    use crate::vault::meeting;
+    use clep_vault::attendance;
+    use clep_vault::kind::resolve;
+    use clep_vault::meeting;
 
     const SECTION: &str = "meetings";
     const LISTED: usize = 10;
@@ -2131,8 +2131,8 @@ mod tests {
 
         // An initialised store — one that actually holds a blob file at a
         // valid fan-out path — silences the hint.
-        let blob_hash = crate::vault::cas::ContentStore::hash_bytes(b"x");
-        let blob_rel = crate::vault::cas::blob_relative_path(&blob_hash).unwrap();
+        let blob_hash = clep_archive::cas::ContentStore::hash_bytes(b"x");
+        let blob_rel = clep_archive::cas::blob_relative_path(&blob_hash).unwrap();
         let blob_path = store.join(&blob_rel);
         fs::create_dir_all(blob_path.parent().unwrap()).unwrap();
         fs::write(&blob_path, b"x").unwrap();
@@ -2208,7 +2208,7 @@ mod tests {
     async fn doctor_reports_effective_feature_states() {
         let enabled = TempDir::new().unwrap();
         let enabled_vault = enabled.path().join("vault");
-        crate::vault::init::init_vault(&enabled_vault).unwrap();
+        clep_vault::init::init_vault(&enabled_vault).unwrap();
         write_top_level_config(enabled.path(), &enabled_vault);
 
         let enabled_report = run_with_cwd(enabled.path(), DoctorOpts::default()).await;
@@ -2228,7 +2228,7 @@ mod tests {
 
         let disabled = TempDir::new().unwrap();
         let disabled_vault = disabled.path().join("vault");
-        crate::vault::init::init_vault(&disabled_vault).unwrap();
+        clep_vault::init::init_vault(&disabled_vault).unwrap();
         write_top_level_config_with_features(disabled.path(), &disabled_vault, false, false);
 
         let disabled_report = run_with_cwd(disabled.path(), DoctorOpts::default()).await;
@@ -2253,7 +2253,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
 
         let vault_cfg = vault_root.join(".clepsydra/config.toml");
         let extant = fs::read_to_string(&vault_cfg).unwrap();
@@ -2324,7 +2324,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         write_top_level_config(cwd, &vault_root);
 
         let report = run_with_cwd(cwd, DoctorOpts::default()).await;
@@ -2415,7 +2415,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         write_top_level_config(cwd, &vault_root);
 
         let report = run_with_cwd(cwd, DoctorOpts::default()).await;
@@ -2439,7 +2439,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         let cas_path = tmp.path().join("cas");
         fs::create_dir_all(&cas_path).unwrap();
         fs::write(
@@ -2469,7 +2469,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         fs::write(
             vault_root.join(".clepsydra/config.toml"),
             "[vault]\nattachment_folder = \"_attachments\"\n\n[archive]\nenabled = true\ncas_path = \"cas-here\"\n",
@@ -2508,7 +2508,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         let cas_path = tmp.path().join("not-a-directory");
         fs::write(&cas_path, "not a directory").unwrap();
         fs::write(
@@ -2552,7 +2552,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         write_top_level_config(cwd, &vault_root);
 
         let report = run_with_cwd(cwd, DoctorOpts::default()).await;
@@ -2571,7 +2571,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
 
         let cert = tmp.path().join("cert.pem");
         let key = tmp.path().join("key.pem");
@@ -2607,7 +2607,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         write_top_level_config(cwd, &vault_root);
 
         let report = run_with_cwd(cwd, DoctorOpts::default()).await;
@@ -2628,7 +2628,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
 
         // Append a zotero config block pointing at a missing file.
         let vault_cfg = vault_root.join(".clepsydra/config.toml");
@@ -2659,7 +2659,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         fs::write(vault_root.join(".clepsydra/bcl"), "1990-01-15\n").unwrap();
         write_top_level_config(cwd, &vault_root);
 
@@ -2680,7 +2680,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         fs::write(vault_root.join(".clepsydra/bcl"), "garbage").unwrap();
         write_top_level_config(cwd, &vault_root);
 
@@ -2699,7 +2699,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
 
         // A base declaring `rating = number`, plus a page violating it and
         // carrying a `kind` extra that shadows the system field.
@@ -2717,7 +2717,7 @@ mod tests {
 
         // The censuses read the index DB; build it first.
         let mut index =
-            crate::vault::index::VaultIndex::open(&vault_root.join(".clepsydra/cache.db")).unwrap();
+            clep_index::index::VaultIndex::open(&vault_root.join(".clepsydra/cache.db")).unwrap();
         index.build(&Vault::open(&vault_root).unwrap()).unwrap();
         drop(index);
 
@@ -2754,7 +2754,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         // Add a markdown page so the build has something to index.
         fs::write(
             vault_root.join("hello.md"),
@@ -2796,7 +2796,7 @@ mod tests {
     async fn meeting_check_is_quiet_without_meeting_pages() {
         let tmp = TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         write_page(&vault_root, "notes/plain.md", "title = \"Plain\"\n");
         write_top_level_config(tmp.path(), &vault_root);
 
@@ -2816,7 +2816,7 @@ mod tests {
     async fn meeting_check_passes_well_formed_pages() {
         let tmp = TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         write_page(
             &vault_root,
             "meetings/kickoff.md",
@@ -2863,7 +2863,7 @@ mod tests {
     async fn meeting_check_reports_hand_edited_breakage() {
         let tmp = TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         // An integer where the wikilink list goes — the API refuses this, a
         // text editor does not.
         write_page(
@@ -2902,7 +2902,7 @@ mod tests {
     async fn meeting_check_reports_unfinished_pages_as_information() {
         let tmp = TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         // A meeting that names nobody and records no time: unfinished, not
         // broken. Only the missing time is worth a word — with the attendee
         // cardinality gone, no meeting is "unnamed".
@@ -2947,7 +2947,7 @@ mod tests {
     async fn project_check_passes_when_every_slug_is_declared() {
         let tmp = TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         write_page(
             &vault_root,
             "projects/atlas/atlas.md",
@@ -2985,7 +2985,7 @@ mod tests {
     async fn project_check_lists_orphan_slugs_as_information() {
         let tmp = TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&vault_root).unwrap();
+        clep_vault::init::init_vault(&vault_root).unwrap();
         write_page(
             &vault_root,
             "projects/atlas/atlas.md",
@@ -3053,14 +3053,14 @@ mod tests {
     fn conflicts_check_warns_and_lists_files() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         std::fs::create_dir_all(root.join("notes")).unwrap();
         std::fs::write(
             root.join("notes/clash.md"),
             "<<<<<<< HEAD\n=======\n>>>>>>> x\n",
         )
         .unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_conflicts(&vault, &mut report);
         let result = report
@@ -3076,8 +3076,8 @@ mod tests {
     fn conflicts_check_ok_when_clean() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_conflicts(&vault, &mut report);
         assert!(matches!(report.results[0].status, Status::Ok));
@@ -3087,14 +3087,14 @@ mod tests {
     fn unparseable_check_warns_invalid_toml() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         std::fs::create_dir_all(root.join("notes")).unwrap();
         std::fs::write(
             root.join("notes/broken.md"),
             "+++\ninvalid toml here !!!\n+++\nSome body text\n",
         )
         .unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_conflicts(&vault, &mut report);
         let result = report
@@ -3110,8 +3110,8 @@ mod tests {
     fn unparseable_check_ok_all_parseable() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_conflicts(&vault, &mut report);
         let result = report
@@ -3126,8 +3126,8 @@ mod tests {
     fn journals_check_ok_when_one_page_per_date() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_journals(&vault, &mut report);
         let result = report
@@ -3142,7 +3142,7 @@ mod tests {
     fn journals_check_warns_on_duplicate_dates() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         std::fs::create_dir_all(root.join("journals")).unwrap();
         for (name, tail) in [
             ("20260829.2026-08-29.aaaaaaaa.md", "01"),
@@ -3156,7 +3156,7 @@ mod tests {
             )
             .unwrap();
         }
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_journals(&vault, &mut report);
         let result = report
@@ -3196,9 +3196,9 @@ mod tests {
     ) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let cas_dir = tmp.path().join("cas");
-        let store = crate::vault::cas::ContentStore::open(&cas_dir).unwrap();
+        let store = clep_archive::cas::ContentStore::open(&cas_dir).unwrap();
         let stored = store.store(b"<html>", "text/html").unwrap();
         drop(store); // release the flock before doctor / direct sqlite access
         std::fs::write(
@@ -3222,7 +3222,7 @@ mod tests {
             .unwrap()
             .execute("UPDATE blobs SET ref_count = 5", [])
             .unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_cas(&vault, true, &mut report);
         let r = report
@@ -3237,7 +3237,7 @@ mod tests {
     #[test]
     fn full_cas_verify_ok_when_consistent() {
         let (_tmp, root, _cas_dir, _hash) = cas_fixture();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_cas(&vault, true, &mut report);
         for name in ["refcounts", "orphans", "missing"] {
@@ -3258,7 +3258,7 @@ mod tests {
         let (_tmp, root, cas_dir, hash) = cas_fixture();
         let hex = &hash["sha256:".len()..];
         std::fs::remove_file(cas_dir.join(&hex[..2]).join(hex)).unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_cas(&vault, true, &mut report);
         let r = report
@@ -3277,9 +3277,9 @@ mod tests {
         // GC-eligible even though the row exists.
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let cas_dir = tmp.path().join("cas");
-        let store = crate::vault::cas::ContentStore::open(&cas_dir).unwrap();
+        let store = clep_archive::cas::ContentStore::open(&cas_dir).unwrap();
         let stored = store.store(b"<html>", "text/html").unwrap();
         drop(store);
         std::fs::write(
@@ -3287,7 +3287,7 @@ mod tests {
             format!("[archive]\ncas_path = \"{}\"\n", cas_dir.display()),
         )
         .unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_cas(&vault, true, &mut report);
         let r = report
@@ -3308,7 +3308,7 @@ mod tests {
         let fan_out_dir = cas_dir.join(&fake_hex[..2]);
         std::fs::create_dir_all(&fan_out_dir).unwrap();
         std::fs::write(fan_out_dir.join(&fake_hex), b"untracked").unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_cas(&vault, true, &mut report);
         let r = report
@@ -3337,7 +3337,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let vault = crate::vault::Vault::open(&root).unwrap();
+        let vault = clep_vault::Vault::open(&root).unwrap();
         let mut report = Report::default();
         check_cas(&vault, true, &mut report);
         let refcounts = report
@@ -3363,7 +3363,7 @@ mod tests {
         fn report_for(seed: impl FnOnce(&Path)) -> Report {
             let tmp = TempDir::new().unwrap();
             let root = tmp.path().join("vault");
-            crate::vault::init::init_vault(&root).unwrap();
+            clep_vault::init::init_vault(&root).unwrap();
             seed(&root);
             let vault = Vault::open(&root).unwrap();
             let mut report = Report::default();
