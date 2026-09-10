@@ -1,0 +1,39 @@
+[package]
+name = "clep-gitsync"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+# `testing` (gitsync::testing) needs `clep-test-support::EnvGuard` for
+# `isolate_git_process_wide`, used by src/sync_runtime.rs and
+# src/doctor/sync.rs tests in the `clepsydra` crate. tempfile is NOT gated
+# here: unlike clep-test-support, it is also a production dependency
+# (merge_driver::text_merge shells out via a real tempdir), so it stays
+# unconditional in [dependencies] below.
+test-support = ["dep:clep-test-support"]
+
+[dependencies]
+chrono = { workspace = true }
+clep-archive = { workspace = true }
+clep-test-support = { workspace = true, optional = true }
+clep-vault = { workspace = true }
+gethostname = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+clep-test-support = { workspace = true }
+serial_test = { workspace = true }
+tempfile = { workspace = true }
+wiremock = { workspace = true }

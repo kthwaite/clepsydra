@@ -8,7 +8,7 @@
 //! `shortid` is the first 7 lowercase hex characters of `sha256(theirs)`:
 //! deterministic, so re-running the same merge produces the same name (and
 //! [`write_conflict_copy`] then keeps the copy already on disk), and 7
-//! characters so [`crate::vault::path::is_canonical_page_filename`] can never
+//! characters so [`clep_vault::path::is_canonical_page_filename`] can never
 //! match the result — a dated journal copy is never mistaken for a journal
 //! (D5).
 
@@ -18,8 +18,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::SyncError;
-use crate::vault::atomic_file::atomic_create;
-use crate::vault::page::{ExtraMap, parse_frontmatter, write_page_content};
+use clep_vault::atomic_file::atomic_create;
+use clep_vault::page::{ExtraMap, parse_frontmatter, write_page_content};
 
 /// Length of the `sha256(theirs)` prefix in a Conflict Copy's name. Seven,
 /// not eight, so the copy of a dated journal file is never a canonical page
@@ -218,15 +218,14 @@ mod tests {
     fn dated_journal_copy_is_not_a_canonical_filename() {
         let copy = conflict_copy_path("journals/20260827.2026-08-27.ab12cd34.md", "abc1234");
         let stem = copy.rsplit('/').next().unwrap();
-        assert!(!crate::vault::path::is_canonical_page_filename(stem));
+        assert!(!clep_vault::path::is_canonical_page_filename(stem));
     }
 
     #[test]
     fn markdown_copy_gets_fresh_id_suffixed_title_and_conflict_of() {
         let theirs = "+++\nid = \"0192b6c0-0000-7000-8000-0000000000aa\"\ntitle = \"Plan\"\ntype = \"NOTE\"\ntags = [\"x\"]\nproject = \"p\"\n+++\ntheirs body\n";
         let out = conflict_copy_content("notes/plan.md", theirs.as_bytes(), "abc1234");
-        let page =
-            crate::vault::page::parse_frontmatter(std::str::from_utf8(&out).unwrap()).unwrap();
+        let page = clep_vault::page::parse_frontmatter(std::str::from_utf8(&out).unwrap()).unwrap();
         assert_ne!(
             page.0.id.to_string(),
             "0192b6c0-0000-7000-8000-0000000000aa"

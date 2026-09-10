@@ -19,7 +19,7 @@ use super::git::{Git, GitError, PushOutcome, Side, StatusEntry};
 use super::journal_merge::{JournalMerge, merge_duplicate_journals};
 use super::state::{self, SyncState};
 use super::{Author, REMOTE_NAME, SyncError, first_line, plural};
-use crate::vault::Vault;
+use clep_vault::Vault;
 
 /// How many page titles a generated commit message names.
 const TITLE_LIMIT: usize = 3;
@@ -552,7 +552,7 @@ impl SyncEngine {
                     let hand_resolved = match worktree.as_deref() {
                         Some(w)
                             if w != ours.as_slice()
-                                && !crate::vault::conflict::has_conflict_markers(
+                                && !clep_vault::conflict::has_conflict_markers(
                                     &String::from_utf8_lossy(w),
                                 ) =>
                         {
@@ -819,7 +819,7 @@ impl SyncEngine {
     /// A checkout recreates `.clepsydra/crypto` with the umask, so tighten
     /// it after every merge that touched the tree. Never fatal.
     fn tighten_crypto_permissions(&self) {
-        if let Err(e) = crate::vault::keyring::tighten_crypto_permissions(&self.root) {
+        if let Err(e) = clep_vault::keyring::tighten_crypto_permissions(&self.root) {
             tracing::warn!("sync: crypto permissions: {e}");
         }
     }
@@ -911,7 +911,7 @@ fn page_title(root: &Path, rel: &str) -> String {
     let Ok(content) = std::fs::read_to_string(root.join(rel)) else {
         return stem();
     };
-    match crate::vault::page::parse_frontmatter(&content) {
+    match clep_vault::page::parse_frontmatter(&content) {
         Ok((meta, _)) => meta.title.unwrap_or_else(stem),
         Err(_) => stem(),
     }
@@ -930,10 +930,10 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::vault::Vault;
-    use crate::vault::gitsync::conflict_copy::find_conflict_copies;
-    use crate::vault::gitsync::init::{InitOpts, LfsPolicy};
-    use crate::vault::gitsync::{SyncError, testing};
+    use crate::conflict_copy::find_conflict_copies;
+    use crate::init::{InitOpts, LfsPolicy};
+    use crate::{SyncError, testing};
+    use clep_vault::Vault;
 
     /// A [`SyncEngine`] over one of `TestRepos`' clones. `TestRepos` clones
     /// already carry the D3 marker `init` would have written.
@@ -1390,9 +1390,9 @@ mod tests {
     fn full_sync_without_remote_commits_and_skips_network() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("v");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let git = testing::git(&root);
-        crate::vault::gitsync::init::init(
+        crate::init::init(
             &Vault::open(&root).unwrap(),
             &git,
             InitOpts {
@@ -1471,7 +1471,7 @@ mod tests {
         assert!(copy.contains("A's edit"));
         assert!(copy.contains("conflict_of = \"notes/p.md\""));
         assert!(copy.contains("title = \"Plan (conflict "));
-        let copy_meta = crate::vault::page::parse_frontmatter(&copy).unwrap().0;
+        let copy_meta = clep_vault::page::parse_frontmatter(&copy).unwrap().0;
         assert_ne!(
             copy_meta.id.to_string(),
             "0192b6c0-0000-7000-8000-000000000005",

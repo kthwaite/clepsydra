@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::SyncError;
-use crate::vault::atomic_file::{atomic_create, atomic_replace};
+use clep_vault::atomic_file::{atomic_create, atomic_replace};
 
 /// What the last sync on this device did.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

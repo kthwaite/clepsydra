@@ -11,8 +11,8 @@ use super::managed_block;
 use super::{
     Author, INIT_MARKER_KEY, INIT_MARKER_VALUE, MANAGED_GITATTRIBUTES, MANAGED_GITIGNORE, SyncError,
 };
-use crate::vault::Vault;
-use crate::vault::config::SyncSection;
+use clep_vault::Vault;
+use clep_vault::config::SyncSection;
 
 /// Whether `init` requires a working `git-lfs`. Tests use [`LfsPolicy::Skip`]
 /// to stay hermetic; the CLI always requests [`LfsPolicy::Required`].
@@ -253,13 +253,13 @@ fn migrate_legacy_cas(
     legacy_cas: Option<&Path>,
     warnings: &mut Vec<String>,
 ) -> Result<String, SyncError> {
-    if !crate::vault::cas::list_blob_hashes(&vault.cas_root()).is_empty() {
+    if !clep_archive::cas::list_blob_hashes(&vault.cas_root()).is_empty() {
         return Ok("skipped: vault CAS store already has blobs".to_string());
     }
     let Some(source) = legacy_cas else {
         return Ok("skipped: no legacy store".to_string());
     };
-    let report = crate::vault::cas_migrate::migrate(vault, source, true)
+    let report = clep_archive::cas_migrate::migrate(vault, source, true)
         .map_err(|e| SyncError::Config(format!("CAS migration from {}: {e}", source.display())))?;
     for warning in &report.warnings {
         warnings.push(format!("cas migration: {warning}"));
@@ -416,14 +416,14 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::vault::cas::{ContentStore, blob_relative_path};
-    use crate::vault::gitsync::testing;
-    use crate::vault::gitsync::{MANAGED_GITATTRIBUTES, MANAGED_GITIGNORE};
+    use crate::testing;
+    use crate::{MANAGED_GITATTRIBUTES, MANAGED_GITIGNORE};
+    use clep_archive::cas::{ContentStore, blob_relative_path};
 
     fn fresh_vault() -> (TempDir, Vault) {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         fs::write(
             root.join("note.md"),
             "+++\nid = \"0192b6c0-0000-7000-8000-000000000001\"\ntitle = \"Note\"\n+++\nhi\n",
@@ -466,7 +466,7 @@ mod tests {
         for line in MANAGED_GITATTRIBUTES {
             assert!(attrs.lines().any(|l| l == *line), "{line}");
         }
-        let cfg = crate::vault::config::VaultConfig::load(vault.root()).unwrap();
+        let cfg = clep_vault::config::VaultConfig::load(vault.root()).unwrap();
         assert_eq!(cfg.sync.author_name.as_deref(), Some("Test Author"));
         assert!(git.status().unwrap().is_empty());
         let tracked = git.run(&["ls-files"]).unwrap();
@@ -474,7 +474,7 @@ mod tests {
         assert!(tracked.contains(".clepsydra/config.toml"));
         assert!(!tracked.contains("cache.db"));
         let reopened = Vault::open(vault.root()).unwrap();
-        assert!(super::super::is_initialised(&reopened, &git).unwrap());
+        assert!(crate::is_initialised(&reopened, &git).unwrap());
     }
 
     #[test]
@@ -547,7 +547,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         testing::git(tmp.path()).init("main").unwrap();
         let root = tmp.path().join("inner");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let vault = Vault::open(&root).unwrap();
         let err = init(&vault, &testing::git(&root), opts()).unwrap_err();
         assert!(matches!(err, SyncError::NestedRepo { .. }), "{err}");
@@ -746,7 +746,7 @@ mod tests {
         let (_tmp, vault) = fresh_vault();
         let git = testing::git(vault.root());
         init(&vault, &git, opts()).unwrap();
-        for (key, value) in crate::vault::gitsync::MERGE_DRIVER_KEYS {
+        for (key, value) in crate::MERGE_DRIVER_KEYS {
             assert_eq!(
                 git.config_get_local(key).unwrap().as_deref(),
                 Some(*value),

@@ -9,9 +9,9 @@ use tempfile::TempDir;
 
 use super::git::Git;
 use super::{Author, INIT_MARKER_KEY, INIT_MARKER_VALUE};
-use crate::vault::init::init_vault;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use clep_test_support::EnvGuard;
+use clep_vault::init::init_vault;
 
 /// The path of an empty file used as `GIT_CONFIG_GLOBAL`, so tests never
 /// read (or write) the developer's real global git config. Created once
@@ -78,6 +78,12 @@ pub struct TestRepos {
     pub remote: PathBuf,
     pub a: PathBuf,
     pub b: PathBuf,
+}
+
+impl Default for TestRepos {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TestRepos {
@@ -149,14 +155,17 @@ fn seed_sync_author(root: &Path) {
 /// guard lives, so a `Git` built by production code (`Git::new`, as
 /// `SyncRuntime::detect` uses) cannot read — or be broken by — the
 /// developer's real `~/.gitconfig`. Callers must be `#[serial]`.
-#[cfg(test)]
-pub(crate) struct GitEnv {
+///
+/// Public for the workspace split; not part of the stable API.
+#[cfg(any(test, feature = "test-support"))]
+pub struct GitEnv {
     _global: EnvGuard,
     _nosystem: EnvGuard,
 }
 
-#[cfg(test)]
-pub(crate) fn isolate_git_process_wide() -> GitEnv {
+/// Public for the workspace split; not part of the stable API.
+#[cfg(any(test, feature = "test-support"))]
+pub fn isolate_git_process_wide() -> GitEnv {
     GitEnv {
         _global: EnvGuard::set("GIT_CONFIG_GLOBAL", empty_global_config()),
         _nosystem: EnvGuard::set("GIT_CONFIG_NOSYSTEM", "1"),

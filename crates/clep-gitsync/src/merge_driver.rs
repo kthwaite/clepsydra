@@ -12,7 +12,7 @@ use std::process::Command;
 
 use chrono::{DateTime, Utc};
 
-use crate::vault::page::{ExtraMap, PageMeta, parse_frontmatter, write_page_content};
+use clep_vault::page::{ExtraMap, PageMeta, parse_frontmatter, write_page_content};
 
 /// What the driver leaves in `%A` and how it exits (D17).
 #[derive(Debug)]
@@ -244,7 +244,7 @@ mod tests {
         let out = merge(&base, &ours, &theirs);
         assert!(out.clean);
         let text = String::from_utf8(out.content).unwrap();
-        let (meta, body) = crate::vault::page::parse_frontmatter(&text).unwrap();
+        let (meta, body) = clep_vault::page::parse_frontmatter(&text).unwrap();
         assert_eq!(meta.title.as_deref(), Some("Renamed"));
         assert_eq!(meta.tags, vec!["a", "b", "c"]);
         assert_eq!(body, "ONE\ntwo\nTHREE\n");
@@ -258,7 +258,7 @@ mod tests {
         let out = merge(&base, &ours, &theirs);
         assert!(out.clean);
         let (meta, _) =
-            crate::vault::page::parse_frontmatter(std::str::from_utf8(&out.content).unwrap())
+            clep_vault::page::parse_frontmatter(std::str::from_utf8(&out.content).unwrap())
                 .unwrap();
         assert_eq!(meta.tags, vec!["keep", "new"]);
     }
@@ -283,7 +283,7 @@ mod tests {
         let out = merge(&base, &ours, &theirs);
         assert!(out.clean);
         let (meta, _) =
-            crate::vault::page::parse_frontmatter(std::str::from_utf8(&out.content).unwrap())
+            clep_vault::page::parse_frontmatter(std::str::from_utf8(&out.content).unwrap())
                 .unwrap();
         assert_eq!(
             meta.updated_at.unwrap().to_rfc3339(),
@@ -314,7 +314,7 @@ mod tests {
         assert!(!out.clean);
         let text = String::from_utf8(out.content).unwrap();
         assert!(text.starts_with("+++\n"), "frontmatter survives: {text}");
-        assert!(crate::vault::conflict::has_conflict_markers(&text));
+        assert!(clep_vault::conflict::has_conflict_markers(&text));
     }
 
     #[test]
@@ -368,7 +368,7 @@ mod tests {
         let out = merge(&base, &ours, &theirs);
         assert!(out.clean);
         let (meta, _) =
-            crate::vault::page::parse_frontmatter(std::str::from_utf8(&out.content).unwrap())
+            clep_vault::page::parse_frontmatter(std::str::from_utf8(&out.content).unwrap())
                 .unwrap();
         assert_eq!(meta.extra.get("custom").and_then(|v| v.as_str()), Some("y"));
         assert_eq!(meta.extra.get("mine").and_then(|v| v.as_integer()), Some(1));

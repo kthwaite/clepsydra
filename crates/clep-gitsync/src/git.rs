@@ -641,7 +641,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::vault::gitsync::testing;
+    use crate::testing;
 
     #[test]
     fn version_reports_git() {

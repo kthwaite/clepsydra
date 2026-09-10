@@ -8,7 +8,7 @@ use std::fs;
 use std::path::Path;
 
 use super::SyncError;
-use crate::vault::atomic_file::{atomic_create, atomic_replace};
+use clep_vault::atomic_file::{atomic_create, atomic_replace};
 
 pub const BLOCK_START: &str = "# >>> clep sync (managed) >>>";
 pub const BLOCK_END: &str = "# <<< clep sync (managed) <<<";

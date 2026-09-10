@@ -13,9 +13,9 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 
 use super::conflict_copy::is_conflict_copy_name;
-use crate::vault::page::{PageMeta, parse_frontmatter, write_page_content};
-use crate::vault::page_filename::extract_journal_date;
-use crate::vault::rewriter::rewrite_links_in_content;
+use clep_vault::page::{PageMeta, parse_frontmatter, write_page_content};
+use clep_vault::page_filename::extract_journal_date;
+use clep_vault::rewriter::rewrite_links_in_content;
 
 /// The two top-level folders whose pages carry a path-derived journal date.
 pub(crate) const JOURNAL_FOLDERS: [&str; 2] = ["journals", "ai-journals"];
@@ -194,7 +194,7 @@ fn merge_group(
     // Written before anything is deleted: a failure here must leave every
     // member exactly as it was.
     let winner_path = root.join(&winner.path);
-    if let Err(e) = crate::vault::atomic_file::atomic_replace(&winner_path, content.as_bytes()) {
+    if let Err(e) = clep_vault::atomic_file::atomic_replace(&winner_path, content.as_bytes()) {
         warnings.push(format!(
             "journal merge: could not write {}: {e}",
             winner.path
@@ -398,7 +398,7 @@ fn repoint_links(root: &Path, pairs: &[(String, String)], warnings: &mut Vec<Str
         let rewritten = rewrite_links_in_content(&content, &pairs);
         if rewritten != content
             && let Err(e) =
-                crate::vault::atomic_file::atomic_replace(entry.path(), rewritten.as_bytes())
+                clep_vault::atomic_file::atomic_replace(entry.path(), rewritten.as_bytes())
         {
             warnings.push(format!(
                 "journal merge: could not rewrite links in {}: {e}",
@@ -556,7 +556,7 @@ mod tests {
         let text =
             std::fs::read_to_string(tmp.path().join("journals/20260829.2026-08-29.aaaaaaaa.md"))
                 .unwrap();
-        let (meta, body) = crate::vault::page::parse_frontmatter(&text).unwrap();
+        let (meta, body) = clep_vault::page::parse_frontmatter(&text).unwrap();
         assert_eq!(
             body, "- 08:00 — morning\n- 10:00 — from B\nan appendix line\n- 12:00 — noon\n",
             "deduped, interleaved by time, continuation stays attached"

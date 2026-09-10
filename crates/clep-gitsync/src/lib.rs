@@ -1,6 +1,6 @@
 //! Git-backed vault synchronisation (`clep sync`).
 //!
-//! Distinct from [`crate::vault::sync`], which turns filesystem events into
+//! Distinct from [`clep_index::sync`], which turns filesystem events into
 //! index updates. This module drives the system `git` binary: repository
 //! setup ([`init`]), the sync algorithm ([`engine`]), and Conflict Copies
 //! ([`conflict_copy`]). Design: `docs/superpowers/specs/2026-08-27-clep-sync-design.md`,
@@ -15,8 +15,8 @@ pub mod journal_merge;
 pub mod managed_block;
 pub mod merge_driver;
 pub mod state;
-#[cfg(test)]
-pub(crate) mod testing;
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing;
 
 use std::path::Path;
 
@@ -72,7 +72,7 @@ pub struct Author {
 
 impl Author {
     /// The configured author, if both halves are present and non-blank.
-    pub fn from_config(section: &crate::vault::config::SyncSection) -> Option<Self> {
+    pub fn from_config(section: &clep_vault::config::SyncSection) -> Option<Self> {
         let name = section.author_name.as_deref()?.trim();
         let email = section.author_email.as_deref()?.trim();
         (!name.is_empty() && !email.is_empty()).then(|| Self {
@@ -158,7 +158,7 @@ pub fn has_git_entry(root: &Path) -> bool {
 /// The marker is read in the `--local` scope only: a `clep.sync.version` a
 /// user has in `~/.gitconfig` would otherwise make every repository on the
 /// machine claim to be sync-initialised.
-pub fn is_initialised(vault: &crate::vault::Vault, git: &git::Git) -> Result<bool, SyncError> {
+pub fn is_initialised(vault: &clep_vault::Vault, git: &git::Git) -> Result<bool, SyncError> {
     let Some(top) = git.toplevel()? else {
         return Ok(false);
     };
@@ -195,8 +195,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{INIT_MARKER_KEY, has_git_entry};
-    use crate::vault::gitsync::git::Git;
-    use crate::vault::gitsync::testing;
+    use crate::git::Git;
+    use crate::testing;
 
     #[test]
     fn a_global_marker_does_not_count_as_initialised() {
@@ -218,7 +218,7 @@ mod tests {
             "the merged config does see the global marker"
         );
 
-        let vault = crate::vault::Vault::open(&repos.a).unwrap();
+        let vault = clep_vault::Vault::open(&repos.a).unwrap();
         assert!(
             !super::is_initialised(&vault, &git).unwrap(),
             "a global clep.sync.version must not make a vault look initialised"

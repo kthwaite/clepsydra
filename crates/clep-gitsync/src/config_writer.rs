@@ -9,7 +9,7 @@ use std::str::FromStr;
 use toml_edit::{DocumentMut, value};
 
 use super::SyncError;
-use crate::vault::atomic_file::{atomic_create, atomic_replace};
+use clep_vault::atomic_file::{atomic_create, atomic_replace};
 
 /// `[sync]` keys to set. A `None` value is left untouched.
 #[derive(Debug, Clone, Default)]
@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn writes_sync_section_preserving_other_content() {
         let tmp = TempDir::new().unwrap();
-        crate::vault::init::init_vault(tmp.path()).unwrap();
+        clep_vault::init::init_vault(tmp.path()).unwrap();
         let path = tmp.path().join(".clepsydra/config.toml");
         let before = fs::read_to_string(&path).unwrap();
         write_sync_section(
@@ -86,7 +86,7 @@ mod tests {
             after.starts_with(&before),
             "existing content must be preserved verbatim"
         );
-        let cfg = crate::vault::config::VaultConfig::load(tmp.path()).unwrap();
+        let cfg = clep_vault::config::VaultConfig::load(tmp.path()).unwrap();
         assert_eq!(cfg.sync.author_name.as_deref(), Some("Kit"));
         assert_eq!(cfg.sync.branch, "main");
         // second write only touches the given key
@@ -99,7 +99,7 @@ mod tests {
             },
         )
         .unwrap();
-        let cfg = crate::vault::config::VaultConfig::load(tmp.path()).unwrap();
+        let cfg = clep_vault::config::VaultConfig::load(tmp.path()).unwrap();
         assert_eq!(cfg.sync.branch, "trunk");
         assert_eq!(cfg.sync.author_email.as_deref(), Some("kit@example.com"));
     }

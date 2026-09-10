@@ -7,7 +7,7 @@ pub use clep_vault::{
 };
 
 pub mod geocode;
-pub mod gitsync;
+pub use clep_gitsync as gitsync;
 
 pub use clep_academic::{
     academic, academic_hook, checkpoint, import, import_doi, import_isbn, import_zotero,
