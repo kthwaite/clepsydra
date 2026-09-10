@@ -1,7 +1,7 @@
 use biblatex::{Bibliography, ChunksExt, DateValue, EntryType, PermissiveType};
 use rusqlite::{Connection, params};
 
-use crate::vault::academic::WorkType;
+use crate::academic::WorkType;
 
 /// A parsed BibTeX entry normalized for import into the vault.
 #[derive(Debug, Clone)]
@@ -154,7 +154,7 @@ pub fn find_existing_work(
 
     // 3. Check by cite_key via canonical_names table
     if let Some(cite_key) = cite_key {
-        use crate::vault::canonical::CanonicalName;
+        use clep_vault::canonical::CanonicalName;
         let cn = CanonicalName::new(cite_key);
         let path: Option<String> = conn
             .query_row(

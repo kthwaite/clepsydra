@@ -6,15 +6,12 @@ pub use clep_vault::{
     toml_json, toml_patch,
 };
 
-pub mod academic;
-pub mod academic_hook;
-pub mod checkpoint;
 pub mod geocode;
 pub mod gitsync;
-pub mod import;
-pub mod import_doi;
-pub mod import_isbn;
-pub mod import_zotero;
+
+pub use clep_academic::{
+    academic, academic_hook, checkpoint, import, import_doi, import_isbn, import_zotero,
+};
 
 pub use clep_archive::{
     archive_backfill, archive_hook, archive_snapshot, cas, cas_migrate, cas_scan,

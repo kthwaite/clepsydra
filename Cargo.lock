@@ -535,6 +535,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "clep-academic"
+version = "0.0.0"
+dependencies = [
+ "biblatex",
+ "chrono",
+ "clep-index",
+ "clep-vault",
+ "dirs",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml 0.8.23",
+ "unicode-normalization",
+ "utoipa",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "clep-archive"
 version = "0.0.0"
 dependencies = [
@@ -733,10 +756,10 @@ dependencies = [
  "axum-server",
  "axum-test",
  "base64 0.22.1",
- "biblatex",
  "blake3",
  "bytes",
  "chrono",
+ "clep-academic",
  "clep-archive",
  "clep-bases",
  "clep-config",
@@ -777,7 +800,6 @@ dependencies = [
  "tower-lsp",
  "tracing",
  "tracing-subscriber",
- "unicode-normalization",
  "url",
  "utoipa",
  "utoipa-swagger-ui",

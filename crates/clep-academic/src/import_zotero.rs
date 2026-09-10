@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use rusqlite::{Connection, OpenFlags};
 
-use crate::vault::academic::WorkType;
-use crate::vault::import::BibImportEntry;
+use crate::academic::WorkType;
+use crate::import::BibImportEntry;
 
 /// Skip these words when picking the first significant title word.
 const SKIP_WORDS: &[&str] = &["a", "an", "the", "on"];
@@ -527,7 +527,7 @@ pub fn normalize_since(since: &str) -> String {
 /// Only compares mapped metadata fields (title, year, venue, publisher, doi, isbn).
 pub fn compute_field_diffs(
     source: &BibImportEntry,
-    local: &crate::vault::page::PageMeta,
+    local: &clep_vault::page::PageMeta,
 ) -> Vec<FieldDiff> {
     let mut diffs = Vec::new();
 
@@ -634,8 +634,8 @@ pub fn find_existing_by_zotero_key(
 /// Apply "source wins" field overwrites from a bibliographic entry onto an
 /// already-loaded page's metadata, in place. Pure: no filesystem I/O.
 pub fn apply_source_wins_to_meta(
-    meta: &mut crate::vault::page::PageMeta,
-    entry: &crate::vault::import::BibImportEntry,
+    meta: &mut clep_vault::page::PageMeta,
+    entry: &crate::import::BibImportEntry,
 ) {
     meta.title = Some(entry.title.clone());
 
@@ -861,7 +861,7 @@ mod decide_tests {
 #[cfg(test)]
 mod source_wins_tests {
     use super::*;
-    use crate::vault::page::PageMeta;
+    use clep_vault::page::PageMeta;
 
     fn sample_entry() -> BibImportEntry {
         BibImportEntry {

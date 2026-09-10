@@ -1,4 +1,4 @@
-use clepsydra::vault::checkpoint::ImportCheckpoint;
+use clep_academic::checkpoint::ImportCheckpoint;
 use tempfile::TempDir;
 
 #[test]

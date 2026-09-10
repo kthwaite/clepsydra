@@ -1,9 +1,9 @@
-use clepsydra::vault::Vault;
-use clepsydra::vault::import::{find_existing_work, parse_bibtex};
-use clepsydra::vault::import_doi::parse_crossref_response;
-use clepsydra::vault::import_isbn::{normalize_isbn, parse_openlibrary_response};
-use clepsydra::vault::index::VaultIndex;
-use clepsydra::vault::init::init_vault;
+use clep_academic::import::{find_existing_work, parse_bibtex};
+use clep_academic::import_doi::parse_crossref_response;
+use clep_academic::import_isbn::{normalize_isbn, parse_openlibrary_response};
+use clep_index::index::VaultIndex;
+use clep_vault::Vault;
+use clep_vault::init::init_vault;
 use rusqlite::Connection;
 use std::fs;
 use tempfile::TempDir;
@@ -30,7 +30,7 @@ fn parse_single_article() {
     assert_eq!(e.doi, Some("10.48550/arXiv.1706.03762".to_string()));
     assert!(matches!(
         e.work_type,
-        clepsydra::vault::academic::WorkType::Paper
+        clep_academic::academic::WorkType::Paper
     ));
 }
 
@@ -50,7 +50,7 @@ fn parse_book_entry() {
     let e = &entries[0];
     assert!(matches!(
         e.work_type,
-        clepsydra::vault::academic::WorkType::Book
+        clep_academic::academic::WorkType::Book
     ));
     assert_eq!(e.authors, vec!["Christopher M. Bishop"]);
     assert_eq!(e.publisher, Some("Springer".to_string()));
@@ -95,11 +95,11 @@ fn parse_thesis_and_report() {
     assert_eq!(entries.len(), 2);
     assert!(matches!(
         entries[0].work_type,
-        clepsydra::vault::academic::WorkType::Thesis
+        clep_academic::academic::WorkType::Thesis
     ));
     assert!(matches!(
         entries[1].work_type,
-        clepsydra::vault::academic::WorkType::Report
+        clep_academic::academic::WorkType::Report
     ));
 }
 
@@ -211,7 +211,7 @@ fn parse_crossref_json_into_import_entry() {
     assert_eq!(entry.doi, Some("10.1038/nature12373".to_string()));
     assert!(matches!(
         entry.work_type,
-        clepsydra::vault::academic::WorkType::Paper
+        clep_academic::academic::WorkType::Paper
     ));
     assert_eq!(entry.cite_key, "kucsko2013nanometrescale");
 }
@@ -236,7 +236,7 @@ fn parse_openlibrary_json_into_import_entry() {
     assert_eq!(entry.publisher, Some("Springer".to_string()));
     assert!(matches!(
         entry.work_type,
-        clepsydra::vault::academic::WorkType::Book
+        clep_academic::academic::WorkType::Book
     ));
     assert_eq!(entry.isbn, Some("978-0-387-31073-2".to_string()));
 }
@@ -285,7 +285,7 @@ fn normalize_isbn_rejects_invalid_input() {
 
 // ── cite key derivation tests ──────────────────────────────────────────────
 
-use clepsydra::vault::import_zotero::derive_cite_key;
+use clep_academic::import_zotero::derive_cite_key;
 
 #[test]
 fn cite_key_from_bbt_extra_field() {
@@ -392,7 +392,7 @@ fn cite_key_multiple_collisions() {
 
 // ── Zotero DB query tests ─────────────────────────────────────────────────
 
-use clepsydra::vault::import_zotero::{
+use clep_academic::import_zotero::{
     ConflictPolicy, ZoteroAuthor, ZoteroItem, ZoteroPdf, compute_field_diffs,
     find_existing_by_zotero_key, map_to_import_entry, normalize_since, open_zotero_db, query_items,
     resolve_attachment_path,
@@ -618,7 +618,7 @@ fn map_journal_article_to_import_entry() {
     assert_eq!(entry.title, "Attention Is All You Need");
     assert!(matches!(
         entry.work_type,
-        clepsydra::vault::academic::WorkType::Paper
+        clep_academic::academic::WorkType::Paper
     ));
     assert_eq!(entry.authors, vec!["Ashish Vaswani", "Noam Shazeer"]);
     assert_eq!(entry.year, Some(2017));
@@ -801,7 +801,7 @@ fn compute_diffs_detects_changed_title() {
     let item = make_article_item();
     let entry = map_to_import_entry(&item);
 
-    let local_meta = clepsydra::vault::page::PageMeta {
+    let local_meta = clep_vault::page::PageMeta {
         title: Some("Old Title".to_string()),
         tags: vec!["local-tag".to_string()],
         ..Default::default()
@@ -818,7 +818,7 @@ fn compute_diffs_empty_when_identical() {
     let item = make_article_item();
     let entry = map_to_import_entry(&item);
 
-    let local_meta = clepsydra::vault::page::PageMeta {
+    let local_meta = clep_vault::page::PageMeta {
         title: Some("Attention Is All You Need".to_string()),
         ..Default::default()
     };
@@ -855,7 +855,7 @@ fn compute_diffs_detects_year_change() {
     let item = make_article_item();
     let entry = map_to_import_entry(&item);
 
-    let mut local_meta = clepsydra::vault::page::PageMeta {
+    let mut local_meta = clep_vault::page::PageMeta {
         title: Some("Attention Is All You Need".to_string()),
         ..Default::default()
     };
@@ -874,7 +874,7 @@ fn compute_diffs_detects_doi_change() {
     let item = make_article_item();
     let entry = map_to_import_entry(&item);
 
-    let local_meta = clepsydra::vault::page::PageMeta::default();
+    let local_meta = clep_vault::page::PageMeta::default();
 
     let diffs = compute_field_diffs(&entry, &local_meta);
     let doi_diff = diffs.iter().find(|d| d.field == "doi").unwrap();

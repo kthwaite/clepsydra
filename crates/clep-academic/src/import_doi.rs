@@ -1,5 +1,5 @@
-use crate::vault::academic::WorkType;
-use crate::vault::import::BibImportEntry;
+use crate::academic::WorkType;
+use crate::import::BibImportEntry;
 
 /// Parse a Crossref API JSON response into a `BibImportEntry`.
 ///

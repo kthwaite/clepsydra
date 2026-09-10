@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use super::page::ExtraMap;
+use clep_vault::page::ExtraMap;
 
 // ---------------------------------------------------------------------------
 // Enums

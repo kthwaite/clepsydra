@@ -1,5 +1,5 @@
-use clepsydra::vault::import_doi::{fetch_doi, parse_crossref_response};
-use clepsydra::vault::import_isbn::fetch_isbn;
+use clep_academic::import_doi::{fetch_doi, parse_crossref_response};
+use clep_academic::import_isbn::fetch_isbn;
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

@@ -1,6 +1,6 @@
-use crate::vault::academic::WorkType;
-use crate::vault::import::BibImportEntry;
-use crate::vault::import_doi::generate_cite_key;
+use crate::academic::WorkType;
+use crate::import::BibImportEntry;
+use crate::import_doi::generate_cite_key;
 
 /// Normalize an ISBN-10 or ISBN-13 to canonical ISBN-13 digits.
 ///

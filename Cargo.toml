@@ -14,9 +14,9 @@ axum = { workspace = true }
 axum-extra = { workspace = true }
 axum-server = { workspace = true }
 base64 = { workspace = true }
-biblatex = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true }
+clep-academic = { workspace = true }
 clep-archive = { workspace = true }
 clep-bases = { workspace = true }
 clep-config = { workspace = true }
@@ -54,7 +54,6 @@ tower-http = { workspace = true }
 tower-lsp = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-unicode-normalization = { workspace = true }
 url = { workspace = true }
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
@@ -84,6 +83,7 @@ edition = "2024"
 
 [workspace.dependencies]
 clep-test-support = { path = "crates/clep-test-support" }
+clep-academic = { path = "crates/clep-academic" }
 clep-archive = { path = "crates/clep-archive" }
 clep-bases = { path = "crates/clep-bases" }
 clep-config = { path = "crates/clep-config" }

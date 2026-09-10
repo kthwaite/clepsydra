@@ -2,11 +2,11 @@ use std::fs;
 
 use rusqlite::params;
 
-use crate::vault::Vault;
-use crate::vault::hooks::PostMoveHook;
-use crate::vault::index::VaultIndex;
-use crate::vault::page::{parse_frontmatter, write_page_content};
-use crate::vault::path::VaultPath;
+use clep_index::hooks::PostMoveHook;
+use clep_index::index::VaultIndex;
+use clep_vault::Vault;
+use clep_vault::page::{parse_frontmatter, write_page_content};
+use clep_vault::path::VaultPath;
 
 /// Rewrites `work_path` in annotation frontmatter when the referenced work page is moved.
 pub struct AcademicMoveHook;
@@ -65,7 +65,7 @@ mod tests {
     fn annotation_rewrite_failure_is_returned_after_preserving_failed_page() {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let annotations = root.join("library/annotations");
         fs::create_dir_all(&annotations).unwrap();
         let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000601").unwrap();
@@ -101,7 +101,7 @@ mod tests {
     fn replay_with_current_work_path_does_not_rewrite_annotation() {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let annotations = root.join("library/annotations");
         fs::create_dir_all(&annotations).unwrap();
         let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000611").unwrap();
