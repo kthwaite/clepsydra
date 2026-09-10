@@ -69,8 +69,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # `src/api/frontend.rs` embeds `ui/dist` via rust-embed, so the crate does
-      # not compile at all until the frontend has been built once. This is a
+      # `crates/clep-frontend-assets/src/lib.rs` embeds `ui/dist` via rust-embed, so
+      # that crate (and so the `clep` binary) does not compile at all until the
+      # frontend has been built once. This is a
       # build input, not a duplicate of the frontend job - that job gates the UI
       # itself, this one only needs the assets to exist.
       - uses: oven-sh/setup-bun@v2

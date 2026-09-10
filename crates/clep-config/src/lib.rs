@@ -26,8 +26,7 @@ pub fn expand_tilde(p: &str) -> Option<PathBuf> {
 }
 
 /// Vault-relative path to the on-disk index/cache database. Shared by every
-/// callsite that opens a [`VaultIndex`](../../clepsydra/vault/index/struct.VaultIndex.html)
-/// so they cannot drift.
+/// callsite that opens a `VaultIndex` so they cannot drift.
 pub const INDEX_DB_RELATIVE: &str = ".clepsydra/cache.db";
 
 /// Barbican orange — the Vessel primary accent, as an RGB triple. Shared by

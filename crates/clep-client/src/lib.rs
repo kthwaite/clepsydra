@@ -2,8 +2,8 @@
 //!
 //! This crate owns the config-driven client boundary (`configured_api_client`
 //! and its supporting helpers) plus the [`client`] and [`todo_capture`]
-//! modules built on top of it. See `src/mcp/mod.rs` in the `clepsydra` crate
-//! for how the MCP server uses this boundary.
+//! modules built on top of it. See the `crates/clep-mcp` crate (the MCP
+//! server) for how the MCP server uses this boundary.
 
 pub mod client;
 pub mod todo_capture;

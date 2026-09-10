@@ -3,5 +3,3 @@ name = "clep-test-support"
 version.workspace = true
 edition.workspace = true
 publish = false
-
-[dependencies]

@@ -22,4 +22,4 @@ ui:
 
 # Install the clep binary; release build embeds ui/dist via rust-embed
 install: ui
-    cargo install --path . --locked --force
+    cargo install --path crates/clep --locked --force

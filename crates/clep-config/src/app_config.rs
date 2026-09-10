@@ -25,7 +25,9 @@ pub fn find_config_path(start_dir: &Path) -> Option<PathBuf> {
     )
 }
 
-/// Internal helper that accepts env vars as parameters for easier testing.
+/// Cross-crate entry point for [`config_candidates`], used by `crates/clep`'s
+/// `config` and `new` commands: takes the env values as parameters so callers
+/// and tests can supply them explicitly.
 pub fn config_candidates_with_env(
     start_dir: &Path,
     xdg_config_home: Option<OsString>,
@@ -56,7 +58,9 @@ pub fn config_candidates_with_env(
     candidates
 }
 
-/// Internal helper that accepts env vars as parameters for easier testing.
+/// Cross-crate entry point for [`find_config_path`], used by `crates/clep`'s
+/// `config` and `new` commands: takes the env values as parameters so callers
+/// and tests can supply them explicitly.
 pub fn find_config_path_with_env(
     start_dir: &Path,
     xdg_config_home: Option<OsString>,

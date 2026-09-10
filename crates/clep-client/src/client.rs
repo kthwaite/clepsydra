@@ -64,7 +64,7 @@ impl ApiCallError {
 /// Build the agent-facing message for a non-success API response, unpacking
 /// the server's uniform `ApiError` payload when present and appending a
 /// next-step hint keyed on the status code.
-pub fn api_error_message(status: u16, body: &str) -> String {
+pub(crate) fn api_error_message(status: u16, body: &str) -> String {
     let (error, server_hint, detail) = match serde_json::from_str::<Value>(body) {
         Ok(parsed) => {
             let error = parsed
