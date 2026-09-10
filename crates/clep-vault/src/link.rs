@@ -47,7 +47,7 @@ pub fn normalize_links_to_target(value: &str) -> NormalizedLinksToTarget {
     let target_id = uuid::Uuid::parse_str(value)
         .map(|value| value.to_string())
         .unwrap_or_else(|_| value.to_owned());
-    let target_canonical = crate::vault::canonical::CanonicalName::from_title(value)
+    let target_canonical = crate::canonical::CanonicalName::from_title(value)
         .as_str()
         .to_owned();
     NormalizedLinksToTarget {

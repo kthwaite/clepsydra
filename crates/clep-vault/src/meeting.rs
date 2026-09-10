@@ -1,6 +1,6 @@
 //! When a MEETING took place.
 //!
-//! The companion to [`crate::vault::attendance`], which owns *who* was there.
+//! The companion to [`crate::attendance`], which owns *who* was there.
 //! Both are frontmatter the MEETING kind carries; they are separate modules
 //! because the attendees relation is a link and this is a scalar.
 //!

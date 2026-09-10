@@ -1,7 +1,7 @@
 //! Vault location: latitude/longitude (and an optional human label) used for
 //! solar-time calculations such as the Atrium "horologe" (sunset countdown).
 //!
-//! Mirrors the [`crate::vault::bcl`] pattern: the vault stores the
+//! Mirrors the [`crate::bcl`] pattern: the vault stores the
 //! source-of-truth at `<vault>/.clepsydra/location.toml` so the value travels
 //! with the vault. On first run the loader uses a lookaside cache: if the
 //! vault file is missing, it copies `~/.config/clepsydra/location.toml` into

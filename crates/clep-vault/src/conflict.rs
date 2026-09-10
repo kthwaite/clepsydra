@@ -143,7 +143,7 @@ mod tests {
     fn conflicted_pages_sweeps_and_sorts() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        crate::init::init_vault(&root).unwrap();
         std::fs::create_dir_all(root.join("notes")).unwrap();
         std::fs::write(
             root.join("notes/b.md"),

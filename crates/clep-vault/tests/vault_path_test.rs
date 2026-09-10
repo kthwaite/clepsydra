@@ -1,5 +1,5 @@
-use clepsydra::vault::Vault;
-use clepsydra::vault::path::VaultPath;
+use clep_vault::Vault;
+use clep_vault::path::VaultPath;
 
 // --- Construction tests ---
 

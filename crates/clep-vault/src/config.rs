@@ -90,7 +90,7 @@ fn default_linkable_properties() -> Vec<String> {
         "link".to_string(),
         // The MEETING attendee relation: linkable by default so a person page
         // collects the backlinks for every meeting naming them.
-        crate::vault::attendance::ATTENDEES_KEY.to_string(),
+        crate::attendance::ATTENDEES_KEY.to_string(),
     ]
 }
 
@@ -394,14 +394,14 @@ database_path = "/custom/path/zotero.sqlite"
         )
         .unwrap();
 
-        let vault = crate::vault::Vault::open(tmp.path()).unwrap();
+        let vault = crate::Vault::open(tmp.path()).unwrap();
 
-        assert!(vault.is_excluded(&crate::vault::path::VaultPath::new("feeds.md").unwrap()));
+        assert!(vault.is_excluded(&crate::path::VaultPath::new("feeds.md").unwrap()));
         assert!(
-            !vault.is_excluded(&crate::vault::path::VaultPath::new("notes/feeds.md").unwrap()),
+            !vault.is_excluded(&crate::path::VaultPath::new("notes/feeds.md").unwrap()),
             "only the reserved root manifest is unconditional"
         );
-        assert!(vault.is_excluded(&crate::vault::path::VaultPath::new("private/page.md").unwrap()));
+        assert!(vault.is_excluded(&crate::path::VaultPath::new("private/page.md").unwrap()));
     }
 
     #[test]

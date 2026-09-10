@@ -128,7 +128,7 @@ pub fn attendees_value(names: &[String]) -> toml::Value {
 }
 
 /// Strip wikilink brackets and any `|display` alias, mirroring
-/// [`crate::vault::link::extract_property_refs`].
+/// [`crate::link::extract_property_refs`].
 fn link_target(raw: &str) -> String {
     let trimmed = raw.trim();
     let inner = trimmed

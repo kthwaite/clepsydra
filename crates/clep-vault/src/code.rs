@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn family_kind_roundtrip() {
-        use crate::vault::kind::Kind;
+        use crate::kind::Kind;
         assert_eq!(CodeFamily::Task.kind(), Kind::Task);
         assert_eq!(CodeFamily::from_kind(Kind::Cycle), Some(CodeFamily::Cycle));
         assert_eq!(CodeFamily::from_kind(Kind::Note), None);

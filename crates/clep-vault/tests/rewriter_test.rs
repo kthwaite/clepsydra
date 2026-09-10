@@ -1,4 +1,4 @@
-use clepsydra::vault::rewriter::{DELETE_PLAIN, DELETE_UNLINK, rewrite_links_in_content};
+use clep_vault::rewriter::{DELETE_PLAIN, DELETE_UNLINK, rewrite_links_in_content};
 
 // ---------------------------------------------------------------------------
 // rewrite_links_in_content tests

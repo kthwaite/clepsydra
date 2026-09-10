@@ -1,4 +1,4 @@
-use clepsydra::vault::block_id::BlockId;
+use clep_vault::block_id::BlockId;
 
 #[test]
 fn generates_valid_block_id() {

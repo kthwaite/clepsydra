@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use clepsydra::vault::block::{BlockType, CheckboxState, parse_blocks};
+use clep_vault::block::{BlockType, CheckboxState, parse_blocks};
 
 #[test]
 fn parses_simple_list() {

@@ -1,12 +1,12 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use clepsydra::vault::encryption::{EncryptionFormat, EncryptionMeta};
-use clepsydra::vault::page::{
+use clep_vault::encryption::{EncryptionFormat, EncryptionMeta};
+use clep_vault::page::{
     ExtraMap, FrontmatterError, Page, PageMeta, parse_frontmatter, parse_or_repair_frontmatter,
     write_page_content,
 };
-use clepsydra::vault::path::VaultPath;
+use clep_vault::path::VaultPath;
 
 const ENCRYPTION_KEY_ID: &str = "019fd000-0000-7000-8000-000000000002";
 

@@ -1,7 +1,7 @@
 use std::fs;
 
 use base64::prelude::{BASE64_STANDARD, Engine as _};
-use clepsydra::vault::keyring::{KeyringError, load_keyring, rewrap_identity, setup_keyring};
+use clep_vault::keyring::{KeyringError, load_keyring, rewrap_identity, setup_keyring};
 use tempfile::TempDir;
 
 const KEY_ID: &str = "019fd000-0000-7000-8000-000000000501";

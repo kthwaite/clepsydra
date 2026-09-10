@@ -10,12 +10,12 @@ use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::vault::board_vocab::DEFAULT_STATUS;
-use crate::vault::page::PageMeta;
-use crate::vault::path::VaultPath;
-use crate::vault::toml_json::toml_value_to_json;
-use crate::vault::toml_patch::{FrontmatterEdits, splice_frontmatter};
-use crate::vault::{kind::Kind, page::parse_frontmatter, page::write_page_content};
+use crate::board_vocab::DEFAULT_STATUS;
+use crate::page::PageMeta;
+use crate::path::VaultPath;
+use crate::toml_json::toml_value_to_json;
+use crate::toml_patch::{FrontmatterEdits, splice_frontmatter};
+use crate::{kind::Kind, page::parse_frontmatter, page::write_page_content};
 
 pub(crate) const TASK_HISTORY_KEY: &str = "task_history";
 

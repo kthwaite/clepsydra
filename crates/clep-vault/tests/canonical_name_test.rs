@@ -1,4 +1,4 @@
-use clepsydra::vault::canonical::CanonicalName;
+use clep_vault::canonical::CanonicalName;
 
 #[test]
 fn from_title_lowercases() {

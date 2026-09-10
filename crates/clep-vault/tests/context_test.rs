@@ -1,4 +1,4 @@
-use clepsydra::vault::context::extract_context;
+use clep_vault::context::extract_context;
 
 #[test]
 fn extracts_sentence_around_link() {

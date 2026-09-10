@@ -4,7 +4,7 @@ use std::ops::Range;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd, TextMergeWithOffset};
 use regex::Regex;
 
-use crate::vault::markdown::markdown_options;
+use crate::markdown::markdown_options;
 
 /// The structural type of a block.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -10,8 +10,8 @@ use uuid::Uuid;
 use super::legacy_yaml;
 use super::path::VaultPath;
 use super::toml_json::toml_value_to_json;
-use crate::vault::encryption::{EncryptionMeta, validate_age_armor};
-use crate::vault::kind::Kind;
+use crate::encryption::{EncryptionMeta, validate_age_armor};
+use crate::kind::Kind;
 
 /// Frontmatter extras: every key that is not a system field, holding native
 /// TOML values. Backed by an order-preserving map so extras round-trip in
@@ -28,7 +28,7 @@ pub type ExtraMap = toml::map::Map<String, toml::Value>;
 /// deriver, link extraction) see real dates, numbers, and booleans instead of
 /// sniffing strings. JSON serialization (`meta_json`, page-detail responses)
 /// goes through an explicit conversion that renders date-times as ISO 8601
-/// strings — see [`crate::vault::toml_json`].
+/// strings — see [`crate::toml_json`].
 #[derive(Debug, Clone)]
 pub struct PageMeta {
     pub id: Uuid,
@@ -433,7 +433,7 @@ pub fn parse_frontmatter(content: &str) -> Result<(PageMeta, String), Frontmatte
 /// Content containing git merge conflict markers is never marked for rewrite
 /// (docs/adr/0004).
 pub fn parse_or_repair_frontmatter(content: &str) -> (PageMeta, String, bool, Option<String>) {
-    if crate::vault::conflict::has_conflict_markers(content) {
+    if crate::conflict::has_conflict_markers(content) {
         let (meta, body, _rewrote, inner) = parse_or_repair_frontmatter_inner(content);
         const NOTE: &str =
             "contains merge conflict markers; indexing read-only (file not modified)";
@@ -869,7 +869,7 @@ Body begins here.
 #[cfg(test)]
 mod kind_field_tests {
     use super::*;
-    use crate::vault::kind::Kind;
+    use crate::kind::Kind;
 
     #[test]
     fn parses_declared_type_into_kind_field() {
@@ -918,7 +918,7 @@ pub fn body_is_protected(path: &str, meta: &PageMeta) -> bool {
     if let Some(readonly) = meta.readonly {
         return readonly;
     }
-    let (kind, _) = crate::vault::kind::resolve(path, meta.kind);
+    let (kind, _) = crate::kind::resolve(path, meta.kind);
     kind.readonly_by_default()
 }
 

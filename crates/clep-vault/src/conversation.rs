@@ -781,7 +781,7 @@ mod tests {
             &[turn(ConversationRole::User, "Hello")],
         )
         .unwrap();
-        let mut meta = crate::vault::page::PageMeta::new();
+        let mut meta = crate::page::PageMeta::new();
 
         write_ledger(&mut meta, &transcript.ledger).unwrap();
 
@@ -793,7 +793,7 @@ mod tests {
 
     #[test]
     fn malformed_or_raw_host_ledger_values_are_rejected() {
-        let mut malformed = crate::vault::page::PageMeta::new();
+        let mut malformed = crate::page::PageMeta::new();
         malformed.extra.insert(
             CONVERSATION_META_KEY.to_string(),
             toml::Value::String("not-a-table".to_string()),
@@ -812,7 +812,7 @@ mod tests {
                     .to_string(),
             last_source_identity: String::new(),
         };
-        let mut meta = crate::vault::page::PageMeta::new();
+        let mut meta = crate::page::PageMeta::new();
         assert!(matches!(
             write_ledger(&mut meta, &raw),
             Err(ConversationError::InvalidHostIdHash)

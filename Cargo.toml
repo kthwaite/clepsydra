@@ -6,7 +6,7 @@ edition.workspace = true
 [features]
 # Enables the directory-flush/sync fault-injection hooks in
 # `vault::atomic_file` and `vault::rubbish` for another crate's tests.
-test-failpoints = []
+test-failpoints = ["clep-vault/test-failpoints"]
 
 [dependencies]
 ammonia = { workspace = true }
@@ -18,6 +18,7 @@ biblatex = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true }
 clep-config = { workspace = true }
+clep-vault = { workspace = true }
 dirs = { workspace = true }
 feed-rs = { workspace = true }
 fs4 = { workspace = true }
@@ -69,6 +70,7 @@ axum-test = { workspace = true }
 serial_test = { workspace = true }
 wiremock = { workspace = true }
 clep-test-support = { workspace = true }
+clep-vault = { workspace = true, features = ["test-failpoints"] }
 
 [workspace]
 members = ["crates/*"]
@@ -84,6 +86,7 @@ clep-config = { path = "crates/clep-config" }
 clep-client = { path = "crates/clep-client" }
 clep-frontend-assets = { path = "crates/clep-frontend-assets" }
 clep-mcp = { path = "crates/clep-mcp" }
+clep-vault = { path = "crates/clep-vault" }
 clepsydra = { path = "." }
 ammonia = "4"
 anstream = "1.0.0"
