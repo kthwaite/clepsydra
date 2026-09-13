@@ -1,5 +1,6 @@
 import { fetchClient } from "#/api/client";
 import { useOfflineStore } from "#/offline/offlineStore";
+import { invalidateOfflineIndex } from "#/offline/search";
 import { API_CACHE_NAME } from "#/offline/swPolicy";
 import {
   PAGE_KEY_PREFIXES,
@@ -31,6 +32,7 @@ export function onSyncComplete(listener: Listener): () => void {
 }
 
 function notifyComplete() {
+  invalidateOfflineIndex();
   for (const listener of completeListeners) listener();
 }
 
