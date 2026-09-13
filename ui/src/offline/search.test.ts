@@ -75,6 +75,22 @@ describe("searchOffline", () => {
     const third = await buildOfflineIndex(storage.asCacheStorage());
     expect(third).not.toBe(first);
   });
+
+  it("retries after a failed build instead of memoising the rejection", async () => {
+    const real = storage.asCacheStorage();
+    let calls = 0;
+    const flaky = {
+      open: async (name: string) => {
+        calls += 1;
+        if (calls === 1) throw new Error("boom");
+        return real.open(name);
+      },
+    } as unknown as CacheStorage;
+
+    await expect(buildOfflineIndex(flaky)).rejects.toThrow("boom");
+    const index = await buildOfflineIndex(flaky);
+    expect(index.search("water").length).toBeGreaterThan(0);
+  });
 });
 
 describe("offlineSearchMiddleware", () => {
@@ -121,5 +137,35 @@ describe("offlineSearchMiddleware", () => {
       options: {} as never,
     } as never);
     expect((response as Response).status).toBe(200);
+  });
+
+  it("falls back to the default limit when the limit param is malformed", async () => {
+    vi.stubGlobal("caches", storage.asCacheStorage());
+    const request = new Request("http://localhost/api/vault/index/search?q=water&limit=abc");
+    const response = await offlineSearchMiddleware.onResponse?.({
+      request,
+      response: offlineUncachedResponse(request.url),
+      schemaPath: "/api/vault/index/search",
+      params: { query: { q: "water" } },
+      id: "4",
+      options: {} as never,
+    } as never);
+    const body = await (response as Response).json();
+    expect(body.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the default limit when the limit param is non-positive", async () => {
+    vi.stubGlobal("caches", storage.asCacheStorage());
+    const request = new Request("http://localhost/api/vault/index/search?q=water&limit=0");
+    const response = await offlineSearchMiddleware.onResponse?.({
+      request,
+      response: offlineUncachedResponse(request.url),
+      schemaPath: "/api/vault/index/search",
+      params: { query: { q: "water" } },
+      id: "5",
+      options: {} as never,
+    } as never);
+    const body = await (response as Response).json();
+    expect(body.length).toBeGreaterThan(0);
   });
 });

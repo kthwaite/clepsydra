@@ -63,7 +63,8 @@ function newIndex(): OfflineIndex {
 }
 
 export function buildOfflineIndex(caches: CacheStorage): Promise<OfflineIndex> {
-  cached ??= (async () => {
+  if (cached) return cached;
+  const promise: Promise<OfflineIndex> = (async () => {
     const index = newIndex();
     const pages = await readCachedPages(caches);
     index.addAll(
@@ -78,7 +79,14 @@ export function buildOfflineIndex(caches: CacheStorage): Promise<OfflineIndex> {
     );
     return index;
   })();
-  return cached;
+  // A rejected build (e.g. caches.open throws) must not be memoised forever:
+  // clear the memo so the next call retries, unless something else already
+  // replaced it (invalidateOfflineIndex + a fresh build raced ahead of us).
+  promise.catch(() => {
+    if (cached === promise) cached = null;
+  });
+  cached = promise;
+  return promise;
 }
 
 function snippetFor(body: string, terms: string[]): string {
@@ -119,12 +127,18 @@ function isSearchRequest(schemaPath: string): boolean {
   return schemaPath === "/api/vault/index/search";
 }
 
+/** A malformed or non-positive limit falls back to searchOffline's default. */
+function parseLimit(raw: string | null): number | undefined {
+  if (raw === null) return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
 async function localResponse(request: Request): Promise<Response> {
   const url = new URL(request.url);
-  const limitParam = url.searchParams.get("limit");
   const hits = await searchOffline(
     url.searchParams.get("q") ?? "",
-    limitParam ? Number(limitParam) : undefined,
+    parseLimit(url.searchParams.get("limit")),
   );
   return new Response(JSON.stringify(hits), {
     status: 200,
