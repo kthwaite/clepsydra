@@ -1,6 +1,7 @@
 import MiniSearch from "minisearch";
 import type { Middleware } from "openapi-fetch";
 import type { components } from "#/api/schema";
+import { useConnectionStore } from "#/offline/connectionStore";
 import { API_CACHE_NAME, isOfflineUncached } from "#/offline/swPolicy";
 
 type PageDetail = components["schemas"]["PageDetailResponse"];
@@ -36,7 +37,8 @@ async function readCachedPages(caches: CacheStorage): Promise<PageDetail[]> {
   const cache = await caches.open(API_CACHE_NAME);
   const pages: PageDetail[] = [];
   for (const request of await cache.keys()) {
-    if (!new URL(request.url).pathname.startsWith("/api/vault/pages/")) continue;
+    if (!new URL(request.url).pathname.startsWith("/api/vault/pages/"))
+      continue;
     const response = await cache.match(request);
     if (!response) continue;
     try {
@@ -152,7 +154,8 @@ async function localResponse(request: Request): Promise<Response> {
  */
 export const offlineSearchMiddleware: Middleware = {
   async onResponse({ request, response, schemaPath }) {
-    if (!isSearchRequest(schemaPath) || response.status !== 503) return undefined;
+    if (!isSearchRequest(schemaPath) || response.status !== 503)
+      return undefined;
     let body: unknown;
     try {
       body = await response.clone().json();
@@ -165,6 +168,16 @@ export const offlineSearchMiddleware: Middleware = {
   async onError({ request, schemaPath }) {
     if (!isSearchRequest(schemaPath)) return undefined;
     if (typeof globalThis.caches === "undefined") return undefined;
+    // A transport failure alone doesn't mean we're offline (a real
+    // server/TLS failure would land here too); only fall back to the local
+    // index when we actually know we're offline or the SSE stream isn't
+    // healthy. The onResponse 503/offline_uncached branch above stays
+    // unconditional — that response is only ever synthesised by the service
+    // worker while offline.
+    const offline =
+      navigator.onLine === false ||
+      useConnectionStore.getState().status !== "connected";
+    if (!offline) return undefined;
     return localResponse(request);
   },
 };
