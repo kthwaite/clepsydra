@@ -184,6 +184,18 @@ describe("Folio offline", () => {
     expect(screen.queryByRole("button", { name: /edit anyway/i })).toBeNull();
   });
 
+  it("hides the raw-markdown button when offline", () => {
+    usePageEditorMock.mockReturnValue(
+      editor({ readonly: true, offline: true }),
+    );
+
+    render(<Folio tabId="t1" path="notes/a-note.md" />);
+
+    expect(
+      screen.queryByRole("button", { name: /raw markdown/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("prefers the offline notice over the archive-protection notice", async () => {
     usePageEditorMock.mockReturnValue(
       editor({ archive: ARCHIVE_META, readonly: true, offline: true }),

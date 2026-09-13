@@ -604,6 +604,7 @@ export function Folio({ tabId, path }: FolioProps) {
     rawMarkdownPresentationAvailable &&
     !editor.isLoading &&
     !(editor.error && !editor.isDraft) &&
+    !offlineReadOnly &&
     (!encrypted || encryptionState.status === "plain") &&
     !(isTodayDraftPath && (isJournalTodayLoading || journalToday)) &&
     !(isTodayAiDraftPath && (isAiJournalTodayLoading || aiJournalToday));
