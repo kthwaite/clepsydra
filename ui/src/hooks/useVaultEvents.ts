@@ -134,6 +134,10 @@ export function useVaultEvents(): ConnectionStatus {
       window.removeEventListener("online", onOnline);
       es?.close();
       if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+      // Leave the shared store neutral so an unmounting instance can't pin
+      // it at "disconnected" forever (connectionStore's sticky-first-error
+      // semantics would otherwise never clear disconnectedSince).
+      setStoreStatus("connecting");
     };
   }, [queryClient, setStoreStatus]);
 

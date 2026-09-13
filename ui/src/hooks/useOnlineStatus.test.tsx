@@ -7,9 +7,15 @@ import {
 } from "#/hooks/useOnlineStatus";
 import { useConnectionStore } from "#/offline/connectionStore";
 
+let originalOnLineDescriptor: PropertyDescriptor | undefined;
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-09-12T10:00:00Z"));
+  originalOnLineDescriptor = Object.getOwnPropertyDescriptor(
+    navigator,
+    "onLine",
+  );
   Object.defineProperty(navigator, "onLine", {
     value: true,
     configurable: true,
@@ -19,6 +25,12 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  if (originalOnLineDescriptor) {
+    Object.defineProperty(navigator, "onLine", originalOnLineDescriptor);
+  } else {
+    // biome-ignore lint/suspicious/noExplicitAny: restoring a property jsdom may not have declared
+    delete (navigator as any).onLine;
+  }
 });
 
 describe("computeOnline", () => {

@@ -24,10 +24,16 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
+let originalOnLineDescriptor: PropertyDescriptor | undefined;
+
 beforeEach(() => {
   vi.useFakeTimers();
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
+  originalOnLineDescriptor = Object.getOwnPropertyDescriptor(
+    navigator,
+    "onLine",
+  );
   Object.defineProperty(navigator, "onLine", {
     value: true,
     configurable: true,
@@ -41,6 +47,12 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  if (originalOnLineDescriptor) {
+    Object.defineProperty(navigator, "onLine", originalOnLineDescriptor);
+  } else {
+    // biome-ignore lint/suspicious/noExplicitAny: restoring a property jsdom may not have declared
+    delete (navigator as any).onLine;
+  }
 });
 
 describe("nextBackoffMs", () => {
@@ -94,6 +106,23 @@ describe("useVaultEvents reconnect", () => {
       disconnectedSince: Date.parse("2026-09-12T10:00:00Z"),
     });
     unmount();
+  });
+
+  it("resets the connection store to neutral when the hook unmounts", () => {
+    vi.setSystemTime(new Date("2026-09-12T10:00:00Z"));
+    const { unmount } = renderHook(() => useVaultEvents(), { wrapper });
+    act(() => FakeEventSource.instances[0]?.onerror?.(new Event("error")));
+    expect(useConnectionStore.getState()).toMatchObject({
+      status: "disconnected",
+      disconnectedSince: Date.parse("2026-09-12T10:00:00Z"),
+    });
+
+    unmount();
+
+    expect(useConnectionStore.getState()).toMatchObject({
+      status: "connecting",
+      disconnectedSince: null,
+    });
   });
 
   it("does not reconnect while the browser is offline and reconnects on the online event", () => {
