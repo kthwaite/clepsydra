@@ -161,6 +161,7 @@ export class OfflineSyncController {
   private pendingDelta: { upserted: Set<string>; removed: Set<string> } | null =
     null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private timerDueAt: number | null = null;
   private disposed = false;
   private readonly deps: SyncDeps;
 
@@ -183,12 +184,30 @@ export class OfflineSyncController {
   dispose() {
     this.disposed = true;
     if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.timerDueAt = null;
   }
 
+  /**
+   * Arms a timer to fire in `delay` ms. A request with a shorter delay than
+   * whatever is already armed (e.g. requestFull() while a requestDelta()
+   * coalesce window is still counting down) pre-empts it — the pending
+   * timer is cleared and re-armed sooner — so a full pass never waits
+   * behind an unrelated, slower delta coalesce. A request with an
+   * equal-or-longer delay leaves the armed timer alone.
+   */
   private schedule(delay: number) {
-    if (this.disposed || this.timer) return;
+    if (this.disposed) return;
+    const dueAt = Date.now() + delay;
+    if (this.timer) {
+      if (this.timerDueAt !== null && dueAt >= this.timerDueAt) return;
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.timerDueAt = dueAt;
     this.timer = setTimeout(() => {
       this.timer = null;
+      this.timerDueAt = null;
       void this.drain();
     }, delay);
   }

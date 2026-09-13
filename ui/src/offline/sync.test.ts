@@ -278,4 +278,20 @@ describe("OfflineSyncController", () => {
     expect(calls.filter((p) => p === "/api/vault/pages")).toHaveLength(2);
     controller.dispose();
   });
+
+  it("lets a full request pre-empt a pending delta coalesce timer", async () => {
+    vi.useFakeTimers();
+    installFetch();
+    const controller = new OfflineSyncController(deps());
+    controller.requestDelta({ upserted: ["notes/a.md"], removed: [] });
+    controller.requestFull();
+    // The full request must not wait behind the delta's coalesce window.
+    await vi.advanceTimersByTimeAsync(DELTA_COALESCE_MS - 1);
+    expect(calls).toContain("/api/vault/pages");
+    // No separate delta pass should follow — the full pass already
+    // subsumed it, so exactly one list call total.
+    await vi.runAllTimersAsync();
+    expect(calls.filter((p) => p === "/api/vault/pages")).toHaveLength(1);
+    controller.dispose();
+  });
 });
