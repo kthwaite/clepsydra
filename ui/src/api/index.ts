@@ -342,7 +342,14 @@ export function useTagSuggestions(query: string, limit = 12, enabled = true) {
         query: { q: normalizedQuery, limit: normalizedLimit },
       },
     },
-    { enabled: enabled && normalizedQuery.length > 0 },
+    {
+      enabled: enabled && normalizedQuery.length > 0,
+      // Opt out of the global throwOnError: Folio already reads this query's
+      // `error` field directly (tagSuggestionsError) to render an inline
+      // recovery affordance instead of losing the whole folio to
+      // FolioBoundary over a transient or offline_uncached failure.
+      throwOnError: false,
+    },
   );
 }
 
