@@ -1,6 +1,6 @@
 # Offline PWA smoke test
 
-Date: 2026-09-13
+Date: 2026-09-13 (fixes re-verified same day, see "Fix re-run" section below)
 Branch: `feature/offline-pwa`
 Build: production `ui/dist` (`bun run build`) embedded into a freshly rebuilt debug `clep` binary (`cargo build -p clep`, forced via a `touch` on `crates/clep-frontend-assets/src/lib.rs` since cargo did not otherwise detect the new `ui/dist`).
 Vault: scratch vault under `/private/tmp/.../scratchpad/offline-pwa-task10/vault` with two notes (`notes/alpha.md`, `notes/beta.md`, the latter linking to the former).
@@ -129,6 +129,60 @@ Both appended lines are present in the cached entry, confirming the SSE-driven w
 
 Note: the first on-disk append happened while the only open tab was the one already blanked by the Step 3.4 crash, so its (dead) SSE connection could not have driven a re-fetch for that edit. A second append was made after opening a fresh, confirmed-live tab, and the final cache check reflects both lines — so the passing result specifically demonstrates the live tab's SSE-triggered re-cache, not a stale artifact from a manual page visit (alpha.md was not navigated to directly in this sequence).
 
+## Fix re-run (2026-09-13, commits `bdf13c73` and `451c43a5`)
+
+Both Step-3 bugs above were diagnosed and fixed the same day (Task 10b). Root
+causes, confirmed by direct console/network instrumentation over three
+separate reproduction attempts (direct full navigation, an extended
+20-second timeline, and client-side navigation via search) — the
+`lazyRouteComponent`/chunk-load theory from the original investigation was
+**ruled out**: zero JS asset fetch failures were observed in any run.
+
+**Bug #1 root cause:** `useSimilar` (`ui/src/api/similar.ts`) and
+`useTagSuggestions` (`ui/src/api/index.ts`) never opted out of the global
+`throwOnError: true` default (unlike `useBacklinks`/`useOutlinks`, which
+already did, with a comment saying so). Offline, the "similar" endpoint's
+`offline_uncached` 503 retries with react-query's default backoff
+(~1s+2s+4s ≈ 7s) and then throws synchronously during render, caught by
+`FolioBoundary`, which swaps the *entire* folio for its error panel. This
+reproduced deterministically 3/3 times, always 7-8s after any offline page
+load with an active Folio tab (which, given workspace-tab persistence,
+includes the "/" route). Fix: `bdf13c73` — both hooks now pass
+`throwOnError: false`.
+
+**Bug #2 root cause:** `usePage`'s retry predicate (`ui/src/api/pages.ts`)
+only special-cased a 404; an `offline_uncached` 503 still retried 3x with
+backoff (~7s) before settling into `error` state, and even once settled,
+`Folio`'s error branch only special-cased `pageNotFound` (a real 404),
+falling through to the generic `FolioError` panel instead of an
+offline-specific message. Fix: `451c43a5` — extracted `RouteError`'s
+"Not available offline" panel into a shared `OfflineUnavailable` component,
+used by both `RouteError` and `Folio`; `usePage`'s retry predicate now also
+excludes `offline_uncached` so the panel appears immediately.
+
+### Re-run method
+
+Same build/serve/vault setup as Step 1 (rebuilt `ui/dist` and forced a
+`clep-frontend-assets` recompile after each fix), same Playwright MCP
+driver, same scratch vault (`notes/alpha.md`, `notes/beta.md`). Verified via
+`browser_run_code_unsafe` scripts instrumenting `console`, `requestfailed`,
+and `pageerror`, going offline via `page.context().setOffline(true)`.
+
+### Re-run results
+
+| Step | Before fix | After fix |
+|---|---|---|
+| 3.4 (stay offline 15-20s on a loaded page) | Content collapsed 23521 → 10463 chars at t=7-8s (`FolioBoundary caught a folio render error … similar/notes%2Fbeta.md`); stable after that | Content stable at 23521 chars through t=20000ms in two separate runs (direct nav and search-driven client nav); no `FolioBoundary caught` in console; only benign console noise (fonts, SW preload mismatches, one `AbortError: Transition was skipped` unrelated to view-transition overlap) |
+| 3.5 (search "water" offline) | PASS (unaffected by either bug) | PASS — `⌘K`, typed "water", body text includes "water clocks" hit |
+| 3.6 (`/tasking`, `/agenda` offline) | PASS | PASS — neither route's body text matches `/something went wrong|route error|unexpected error/i` |
+| 3.7 (missing page offline) | Stuck on "… fetching folio …" indefinitely (checked to 6s) | "Not available offline" heading present at **t=500ms** (first poll) |
+
+Bug #1's fix was confirmed with two independent repro scripts: a direct
+`page.goto` to `/pages/notes/beta.md` while offline, and a client-side
+in-app navigation there via `⌘K` search — both previously collapsed via
+`FolioBoundary` at t=7-8s and both now stay fully rendered for the whole
+20-second observation window.
+
 ## Step 4: iOS device check (user-run) — PENDING USER VERIFICATION
 
 Not run in this smoke test (requires a physical iOS device on the same network/tailnet). Steps for the user:
@@ -156,13 +210,13 @@ Given the two bugs found in Step 3 (the blank-crash a few seconds after going of
 | 3.1 SW controller | PASS |
 | 3.2 Cache population (18 ≥ 6) | PASS |
 | 3.3 Set offline | PASS |
-| 3.4 Unopened page offline | PASS (assertions met), but surfaced the blank-crash bug described above |
-| 3.5 Search offline | PASS |
-| 3.6 `/tasking`, `/agenda` offline | PASS |
-| 3.7 Missing page offline | **FAIL** — never reaches "Not available offline"; stuck loading indefinitely |
+| 3.4 Unopened page offline | PASS (assertions met), but surfaced the blank-crash bug described above — **fixed `bdf13c73`, re-run PASS (stable through 20s)** |
+| 3.5 Search offline | PASS — **re-confirmed after fixes** |
+| 3.6 `/tasking`, `/agenda` offline | PASS — **re-confirmed after fixes** |
+| 3.7 Missing page offline | **FAIL** — never reaches "Not available offline"; stuck loading indefinitely — **fixed `451c43a5`, re-run PASS (shows at t=500ms)** |
 | 3.8 SSE delta re-cache | PASS |
 | 4. iOS device check | PENDING (user-run) |
 
-**Two application bugs found, not fixed (out of scope for this task):**
-1. A few seconds after going offline, on any route, the app throws an uncaught exception (via TanStack Router's `lazyRouteComponent` reload-once-then-throw recovery path colliding with being offline) and unmounts to a permanently blank screen.
-2. Navigating to a page that doesn't exist while offline never surfaces the "Not available offline" message — the UI is stuck on an indefinite loading spinner instead.
+**Two application bugs found in this smoke test, both fixed the same day (Task 10b) — see "Fix re-run" above for root causes, commits, and re-run evidence:**
+1. ~~A few seconds after going offline, on any route, the app throws an uncaught exception (via TanStack Router's `lazyRouteComponent` reload-once-then-throw recovery path colliding with being offline) and unmounts to a permanently blank screen.~~ Direct instrumentation ruled out `lazyRouteComponent`/chunk loading entirely (no failed JS asset fetches in any repro). The actual cause was `useSimilar`/`useTagSuggestions` missing `throwOnError: false`, so `FolioBoundary` swallowed the whole folio on the offline_uncached 503 for the "similar" query, ~7-8s after any offline page load. Fixed in `bdf13c73`.
+2. ~~Navigating to a page that doesn't exist while offline never surfaces the "Not available offline" message — the UI is stuck on an indefinite loading spinner instead.~~ Fixed in `451c43a5`: `usePage` no longer retries an `offline_uncached` error, and `Folio`'s error branch now renders the shared `OfflineUnavailable` panel (extracted from `RouteError`) for that case instead of falling through to the generic error panel.
