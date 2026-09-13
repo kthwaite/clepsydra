@@ -197,4 +197,27 @@ describe("Folio offline", () => {
     expect(screen.queryByText(/captured archive/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /edit anyway/i })).toBeNull();
   });
+
+  it("shows Not available offline instead of a stuck loading state for an uncached page", () => {
+    usePageEditorMock.mockReturnValue(
+      editor({
+        error: {
+          code: "offline_uncached",
+          url: "/api/vault/pages/notes%2Fmissing.md",
+        },
+        pageNotFound: false,
+        isDraft: false,
+      }),
+    );
+
+    render(<Folio tabId="t1" path="notes/missing.md" />);
+
+    expect(
+      screen.getByRole("heading", { name: "Not available offline" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("This page hasn't been synced to this device yet."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/fetching folio/i)).toBeNull();
+  });
 });

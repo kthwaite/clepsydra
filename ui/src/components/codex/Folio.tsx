@@ -61,6 +61,7 @@ import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useReadingColumn } from "#/components/codex/useReadingColumn";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { KindIcon } from "#/components/KindIcon";
+import { OfflineUnavailable } from "#/components/OfflineUnavailable";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { TagInput } from "#/components/ui/tag-input";
@@ -94,6 +95,7 @@ import { presentationFor } from "#/lib/kindPresentation";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { formatAbsoluteDate, formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
+import { isOfflineUncached } from "#/offline/swPolicy";
 import {
   parseRecipeMarkdown,
   type RecipeParseResult,
@@ -986,6 +988,12 @@ export function Folio({ tabId, path }: FolioProps) {
     // error is a load failure the user can retry without losing the tab.
     if (editor.pageNotFound) {
       return <FolioNotFound path={path} onClose={() => closeTab(tabId)} />;
+    }
+    // The service worker's offline_uncached 503: the page was never synced
+    // to this device, so retrying while still offline can't succeed either.
+    // Same panel RouteError shows for a route-level throw of the same shape.
+    if (isOfflineUncached(editor.error)) {
+      return <OfflineUnavailable onRetry={resetErroredQueries} />;
     }
     return (
       <FolioError

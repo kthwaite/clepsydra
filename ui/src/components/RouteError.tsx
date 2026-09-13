@@ -1,5 +1,6 @@
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useState } from "react";
+import { OfflineUnavailable } from "#/components/OfflineUnavailable";
 import { Button } from "#/components/ui/button";
 import { isOfflineUncached } from "#/offline/swPolicy";
 
@@ -151,26 +152,7 @@ export function RouteError({
     isOfflineUncached(error) ||
     (response && response.status === 503 && isOfflineUncached(response.payload))
   ) {
-    return (
-      <div className="mx-auto max-w-3xl px-8 py-6">
-        <section className="border border-border bg-background p-5 shadow-md">
-          <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            Offline
-          </p>
-          <h1 className="mt-2 font-heading text-2xl font-bold">
-            Not available offline
-          </h1>
-          <p className="mt-2 text-sm">
-            This page hasn't been synced to this device yet.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button variant="secondary" size="sm" onPress={reset}>
-              Retry
-            </Button>
-          </div>
-        </section>
-      </div>
-    );
+    return <OfflineUnavailable onRetry={reset} />;
   }
 
   return (
