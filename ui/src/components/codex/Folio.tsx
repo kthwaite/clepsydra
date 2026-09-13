@@ -575,8 +575,10 @@ export function Folio({ tabId, path }: FolioProps) {
   // Archived bodies are generated from a captured snapshot, and the page's
   // frontmatter hash claims to describe them; the server refuses body writes
   // until the reader explicitly unlocks the page.
-  const bodyProtected = editor.readonly === true;
-  const folioReadOnly = conversationReadOnly || recipeReadOnly || bodyProtected;
+  const offlineReadOnly = editor.offline === true;
+  const bodyProtected = editor.readonly === true && !offlineReadOnly;
+  const folioReadOnly =
+    conversationReadOnly || recipeReadOnly || bodyProtected || offlineReadOnly;
   const encrypted = editor.encrypted === true;
   const encryptionState = editor.encryptionState ?? {
     status: "plain" as const,
@@ -1163,7 +1165,9 @@ export function Folio({ tabId, path }: FolioProps) {
             isAiConversation && `ai-conversation--${conversationMode}`,
           )}
         >
-          {bodyProtected ? (
+          {offlineReadOnly ? (
+            <OfflineBodyNotice />
+          ) : bodyProtected ? (
             <ProtectedBodyNotice onUnlock={() => editor.setReadonly(false)} />
           ) : null}
           <WikilinkResolutionProvider path={path}>
@@ -1201,7 +1205,9 @@ export function Folio({ tabId, path }: FolioProps) {
                   onSaveNow={editor.saveNow}
                   insertionRequest={attachmentInsertion}
                   onInsertionHandled={finishAttachmentInsertion}
-                  readOnly={conversationReadOnly || bodyProtected}
+                  readOnly={
+                    conversationReadOnly || bodyProtected || offlineReadOnly
+                  }
                   journalDate={
                     journalDateFromPath(path) ?? aiJournalDateFromPath(path)
                   }
@@ -1925,6 +1931,19 @@ function ReadingTicks({
         );
       })}
     </nav>
+  );
+}
+
+function OfflineBodyNotice() {
+  return (
+    <div
+      role="status"
+      className="mb-4 flex items-center gap-3 border border-rule px-3 py-2 text-[13px] text-ink-2"
+    >
+      <span>
+        Offline — read only. Edits resume when the connection returns.
+      </span>
+    </div>
   );
 }
 

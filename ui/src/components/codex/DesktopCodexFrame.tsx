@@ -14,17 +14,20 @@ import {
   VIEW_REGISTRY,
 } from "#/components/codex/viewRegistry";
 import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
+import { offlineLabel } from "#/components/SyncIndicator";
 import { useTheme } from "#/components/ThemeProvider";
 import { useClock } from "#/hooks/useClock";
 import {
   useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
+import { useOnlineStatus } from "#/hooks/useOnlineStatus";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useUptime } from "#/hooks/useUptime";
-import { useVaultEvents } from "#/hooks/useVaultEvents";
 import { cn } from "#/lib/cn";
 import { formatClock, formatRelativeTime, pad2 } from "#/lib/time";
+import { useConnectionStore } from "#/offline/connectionStore";
+import { useOfflineStore } from "#/offline/offlineStore";
 import { useUiStore } from "#/store/ui";
 import { selectActiveTab, useWorkspaceStore } from "#/store/workspace";
 
@@ -62,7 +65,9 @@ export function DesktopCodexFrame({
   const activateTab = useActivateTabWithFolioHistory();
   const leaveWorkspace = useLeaveFolioWorkspace();
   const { data: stats, isError: statsError } = useStats();
-  const syncStatus = useVaultEvents();
+  const syncStatus = useConnectionStore((s) => s.status);
+  const online = useOnlineStatus();
+  const lastFullSync = useOfflineStore((s) => s.lastFullSync);
 
   const resolved = useCodexView();
   const view = forceView ?? resolved;
@@ -75,12 +80,15 @@ export function DesktopCodexFrame({
 
   const pages = stats?.pages ?? 0;
   const links = stats?.links_total ?? 0;
-  const sync = syncStatus === "connected";
-  const syncColor = sync
-    ? "var(--cool)"
-    : syncStatus === "connecting"
-      ? "var(--warn)"
-      : "var(--hot)";
+  const sync = online && syncStatus === "connected";
+  const syncColor = !online
+    ? "var(--warn)"
+    : sync
+      ? "var(--cool)"
+      : syncStatus === "connecting"
+        ? "var(--warn)"
+        : "var(--hot)";
+  const syncLabel = online ? undefined : offlineLabel(lastFullSync);
 
   return (
     <>
@@ -175,7 +183,10 @@ export function DesktopCodexFrame({
         ? createPortal(
             <footer className="cl-mono order-3 flex flex-shrink-0 items-center border-t border-rule bg-bar-bg text-[10px] text-bar-fg">
               {diegetic && (
-                <span className="flex items-center gap-1.5 border-r border-bar-rule px-3 py-[2px]">
+                <span
+                  className="flex items-center gap-1.5 border-r border-bar-rule px-3 py-[2px]"
+                  title={syncLabel}
+                >
                   <span
                     className="inline-block h-[6px] w-[6px]"
                     style={{ background: syncColor }}

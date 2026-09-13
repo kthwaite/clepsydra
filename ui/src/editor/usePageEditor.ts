@@ -11,6 +11,7 @@ import {
   useOptionalEncryptionActions,
   useOptionalEncryptionStatus,
 } from "#/crypto/EncryptionProvider";
+import { useOnlineStatus } from "#/hooks/useOnlineStatus";
 import { markdownToSlate, slateToMarkdown } from "./convert";
 import {
   type DecryptedBodyState,
@@ -110,6 +111,8 @@ interface PageEditorState {
   /** Effective body write-protection, resolved by the server from the page's
    *  `readonly` or, absent that, its kind's default. */
   readonly: boolean;
+  /** True while the device is offline; the body is forced read-only. */
+  offline: boolean;
   /** Declare or clear that protection. */
   setReadonly: (readonly: boolean) => Promise<void>;
   project: string | null;
@@ -125,6 +128,7 @@ export function usePageEditor(
   options?: PageEditorOptions,
 ): PageEditorState {
   const { data: page, isLoading, error, refetch: refetchPage } = usePage(path);
+  const online = useOnlineStatus();
   const encryptionStatus = useOptionalEncryptionStatus();
   const encryptionActions = useOptionalEncryptionActions();
   const lockEpoch = encryptionStatus?.lockEpoch ?? 0;
@@ -536,6 +540,12 @@ export function usePageEditor(
 
   doSaveRef.current = doSave;
 
+  // Flush pending edits before the body flips to read-only offline, so
+  // nothing typed just before the connection dropped is left stranded.
+  useEffect(() => {
+    if (!online) void doSave().catch(() => undefined);
+  }, [online, doSave]);
+
   const reloadAfterConflict = useCallback(async () => {
     if (!conflictRef.current) return;
     if (timerRef.current) {
@@ -775,7 +785,8 @@ export function usePageEditor(
     kind: page?.kind ?? null,
     conversationProvider: page?.conversation?.provider ?? null,
     inferred: page?.inferred ?? true,
-    readonly: page?.readonly ?? false,
+    readonly: (page?.readonly ?? false) || !online,
+    offline: !online,
     setReadonly,
     project: page?.project ?? null,
     encryptionState,
