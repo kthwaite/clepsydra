@@ -6,7 +6,7 @@ import { API_CACHE_NAME, isOfflineUncached } from "#/offline/swPolicy";
 
 type PageDetail = components["schemas"]["PageDetailResponse"];
 
-export interface OfflineSearchHit {
+interface OfflineSearchHit {
   page_id: string;
   path: string;
   title: string | null;
@@ -22,7 +22,7 @@ interface Doc {
   body: string;
 }
 
-export type OfflineIndex = MiniSearch<Doc>;
+type OfflineIndex = MiniSearch<Doc>;
 
 const SNIPPET_RADIUS = 80;
 const DEFAULT_LIMIT = 20;

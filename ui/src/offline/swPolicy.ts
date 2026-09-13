@@ -4,9 +4,9 @@
  */
 
 export const API_CACHE_NAME = "clep-api-v1";
-export const OFFLINE_UNCACHED_CODE = "offline_uncached";
+const OFFLINE_UNCACHED_CODE = "offline_uncached";
 
-export type RequestClass = "network-only" | "api" | "navigation" | "asset";
+type RequestClass = "network-only" | "api" | "navigation" | "asset";
 
 const NETWORK_ONLY_PREFIXES = [
   "/api/vault/events",

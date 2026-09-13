@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export interface OfflineState {
+interface OfflineState {
   phase: "idle" | "running";
   progress: { done: number; total: number };
   /** ISO timestamp of the last completed full pass, or null if never. */
@@ -10,7 +10,7 @@ export interface OfflineState {
   lastError: string | null;
 }
 
-export interface OfflineActions {
+interface OfflineActions {
   start: (total: number) => void;
   advance: () => void;
   finishFull: (input: {

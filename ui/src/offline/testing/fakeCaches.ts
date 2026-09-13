@@ -1,7 +1,5 @@
 /** Minimal in-memory CacheStorage for vitest (jsdom has none). */
-export class FakeCache
-  implements Pick<Cache, "match" | "put" | "delete" | "keys">
-{
+class FakeCache implements Pick<Cache, "match" | "put" | "delete" | "keys"> {
   readonly entries = new Map<string, Response>();
 
   private key(request: RequestInfo | URL): string {

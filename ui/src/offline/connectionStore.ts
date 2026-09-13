@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
-export interface ConnectionState {
+interface ConnectionState {
   status: ConnectionStatus;
   /** Epoch ms of the first error in the current disconnected stretch. */
   disconnectedSince: number | null;
@@ -28,7 +28,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   },
 }));
 
-export interface IndexDelta {
+interface IndexDelta {
   upserted: string[];
   removed: string[];
 }

@@ -8,8 +8,6 @@ import {
   useConnectionStore,
 } from "#/offline/connectionStore";
 
-export type { ConnectionStatus } from "#/offline/connectionStore";
-
 type SyncNotification =
   | {
       type: "index_changed";
@@ -19,7 +17,7 @@ type SyncNotification =
   | { type: "base_registry_changed" }
   | { type: "feed_changed" };
 
-export const SSE_BACKOFF = { initialMs: 3000, maxMs: 60_000, jitter: 0.2 };
+const SSE_BACKOFF = { initialMs: 3000, maxMs: 60_000, jitter: 0.2 };
 
 /** Exponential backoff with ±jitter; `random` is injectable for tests. */
 export function nextBackoffMs(

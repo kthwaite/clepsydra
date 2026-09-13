@@ -11,7 +11,7 @@ import {
 } from "#/offline/walkSet";
 
 export const WALKER_CONCURRENCY = 6;
-export const REQUEST_TIMEOUT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 15_000;
 export const DELTA_COALESCE_MS = 2_000;
 export const LAUNCH_DELAY_MS = 3_000;
 export const FULL_SYNC_MAX_AGE_MS = 24 * 60 * 60 * 1000;
