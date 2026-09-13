@@ -542,6 +542,26 @@ the server’s typed move operation: successful and unchanged paths are cleared
 from the selection, while failed paths remain available for correction rather
 than being presented as successful.
 
+## Install on iPhone and read offline
+
+Clepsydra is a Progressive Web App. Installed to the home screen it keeps
+the whole vault readable without a connection.
+
+1. Open the vault URL in Safari (for example the tailnet address).
+2. Tap Share, then **Add to Home Screen**, then **Add**.
+3. Launch Clepsydra from the home screen once while online. The status
+   dot in the frame shows **Live**; Settings → Advanced → **Offline copy**
+   reports the page count and last sync time.
+
+Offline, pages, links, the tree, tags, journals, the board, and search all
+work from the copy. The body is read-only with an **Offline — read only**
+notice, and the status dot reads **Offline — vault as of HH:MM**. Pages
+changed on the server while you were away are re-synced automatically when
+the connection returns; **Sync now** in Settings forces a full pass.
+
+Not kept offline: attachments and archived web snapshots, block search, and
+any edit.
+
 ## Privacy
 
 Atrium and Gazetteer display server and index projections from the selected

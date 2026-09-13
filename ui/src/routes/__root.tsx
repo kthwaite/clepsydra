@@ -8,6 +8,8 @@ import { NotFoundPage } from "#/components/FeatureGate";
 import { RouteError } from "#/components/RouteError";
 import { Toaster } from "#/components/ui/Toaster";
 import { GlobalShortcuts } from "#/hooks/useGlobalShortcuts";
+import { useVaultEvents } from "#/hooks/useVaultEvents";
+import { useOfflineSync } from "#/offline/useOfflineSync";
 import { usePreviewStore } from "#/store/preview";
 import { useUiStore } from "#/store/ui";
 
@@ -173,14 +175,11 @@ function OverlayLoadingFallback({
   );
 }
 
-export const Route = createRootRoute({
-  staticData: { codexView: "atrium" },
-  notFoundComponent: NotFoundPage,
-  errorComponent: RouteError,
-  head: () => ({
-    meta: [{ title: "clepsydra" }],
-  }),
-  component: () => (
+function RootComponent() {
+  useVaultEvents();
+  useOfflineSync();
+
+  return (
     <>
       <HeadContent />
       <FeatureFlagsProvider>
@@ -194,5 +193,15 @@ export const Route = createRootRoute({
         </ReadingProgressProvider>
       </FeatureFlagsProvider>
     </>
-  ),
+  );
+}
+
+export const Route = createRootRoute({
+  staticData: { codexView: "atrium" },
+  notFoundComponent: NotFoundPage,
+  errorComponent: RouteError,
+  head: () => ({
+    meta: [{ title: "clepsydra" }],
+  }),
+  component: RootComponent,
 });

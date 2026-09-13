@@ -95,6 +95,17 @@ describe("documentation file routes", () => {
         dispatchEvent: vi.fn(),
       })),
     );
+    // The root route mounts useVaultEvents() for every viewport now; jsdom
+    // has no EventSource, so a full render needs a stub to open one.
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        onopen: (() => void) | null = null;
+        onmessage: ((event: MessageEvent<string>) => void) | null = null;
+        onerror: (() => void) | null = null;
+        close() {}
+      },
+    );
     const router = await loadDocsPath("/docs/getting-started");
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },

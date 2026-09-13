@@ -8,6 +8,11 @@ import { queryClient } from "#/lib/queryClient";
 import { routeTree } from "./routeTree.gen";
 import "katex/dist/katex.min.css";
 import "./main.css";
+import { registerSW } from "virtual:pwa-register";
+
+if (import.meta.env.PROD) {
+  registerSW({ immediate: true });
+}
 
 const router = createRouter({
   routeTree,

@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { isOfflineUncached } from "#/offline/swPolicy";
 import { $api } from "./client";
 import {
   invalidatePageContent,
@@ -10,7 +11,17 @@ import type { components } from "./schema";
 export type ArchivedPage = components["schemas"]["RubbishItemSummary"];
 
 export function usePages() {
-  return $api.useQuery("get", "/api/vault/pages");
+  return $api.useQuery(
+    "get",
+    "/api/vault/pages",
+    {},
+    // Opt out of the global throwOnError: useProjects() calls this
+    // unconditionally in Folio before any early return, so an
+    // offline_uncached 503 (no synced page list, or a pruned cache) must
+    // surface as query `error` state rather than throw into FolioBoundary
+    // and blank out the whole folio (same policy as useSimilar).
+    { throwOnError: false },
+  );
 }
 
 /** Local shape check — the api layer must not depend on editor-side helpers. */
@@ -36,9 +47,14 @@ export function usePage(path: string) {
       throwOnError: false,
       // A 404 is a settled answer — the page does not exist — not a transient
       // failure. Retrying it holds the editor on its loading state for the
-      // whole backoff window before draft mode can render. Other failures keep
-      // the library default of three attempts.
-      retry: (failureCount, error) => !isNotFound(error) && failureCount < 3,
+      // whole backoff window before draft mode can render. Same for
+      // offline_uncached: the service worker already knows this page was
+      // never synced to this device, so a retry while still offline cannot
+      // succeed and would only hold the folio on "fetching…" for the whole
+      // backoff window before "Not available offline" can render. Other
+      // failures keep the library default of three attempts.
+      retry: (failureCount, error) =>
+        !isNotFound(error) && !isOfflineUncached(error) && failureCount < 3,
     },
   );
 }

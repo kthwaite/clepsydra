@@ -1,6 +1,8 @@
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useState } from "react";
+import { OfflineUnavailable } from "#/components/OfflineUnavailable";
 import { Button } from "#/components/ui/button";
+import { isOfflineUncached } from "#/offline/swPolicy";
 
 type ResponseDetails = {
   status: number | null;
@@ -145,6 +147,13 @@ export function RouteError({
   const errorName = getErrorName(error);
   const message = getErrorMessage(error);
   const stack = getStack(error);
+
+  if (
+    isOfflineUncached(error) ||
+    (response && response.status === 503 && isOfflineUncached(response.payload))
+  ) {
+    return <OfflineUnavailable onRetry={reset} />;
+  }
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-6">

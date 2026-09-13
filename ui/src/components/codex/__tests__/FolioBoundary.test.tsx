@@ -9,6 +9,12 @@ function Boom(): never {
   throw new Error("boom");
 }
 
+function ThrowOfflineUncached(): never {
+  // The real trigger: openapi-fetch's queryFn throws the parsed body
+  // directly, unwrapped, and throwOnError re-throws it during render.
+  throw { code: "offline_uncached", url: "/api/vault/pages/notes%2Fgone.md" };
+}
+
 let flakyThrows = true;
 
 function FlakyChild() {
@@ -93,6 +99,20 @@ describe("FolioBoundary", () => {
     expect(
       queryClient.getQueryState(["boundary-test-errored"])?.status,
     ).not.toBe("error");
+    spy.mockRestore();
+  });
+
+  it("renders the offline-unavailable panel for a caught offline_uncached body", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <FolioBoundary path="notes/gone.md">
+        <ThrowOfflineUncached />
+      </FolioBoundary>,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Not available offline" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Folio hit an error.")).not.toBeInTheDocument();
     spy.mockRestore();
   });
 
