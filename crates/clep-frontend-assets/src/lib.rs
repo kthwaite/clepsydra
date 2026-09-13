@@ -21,7 +21,30 @@ use rust_embed::RustEmbed;
 // external and same-origin; connect-src 'self' covers both API fetches and SSE.
 const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; base-uri 'self'; connect-src 'self'; \
     font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; \
-    object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'";
+    manifest-src 'self'; object-src 'none'; script-src 'self'; \
+    style-src 'self' 'unsafe-inline'; worker-src 'self'";
+
+/// Hashed build output under `assets/` never changes at a given URL, so it may
+/// be cached for a year. Everything else (the HTML shell, the service worker,
+/// the manifest, unhashed public files) must be revalidated on every load so a
+/// deploy is picked up and the service worker update check sees new bytes.
+fn cache_control_for(path: &str) -> &'static str {
+    if path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
+}
+
+fn content_type_for(path: &str) -> String {
+    if path.ends_with(".webmanifest") {
+        return "application/manifest+json".to_string();
+    }
+    mime_guess::from_path(path)
+        .first_or_octet_stream()
+        .essence_str()
+        .to_string()
+}
 
 #[derive(RustEmbed)]
 #[folder = "../../ui/dist/"]
@@ -37,19 +60,23 @@ where
 async fn static_handler(uri: Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
 
-    let response = if path.is_empty() || path == "index.html" {
-        index_html().await
+    let (mut response, cache_control) = if path.is_empty() || path == "index.html" {
+        (index_html().await, cache_control_for("index.html"))
     } else if let Some(content) = Assets::get(path) {
-        let mime = mime_guess::from_path(path).first_or_octet_stream();
-        Response::builder()
-            .header(header::CONTENT_TYPE, mime.as_ref())
+        let response = Response::builder()
+            .header(header::CONTENT_TYPE, content_type_for(path))
             .body(Body::from(content.data))
-            .unwrap()
+            .unwrap();
+        (response, cache_control_for(path))
     } else {
         // SPA fallback: serve index.html for unknown paths
-        index_html().await
+        (index_html().await, cache_control_for("index.html"))
     };
 
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(cache_control),
+    );
     with_security_headers(response)
 }
 
@@ -88,7 +115,8 @@ mod tests {
 
     const EXPECTED_CSP: &str = "default-src 'self'; base-uri 'self'; connect-src 'self'; \
         font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; \
-        object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'";
+        manifest-src 'self'; object-src 'none'; script-src 'self'; \
+        style-src 'self' 'unsafe-inline'; worker-src 'self'";
 
     fn assert_security_headers(response: &Response) {
         let headers = response.headers();
@@ -169,5 +197,82 @@ mod tests {
             let tag = &tag[..tag.find('>').expect("complete script tag")];
             assert!(tag.contains(" src="), "inline script found: {tag}>");
         }
+    }
+
+    #[test]
+    fn hashed_assets_are_immutable_and_shell_files_are_revalidated() {
+        assert_eq!(
+            cache_control_for("assets/index-m5_YmWWd.js"),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(
+            cache_control_for("assets/react-CwJFpaho.js"),
+            "public, max-age=31536000, immutable"
+        );
+        for shell in [
+            "index.html",
+            "sw.js",
+            "manifest.webmanifest",
+            "registerSW.js",
+            "",
+        ] {
+            assert_eq!(cache_control_for(shell), "no-cache", "path {shell:?}");
+        }
+        assert_eq!(cache_control_for("favicon.svg"), "no-cache");
+    }
+
+    #[test]
+    fn manifest_and_common_assets_get_the_right_content_type() {
+        assert_eq!(
+            content_type_for("manifest.webmanifest"),
+            "application/manifest+json"
+        );
+        assert_eq!(content_type_for("sw.js"), "text/javascript");
+        assert_eq!(content_type_for("assets/a.css"), "text/css");
+        assert_eq!(content_type_for("pwa-512.png"), "image/png");
+    }
+
+    #[tokio::test]
+    async fn responses_carry_cache_control() {
+        let index = static_handler(Uri::from_static("/index.html"))
+            .await
+            .into_response();
+        assert_eq!(
+            index
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|v| v.to_str().ok()),
+            Some("no-cache")
+        );
+
+        let fallback = static_handler(Uri::from_static("/docs/anything"))
+            .await
+            .into_response();
+        assert_eq!(
+            fallback
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|v| v.to_str().ok()),
+            Some("no-cache")
+        );
+
+        let asset = Assets::iter()
+            .find(|path| path.starts_with("assets/"))
+            .expect("at least one hashed asset");
+        let uri = Uri::try_from(format!("/{asset}")).expect("asset URI");
+        let asset = static_handler(uri).await.into_response();
+        assert_eq!(
+            asset
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|v| v.to_str().ok()),
+            Some("public, max-age=31536000, immutable")
+        );
+    }
+
+    #[test]
+    fn csp_allows_same_origin_workers_and_manifest() {
+        assert!(CONTENT_SECURITY_POLICY.contains("worker-src 'self'"));
+        assert!(CONTENT_SECURITY_POLICY.contains("manifest-src 'self'"));
     }
 }
