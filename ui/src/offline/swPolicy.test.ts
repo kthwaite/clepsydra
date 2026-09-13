@@ -45,6 +45,16 @@ describe("classifyRequest", () => {
     expect(classify("/", "GET", "navigate")).toBe("navigation");
   });
 
+  it("never serves the app shell for a navigation into /api/", () => {
+    expect(
+      classify("/api/vault/attachments/img%2Fa.png", "GET", "navigate"),
+    ).toBe("network-only");
+    expect(classify("/api/docs", "GET", "navigate")).toBe("network-only");
+    expect(classify("/api/vault/pages/x.md", "GET", "navigate")).toBe(
+      "network-only",
+    );
+  });
+
   it("treats other same-origin GETs as assets", () => {
     expect(classify("/assets/index-abc.js")).toBe("asset");
     expect(classify("/favicon.svg")).toBe("asset");

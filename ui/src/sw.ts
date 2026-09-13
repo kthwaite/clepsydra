@@ -25,8 +25,15 @@ self.addEventListener("activate", (event) => {
 precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
 
-// SPA navigations always get the precached shell so deep links work offline.
-registerRoute(new NavigationRoute(createHandlerBoundToURL("/index.html")));
+// SPA navigations always get the precached shell so deep links work offline,
+// except under /api/: a top-level navigation to an API path (e.g. an
+// attachment link opened in a new tab) must reach the network, never the
+// cached app shell.
+registerRoute(
+  new NavigationRoute(createHandlerBoundToURL("/index.html"), {
+    denylist: [/^\/api\//],
+  }),
+);
 
 const apiStrategy = new NetworkFirst({
   cacheName: API_CACHE_NAME,

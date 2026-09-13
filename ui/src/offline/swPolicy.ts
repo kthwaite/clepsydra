@@ -25,16 +25,22 @@ export function classifyRequest(input: {
   const { url, method, mode, origin } = input;
   if (url.origin !== origin) return "network-only";
   if (method.toUpperCase() !== "GET") return "network-only";
-  if (mode === "navigate") return "navigation";
 
   const path = url.pathname;
-  if (NETWORK_ONLY_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+  // A top-level navigation into /api/ (e.g. an attachment link opened in a
+  // new tab) must never be answered by the app shell or the api cache; it
+  // has to reach the network like any other API request.
+  if (path.startsWith("/api/")) {
+    if (mode === "navigate") return "network-only";
+    if (NETWORK_ONLY_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+      return "network-only";
+    }
+    if (path.startsWith("/api/vault/") || path === "/api/features") {
+      return "api";
+    }
     return "network-only";
   }
-  if (path.startsWith("/api/vault/") || path === "/api/features") {
-    return "api";
-  }
-  if (path.startsWith("/api/")) return "network-only";
+  if (mode === "navigate") return "navigation";
   return "asset";
 }
 
