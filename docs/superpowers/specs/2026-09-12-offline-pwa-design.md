@@ -1,7 +1,7 @@
 # Offline PWA — design
 
 **Date:** 2026-09-12
-**Status:** Approved in conversation; implementation plan pending
+**Status:** Merged to develop as 56c0e296 (2026-09-13)
 **Scope:** `ui/` (service worker, manifest, offline sync, search fallback, offline UX) and `crates/clep-frontend-assets` (headers, CSP). No API route or DTO changes.
 
 ## 1. Why
