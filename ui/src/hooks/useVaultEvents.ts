@@ -4,6 +4,7 @@ import { clearBlockDetailsForPagePaths } from "#/api/blocks";
 import { invalidateByPath, invalidateRubbish, queryKeys } from "#/api/keys";
 import {
   type ConnectionStatus,
+  emitIndexChanged,
   useConnectionStore,
 } from "#/offline/connectionStore";
 
@@ -77,6 +78,10 @@ export function useVaultEvents(): ConnectionStatus {
         try {
           const data: SyncNotification = JSON.parse(event.data);
           if (data.type === "index_changed") {
+            emitIndexChanged({
+              upserted: data.upserted,
+              removed: data.removed,
+            });
             void clearBlockDetailsForPagePaths(queryClient, [
               ...data.upserted,
               ...data.removed,

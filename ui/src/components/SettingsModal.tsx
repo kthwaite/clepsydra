@@ -7,6 +7,7 @@ import { useLocation } from "#/api/location";
 import { LocationForm } from "#/components/codex/LocationForm";
 import { NavigationModeSelector } from "#/components/NavigationModeSelector";
 import { IndexHealthPanel } from "#/components/settings/IndexHealthPanel";
+import { OfflinePanel } from "#/components/settings/OfflinePanel";
 import { useTheme } from "#/components/ThemeProvider";
 import { Badge } from "#/components/ui/badge";
 import { IconButton } from "#/components/ui/icon-button";
@@ -150,6 +151,7 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
     <>
       <EncryptionSettings />
       <IndexHealthPanel />
+      <OfflinePanel />
     </>
   );
 }

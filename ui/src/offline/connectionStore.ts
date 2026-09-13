@@ -27,3 +27,21 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     set({ status, disconnectedSince: null });
   },
 }));
+
+export interface IndexDelta {
+  upserted: string[];
+  removed: string[];
+}
+
+type DeltaListener = (delta: IndexDelta) => void;
+const deltaListeners = new Set<DeltaListener>();
+
+/** Subscribe to SSE `index_changed` deltas (used by the offline walker). */
+export function onIndexChanged(listener: DeltaListener): () => void {
+  deltaListeners.add(listener);
+  return () => deltaListeners.delete(listener);
+}
+
+export function emitIndexChanged(delta: IndexDelta) {
+  for (const listener of deltaListeners) listener(delta);
+}
