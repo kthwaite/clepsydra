@@ -1,6 +1,25 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { FolioError, resetErroredQueries } from "#/components/codex/FolioError";
+import { OfflineUnavailable } from "#/components/OfflineUnavailable";
+import { isOfflineUncached } from "#/offline/swPolicy";
 import { useWorkspaceStore } from "#/store/workspace";
+
+/**
+ * The caught value is usually the raw body a query's queryFn rejected with
+ * (openapi-fetch throws the parsed JSON body directly, not wrapped in an
+ * Error), but also accept an Error-like value whose `.cause` or `.data`
+ * carries the same shape, in case some caller wraps it before it reaches
+ * this boundary.
+ */
+function offlineUncachedFrom(error: unknown): boolean {
+  if (isOfflineUncached(error)) return true;
+  if (error && typeof error === "object") {
+    const wrapped = error as { cause?: unknown; data?: unknown };
+    if (isOfflineUncached(wrapped.cause)) return true;
+    if (isOfflineUncached(wrapped.data)) return true;
+  }
+  return false;
+}
 
 interface Props {
   /** Active tab path; key this boundary on it so a new tab resets the error. */
@@ -51,6 +70,9 @@ export class FolioBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.error) {
+      if (offlineUncachedFrom(this.state.error)) {
+        return <OfflineUnavailable onRetry={this.handleRetry} />;
+      }
       return (
         <FolioError
           path={this.props.path}
