@@ -1,4 +1,5 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   emitIndexChanged,
@@ -102,6 +103,81 @@ describe("useOfflineSync", () => {
     expect(OfflineSyncController.prototype.requestFull).toHaveBeenCalledTimes(
       2,
     );
+    unmount();
+  });
+
+  it("keeps a live controller across StrictMode's mount-cleanup-remount", async () => {
+    const disposeSpy = vi.spyOn(OfflineSyncController.prototype, "dispose");
+    const requestFullSpy = vi.mocked(
+      OfflineSyncController.prototype.requestFull,
+    );
+
+    const { unmount } = renderHook(() => useOfflineSync(), {
+      wrapper: StrictMode,
+    });
+
+    await vi.advanceTimersByTimeAsync(LAUNCH_DELAY_MS + 10);
+    expect(requestFullSpy).toHaveBeenCalledTimes(1);
+    const liveInstance = requestFullSpy.mock.instances.at(-1);
+
+    // The controller servicing the launch pass must not be one StrictMode's
+    // fake unmount already disposed of -- this proves the remount built a
+    // fresh instance rather than reviving a disposed one (a `useMemo`-owned
+    // controller would reuse -- and thus revive -- the disposed instance).
+    expect(disposeSpy.mock.instances).not.toContain(liveInstance);
+
+    requestOfflineSyncNow();
+    expect(requestFullSpy).toHaveBeenCalledTimes(2);
+
+    unmount();
+  });
+
+  it("does not gate the launch pass on connectivity, then resyncs a stale copy on an offline->online transition", async () => {
+    useOfflineStore.setState({
+      lastFullSync: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+    });
+    useConnectionStore.setState({
+      status: "disconnected",
+      disconnectedSince: Date.now() - 20_000,
+    });
+
+    const { unmount } = renderHook(() => useOfflineSync());
+
+    await vi.advanceTimersByTimeAsync(LAUNCH_DELAY_MS + 10);
+    // The launch effect only checks staleness, not connectivity -- a real
+    // runFullSync() would no-op via its own isOnline() guard, so being
+    // offline here does not suppress this call.
+    expect(OfflineSyncController.prototype.requestFull).toHaveBeenCalledTimes(
+      1,
+    );
+
+    act(() => {
+      useConnectionStore.getState().setStatus("connected");
+    });
+    expect(OfflineSyncController.prototype.requestFull).toHaveBeenCalledTimes(
+      2,
+    );
+
+    unmount();
+  });
+
+  it("does not resync on an offline->online transition when the copy is fresh", async () => {
+    useOfflineStore.setState({ lastFullSync: new Date().toISOString() });
+    useConnectionStore.setState({
+      status: "disconnected",
+      disconnectedSince: Date.now() - 20_000,
+    });
+
+    const { unmount } = renderHook(() => useOfflineSync());
+
+    await vi.advanceTimersByTimeAsync(LAUNCH_DELAY_MS + 10);
+    expect(OfflineSyncController.prototype.requestFull).not.toHaveBeenCalled();
+
+    act(() => {
+      useConnectionStore.getState().setStatus("connected");
+    });
+    expect(OfflineSyncController.prototype.requestFull).not.toHaveBeenCalled();
+
     unmount();
   });
 });
