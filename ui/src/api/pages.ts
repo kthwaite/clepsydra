@@ -11,7 +11,17 @@ import type { components } from "./schema";
 export type ArchivedPage = components["schemas"]["RubbishItemSummary"];
 
 export function usePages() {
-  return $api.useQuery("get", "/api/vault/pages");
+  return $api.useQuery(
+    "get",
+    "/api/vault/pages",
+    {},
+    // Opt out of the global throwOnError: useProjects() calls this
+    // unconditionally in Folio before any early return, so an
+    // offline_uncached 503 (no synced page list, or a pruned cache) must
+    // surface as query `error` state rather than throw into FolioBoundary
+    // and blank out the whole folio (same policy as useSimilar).
+    { throwOnError: false },
+  );
 }
 
 /** Local shape check — the api layer must not depend on editor-side helpers. */
