@@ -132,6 +132,65 @@ async function renderEditorWithInlineMath() {
   return { editable, editor, user };
 }
 
+it("keeps the caret in the second bullet when Tab nests it under the first", async () => {
+  const user = userEvent.setup();
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, enabled: false } },
+  });
+  render(
+    <QueryClientProvider client={client}>
+      <SlateEditor
+        initialValue={[
+          {
+            type: "bulleted-list",
+            children: ["first bullet", "second bullet"].map((text) => ({
+              type: "list-item",
+              children: [{ type: "paragraph", children: [{ text }] }],
+            })),
+          },
+        ]}
+        onChange={vi.fn()}
+        onSaveNow={vi.fn()}
+      />
+    </QueryClientProvider>,
+  );
+
+  const editor = editorRef.current;
+  if (!editor) throw new Error("Slate editor is not active");
+  await user.click(screen.getByRole("textbox"));
+  await act(async () => {
+    Transforms.select(editor, { path: [0, 1, 0, 0], offset: 6 });
+  });
+  await waitFor(() => {
+    expect(window.getSelection()?.anchorNode?.textContent).toBe(
+      "second bullet",
+    );
+    expect(window.getSelection()?.anchorOffset).toBe(6);
+  });
+
+  await user.keyboard("{Tab}");
+
+  const nestedPoint = { path: [0, 0, 1, 0, 0, 0], offset: 6 };
+  expect(Node.string(Node.get(editor, [0, 0, 1, 0]))).toBe("second bullet");
+  expect(editor.selection).toEqual({ anchor: nestedPoint, focus: nestedPoint });
+  await waitFor(() => {
+    const selection = window.getSelection();
+    expect(selection?.isCollapsed).toBe(true);
+    expect(selection?.anchorNode?.textContent).toBe("second bullet");
+    expect(selection?.anchorOffset).toBe(6);
+    const [parentBullet, nestedBullet] = screen.getAllByRole("listitem");
+    expect(parentBullet).toContainElement(nestedBullet);
+    expect(selection?.anchorNode?.parentElement?.closest("li")).toBe(
+      nestedBullet,
+    );
+  });
+
+  await user.keyboard("!");
+
+  expect(Node.string(Node.get(editor, [0, 0, 0]))).toBe("first bullet");
+  expect(Node.string(Node.get(editor, [0, 0, 1, 0]))).toBe("second! bullet");
+});
+
 it("replaces a one-character selection once before continuing to type", async () => {
   const { editor, user } = await renderEditorWithSelectedB();
 

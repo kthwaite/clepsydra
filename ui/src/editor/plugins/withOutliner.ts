@@ -227,25 +227,21 @@ export function indentListItem(editor: Editor): void {
       const destPath = [...nestedListPath, nestedList.children.length];
       Transforms.moveNodes(editor, { at: itemPath, to: destPath });
     } else {
-      // Clone the item, remove it, then insert a nested list into the
-      // previous sibling. We clone first because removeNodes invalidates
-      // the node reference.
-      const itemNode = JSON.parse(
-        JSON.stringify(Node.get(editor, itemPath)),
-      ) as SlateElement;
-      Transforms.removeNodes(editor, { at: itemPath });
-
-      // Insert a new list containing the cloned item as last child
-      // of the previous sibling
-      const insertIdx = prevChildren.length;
+      // Move the item into a new nested list so Slate keeps the selection
+      // attached to its text instead of relocating it when the item is removed.
+      const nestedListPath = [...prevSiblingPath, prevChildren.length];
       Transforms.insertNodes(
         editor,
         {
           type: listType,
-          children: [itemNode],
-        } as SlateElement,
-        { at: [...prevSiblingPath, insertIdx] },
+          children: [],
+        },
+        { at: nestedListPath },
       );
+      Transforms.moveNodes(editor, {
+        at: itemPath,
+        to: [...nestedListPath, 0],
+      });
     }
   });
 }

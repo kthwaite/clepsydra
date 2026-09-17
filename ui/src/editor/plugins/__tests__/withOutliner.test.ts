@@ -47,6 +47,78 @@ function topList(editor: Editor, index = 0) {
 // ---------------------------------------------------------------------------
 
 describe("indentListItem", () => {
+  it("keeps the caret at its text offset in the indented item", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [canonicalItem("First"), canonicalItem("Second")],
+      },
+    ]);
+    Transforms.select(editor, { path: [0, 1, 0, 0], offset: 3 });
+
+    indentListItem(editor);
+
+    expect(editor.selection).toEqual({
+      anchor: { path: [0, 0, 1, 0, 0, 0], offset: 3 },
+      focus: { path: [0, 0, 1, 0, 0, 0], offset: 3 },
+    });
+  });
+
+  it("keeps the caret in an indented empty item", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [canonicalItem("First"), canonicalItem("")],
+      },
+    ]);
+    selectAt(editor, [0, 1, 0, 0]);
+
+    indentListItem(editor);
+
+    expect(Node.get(editor, [0, 0, 1, 0])).toEqual(canonicalItem(""));
+    expect(editor.selection).toEqual({
+      anchor: { path: [0, 0, 1, 0, 0, 0], offset: 0 },
+      focus: { path: [0, 0, 1, 0, 0, 0], offset: 0 },
+    });
+    expect(normalizeUnchanged(editor)).toBe(true);
+  });
+
+  it("keeps the caret inside marked inline content when indenting", () => {
+    const item = {
+      type: "list-item",
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            { text: "Before " },
+            {
+              type: "link",
+              url: "https://example.com",
+              children: [{ text: "Second", bold: true }],
+            },
+            { text: " after" },
+          ],
+        },
+      ],
+    } satisfies Descendant;
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [canonicalItem("First"), item],
+      },
+    ]);
+    Transforms.select(editor, { path: [0, 1, 0, 1, 0], offset: 2 });
+
+    indentListItem(editor);
+
+    expect(Node.get(editor, [0, 0, 1, 0])).toEqual(item);
+    expect(editor.selection).toEqual({
+      anchor: { path: [0, 0, 1, 0, 0, 1, 0], offset: 2 },
+      focus: { path: [0, 0, 1, 0, 0, 1, 0], offset: 2 },
+    });
+    expect(normalizeUnchanged(editor)).toBe(true);
+  });
+
   it("indents a list item to become child of previous sibling", () => {
     const editor = makeEditor([
       {
@@ -76,7 +148,7 @@ describe("indentListItem", () => {
     expect((nested.children[0] as SlateElement).type).toBe("list-item");
   });
 
-  it("appends to existing nested list of previous sibling", () => {
+  it("keeps the caret when appending to an existing nested list and indenting again", () => {
     const editor = makeEditor([
       {
         type: "bulleted-list",
@@ -84,33 +156,39 @@ describe("indentListItem", () => {
           {
             type: "list-item",
             children: [
-              { text: "First" },
+              { type: "paragraph", children: [{ text: "First" }] },
               {
                 type: "bulleted-list",
-                children: [
-                  { type: "list-item", children: [{ text: "Nested" }] },
-                ],
+                children: [canonicalItem("Nested")],
               },
             ],
           },
-          { type: "list-item", children: [{ text: "Second" }] },
+          canonicalItem("Second"),
         ],
       },
     ]);
-    selectAt(editor, [0, 1, 0]);
+    Transforms.select(editor, { path: [0, 1, 0, 0], offset: 3 });
     indentListItem(editor);
 
-    const list = topList(editor);
-    expect(list.children.length).toBe(1);
-    const first = list.children[0] as SlateElement & {
-      children: Descendant[];
-    };
-    const nested = first.children[1] as SlateElement & {
-      children: SlateElement[];
-    };
-    expect(nested.type).toBe("bulleted-list");
-    // Should now have "Nested" and "Second"
-    expect(nested.children.length).toBe(2);
+    expect(Node.get(editor, [0, 0, 1])).toEqual({
+      type: "bulleted-list",
+      children: [canonicalItem("Nested"), canonicalItem("Second")],
+    });
+    expect(editor.selection).toEqual({
+      anchor: { path: [0, 0, 1, 1, 0, 0], offset: 3 },
+      focus: { path: [0, 0, 1, 1, 0, 0], offset: 3 },
+    });
+
+    indentListItem(editor);
+
+    expect(Node.get(editor, [0, 0, 1, 0, 1, 0])).toEqual(
+      canonicalItem("Second"),
+    );
+    expect(editor.selection).toEqual({
+      anchor: { path: [0, 0, 1, 0, 1, 0, 0, 0], offset: 3 },
+      focus: { path: [0, 0, 1, 0, 1, 0, 0, 0], offset: 3 },
+    });
+    expect(normalizeUnchanged(editor)).toBe(true);
   });
 
   it("preserves numbered-list type when indenting", () => {
