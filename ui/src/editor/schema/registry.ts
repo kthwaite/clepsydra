@@ -6,6 +6,7 @@ import { codeBlockDescriptor } from "./elements/codeBlock";
 import { conversationTurnDescriptor } from "./elements/conversationTurn";
 import { footnoteDefDescriptor } from "./elements/footnoteDef";
 import { footnoteRefDescriptor } from "./elements/footnoteRef";
+import { generatedRegionDescriptor } from "./elements/generatedRegion";
 import { headingDescriptor } from "./elements/heading";
 import { imageDescriptor } from "./elements/image";
 import { journalTimeDescriptor } from "./elements/journalTime";
@@ -49,6 +50,7 @@ const ALL: ElementDescriptor[] = [
   tableRowDescriptor,
   tableCellDescriptor,
   baseEmbedDescriptor,
+  generatedRegionDescriptor,
 ];
 
 export const REGISTRY = Object.fromEntries(

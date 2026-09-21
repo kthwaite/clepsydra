@@ -58,6 +58,59 @@ beforeEach(() => {
 });
 
 describe("MarkdownRenderer", () => {
+  it("renders snapshot prose and links while keeping nested embeds and HTML inert", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <MarkdownRenderer
+        restricted
+        content={
+          '# Saved tasting\n\nA **complete** note and [[source|Source]].\n\n```base\nbase = "recursive"\nview = "All"\n```\n\n((abc123DEF0))\n\n<button>Execute</button>'
+        }
+      />,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Saved tasting" }),
+    ).toBeVisible();
+    expect(container.querySelector("strong")).toHaveTextContent("complete");
+    expect(container.querySelector("pre")).toHaveTextContent(
+      'base = "recursive"',
+    );
+    expect(screen.queryByRole("button", { name: "Execute" })).toBeNull();
+    expect(useBlockMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("link", { name: "Source" }));
+    expect(openTabMock).toHaveBeenCalledWith("page", "source");
+  });
+  it("resolves relative attachment and page links from the destination, not the browser route", async () => {
+    const user = userEvent.setup();
+    render(
+      <MarkdownRenderer
+        restricted
+        pagePath="reports/tastings.md"
+        attachmentPaths={
+          new Map([
+            ["media/bottle one.svg", "/api/vault/attachments/bottle%20one.svg"],
+          ])
+        }
+        content={
+          "![Bottle](../media/bottle%20one.svg)\n\n[Source](../notes/source.md)\n\n[Download](../media/bottle%20one.svg?download=1)\n\n![External](https://images.example.test/bottle.svg)"
+        }
+      />,
+    );
+    expect(screen.getByRole("img", { name: "Bottle" })).toHaveAttribute(
+      "src",
+      "/api/vault/attachments/bottle%20one.svg",
+    );
+    expect(screen.getByRole("img", { name: "External" })).toHaveAttribute(
+      "src",
+      "https://images.example.test/bottle.svg",
+    );
+    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute(
+      "href",
+      "/api/vault/attachments/bottle%20one.svg?download=1",
+    );
+    await user.click(screen.getByRole("link", { name: "Source" }));
+    expect(openTabMock).toHaveBeenCalledWith("page", "notes/source.md");
+  });
   it("renders a mermaid fence as a toggleable diagram", async () => {
     const user = userEvent.setup();
     const { container } = render(

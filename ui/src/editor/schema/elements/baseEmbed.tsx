@@ -31,12 +31,23 @@ export function makeBaseEmbed(
   props: BaseEmbedCreateProps = {},
 ): BaseEmbedElement {
   if (props.status === "configured") {
-    const { status, base, view, filter, sort, limit, display, width } = props;
+    const {
+      status,
+      base,
+      view,
+      template,
+      filter,
+      sort,
+      limit,
+      display,
+      width,
+    } = props;
     return {
       type: "base-embed",
       status,
       base,
-      view,
+      ...(view === undefined ? {} : { view }),
+      ...(template === undefined ? {} : { template }),
       ...(filter === undefined ? {} : { filter }),
       ...(sort === undefined ? {} : { sort }),
       ...(limit === undefined ? {} : { limit }),
@@ -94,15 +105,16 @@ function hasValidStateShape(value: Record<string, unknown>): boolean {
   if (
     !hasExactKeys(
       value,
-      ["type", "status", "base", "view", "children"],
-      ["filter", "sort", "limit", "display", "width"],
+      ["type", "status", "base", "children"],
+      ["view", "template", "filter", "sort", "limit", "display", "width"],
     )
   ) {
     return false;
   }
   return isCanonicalBaseEmbedConfig({
     base: value.base,
-    view: value.view,
+    ...(Object.hasOwn(value, "view") ? { view: value.view } : {}),
+    ...(Object.hasOwn(value, "template") ? { template: value.template } : {}),
     ...(Object.hasOwn(value, "filter") ? { filter: value.filter } : {}),
     ...(Object.hasOwn(value, "sort") ? { sort: value.sort } : {}),
     ...(Object.hasOwn(value, "limit") ? { limit: value.limit } : {}),

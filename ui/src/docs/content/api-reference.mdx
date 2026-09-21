@@ -130,7 +130,7 @@ Serve blob. Responses: `200` Archived blob bytes; `404` Blob not found; `500` In
 ## Attachments
 
 ### `GET /api/vault/attachments`
-List attachments. Responses: `200` List attachments; `500` Internal server error.
+List attachments. Each item has `name`, attachment-endpoint-relative `path`, vault-relative `vault_path`, and `size`. Use `vault_path` to resolve Markdown resources without assuming the configured attachment folder; fetch bytes through the existing attachment endpoint using `path`. Responses: `200` List attachments; `500` Internal server error.
 ### `DELETE /api/vault/attachments/{path}`
 Delete attachment. Responses: `204` Attachment deleted; `400` Invalid path; `404` Attachment not found; `500` Internal server error.
 ### `GET /api/vault/attachments/{path}`
@@ -164,6 +164,28 @@ Evaluate view. Responses: `200`; `404` Unknown base or view.
 Evaluate embedded view. Responses: `200`; `400`; `404`; `409`; `500`.
 ### `POST /api/vault/bases/preview`
 Preview base. Responses: `200`.
+
+### `GET /api/vault/base-templates`
+List reusable Markdown template slugs as `{ templates: string[] }`. Templates live in `.clepsydra/templates/` and are not Base member pages. Responses: `200`; `500`.
+
+### `GET /api/vault/base-templates/{slug}`
+Read `{ slug, source, revision }`. Revisions hash exact file bytes. Slugs address direct-child `.md.jinja` files, not arbitrary filesystem paths. Responses: `200`; `400` Invalid slug or unsafe path; `404`; `500`.
+
+### `POST /api/vault/base-templates/{slug}`
+Create a template from `{ source }`; never overwrite an existing file. Returns its source and revision. Responses: `201`; `400` Invalid source or path; `409` Already exists; `500`.
+
+### `PUT /api/vault/base-templates/{slug}`
+Save `{ source, expected_revision }` with conditional atomic publication. A stale save preserves the newer file. Responses: `200`; `400`; `404`; `409` Revision conflict; `500`.
+
+### `POST /api/vault/base-render/render`
+Render `{ page_path, selection, template_source? }` without writing any page. `selection` contains `base`, `template`, and optional `view`, `filter`, `sort`, and `limit`; `template_source` previews an unsaved source draft. Returns `{ markdown, selected_count, limit }`. Full native member properties and bodies are available to MiniJinja; table windows do not silently truncate rendering. Responses: `200`; `400`; `403` Inaccessible page; `404`; `409` Source changed; `422` Template or resource-limit error; `500`.
+
+### `POST /api/vault/base-render/preview`
+Preview a saved-template snapshot with `{ page_path, expected_revision, selection }` plus exactly one of `region_id` (regeneration) or `insert_offset` (a UTF-8 byte offset between blocks in the saved **body**, excluding frontmatter). Returns the exact proposed `markdown`, `current_markdown`, `modified`, `selected_count`, `region_id`, and opaque `token`. Does not write the page. Responses: `200`; `400`; `403`; `404`; `409` Destination conflict; `422`; `500`.
+
+### `POST /api/vault/base-render/apply`
+Apply `{ token, overwrite_modified }`. The token binds the exact previewed output and destination revision. External payload edits require `overwrite_modified: true`; this never bypasses a destination revision conflict. Source changes after preview do not substitute an unreviewed render. Returns canonical saved `{ body, revision }`. Tokens expire after ten minutes; at most 32 previews and 16 MiB are retained per router, so eviction also requires a fresh preview. Responses: `200`; `400`; `403`; `404`; `409` Stale destination, modified output, or expired token; `500`.
+
 ### `GET /api/vault/pages/by-id/{uuid}/properties`
 Project the page's current revision, encryption state, matching Bases, and
 declared custom properties. Duplicate declarations include complete provenance

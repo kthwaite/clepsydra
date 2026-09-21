@@ -108,6 +108,7 @@ function editor(overrides: Record<string, unknown> = {}) {
     project: null,
     encrypted: false,
     readonly: true,
+    generatedChangePending: false,
     setReadonly: vi.fn().mockResolvedValue(undefined),
     getRevision: vi.fn(() => "rev-a"),
     ...overrides,

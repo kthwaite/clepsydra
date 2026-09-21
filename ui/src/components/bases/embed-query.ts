@@ -1,4 +1,9 @@
-import type { BaseFilter, BaseViewEvaluateRequest, SortKey } from "#/api/bases";
+import type {
+  BaseFilter,
+  BaseViewEvaluateRequest,
+  RenderSelection,
+  SortKey,
+} from "#/api/bases";
 import {
   type GroupOverride,
   groupOverrideParam,
@@ -7,11 +12,24 @@ import { asciiCaseFold } from "./local-validation";
 
 export interface BaseEmbedConfig {
   base: string;
-  view: string;
+  view?: string;
+  template?: string;
   filter?: BaseFilter;
   sort?: SortKey[];
   limit?: number;
   groupBy?: GroupOverride;
+}
+
+export function baseRenderSelection(config: BaseEmbedConfig): RenderSelection {
+  if (!config.template) throw new Error("Choose a saved rendering template.");
+  return {
+    base: config.base,
+    template: config.template,
+    ...(config.view === undefined ? {} : { view: config.view }),
+    ...(config.filter === undefined ? {} : { filter: config.filter }),
+    ...(config.sort === undefined ? {} : { sort: config.sort }),
+    ...(config.limit === undefined ? {} : { limit: config.limit }),
+  };
 }
 
 export type NormalizedEmbedSort =
@@ -20,7 +38,7 @@ export type NormalizedEmbedSort =
 
 export interface NormalizedEmbedConfig {
   base: string;
-  view: string;
+  view?: string;
   filter?: BaseFilter;
   sort: NormalizedEmbedSort;
   /** The author's ceiling on the whole result; absent means the true total. */
@@ -53,7 +71,7 @@ export function normalizeEmbedConfiguration(
 ): NormalizedEmbedConfig {
   return {
     base: config.base,
-    view: asciiCaseFold(config.view),
+    ...(config.view === undefined ? {} : { view: asciiCaseFold(config.view) }),
     ...(config.filter === undefined
       ? {}
       : { filter: canonicalFilter(config.filter) }),

@@ -5,10 +5,11 @@ import type {
   BaseSummary,
   SortKey,
 } from "#/api/bases";
-import { useBase, useBases } from "#/api/bases";
+import { useBase, useBases, useBaseTemplates } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { Select, SelectItem } from "#/components/ui/select";
+import { useBaseRendering } from "#/editor/baseRendering";
 import {
   extractBaseEmbedTomlBody,
   parseBaseEmbedConfig,
@@ -30,9 +31,14 @@ import {
 import { validateBaseEmbedSemantics } from "./embed-semantic-validation";
 import { asciiCaseFold } from "./local-validation";
 import { OrderedSortEditor } from "./OrderedSortEditor";
+import {
+  renderErrorMessage,
+  TemplateSourceEditor,
+} from "./TemplateSourceEditor";
 
 interface StructuredDraft {
   base: string;
+  template: string;
   view: string;
   filter?: BaseFilter;
   sort?: SortKey[];
@@ -47,6 +53,8 @@ interface StructuredDraft {
 export interface BaseEmbedInspectorProps {
   isOpen: boolean;
   node: BaseEmbedElement;
+  initialMode?: "live" | "generated";
+  onGenerate?(node: ConfiguredBaseEmbedElement): void;
   onSave(node: ConfiguredBaseEmbedElement): void;
   onCancel(): void;
   onRestoreFocus(): void;
@@ -66,7 +74,8 @@ function draftFromNode(
   if (node.status === "configured") {
     return {
       base: node.base,
-      view: node.view,
+      view: node.view ?? "",
+      template: node.template ?? "",
       filter:
         node.filter === undefined ? undefined : structuredClone(node.filter),
       sort:
@@ -83,6 +92,7 @@ function draftFromNode(
   const base = bases[0];
   return {
     base: base?.slug ?? "",
+    template: "",
     view: base?.views[0] ?? "",
     limit: 50,
     persistLimit: false,
@@ -94,7 +104,8 @@ function draftFromNode(
 
 function configuredNode(config: {
   base: string;
-  view: string;
+  view?: string;
+  template?: string;
   filter?: BaseFilter;
   sort?: SortKey[];
   limit?: number;
@@ -105,7 +116,8 @@ function configuredNode(config: {
     type: "base-embed",
     status: "configured",
     base: config.base,
-    view: config.view,
+    ...(config.view === undefined ? {} : { view: config.view }),
+    ...(config.template === undefined ? {} : { template: config.template }),
     ...(config.filter === undefined
       ? {}
       : { filter: structuredClone(config.filter) }),
@@ -120,7 +132,12 @@ function configuredNode(config: {
 }
 
 function referenceAndFieldDiagnostics(
-  config: { base: string; view: string; filter?: BaseFilter; sort?: SortKey[] },
+  config: {
+    base: string;
+    view?: string;
+    filter?: BaseFilter;
+    sort?: SortKey[];
+  },
   bases: readonly BaseSummary[],
   detail: BaseDetailResponse | undefined,
   registryReady: boolean,
@@ -150,15 +167,23 @@ function referenceAndFieldDiagnostics(
 export function BaseEmbedInspector({
   isOpen,
   node,
+  initialMode = "live",
+  onGenerate,
   onSave,
   onCancel,
   onRestoreFocus,
 }: BaseEmbedInspectorProps) {
   const registry = useBases();
+  const templates = useBaseTemplates();
+  const lifecycle = useBaseRendering();
+  const [templateEditor, setTemplateEditor] = useState<{
+    slug?: string;
+  } | null>(null);
   const bases = registry.data?.bases ?? [];
   const [draft, setDraft] = useState<StructuredDraft>(() =>
     draftFromNode(node, bases),
   );
+  const [mode, setMode] = useState(initialMode);
   const [source, setSource] = useState(() =>
     node.status === "invalid" ? extractBaseEmbedTomlBody(node.rawBlock) : "",
   );
@@ -169,6 +194,7 @@ export function BaseEmbedInspector({
     const replaced = node !== previousNode.current;
     if (isOpen && (opened || replaced)) {
       setDraft(draftFromNode(node, bases));
+      setMode(initialMode);
       setSource(
         node.status === "invalid"
           ? extractBaseEmbedTomlBody(node.rawBlock)
@@ -177,7 +203,7 @@ export function BaseEmbedInspector({
     }
     wasOpen.current = isOpen;
     previousNode.current = node;
-  }, [bases, isOpen, node]);
+  }, [bases, initialMode, isOpen, node]);
   const sourceRepair = node.status === "invalid";
   const parsedSource = useMemo(() => parseBaseEmbedConfig(source), [source]);
   const selectedSlug = sourceRepair
@@ -204,7 +230,8 @@ export function BaseEmbedInspector({
 
   const structuredConfig = {
     base: draft.base,
-    view: draft.view,
+    ...(draft.view ? { view: draft.view } : {}),
+    ...(draft.template ? { template: draft.template } : {}),
     ...(draft.filter === undefined ? {} : { filter: draft.filter }),
     ...(draft.sort === undefined ? {} : { sort: draft.sort }),
     ...(draft.persistLimit
@@ -257,7 +284,12 @@ export function BaseEmbedInspector({
   ];
   const refreshing = registryRefreshing || detailRefreshing;
   const saveDisabled =
-    refreshing || detailUnavailable || !candidate || diagnostics.length > 0;
+    refreshing ||
+    detailUnavailable ||
+    !candidate ||
+    diagnostics.length > 0 ||
+    (mode === "generated" && !candidate.template) ||
+    !!lifecycle?.readonly;
 
   const baseDiagnostics = diagnostics.filter(
     (diagnostic) => diagnostic.path === "base",
@@ -293,418 +325,564 @@ export function BaseEmbedInspector({
 
   function save() {
     if (saveDisabled || !candidate) return;
-    onSave(configuredNode(candidate));
-    onRestoreFocus();
+    const replacement = configuredNode(candidate);
+    if (mode === "generated" && onGenerate) {
+      onGenerate(replacement);
+    } else {
+      onSave(replacement);
+      onRestoreFocus();
+    }
   }
 
   return (
-    <Dialog
-      isOpen={isOpen}
-      onOpenChange={(open) => {
-        if (!open) closeWithoutSaving();
-      }}
-      title="Configure Base embed"
-      description={
-        sourceRepair
-          ? "Repair the persisted TOML before replacing this embed."
-          : "Choose a saved Base view and local query overrides."
-      }
-      ariaDescribedBy={
-        !sourceRepair && rootDiagnostics.length > 0
-          ? "base-embed-root-diagnostics"
-          : undefined
-      }
-      size="xl"
-      footer={
-        <>
-          <Button variant="secondary" onPress={closeWithoutSaving}>
-            Cancel
-          </Button>
-          <Button variant="primary" onPress={save} isDisabled={saveDisabled}>
-            Save
-          </Button>
-        </>
-      }
-    >
-      {sourceRepair ? (
-        <div>
-          <label className={labelClass} htmlFor="base-embed-source">
-            Base embed TOML
-          </label>
-          <textarea
-            id="base-embed-source"
-            autoFocus
-            rows={12}
-            value={source}
-            onChange={(event) => setSource(event.target.value)}
-            aria-invalid={diagnostics.length > 0}
-            aria-describedby="base-embed-source-description base-embed-source-diagnostics"
-            className={`${controlClass} min-h-48 resize-y font-mono`}
-          />
-          <p id="base-embed-source-description" className={descriptionClass}>
-            Enter a valid TOML Base embed body. Fence delimiters are managed by
-            the document serializer.
-          </p>
-          <div
-            id="base-embed-source-diagnostics"
-            role={diagnostics.length > 0 ? "alert" : undefined}
-            className="mt-2 text-xs text-destructive"
-          >
-            {diagnosticRows(diagnostics).map(({ diagnostic, key }) => (
-              <p key={key}>{diagnostic.message}</p>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className="grid gap-5">
-          {rootDiagnostics.length > 0 ? (
-            <div
-              id="base-embed-root-diagnostics"
-              role="alert"
-              className="border border-destructive px-3 py-2 text-xs text-destructive"
-            >
-              {rootDiagnostics.map((diagnostic) => (
-                <p key={diagnostic.message}>{diagnostic.message}</p>
-              ))}
-            </div>
-          ) : null}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Select
-                id="base-embed-base"
-                label="Base"
-                autoFocus
-                value={draft.base}
-                isInvalid={baseDiagnostics.length > 0}
-                aria-describedby="base-embed-base-description base-embed-base-diagnostics"
-                isDisabled={registryRefreshing}
-                onChange={(key) => {
-                  if (key == null) return;
-                  const selectedBase = String(key);
-                  const base = bases.find((item) => item.slug === selectedBase);
-                  setDraft((current) => ({
-                    ...current,
-                    base: selectedBase,
-                    view: base?.views[0] ?? "",
-                    filter: undefined,
-                    sort: undefined,
-                  }));
-                }}
-              >
-                {draft.base &&
-                !bases.some((base) => base.slug === draft.base) ? (
-                  <SelectItem
-                    id={draft.base}
-                    textValue={`${draft.base} (missing)`}
-                  >
-                    {draft.base} (missing)
-                  </SelectItem>
-                ) : null}
-                {!draft.base ? (
-                  <SelectItem id="">Choose a Base</SelectItem>
-                ) : null}
-                {bases.map((base) => (
-                  <SelectItem key={base.slug} id={base.slug}>
-                    {base.name}
-                  </SelectItem>
-                ))}
-              </Select>
-              <p id="base-embed-base-description" className={descriptionClass}>
-                Select a saved Base from the vault registry.
-              </p>
-              <div
-                id="base-embed-base-diagnostics"
-                className="text-xs text-destructive"
-                role={baseDiagnostics.length > 0 ? "alert" : undefined}
-              >
-                {baseDiagnostics.map((diagnostic) => (
-                  <p key={diagnostic.message}>{diagnostic.message}</p>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <Select
-                id="base-embed-view"
-                label="Saved view"
-                value={selectedViewName ?? draft.view}
-                isInvalid={viewDiagnostics.length > 0}
-                aria-describedby="base-embed-view-description base-embed-view-diagnostics"
-                isDisabled={!selectedSummary || registryRefreshing}
-                onChange={(key) => {
-                  if (key == null) return;
-                  setDraft((current) => ({
-                    ...current,
-                    view: String(key),
-                    sort: undefined,
-                  }));
-                }}
-              >
-                {draft.view && selectedSummary && !selectedViewName ? (
-                  <SelectItem
-                    id={draft.view}
-                    textValue={`${draft.view} (missing)`}
-                  >
-                    {draft.view} (missing)
-                  </SelectItem>
-                ) : null}
-                {!draft.view ? (
-                  <SelectItem id="">Choose a saved view</SelectItem>
-                ) : null}
-                {selectedSummary?.views.map((view) => (
-                  <SelectItem key={view} id={view}>
-                    {view}
-                  </SelectItem>
-                ))}
-              </Select>
-              <p id="base-embed-view-description" className={descriptionClass}>
-                Views are scoped to the selected Base.
-              </p>
-              <div
-                id="base-embed-view-diagnostics"
-                className="text-xs text-destructive"
-              >
-                {viewDiagnostics.map((diagnostic) => (
-                  <p key={diagnostic.message}>{diagnostic.message}</p>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <section
-            className={sectionClass}
-            aria-labelledby="base-embed-filter-heading"
-            aria-invalid={filterSectionDiagnostics.length > 0}
-            aria-describedby={
-              filterSectionDiagnostics.length > 0
-                ? "base-embed-filter-diagnostics"
-                : undefined
-            }
-          >
-            <h3 id="base-embed-filter-heading" className={labelClass}>
-              Embed filter
-            </h3>
-            <p className={descriptionClass}>
-              This filter is combined with Base membership and the saved view.
-            </p>
-            <div className="mt-3">
-              <BaseFilterEditor
-                label="Embed filter"
-                value={draft.filter}
-                properties={properties}
-                diagnostics={diagnostics}
-                diagnosticRoot="filter"
-                onChange={(filter) =>
-                  setDraft((current) => ({ ...current, filter }))
-                }
-              />
-            </div>
-            {filterSectionDiagnostics.length > 0 ? (
-              <div
-                id="base-embed-filter-diagnostics"
-                role="alert"
-                className="mt-2 text-xs text-destructive"
-              >
-                {filterSectionDiagnostics.map((diagnostic) => (
-                  <p key={`${diagnostic.path}-${diagnostic.message}`}>
-                    {diagnostic.message}
-                  </p>
-                ))}
-              </div>
-            ) : null}
-          </section>
-
-          <section
-            className={sectionClass}
-            aria-labelledby="base-embed-sort-heading"
-            aria-invalid={sortSectionDiagnostics.length > 0}
-            aria-describedby={
-              sortSectionDiagnostics.length > 0
-                ? "base-embed-sort-diagnostics"
-                : undefined
-            }
-          >
-            <h3 id="base-embed-sort-heading" className={labelClass}>
-              Sort order
-            </h3>
-            <fieldset className="mt-3">
-              <legend className={labelClass}>Sort behavior</legend>
-              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm">
-                <label className="inline-flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="base-embed-sort-behavior"
-                    checked={draft.sort === undefined}
-                    onChange={() =>
-                      setDraft((current) => ({
-                        ...current,
-                        sort: undefined,
-                      }))
-                    }
-                  />
-                  Inherit saved view sorting
-                </label>
-                <label className="inline-flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="base-embed-sort-behavior"
-                    checked={draft.sort !== undefined}
-                    onChange={() =>
-                      setDraft((current) => ({
-                        ...current,
-                        sort: current.sort ?? [],
-                      }))
-                    }
-                  />
-                  Override saved view sorting
-                </label>
-              </div>
-            </fieldset>
-            <p className={descriptionClass}>
-              Inherit uses the saved view sort. An override with no keys
-              explicitly removes saved-view sorting; earlier keys take
-              precedence.
-            </p>
-            {draft.sort === undefined ? null : (
-              <OrderedSortEditor
-                value={draft.sort}
-                properties={properties}
-                diagnostics={diagnostics}
-                diagnosticRoot="sort"
-                idPrefix="base-embed"
-                onChange={(sort) =>
-                  setDraft((current) => ({ ...current, sort }))
-                }
-                registerFocus={() => {}}
-              />
-            )}
-            {sortSectionDiagnostics.length > 0 ? (
-              <div
-                id="base-embed-sort-diagnostics"
-                role="alert"
-                className="mt-2 text-xs text-destructive"
-              >
-                {sortSectionDiagnostics.map((diagnostic) => (
-                  <p key={`${diagnostic.path}-${diagnostic.message}`}>
-                    {diagnostic.message}
-                  </p>
-                ))}
-              </div>
-            ) : null}
-          </section>
-
-          <section className={sectionClass}>
-            <label className={labelClass} htmlFor="base-embed-limit">
-              Limit
+    <>
+      <Dialog
+        isOpen={isOpen}
+        onOpenChange={(open) => {
+          if (!open) closeWithoutSaving();
+        }}
+        title="Configure Base embed"
+        description={
+          sourceRepair
+            ? "Repair the persisted TOML before replacing this embed."
+            : "Choose a saved Base view and local query overrides."
+        }
+        ariaDescribedBy={
+          !sourceRepair && rootDiagnostics.length > 0
+            ? "base-embed-root-diagnostics"
+            : undefined
+        }
+        size="xl"
+        footer={
+          <>
+            <Button variant="secondary" onPress={closeWithoutSaving}>
+              Cancel
+            </Button>
+            <Button variant="primary" onPress={save} isDisabled={saveDisabled}>
+              {mode === "generated" ? "Preview generated region" : "Save"}
+            </Button>
+          </>
+        }
+      >
+        {sourceRepair ? (
+          <div>
+            <label className={labelClass} htmlFor="base-embed-source">
+              Base embed TOML
             </label>
-            <input
-              id="base-embed-limit"
-              type="number"
-              min={1}
-              max={200}
-              step={1}
-              className={controlClass}
-              value={draft.limit}
-              aria-invalid={limitDiagnostics.length > 0}
-              aria-describedby="base-embed-limit-description base-embed-limit-diagnostics"
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  limit: event.target.value,
-                  persistLimit: true,
-                }))
-              }
+            <textarea
+              id="base-embed-source"
+              autoFocus
+              rows={12}
+              value={source}
+              onChange={(event) => setSource(event.target.value)}
+              aria-invalid={diagnostics.length > 0}
+              aria-describedby="base-embed-source-description base-embed-source-diagnostics"
+              className={`${controlClass} min-h-48 resize-y font-mono`}
             />
-            <p id="base-embed-limit-description" className={descriptionClass}>
-              Return 1 through 200 rows; the default is 50.
+            <p id="base-embed-source-description" className={descriptionClass}>
+              Enter a valid TOML Base embed body. Fence delimiters are managed
+              by the document serializer.
             </p>
             <div
-              id="base-embed-limit-diagnostics"
-              className="text-xs text-destructive"
+              id="base-embed-source-diagnostics"
+              role={diagnostics.length > 0 ? "alert" : undefined}
+              className="mt-2 text-xs text-destructive"
             >
-              {limitDiagnostics.map((diagnostic) => (
-                <p key={diagnostic.message}>{diagnostic.message}</p>
+              {diagnosticRows(diagnostics).map(({ diagnostic, key }) => (
+                <p key={key}>{diagnostic.message}</p>
               ))}
             </div>
-          </section>
-
-          <section className={sectionClass}>
+          </div>
+        ) : (
+          <div className="grid gap-5">
+            {rootDiagnostics.length > 0 ? (
+              <div
+                id="base-embed-root-diagnostics"
+                role="alert"
+                className="border border-destructive px-3 py-2 text-xs text-destructive"
+              >
+                {rootDiagnostics.map((diagnostic) => (
+                  <p key={diagnostic.message}>{diagnostic.message}</p>
+                ))}
+              </div>
+            ) : null}
+            <section className={sectionClass}>
+              <Select
+                label="Rendering template"
+                value={draft.template || "__table__"}
+                onChange={(key) => {
+                  if (key == null) return;
+                  setDraft((current) => ({
+                    ...current,
+                    template: key === "__table__" ? "" : String(key),
+                  }));
+                }}
+              >
+                <SelectItem id="__table__">Table (no template)</SelectItem>
+                {draft.template &&
+                !templates.data?.templates.includes(draft.template) ? (
+                  <SelectItem id={draft.template}>
+                    {draft.template} (unavailable)
+                  </SelectItem>
+                ) : null}
+                {templates.data?.templates.map((slug) => (
+                  <SelectItem key={slug} id={slug}>
+                    {slug}
+                  </SelectItem>
+                ))}
+              </Select>
+              <div className="mt-2 flex gap-2">
+                <Button
+                  variant="secondary"
+                  onPress={() => setTemplateEditor({})}
+                  isDisabled={!!lifecycle?.readonly}
+                >
+                  Create template
+                </Button>
+                <Button
+                  variant="secondary"
+                  onPress={() => setTemplateEditor({ slug: draft.template })}
+                  isDisabled={!draft.template}
+                >
+                  Edit template
+                </Button>
+              </div>
+              {templates.error ? (
+                <p role="alert" className="mt-2 text-xs text-destructive">
+                  {renderErrorMessage(templates.error)}
+                </p>
+              ) : null}
+              {mode === "generated" && !draft.template ? (
+                <p role="status" className={descriptionClass}>
+                  Choose a saved template for generated Markdown.
+                </p>
+              ) : null}
+            </section>
             <div className="grid gap-4 sm:grid-cols-2">
+              {onGenerate ? (
+                <fieldset className="sm:col-span-2">
+                  <legend className={labelClass}>Presentation</legend>
+                  <div className="mt-2 flex gap-4 text-sm">
+                    <label>
+                      <input
+                        type="radio"
+                        name="base-render-mode"
+                        checked={mode === "live"}
+                        onChange={() => setMode("live")}
+                      />{" "}
+                      Live embed
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="base-render-mode"
+                        checked={mode === "generated"}
+                        onChange={() => setMode("generated")}
+                      />{" "}
+                      Generated Markdown snapshot
+                    </label>
+                  </div>
+                  <p className={descriptionClass}>
+                    Live results refresh without changing the page. Snapshots
+                    change only after preview and apply.
+                  </p>
+                </fieldset>
+              ) : null}
               <div>
                 <Select
-                  id="base-embed-display"
-                  label="Display"
-                  value={draft.display}
-                  aria-describedby="base-embed-display-description"
+                  id="base-embed-base"
+                  label="Base"
+                  autoFocus
+                  value={draft.base}
+                  isInvalid={baseDiagnostics.length > 0}
+                  aria-describedby="base-embed-base-description base-embed-base-diagnostics"
+                  isDisabled={registryRefreshing}
+                  onChange={(key) => {
+                    if (key == null) return;
+                    const selectedBase = String(key);
+                    const base = bases.find(
+                      (item) => item.slug === selectedBase,
+                    );
+                    setDraft((current) => ({
+                      ...current,
+                      base: selectedBase,
+                      view: base?.views[0] ?? "",
+                      filter: undefined,
+                      sort: undefined,
+                    }));
+                  }}
+                >
+                  {draft.base &&
+                  !bases.some((base) => base.slug === draft.base) ? (
+                    <SelectItem
+                      id={draft.base}
+                      textValue={`${draft.base} (missing)`}
+                    >
+                      {draft.base} (missing)
+                    </SelectItem>
+                  ) : null}
+                  {!draft.base ? (
+                    <SelectItem id="">Choose a Base</SelectItem>
+                  ) : null}
+                  {bases.map((base) => (
+                    <SelectItem key={base.slug} id={base.slug}>
+                      {base.name}
+                    </SelectItem>
+                  ))}
+                </Select>
+                <p
+                  id="base-embed-base-description"
+                  className={descriptionClass}
+                >
+                  Select a saved Base from the vault registry.
+                </p>
+                <div
+                  id="base-embed-base-diagnostics"
+                  className="text-xs text-destructive"
+                  role={baseDiagnostics.length > 0 ? "alert" : undefined}
+                >
+                  {baseDiagnostics.map((diagnostic) => (
+                    <p key={diagnostic.message}>{diagnostic.message}</p>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <Select
+                  id="base-embed-view"
+                  label="Saved view"
+                  value={
+                    selectedViewName ??
+                    (draft.view || (draft.template ? "__base_only__" : ""))
+                  }
+                  isInvalid={viewDiagnostics.length > 0}
+                  aria-describedby="base-embed-view-description base-embed-view-diagnostics"
+                  isDisabled={!selectedSummary || registryRefreshing}
                   onChange={(key) => {
                     if (key == null) return;
                     setDraft((current) => ({
                       ...current,
-                      display: key === "full" ? "full" : "compact",
-                      persistDisplay: true,
+                      view: key === "__base_only__" ? "" : String(key),
+                      sort: undefined,
                     }));
                   }}
                 >
-                  <SelectItem id="compact">Compact</SelectItem>
-                  <SelectItem id="full">Full</SelectItem>
+                  {draft.view && selectedSummary && !selectedViewName ? (
+                    <SelectItem
+                      id={draft.view}
+                      textValue={`${draft.view} (missing)`}
+                    >
+                      {draft.view} (missing)
+                    </SelectItem>
+                  ) : null}
+                  {draft.template ? (
+                    <SelectItem id="__base_only__">
+                      Base membership (no saved view)
+                    </SelectItem>
+                  ) : !draft.view ? (
+                    <SelectItem id="">Choose a saved view</SelectItem>
+                  ) : null}
+                  {selectedSummary?.views.map((view) => (
+                    <SelectItem key={view} id={view}>
+                      {view}
+                    </SelectItem>
+                  ))}
                 </Select>
                 <p
-                  id="base-embed-display-description"
+                  id="base-embed-view-description"
                   className={descriptionClass}
                 >
-                  Compact folds the Base chrome into one toolbar and scrolls
-                  large results in place. Full renders the whole table.
-                </p>
-              </div>
-
-              <div>
-                <label className={labelClass} htmlFor="base-embed-width">
-                  Width
-                </label>
-                <input
-                  id="base-embed-width"
-                  type="number"
-                  min={EMBED_WIDTH_MIN}
-                  max={EMBED_WIDTH_MAX}
-                  step={1}
-                  className={controlClass}
-                  value={draft.width}
-                  aria-invalid={widthDiagnostics.length > 0}
-                  aria-describedby="base-embed-width-description base-embed-width-diagnostics"
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      width: event.target.value,
-                    }))
-                  }
-                />
-                <p
-                  id="base-embed-width-description"
-                  className={descriptionClass}
-                >
-                  Leave empty to fill the column. {EMBED_WIDTH_MIN} through{" "}
-                  {EMBED_WIDTH_MAX} pixels sets a fixed width, which may exceed
-                  the reading column but never the pane.
+                  Views are scoped to the selected Base.
                 </p>
                 <div
-                  id="base-embed-width-diagnostics"
+                  id="base-embed-view-diagnostics"
                   className="text-xs text-destructive"
                 >
-                  {widthDiagnostics.map((diagnostic) => (
+                  {viewDiagnostics.map((diagnostic) => (
                     <p key={diagnostic.message}>{diagnostic.message}</p>
                   ))}
                 </div>
               </div>
             </div>
-          </section>
 
-          {refreshing ? (
-            <p role="status" className="text-xs text-muted-foreground">
-              Refreshing Base configuration…
-            </p>
-          ) : null}
-        </div>
-      )}
-    </Dialog>
+            <section
+              className={sectionClass}
+              aria-labelledby="base-embed-filter-heading"
+              aria-invalid={filterSectionDiagnostics.length > 0}
+              aria-describedby={
+                filterSectionDiagnostics.length > 0
+                  ? "base-embed-filter-diagnostics"
+                  : undefined
+              }
+            >
+              <h3 id="base-embed-filter-heading" className={labelClass}>
+                Embed filter
+              </h3>
+              <p className={descriptionClass}>
+                This filter is combined with Base membership and the saved view.
+              </p>
+              <div className="mt-3">
+                <BaseFilterEditor
+                  label="Embed filter"
+                  value={draft.filter}
+                  properties={properties}
+                  diagnostics={diagnostics}
+                  diagnosticRoot="filter"
+                  onChange={(filter) =>
+                    setDraft((current) => ({ ...current, filter }))
+                  }
+                />
+              </div>
+              {filterSectionDiagnostics.length > 0 ? (
+                <div
+                  id="base-embed-filter-diagnostics"
+                  role="alert"
+                  className="mt-2 text-xs text-destructive"
+                >
+                  {filterSectionDiagnostics.map((diagnostic) => (
+                    <p key={`${diagnostic.path}-${diagnostic.message}`}>
+                      {diagnostic.message}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+
+            <section
+              className={sectionClass}
+              aria-labelledby="base-embed-sort-heading"
+              aria-invalid={sortSectionDiagnostics.length > 0}
+              aria-describedby={
+                sortSectionDiagnostics.length > 0
+                  ? "base-embed-sort-diagnostics"
+                  : undefined
+              }
+            >
+              <h3 id="base-embed-sort-heading" className={labelClass}>
+                Sort order
+              </h3>
+              <fieldset className="mt-3">
+                <legend className={labelClass}>Sort behavior</legend>
+                <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="base-embed-sort-behavior"
+                      checked={draft.sort === undefined}
+                      onChange={() =>
+                        setDraft((current) => ({
+                          ...current,
+                          sort: undefined,
+                        }))
+                      }
+                    />
+                    Inherit saved view sorting
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="base-embed-sort-behavior"
+                      checked={draft.sort !== undefined}
+                      onChange={() =>
+                        setDraft((current) => ({
+                          ...current,
+                          sort: current.sort ?? [],
+                        }))
+                      }
+                    />
+                    Override saved view sorting
+                  </label>
+                </div>
+              </fieldset>
+              <p className={descriptionClass}>
+                Inherit uses the saved view sort. An override with no keys
+                explicitly removes saved-view sorting; earlier keys take
+                precedence.
+              </p>
+              {draft.sort === undefined ? null : (
+                <OrderedSortEditor
+                  value={draft.sort}
+                  properties={properties}
+                  diagnostics={diagnostics}
+                  diagnosticRoot="sort"
+                  idPrefix="base-embed"
+                  onChange={(sort) =>
+                    setDraft((current) => ({ ...current, sort }))
+                  }
+                  registerFocus={() => {}}
+                />
+              )}
+              {sortSectionDiagnostics.length > 0 ? (
+                <div
+                  id="base-embed-sort-diagnostics"
+                  role="alert"
+                  className="mt-2 text-xs text-destructive"
+                >
+                  {sortSectionDiagnostics.map((diagnostic) => (
+                    <p key={`${diagnostic.path}-${diagnostic.message}`}>
+                      {diagnostic.message}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+
+            <section className={sectionClass}>
+              <label className={labelClass} htmlFor="base-embed-limit">
+                Limit
+              </label>
+              <input
+                id="base-embed-limit"
+                type="number"
+                min={1}
+                max={draft.template ? undefined : 200}
+                step={1}
+                className={controlClass}
+                value={draft.template && !draft.persistLimit ? "" : draft.limit}
+                aria-invalid={limitDiagnostics.length > 0}
+                aria-describedby="base-embed-limit-description base-embed-limit-diagnostics"
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    limit: event.target.value,
+                    persistLimit: true,
+                  }))
+                }
+              />
+              <p id="base-embed-limit-description" className={descriptionClass}>
+                {draft.template
+                  ? "No limit is applied unless you set one. Rendering budgets still apply."
+                  : "Return 1 through 200 rows; the default is 50."}
+              </p>
+              {draft.template ? (
+                <Button
+                  variant="ghost"
+                  onPress={() =>
+                    setDraft((current) => ({ ...current, persistLimit: false }))
+                  }
+                >
+                  Use all selected records
+                </Button>
+              ) : null}
+              <div
+                id="base-embed-limit-diagnostics"
+                className="text-xs text-destructive"
+              >
+                {limitDiagnostics.map((diagnostic) => (
+                  <p key={diagnostic.message}>{diagnostic.message}</p>
+                ))}
+              </div>
+            </section>
+
+            <section className={sectionClass} hidden={!!draft.template}>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Select
+                    id="base-embed-display"
+                    label="Display"
+                    value={draft.display}
+                    aria-describedby="base-embed-display-description"
+                    onChange={(key) => {
+                      if (key == null) return;
+                      setDraft((current) => ({
+                        ...current,
+                        display: key === "full" ? "full" : "compact",
+                        persistDisplay: true,
+                      }));
+                    }}
+                  >
+                    <SelectItem id="compact">Compact</SelectItem>
+                    <SelectItem id="full">Full</SelectItem>
+                  </Select>
+                  <p
+                    id="base-embed-display-description"
+                    className={descriptionClass}
+                  >
+                    Compact folds the Base chrome into one toolbar and scrolls
+                    large results in place. Full renders the whole table.
+                  </p>
+                </div>
+
+                <div>
+                  <label className={labelClass} htmlFor="base-embed-width">
+                    Width
+                  </label>
+                  <input
+                    id="base-embed-width"
+                    type="number"
+                    min={EMBED_WIDTH_MIN}
+                    max={EMBED_WIDTH_MAX}
+                    step={1}
+                    className={controlClass}
+                    value={draft.width}
+                    aria-invalid={widthDiagnostics.length > 0}
+                    aria-describedby="base-embed-width-description base-embed-width-diagnostics"
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        width: event.target.value,
+                      }))
+                    }
+                  />
+                  <p
+                    id="base-embed-width-description"
+                    className={descriptionClass}
+                  >
+                    Leave empty to fill the column. {EMBED_WIDTH_MIN} through{" "}
+                    {EMBED_WIDTH_MAX} pixels sets a fixed width, which may
+                    exceed the reading column but never the pane.
+                  </p>
+                  <div
+                    id="base-embed-width-diagnostics"
+                    className="text-xs text-destructive"
+                  >
+                    {widthDiagnostics.map((diagnostic) => (
+                      <p key={diagnostic.message}>{diagnostic.message}</p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {refreshing ? (
+              <p role="status" className="text-xs text-muted-foreground">
+                Refreshing Base configuration…
+              </p>
+            ) : null}
+          </div>
+        )}
+      </Dialog>
+      {templateEditor ? (
+        <TemplateSourceEditor
+          key={templateEditor.slug ?? "__new__"}
+          slug={templateEditor.slug}
+          pagePath={lifecycle?.pagePath}
+          readonly={lifecycle?.readonly}
+          selection={
+            candidate
+              ? {
+                  base: candidate.base,
+                  template:
+                    candidate.template || templateEditor.slug || "draft",
+                  ...(candidate.view ? { view: candidate.view } : {}),
+                  ...(candidate.filter === undefined
+                    ? {}
+                    : { filter: candidate.filter }),
+                  ...(candidate.sort === undefined
+                    ? {}
+                    : { sort: candidate.sort }),
+                  ...(candidate.limit === undefined
+                    ? {}
+                    : { limit: candidate.limit }),
+                }
+              : undefined
+          }
+          onSaved={(slug) =>
+            setDraft((current) => ({ ...current, template: slug }))
+          }
+          onClose={() => setTemplateEditor(null)}
+        />
+      ) : null}
+    </>
   );
 }

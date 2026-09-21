@@ -273,15 +273,25 @@ function assertValidBaseEmbedConfig(
   if (!isTable(value)) fail("Base embed configuration must be a TOML table");
   assertClosedKeys(
     value,
-    ["base", "view"],
-    ["filter", "sort", "limit", "display", "width"],
+    ["base"],
+    ["view", "template", "filter", "sort", "limit", "display", "width"],
   );
   if (typeof value.base !== "string" || value.base.trim().length === 0) {
     fail("`base` must be a nonblank string", "base");
   }
-  if (typeof value.view !== "string" || value.view.trim().length === 0) {
+  if (
+    (value.view !== undefined || value.template === undefined) &&
+    (typeof value.view !== "string" || value.view.trim().length === 0)
+  ) {
     fail("`view` must be a nonblank string", "view");
   }
+  if (
+    value.template !== undefined &&
+    (typeof value.template !== "string" || value.template.trim().length === 0)
+  ) {
+    fail("`template` must be a nonblank string", "template");
+  }
+  const maxLimit = value.template === undefined ? MAX_LIMIT : 1000;
   if (Object.hasOwn(value, "filter")) {
     validateFilter(value.filter, 1, { nodes: 0 }, "filter");
   }
@@ -290,10 +300,10 @@ function assertValidBaseEmbedConfig(
     Object.hasOwn(value, "limit") &&
     (!Number.isInteger(value.limit) ||
       (value.limit as number) < MIN_LIMIT ||
-      (value.limit as number) > MAX_LIMIT)
+      (value.limit as number) > maxLimit)
   ) {
     fail(
-      `\`limit\` must be an integer from ${MIN_LIMIT} through ${MAX_LIMIT}`,
+      `\`limit\` must be an integer from ${MIN_LIMIT} through ${maxLimit}`,
       "limit",
     );
   }
@@ -409,10 +419,13 @@ type BaseEmbedFence = BaseEmbedConfig & BaseEmbedPresentation;
 
 function canonicalBody(config: BaseEmbedFence): string {
   assertValidBaseEmbedConfig(config);
-  const lines = [
-    `base = ${encodeTomlBasicString(config.base)}`,
-    `view = ${encodeTomlBasicString(config.view)}`,
-  ];
+  const lines = [`base = ${encodeTomlBasicString(config.base)}`];
+  if (config.view !== undefined) {
+    lines.push(`view = ${encodeTomlBasicString(config.view)}`);
+  }
+  if (config.template !== undefined) {
+    lines.push(`template = ${encodeTomlBasicString(config.template)}`);
+  }
   if (config.filter !== undefined) {
     lines.push(`filter = ${serializeFilter(config.filter)}`);
   }
@@ -605,10 +618,11 @@ export function baseEmbedFromCode(
 }
 
 function configuredRawBlock(node: ConfiguredBaseEmbedElement): string {
-  const { base, view, filter, sort, limit, display, width } = node;
+  const { base, view, template, filter, sort, limit, display, width } = node;
   return `\`\`\`base\n${canonicalBody({
     base,
-    view,
+    ...(view === undefined ? {} : { view }),
+    ...(template === undefined ? {} : { template }),
     ...(filter === undefined ? {} : { filter }),
     ...(sort === undefined ? {} : { sort }),
     ...(limit === undefined ? {} : { limit }),

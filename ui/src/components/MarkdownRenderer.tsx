@@ -19,10 +19,18 @@ import {
 } from "#/lib/markdown/blockReferences";
 import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
 import { mermaidFenceSource } from "#/lib/markdown/mermaidFence";
-import { isCasResource, resolveResourceUrl } from "#/lib/resourceUrl";
+import {
+  isCasResource,
+  resolveResourceUrl,
+  resolveVaultRelativeResource,
+} from "#/lib/resourceUrl";
 
 interface MarkdownRendererProps {
   content: string;
+  /** Render stored/template Markdown without executing transclusions or diagrams. */
+  restricted?: boolean;
+  pagePath?: string;
+  attachmentPaths?: ReadonlyMap<string, string>;
 }
 
 function isMathDelimiter(value: unknown): value is MathDelimiter {
@@ -79,13 +87,36 @@ const transformMarkdownUrl: UrlTransform = (url, key, node) => {
     : defaultUrlTransform(url);
 };
 
-export function MarkdownRenderer({ content }: MarkdownRendererProps) {
+export function MarkdownRenderer({
+  content,
+  restricted = false,
+  pagePath,
+  attachmentPaths,
+}: MarkdownRendererProps) {
   const openTab = useOpenTab();
 
   return (
     <Markdown
       remarkPlugins={remarkPlugins}
-      urlTransform={transformMarkdownUrl}
+      skipHtml={restricted}
+      urlTransform={(url, key, node) => {
+        const target =
+          restricted && pagePath
+            ? resolveVaultRelativeResource(url, pagePath)
+            : null;
+        if (target) {
+          const attachment = attachmentPaths?.get(target.path);
+          if (attachment) return attachment + target.suffix;
+          if (
+            key === "href" &&
+            node.tagName === "a" &&
+            /\.md$/i.test(target.path)
+          ) {
+            return `/pages/${encodeURIComponent(target.path)}`;
+          }
+        }
+        return transformMarkdownUrl(url, key, node);
+      }}
       components={{
         span: ({ children, node, ...props }) => {
           const tex = node?.properties["data-tex"];
@@ -115,7 +146,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         },
         a: ({ href, children, ...props }) => {
           const blockId = href ? blockIdFromHref(href) : null;
-          if (blockId) {
+          if (blockId && !restricted) {
             return (
               <BlockTransclusion
                 blockId={blockId}
@@ -185,7 +216,8 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         ),
         pre: ({ children, node }) => {
           const mermaid = mermaidFenceSource(node);
-          if (mermaid !== null) return <MermaidCodeBlock code={mermaid} />;
+          if (mermaid !== null && !restricted)
+            return <MermaidCodeBlock code={mermaid} />;
           return <MarkdownCodeBlock>{children}</MarkdownCodeBlock>;
         },
         code: ({ children, className: codeClassName, ...props }) => {

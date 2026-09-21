@@ -75,11 +75,11 @@ import {
 import { TaskPropertyPopoverProvider } from "./taskPropertyContext";
 import { escapeTrappingBlock } from "./transforms/blockEscape";
 import { insertMarkdown } from "./transforms/insertMarkdown";
-import { selectAdjacentVoidBlock } from "./transforms/voidNavigation";
 import {
   handleJournalTimeHeadingDeletion,
   insertJournalTimeHeading,
 } from "./transforms/journalTime";
+import { selectAdjacentVoidBlock } from "./transforms/voidNavigation";
 import { useVim, VimStatusBar } from "./vim";
 import { WikilinkCombobox } from "./WikilinkCombobox";
 import {
@@ -614,7 +614,8 @@ export function SlateEditor({
       const selectedBase = Editor.above(editor, {
         at: editor.selection,
         match: (node) =>
-          SlateElement.isElement(node) && node.type === "base-embed",
+          SlateElement.isElement(node) &&
+          (node.type === "base-embed" || node.type === "generated-region"),
         mode: "lowest",
         voids: true,
       });
@@ -635,7 +636,8 @@ export function SlateEditor({
       const selectedBase = Editor.above(editor, {
         at: editor.selection,
         match: (node) =>
-          SlateElement.isElement(node) && node.type === "base-embed",
+          SlateElement.isElement(node) &&
+          (node.type === "base-embed" || node.type === "generated-region"),
         mode: "lowest",
         voids: true,
       });

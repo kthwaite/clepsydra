@@ -12,6 +12,8 @@ export interface ParagraphElement {
   blockId?: string;
   /** Editor-only caret escape synthesized after a terminal Base embed. */
   baseEmbedTrailingSentinel?: true;
+  /** Editor-only caret escape synthesized after a terminal generated region. */
+  generatedRegionTrailingSentinel?: true;
   properties?: Record<string, string>;
   children: Descendant[];
 }
@@ -187,6 +189,43 @@ export type BaseEmbedElement =
   | UnconfiguredBaseEmbedElement
   | ConfiguredBaseEmbedElement
   | InvalidBaseEmbedElement;
+
+export type GeneratedRegionDescriptor = Pick<
+  BaseEmbedConfig,
+  "base" | "filter" | "sort" | "limit"
+> & {
+  version: 1;
+  id: string;
+  view?: string;
+  template: string;
+  output_hash: string;
+};
+
+interface GeneratedRegionElementBase {
+  type: "generated-region";
+  /** Original marker and payload bytes; never rebuilt during ordinary saves. */
+  rawBlock: string;
+  children: [{ text: "" }];
+}
+
+export interface ValidGeneratedRegionElement
+  extends GeneratedRegionElementBase {
+  /** Structural validity only; the backend verifies the BLAKE3 fingerprint. */
+  status: "valid";
+  descriptor: GeneratedRegionDescriptor;
+  payload: string;
+}
+
+export interface InvalidGeneratedRegionElement
+  extends GeneratedRegionElementBase {
+  status: "invalid";
+  parseError: string;
+}
+
+export type GeneratedRegionElement =
+  | ValidGeneratedRegionElement
+  | InvalidGeneratedRegionElement;
+
 export type CustomElement =
   | ParagraphElement
   | HeadingElement
@@ -209,7 +248,8 @@ export type CustomElement =
   | TableElement
   | TableRowElement
   | TableCellElement
-  | BaseEmbedElement;
+  | BaseEmbedElement
+  | GeneratedRegionElement;
 
 export type ElementType = CustomElement["type"];
 

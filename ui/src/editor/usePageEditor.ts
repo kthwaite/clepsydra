@@ -74,6 +74,16 @@ export interface PageEditorOptions {
   ensure?: () => Promise<EnsureResult>;
 }
 
+export interface GeneratedChangeSession {
+  pagePath: string;
+  body: string;
+  revision: string;
+  cancel(error?: unknown): void;
+  apply(
+    write: () => Promise<{ body: string; revision: string }>,
+  ): Promise<void>;
+}
+
 interface PageEditorState {
   isLoading: boolean;
   error: unknown;
@@ -99,6 +109,10 @@ interface PageEditorState {
   onSlateChange: (value: Descendant[], editor: Editor) => void;
   setBodyMarkdown: (markdown: string) => void;
   saveNow: () => Promise<void>;
+  beginGeneratedChange: (
+    preparedBody?: string,
+  ) => Promise<GeneratedChangeSession>;
+  generatedChangePending: boolean;
   revisionConflict: RevisionConflict | null;
   reloadAfterConflict: () => Promise<void>;
   createdAt: string | null;
@@ -206,6 +220,14 @@ export function usePageEditor(
     promise: Promise<void>;
   } | null>(null);
   const conflictRef = useRef<RevisionConflict | null>(null);
+  const generatedChangeRef = useRef<object | null>(null);
+  const drainingGeneratedChangeRef = useRef(false);
+  const ignoredServerPageRef = useRef<typeof page>(undefined);
+  const observedServerPageRef = useRef(page);
+  useEffect(() => {
+    observedServerPageRef.current = page;
+  }, [page]);
+  const [generatedChangePending, setGeneratedChangePending] = useState(false);
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -244,6 +266,10 @@ export function usePageEditor(
     if (previousPathRef.current === path) return;
     previousPathRef.current = path;
     lifecycleRef.current += 1;
+    generatedChangeRef.current = null;
+    drainingGeneratedChangeRef.current = false;
+    ignoredServerPageRef.current = undefined;
+    setGeneratedChangePending(false);
 
     setEnsured(false);
     titleRef.current = "";
@@ -289,7 +315,12 @@ export function usePageEditor(
   // Skip when we have unsaved local edits (dirty), to prevent refetches
   // triggered by our own saves from overwriting in-flight user work.
   useEffect(() => {
-    if (!page) return;
+    if (
+      !page ||
+      page === ignoredServerPageRef.current ||
+      generatedChangeRef.current
+    )
+      return;
     if (conflictRef.current) return;
     const bodyDirty = bodyEditGenRef.current > savedBodyGenRef.current;
     const metaDirty = metaEditGenRef.current > savedMetaGenRef.current;
@@ -320,6 +351,9 @@ export function usePageEditor(
     // Capturing the path is intentional. It changes this callback's identity so
     // the cleanup effect flushes the outgoing page before path-scoped refs reset.
     void path;
+    if (generatedChangeRef.current && !drainingGeneratedChangeRef.current) {
+      return Promise.resolve();
+    }
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -540,6 +574,92 @@ export function usePageEditor(
 
   doSaveRef.current = doSave;
 
+  const beginGeneratedChange = useCallback(
+    async (preparedBody?: string): Promise<GeneratedChangeSession> => {
+      if (!online || page?.readonly || page?.encrypted) {
+        throw new Error(
+          "Generated output requires an online, writable, unencrypted page.",
+        );
+      }
+      if (generatedChangeRef.current)
+        throw new Error("A generated preview is already open.");
+      if (preparedBody !== undefined) {
+        const nextValue = markdownToSlate(preparedBody);
+        editorValueRef.current = nextValue;
+        bodyOverrideRef.current = preparedBody;
+        bodyEditGenRef.current += 1;
+      }
+      const owner = {};
+      const epoch = lifecycleRef.current;
+      generatedChangeRef.current = owner;
+      drainingGeneratedChangeRef.current = true;
+      setGeneratedChangePending(true);
+      const current = () =>
+        generatedChangeRef.current === owner && lifecycleRef.current === epoch;
+      const cancel = (error?: unknown) => {
+        if (!current()) return;
+        const conflict = decodeRevisionConflict(error);
+        if (conflict) {
+          conflictRef.current = conflict;
+          setRevisionConflict(conflict);
+          setSaveStatus("error");
+          setSaveError(
+            "The destination changed. Reload its latest revision before previewing again.",
+          );
+        }
+        generatedChangeRef.current = null;
+        drainingGeneratedChangeRef.current = false;
+        setGeneratedChangePending(false);
+      };
+      try {
+        await doSaveRef.current();
+        if (!current())
+          throw new Error("The destination page changed. Preview again.");
+        drainingGeneratedChangeRef.current = false;
+        ignoredServerPageRef.current = observedServerPageRef.current;
+        if (!revisionRef.current)
+          throw new Error(
+            "Save the destination page before generating output.",
+          );
+        return {
+          pagePath: savePathRef.current,
+          body: savedRef.current.body,
+          revision: revisionRef.current,
+          cancel,
+          async apply(write) {
+            if (!current())
+              throw new Error("The destination page changed. Preview again.");
+            try {
+              const canonical = await write();
+              if (!current()) return;
+              const nextValue = markdownToSlate(canonical.body);
+              ignoredServerPageRef.current = observedServerPageRef.current;
+              savedRef.current = { ...savedRef.current, body: canonical.body };
+              revisionRef.current = canonical.revision;
+              bodyOverrideRef.current = null;
+              editorValueRef.current = nextValue;
+              savedBodyGenRef.current = bodyEditGenRef.current;
+              savedMetaGenRef.current = metaEditGenRef.current;
+              saveRequestedRef.current = false;
+              setSaveError(null);
+              setSaveStatus("saved");
+              setEditorRevision((revision) => revision + 1);
+            } catch (error) {
+              cancel(error);
+              throw error;
+            } finally {
+              cancel();
+            }
+          },
+        };
+      } catch (error) {
+        cancel();
+        throw error;
+      }
+    },
+    [online, page],
+  );
+
   // Flush pending edits before the body flips to read-only offline, so
   // nothing typed just before the connection dropped is left stranded.
   useEffect(() => {
@@ -618,6 +738,7 @@ export function usePageEditor(
 
   const scheduleSave = useCallback(() => {
     clearTimeout(timerRef.current ?? undefined);
+    if (generatedChangeRef.current) return;
     if (conflictRef.current) {
       setSaveStatus("error");
       return;
@@ -630,6 +751,7 @@ export function usePageEditor(
 
   const onSlateChange = useCallback(
     (value: Descendant[], editor: Editor) => {
+      if (generatedChangeRef.current) return;
       editorValueRef.current = value;
       // Only schedule a save if there are actual content changes,
       // not just selection/cursor movements
@@ -651,6 +773,7 @@ export function usePageEditor(
   // value instead of the stale one.
   const setTitle = useCallback(
     (t: string) => {
+      if (generatedChangeRef.current) return;
       titleRef.current = t;
       setTitleState(t);
       metaEditGenRef.current += 1;
@@ -661,6 +784,7 @@ export function usePageEditor(
 
   const setTags = useCallback(
     (t: string[]) => {
+      if (generatedChangeRef.current) return;
       tagsRef.current = t;
       setTagsState(t);
       metaEditGenRef.current += 1;
@@ -671,6 +795,7 @@ export function usePageEditor(
 
   const setAliases = useCallback(
     (a: string[]) => {
+      if (generatedChangeRef.current) return;
       aliasesRef.current = a;
       setAliasesState(a);
       metaEditGenRef.current += 1;
@@ -681,6 +806,7 @@ export function usePageEditor(
 
   const setBodyMarkdown = useCallback(
     (markdown: string) => {
+      if (generatedChangeRef.current) return;
       const nextValue = markdownToSlate(markdown);
       bodyOverrideRef.current = markdown;
       editorValueRef.current = nextValue;
@@ -727,6 +853,7 @@ export function usePageEditor(
     previousPathRef.current !== path ||
     (page?.encrypted === true && previousLockEpochRef.current !== lockEpoch) ||
     (page !== undefined &&
+      page !== ignoredServerPageRef.current &&
       plainBody !== null &&
       !conflictRef.current &&
       !localEditorIsDirty &&
@@ -778,6 +905,8 @@ export function usePageEditor(
     onSlateChange,
     setBodyMarkdown,
     saveNow: doSave,
+    beginGeneratedChange,
+    generatedChangePending,
     createdAt: page?.meta?.created_at ?? null,
     updatedAt: page?.meta?.updated_at ?? null,
     archive: page?.meta.archive ?? null,
@@ -785,7 +914,7 @@ export function usePageEditor(
     kind: page?.kind ?? null,
     conversationProvider: page?.conversation?.provider ?? null,
     inferred: page?.inferred ?? true,
-    readonly: (page?.readonly ?? false) || !online,
+    readonly: (page?.readonly ?? false) || !online || generatedChangePending,
     offline: !online,
     setReadonly,
     project: page?.project ?? null,

@@ -66,6 +66,7 @@ import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { TagInput } from "#/components/ui/tag-input";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
+import { BaseRenderingProvider } from "#/editor/baseRendering";
 import { diagnoseConversationMarkdown } from "#/editor/conversation/marker";
 import { ConversationPresentationProvider } from "#/editor/conversation/presentation";
 import { insertConversationTurn } from "#/editor/conversation/transforms";
@@ -578,7 +579,10 @@ export function Folio({ tabId, path }: FolioProps) {
   // frontmatter hash claims to describe them; the server refuses body writes
   // until the reader explicitly unlocks the page.
   const offlineReadOnly = editor.offline === true;
-  const bodyProtected = editor.readonly === true && !offlineReadOnly;
+  const bodyProtected =
+    editor.readonly === true &&
+    !offlineReadOnly &&
+    !editor.generatedChangePending;
   const folioReadOnly =
     conversationReadOnly || recipeReadOnly || bodyProtected || offlineReadOnly;
   const encrypted = editor.encrypted === true;
@@ -1207,22 +1211,33 @@ export function Folio({ tabId, path }: FolioProps) {
                     : null,
                 }}
               >
-                <SlateEditor
-                  key={`${path}:${editor.editorRevision}`}
-                  initialValue={currentEditorValue}
-                  onChange={editor.onSlateChange}
-                  onSaveNow={editor.saveNow}
-                  insertionRequest={attachmentInsertion}
-                  onInsertionHandled={finishAttachmentInsertion}
-                  readOnly={
-                    conversationReadOnly || bodyProtected || offlineReadOnly
-                  }
-                  journalDate={
-                    journalDateFromPath(path) ?? aiJournalDateFromPath(path)
-                  }
-                  editorRef={folioEditorRef}
-                  onUnmountSnapshot={handleEditorSwapSnapshot}
-                />
+                <BaseRenderingProvider
+                  value={{
+                    pagePath: path,
+                    readonly: folioReadOnly || editor.encrypted,
+                    beginGeneratedChange: editor.beginGeneratedChange,
+                  }}
+                >
+                  <SlateEditor
+                    key={`${path}:${editor.editorRevision}`}
+                    initialValue={currentEditorValue}
+                    onChange={editor.onSlateChange}
+                    onSaveNow={editor.saveNow}
+                    insertionRequest={attachmentInsertion}
+                    onInsertionHandled={finishAttachmentInsertion}
+                    readOnly={
+                      conversationReadOnly ||
+                      bodyProtected ||
+                      offlineReadOnly ||
+                      editor.generatedChangePending
+                    }
+                    journalDate={
+                      journalDateFromPath(path) ?? aiJournalDateFromPath(path)
+                    }
+                    editorRef={folioEditorRef}
+                    onUnmountSnapshot={handleEditorSwapSnapshot}
+                  />
+                </BaseRenderingProvider>
               </ConversationPresentationProvider>
             )}
           </WikilinkResolutionProvider>
