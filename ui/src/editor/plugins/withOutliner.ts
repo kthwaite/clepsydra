@@ -10,14 +10,14 @@ import {
 import { isListElement, isListItem } from "#/editor/plugins/listUtils";
 
 /**
- * Slate plugin that allows list-items to contain mixed content (text + nested
- * lists). Without this override, Slate's default normalization merges block
- * children into adjacent text nodes, destroying nested list structure.
+ * List boundary deletion: join adjacent compatible lists before falling back to
+ * outdenting/unwrapping on Backspace or Slate's ordinary text deletion.
  */
 export function withOutliner(editor: Editor): Editor {
-  const { deleteBackward } = editor;
+  const { deleteBackward, deleteForward } = editor;
 
   editor.deleteBackward = (unit) => {
+    if (joinAdjacentLists(editor, "backward")) return;
     const { selection } = editor;
     if (selection && Range.isCollapsed(selection)) {
       const itemEntry = Editor.above(editor, {
@@ -39,12 +39,48 @@ export function withOutliner(editor: Editor): Editor {
     deleteBackward(unit);
   };
 
+  editor.deleteForward = (unit) => {
+    if (joinAdjacentLists(editor, "forward")) return;
+    deleteForward(unit);
+  };
+
   return editor;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function joinAdjacentLists(
+  editor: Editor,
+  direction: "backward" | "forward",
+): boolean {
+  const { selection } = editor;
+  if (!selection || !Range.isCollapsed(selection)) return false;
+
+  const listEntry = Editor.above(editor, { match: isListElement });
+  if (!listEntry) return false;
+  const [list, listPath] = listEntry;
+  const backward = direction === "backward";
+  const edge = backward
+    ? Editor.start(editor, listPath)
+    : Editor.end(editor, listPath);
+  if (!Point.equals(selection.anchor, edge)) return false;
+  if (backward && listPath[listPath.length - 1] === 0) return false;
+
+  const siblingPath = backward ? Path.previous(listPath) : Path.next(listPath);
+  const sibling = Node.getIf(editor, siblingPath);
+  if (!isListElement(sibling) || sibling.type !== list.type) return false;
+
+  // Merge the containers, not their boundary items. Slate remaps the caret
+  // through the merge so it stays with the same text in either direction.
+  Transforms.mergeNodes(editor, {
+    at: backward ? listPath : siblingPath,
+    match: isListElement,
+    mode: "lowest",
+  });
+  return true;
+}
 
 /**
  * Whether the given list-item is nested inside another list-item.

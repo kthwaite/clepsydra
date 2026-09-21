@@ -159,8 +159,13 @@ that sibling is another unchecked Todo. `Enter` mid-text splits the item.
 `Enter` on an empty nested item outdents it one level, and on an empty top-level
 item it leaves the list for a paragraph.
 
-`Backspace` at the start of an item outdents a nested item, or unwraps a
-top-level item into a paragraph, preserving any nested sub-list.
+To join two directly adjacent lists of the same type, press `Backspace` at the
+start of the second list's first item, or forward `Delete` at the end of the
+first list's last item (`Fn+Delete` on a Mac keyboard). The items remain separate
+bullets, the caret stays with its text, and one undo restores the two lists.
+
+Otherwise, `Backspace` at the start of an item outdents a nested item, or unwraps
+a top-level item into a paragraph, preserving any nested sub-list.
 
 There is no outline folding.
 

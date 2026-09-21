@@ -635,6 +635,48 @@ function canonicalItem(text: string, extra: object = {}) {
   };
 }
 
+describe("joining adjacent list blocks", () => {
+  for (const direction of ["backward", "forward"] as const) {
+    it(`joins with ${direction} deletion without merging bullet text, and undoes in one step`, () => {
+      const first = {
+        type: "bulleted-list",
+        children: [canonicalItem("First"), canonicalItem("Second")],
+      } satisfies Descendant;
+      const second = {
+        type: "bulleted-list",
+        children: [
+          canonicalItem("Third", { checked: true }),
+          canonicalItem("Fourth"),
+        ],
+      } satisfies Descendant;
+      const editor = makeEditor([first, second]);
+      const point =
+        direction === "backward"
+          ? Editor.start(editor, [1])
+          : Editor.end(editor, [0]);
+      Transforms.select(editor, point);
+
+      if (direction === "backward") editor.deleteBackward("character");
+      else editor.deleteForward("character");
+
+      expect(editor.children).toEqual([
+        {
+          type: "bulleted-list",
+          children: [...first.children, ...second.children],
+        },
+      ]);
+      const caret =
+        direction === "backward" ? { path: [0, 2, 0, 0], offset: 0 } : point;
+      expect(editor.selection).toEqual({ anchor: caret, focus: caret });
+      expect(normalizeUnchanged(editor)).toBe(true);
+
+      editor.undo();
+      expect(editor.children).toEqual([first, second]);
+      expect(editor.selection).toEqual({ anchor: point, focus: point });
+    });
+  }
+});
+
 describe("deleteBackward at start of list-item", () => {
   it("unwraps a sole top-level item to a single paragraph, preserving text and shape", () => {
     const editor = makeEditor([
