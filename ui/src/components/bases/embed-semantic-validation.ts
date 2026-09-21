@@ -9,7 +9,7 @@ import { asciiCaseFold } from "./local-validation";
 
 export interface BaseEmbedSemanticConfig {
   base: string;
-  view: string;
+  view?: string;
   filter?: BaseFilter;
   sort?: SortKey[];
 }
@@ -354,14 +354,16 @@ export function validateBaseEmbedSemantics(
   detail: BaseDetailResponse,
 ): BaseEmbedSemanticDiagnostic[] {
   const diagnostics: BaseEmbedSemanticDiagnostic[] = [];
-  const view = (detail.views ?? []).find(
-    ({ name }) => asciiCaseFold(name) === asciiCaseFold(config.view),
-  );
-  if (!view) {
-    diagnostics.push({
-      path: "view",
-      message: `Saved view “${config.view}” was not found in ${detail.name}.`,
-    });
+  if (config.view !== undefined) {
+    const view = (detail.views ?? []).find(
+      ({ name }) => asciiCaseFold(name) === asciiCaseFold(config.view ?? ""),
+    );
+    if (!view) {
+      diagnostics.push({
+        path: "view",
+        message: `Saved view “${config.view}” was not found in ${detail.name}.`,
+      });
+    }
   }
   if (config.filter) {
     diagnostics.push(...validateFilter(config.filter, "filter", detail));

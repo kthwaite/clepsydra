@@ -4,6 +4,8 @@ pub mod ai_journal;
 pub mod archive;
 pub mod attachments;
 pub mod base_members;
+pub mod base_render;
+pub mod base_templates;
 pub mod bases;
 pub mod bcl;
 pub mod blocks;
@@ -242,6 +244,8 @@ pub fn api_router_with_archive_limit(
         .nest("/board", board::router())
         .nest("/agenda", agenda::router())
         .nest("/bases", bases::router())
+        .nest("/base-templates", base_templates::router())
+        .nest("/base-render", base_render::router())
         .nest("/query", query::router())
         .nest("/blocks", blocks::router())
         .route("/bcl", axum::routing::get(bcl::get_bcl))

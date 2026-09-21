@@ -1,6 +1,7 @@
 import {
   type QueryClient,
   useInfiniteQuery,
+  useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
@@ -76,6 +77,101 @@ export type GroupResult = components["schemas"]["GroupResult"];
 export type BaseViewDefinition = components["schemas"]["ViewDefinition"];
 export type BaseFilePayload = components["schemas"]["BaseFilePayload"];
 
+export type RenderSelection = components["schemas"]["RenderSelection"];
+export type RenderRequest = components["schemas"]["RenderRequest"];
+export type RenderOutput = components["schemas"]["RenderOutput"];
+export type GeneratedPreview = components["schemas"]["PreviewResponse"];
+export type GeneratedPreviewRequest = components["schemas"]["PreviewRequest"];
+export type GeneratedApplyRequest = components["schemas"]["ApplyRequest"];
+export type TemplateDocument = components["schemas"]["TemplateDocument"];
+
+export const useBaseTemplates = () =>
+  $api.useQuery(
+    "get",
+    "/api/vault/base-templates",
+    {},
+    { throwOnError: false },
+  );
+
+export function useBaseTemplate(slug: string) {
+  return $api.useQuery(
+    "get",
+    "/api/vault/base-templates/{slug}",
+    {
+      params: { path: { slug } },
+    },
+    { enabled: !!slug, throwOnError: false },
+  );
+}
+
+export function useCreateBaseTemplate() {
+  const client = useQueryClient();
+  return $api.useMutation("post", "/api/vault/base-templates/{slug}", {
+    onSuccess: () => invalidateByPath(client, "/api/vault/base-templates"),
+  });
+}
+
+export function useUpdateBaseTemplate() {
+  const client = useQueryClient();
+  return $api.useMutation("put", "/api/vault/base-templates/{slug}", {
+    onSuccess: () => {
+      invalidateByPath(client, "/api/vault/base-templates");
+      invalidateByPath(client, "/api/vault/base-render/render");
+    },
+  });
+}
+
+export async function renderBase(
+  body: RenderRequest,
+  signal?: AbortSignal,
+): Promise<RenderOutput> {
+  const result = await fetchClient.POST("/api/vault/base-render/render", {
+    body,
+    signal,
+  });
+  if (result.error) throw result.error;
+  if (!result.data) throw new Error("The render response was empty.");
+  return result.data;
+}
+
+export function useLiveBaseRender(
+  selection: RenderSelection,
+  pagePath: string,
+) {
+  return useQuery({
+    queryKey: [
+      "post",
+      "/api/vault/base-render/render",
+      { selection, page_path: pagePath },
+    ],
+    queryFn: ({ signal }) =>
+      renderBase({ selection, page_path: pagePath }, signal),
+    enabled: !!pagePath,
+    throwOnError: false,
+  });
+}
+
+export async function previewGeneratedRegion(
+  body: GeneratedPreviewRequest,
+): Promise<GeneratedPreview> {
+  const result = await fetchClient.POST("/api/vault/base-render/preview", {
+    body,
+  });
+  if (result.error) throw result.error;
+  if (!result.data)
+    throw new Error("The generated preview response was empty.");
+  return result.data;
+}
+
+export async function applyGeneratedRegion(body: GeneratedApplyRequest) {
+  const result = await fetchClient.POST("/api/vault/base-render/apply", {
+    body,
+  });
+  if (result.error) throw result.error;
+  if (!result.data)
+    throw new Error("The generated application response was empty.");
+  return result.data;
+}
 const BASE_MEMBER_SCOPES: ReadonlySet<string> = new Set([
   "membership",
   "view",
@@ -135,6 +231,7 @@ export function invalidateBaseMutationQueries(queryClient: QueryClient): void {
   invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
   invalidateByPath(queryClient, queryKeys.query.pathPrefix);
   invalidateByPath(queryClient, queryKeys.pages.pathPrefix);
+  invalidateByPath(queryClient, "/api/vault/base-render/render");
 }
 
 function invalidatePropertyCommitFailureQueries(
@@ -249,6 +346,7 @@ async function evaluateWindow(
   window: { limit: number; offset: number },
   signal: AbortSignal | undefined,
 ): Promise<BaseViewEvaluateResponse> {
+  if (!config.view) throw new Error("A table embed requires a saved view.");
   const { data, error } = await fetchClient.POST(
     "/api/vault/bases/{slug}/views/{view}/evaluate",
     {

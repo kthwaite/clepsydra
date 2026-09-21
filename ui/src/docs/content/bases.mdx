@@ -464,6 +464,129 @@ The embed is one Slate block with explicit keyboard boundaries:
 
 The structured editor is the normal authoring path, but the TOML format remains public and editable. Manual TOML is useful for advanced changes or recovery; use the exact `preview`/`labels` shapes and qualification rules above. Guided saves structurally merge managed presentation nodes, preserve comments and unknown keys when they can be retained safely, and reject a removal that would silently discard an attached comment. A valid manual edit made while Configure is open changes the file revision, so the next Save reports a conflict and preserves the local draft; reload before reapplying it. If a definition cannot be parsed, `/bases` reports it under **Base files needing repair** and provides its path. Repair that file in a text editor, then reload; Clepsydra never fabricates a replacement draft over an unparseable file.
 
+## Render a Base as Markdown
+
+Choose a **Rendering template** in the Base embed inspector to present records
+as headings, lists, and prose instead of a table. Templates use **MiniJinja**
+(Jinja-style syntax) and live in
+`.clepsydra/templates/<name>.md.jinja`. **Create template** and **Edit template**
+open the source editor; **Preview draft** renders unsaved source without writing
+any page. **Save template** uses the file revision and retains your draft if an
+external edit conflicts.
+
+A Base still selects ordinary member pages. It does not store separate rows or
+move the notes. Put structured values in member frontmatter and free-form
+Markdown in each member's body.
+
+### Live output or a portable snapshot
+
+- **Live embed** stores only the query/template reference. Record and Base
+  changes refresh its rendered Markdown through vault events; **Refresh output**
+  also picks up externally edited template files. It never writes the output
+  back into the page.
+- **Generated Markdown snapshot** stores the rendered headings and prose as
+  ordinary Markdown between invisible HTML-comment markers. Other Markdown
+  readers can display it without Clepsydra. Source changes never automatically
+  rewrite it.
+
+To insert a snapshot, use **Base embed** from the slash menu, select a template,
+choose **Generated Markdown snapshot**, and choose **Preview generated region**.
+**Render preview** prepares output from the saved template; **Apply reviewed
+snapshot** publishes exactly that preview. Pending handwritten edits are saved
+first, and the destination is locked against editing while preview is open.
+Cancel leaves the existing content unchanged.
+
+Generated regions are read-only inside the editor. **Open source** opens the
+Base; edit member pages there. **Edit selection** changes the query through a
+new preview. **Edit template** changes formatting. **Preview / Regenerate**
+refreshes the snapshot only after explicit application. Removing the whole block
+is separate from editing the prose around it.
+
+An external edit inside the generated region remains visible and shows a
+fingerprint warning. Overwriting it requires an explicit acknowledgement.
+Acknowledgement never bypasses a page-revision conflict: if the destination
+changed after preview, preview again. Missing templates, invalid template
+expressions, and render limits leave the saved snapshot intact. Snapshots remain
+readable offline and when their Base or template is missing.
+
+### Live fence and selection
+
+````markdown
+```base
+base = "beer-tasting-notes"
+view = "All"
+template = "beer-notes"
+filter = { field = "abv", op = "lte", value = 5 }
+```
+````
+
+For templates, `view` is optional: omit it to query Base membership alone.
+Additional filters intersect membership and the selected view. Omitted `sort`
+inherits the view; `sort = []` clears it. Rendering has **no implicit table
+window**. An explicit `limit` selects the first N records in effective global
+sort order before grouping; without it, all matching records must fit the
+render budget. Equal sort values use the stable page-path tie-breaker.
+
+### Template context
+
+| Value | Meaning |
+| --- | --- |
+| `page` | Destination `id`, `path`, `title`, `kind`, `project`, and `properties`; no destination body. |
+| `rows` | Complete selected records in effective sort order. |
+| `row.properties` | Native custom properties, including arrays, numbers, booleans, and nested values. System identity fields remain separate; reserved operational conversation metadata is excluded. |
+| `row.body` | Full Markdown, not a table excerpt. Source-relative links are rebased for the destination. |
+| `groups` | Empty for a flat selection; otherwise groups with typed `key`, display `label`, and complete selected `rows`. |
+
+```jinja
+{% for group in groups %}
+# {{ group.label }}
+
+{% for beer in group.rows %}
+## {{ beer.properties.brewery }}, '{{ beer.properties.name }}', {{ beer.properties.abv }}%
+
+{% if beer.properties.hops is defined and beer.properties.hops %}
+Hops: {{ beer.properties.hops | join(", ") }}
+{% endif %}
+
+{{ beer.body }}
+
+{% endfor %}
+{% endfor %}
+```
+
+This example requires a grouped view and properties with those names. Choose
+explicit sort properties to preserve authored record order. For a custom
+category sequence, loop over that sequence in the template and present matching
+records from `rows`; alphabetical group order does not imply an authored order.
+Undefined values are errors: guard optional properties with `is defined` or
+`default`. Dates follow the existing TOML-to-JSON representation.
+
+Templates produce Markdown, not executable application HTML. Nested Base fences
+stay literal code; templates cannot import/include other templates, access the
+filesystem or network, or run arbitrary queries. Managed attachments use the
+existing attachment endpoint and configured folder; rendering does not grant
+access to arbitrary vault files.
+
+Each render is bounded to **1,000 records**, **1 MiB template source**,
+**16 MiB input**, **4 MiB output**, **1,000,000 MiniJinja fuel units**, and
+**64 recursion depth**. Exceeding a budget fails rather than silently truncating.
+Fuel measures engine instructions, not a hard process-memory limit on temporary
+values. A render is an observed source snapshot, not a vault-wide transaction.
+
+### Generated Markdown on disk
+
+A generated region has a versioned `<!-- clep:generated` header containing its
+UUID, query/template reference, and `output_hash = "blake3:..."`; it ends at
+`<!-- /clep:generated -->`. The hash covers the exact UTF-8 payload between the
+comments, including separator newlines. Line-ending conversions can therefore
+count as external edits. Ordinary surrounding edits preserve the stored payload.
+Duplicate IDs, nested regions, unsupported descriptors, and malformed markers
+remain source-repair content rather than being regenerated speculatively.
+Marker examples inside code fences are literal examples.
+
+See the [rendering and template endpoints](/docs/api-reference#bases) for API
+preview/application contracts.
+
 ## Neovim/LSP completions and warnings
 
 With `clep lsp` attached, completion inside a page's `+++` frontmatter offers property keys declared by bases. Properties from bases that match the current page rank first. Quoted values for `select` and `multi_select` complete from declared options; an open vocabulary can complete from observed vault values. Typing `[[` in a relation value uses normal wikilink completion.

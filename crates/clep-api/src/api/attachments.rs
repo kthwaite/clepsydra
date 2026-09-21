@@ -30,6 +30,8 @@ use crate::vault::path::VaultPath;
 pub struct AttachmentInfo {
     pub name: String,
     pub path: String,
+    /// Vault-relative target for resolving Markdown links without assuming the configured attachment folder.
+    pub vault_path: String,
     pub size: u64,
 }
 
@@ -224,6 +226,7 @@ pub async fn list_attachments(
             attachments.push(AttachmentInfo {
                 name: entry.file_name().to_string_lossy().to_string(),
                 path,
+                vault_path: relative,
                 size: entry.metadata().map(|metadata| metadata.len()).unwrap_or(0),
             });
         }
@@ -390,7 +393,12 @@ pub async fn upload_attachment(
 
     Ok((
         StatusCode::CREATED,
-        Json(AttachmentInfo { name, path, size }),
+        Json(AttachmentInfo {
+            name,
+            path,
+            vault_path: vault_path.to_string(),
+            size,
+        }),
     )
         .into_response())
 }

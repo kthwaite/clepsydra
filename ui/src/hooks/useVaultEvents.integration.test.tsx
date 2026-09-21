@@ -1,8 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import type { Middleware } from "openapi-fetch";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { useLiveBaseRender } from "#/api/bases";
+import { fetchClient } from "#/api/client";
+import type { paths } from "#/api/schema";
 import { useVaultEvents } from "#/hooks/useVaultEvents";
+
+vi.mock("#/api/client", async () => {
+  // Vitest hoists this module factory before static runtime imports initialize.
+  const { default: createFetchClient } = await import("openapi-fetch");
+  const { default: createClient } = await import("openapi-react-query");
+  const fetchClient = createFetchClient<paths>({ baseUrl: "http://localhost" });
+  return { fetchClient, $api: createClient(fetchClient) };
+});
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -78,5 +90,61 @@ it("invalidates the full feeds path prefix when persisted feed data changes", ()
   expect(client.getQueryState(unrelatedKey)?.isInvalidated).toBe(false);
   for (const key of rubbishKeys) {
     expect(client.getQueryState(key)?.isInvalidated).toBe(false);
+  }
+});
+
+it("refreshes live Markdown after record edits and Base selection changes", async () => {
+  let markdown = "Original live report";
+  const transport: Middleware = {
+    onRequest({ request }) {
+      if (request.url.includes("/base-render/render")) {
+        return Response.json({ markdown, selected_count: 1 });
+      }
+    },
+  };
+  fetchClient.use(transport);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  try {
+    const { result } = renderHook(
+      () => {
+        useVaultEvents();
+        return useLiveBaseRender(
+          { base: "tastings", template: "notes" },
+          "reports/tastings.md",
+        );
+      },
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      },
+    );
+    await waitFor(() =>
+      expect(result.current.data?.markdown).toBe("Original live report"),
+    );
+    const stream = FakeEventSource.instances[0];
+    markdown = "Report after a source edit";
+    act(() =>
+      stream.emit({
+        type: "index_changed",
+        upserted: ["tastings/source.md"],
+        removed: [],
+      }),
+    );
+    await waitFor(() =>
+      expect(result.current.data?.markdown).toBe("Report after a source edit"),
+    );
+    markdown = "Report after changed Base membership";
+    act(() => stream.emit({ type: "base_registry_changed" }));
+    await waitFor(() =>
+      expect(result.current.data?.markdown).toBe(
+        "Report after changed Base membership",
+      ),
+    );
+  } finally {
+    fetchClient.eject(transport);
+    client.clear();
   }
 });

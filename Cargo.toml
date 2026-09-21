@@ -41,6 +41,7 @@ gethostname = "1"
 glob = "0.3"
 lol_html = "3.0.1"
 mime_guess = "2"
+minijinja = { version = "=2.24.0", default-features = false, features = ["builtins", "debug", "fuel", "serde"] }
 notify-debouncer-mini = "0.5"
 owo-colors = "4.3.0"
 parking_lot = "0.12"

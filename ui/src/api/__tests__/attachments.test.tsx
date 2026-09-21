@@ -29,6 +29,7 @@ describe("attachment helpers", () => {
       attachmentMarkdown({
         name: "chart 1.png",
         path: "research/chart 1.png",
+        vault_path: "_attachments/research/chart 1.png",
         size: 42,
       }),
     ).toBe("![chart 1.png](/api/vault/attachments/research/chart%201.png)");
@@ -36,6 +37,7 @@ describe("attachment helpers", () => {
       attachmentMarkdown({
         name: "paper.pdf",
         path: "paper.pdf",
+        vault_path: "_attachments/paper.pdf",
         size: 84,
       }),
     ).toBe("[paper.pdf](/api/vault/attachments/paper.pdf)");

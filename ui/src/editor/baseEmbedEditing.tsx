@@ -19,7 +19,12 @@ import {
   Transforms,
 } from "slate";
 import { ReactEditor } from "slate-react";
-import type { BaseEmbedElement } from "#/editor/types";
+import type {
+  BaseEmbedElement,
+  GeneratedRegionElement,
+} from "#/editor/schema/types";
+
+type AtomicBaseElement = BaseEmbedElement | GeneratedRegionElement;
 
 export interface BaseEmbedEntryFocusHandle {
   focusEntry(): boolean;
@@ -32,18 +37,18 @@ interface BeginOptions {
 
 export interface BaseEmbedEditingController {
   begin(path: Path, options?: BeginOptions): void;
-  commit(replacement: BaseEmbedElement): void;
+  commit(replacement: AtomicBaseElement): void;
   cancel(): void;
   isActive(path: Path): boolean;
   registerEntryFocus(
-    node: BaseEmbedElement,
+    node: AtomicBaseElement,
     handle: BaseEmbedEntryFocusHandle,
   ): () => void;
   focusEntry(path: Path): boolean;
   restoreFocus(path: Path): void;
   exit(path: Path, side: "before" | "after"): void;
   remove(path: Path, node: Node): void;
-  disposeNode(node: BaseEmbedElement): void;
+  disposeNode(node: AtomicBaseElement): void;
 }
 
 interface EditingSession {
@@ -71,7 +76,7 @@ export function useBaseEmbedEditingController(
 ): BaseEmbedEditingController {
   const sessionRef = useRef<EditingSession | null>(null);
   const entryFocusHandles = useRef(
-    new WeakMap<BaseEmbedElement, BaseEmbedEntryFocusHandle>(),
+    new WeakMap<AtomicBaseElement, BaseEmbedEntryFocusHandle>(),
   );
   const suppressNextRestore = useRef(false);
   const [sessionVersion, setSessionVersion] = useState(0);
@@ -103,7 +108,7 @@ export function useBaseEmbedEditingController(
   );
 
   const commit = useCallback(
-    (replacement: BaseEmbedElement) => {
+    (replacement: AtomicBaseElement) => {
       const session = sessionRef.current;
       const path = session?.pathRef.current;
       if (!session || !path) {
@@ -180,7 +185,7 @@ export function useBaseEmbedEditingController(
   );
 
   const registerEntryFocus = useCallback(
-    (node: BaseEmbedElement, handle: BaseEmbedEntryFocusHandle) => {
+    (node: AtomicBaseElement, handle: BaseEmbedEntryFocusHandle) => {
       entryFocusHandles.current.set(node, handle);
       return () => {
         if (entryFocusHandles.current.get(node) === handle) {
@@ -194,7 +199,10 @@ export function useBaseEmbedEditingController(
   const focusEntry = useCallback(
     (path: Path) => {
       const [node] = Editor.node(editor, path);
-      if (!SlateElement.isElement(node) || node.type !== "base-embed") {
+      if (
+        !SlateElement.isElement(node) ||
+        (node.type !== "base-embed" && node.type !== "generated-region")
+      ) {
         return false;
       }
       return entryFocusHandles.current.get(node)?.focusEntry() ?? false;
@@ -211,7 +219,11 @@ export function useBaseEmbedEditingController(
       queueMicrotask(() => {
         if (!Editor.hasPath(editor, path)) return;
         const [node] = Editor.node(editor, path);
-        if (!SlateElement.isElement(node) || node.type !== "base-embed") return;
+        if (
+          !SlateElement.isElement(node) ||
+          (node.type !== "base-embed" && node.type !== "generated-region")
+        )
+          return;
         entryFocusHandles.current.get(node)?.focusEdit();
       });
     },
@@ -251,7 +263,7 @@ export function useBaseEmbedEditingController(
   );
 
   const disposeNode = useCallback(
-    (node: BaseEmbedElement) => {
+    (node: AtomicBaseElement) => {
       if (sessionRef.current?.original === node) releaseSession();
     },
     [releaseSession],

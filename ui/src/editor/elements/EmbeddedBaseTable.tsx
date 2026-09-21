@@ -17,6 +17,7 @@ import type { ConfiguredBaseEmbedElement } from "#/editor/types";
 
 interface EmbeddedBaseTableProps {
   element: ConfiguredBaseEmbedElement;
+  view: string;
   path: Path;
   chrome: "full" | "compact";
   /** Rendered in the table's toolbar, or beside the message that replaces it. */
@@ -26,7 +27,7 @@ interface EmbeddedBaseTableProps {
 export const EmbeddedBaseTable = forwardRef<
   BaseTableViewHandle,
   EmbeddedBaseTableProps
->(function EmbeddedBaseTable({ element, path, chrome, actions }, ref) {
+>(function EmbeddedBaseTable({ element, view, path, chrome, actions }, ref) {
   const editor = useSlateStatic();
   const mounted = useRef(true);
   const pendingSortReset = useRef(0);
@@ -85,7 +86,7 @@ export const EmbeddedBaseTable = forwardRef<
   const controller = useBaseTableController({
     mode: "embedded",
     slug: element.base,
-    activeView: element.view,
+    activeView: view,
     sort: element.sort,
     ...(element.filter === undefined ? {} : { filter: element.filter }),
     ...(element.limit === undefined ? {} : { limit: element.limit }),

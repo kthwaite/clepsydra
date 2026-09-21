@@ -72,6 +72,7 @@ describe("PlaintextAttachmentDialog", () => {
       attachment: {
         name: "diagram.png",
         path: "sketches/diagram.png",
+        vault_path: "_attachments/sketches/diagram.png",
         size: 1536,
       },
       markdown: "![diagram.png](/api/vault/attachments/sketches/diagram.png)",

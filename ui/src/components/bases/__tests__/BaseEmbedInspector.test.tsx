@@ -60,6 +60,11 @@ const apiState = vi.hoisted(() => ({
 
 vi.mock("#/api/bases", () => ({
   useBases: () => apiState.bases,
+  useBaseTemplates: () => ({
+    data: { templates: [] },
+    isPending: false,
+    error: null,
+  }),
   useBase: (slug: string) =>
     apiState.details[slug] ?? {
       data: undefined,

@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { Descendant, Editor } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ConvertModule from "../convert";
-import { usePageEditor } from "../usePageEditor";
+import { type GeneratedChangeSession, usePageEditor } from "../usePageEditor";
 
 const {
   decryptMarkdownMock,
@@ -179,6 +179,41 @@ describe("usePageEditor raw Markdown body", () => {
     });
     refetchPageMock.mockResolvedValue({ data: page });
     useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });
+  });
+
+  it("flushes handwritten edits before regeneration and never autosaves the old snapshot over the applied body", async () => {
+    const save = deferred<MockPage>();
+    mutateAsyncMock.mockReturnValue(save.promise);
+    const { result } = renderHook(() => usePageEditor("notes/page.md"));
+    const handwritten = "Handwritten edit.\n\nOld snapshot.\n";
+    const regenerated = "Handwritten edit.\n\nNew reviewed snapshot.\n";
+    act(() => result.current.setBodyMarkdown(handwritten));
+
+    let preparation!: Promise<GeneratedChangeSession>;
+    act(() => {
+      preparation = result.current.beginGeneratedChange();
+    });
+    expect(result.current.readonly).toBe(true);
+    await act(async () => {
+      save.resolve(makePage(handwritten, "rev-b"));
+      await preparation;
+    });
+    const session = await preparation;
+    expect(session.body).toBe(handwritten);
+    expect(session.revision).toBe("rev-b");
+
+    await act(async () => {
+      await session.apply(async () => ({
+        body: regenerated,
+        revision: "rev-c",
+      }));
+      await result.current.saveNow();
+    });
+    expect(result.current.getPlaintext()).toBe(regenerated);
+    expect(result.current.getRevision()).toBe("rev-c");
+    expect(result.current.saveStatus).toBe("saved");
+    expect(result.current.readonly).toBe(false);
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
   });
 
   it("saves exact supplied Markdown and exposes it while the request is in flight", async () => {

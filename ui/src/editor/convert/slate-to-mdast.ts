@@ -17,6 +17,7 @@ import { getDescriptor } from "#/editor/schema/registry";
 import type { CustomElement, CustomText } from "#/editor/types";
 import { folioMathToMarkdown } from "#/lib/markdown/folioMath";
 import { baseFenceToMarkdown } from "./baseEmbedMarkdown";
+import { generatedRegionToMarkdown } from "./generatedRegionMarkdown";
 import type {
   BaseFenceMdast,
   FolioInlineMathMdast,
@@ -159,7 +160,7 @@ function textToMdast(leaf: CustomText): PhrasingContent | PhrasingContent[] {
       }`
     : backgroundColor
       ? `background-color: ${backgroundColor}`
-    : undefined;
+      : undefined;
   let htmlMarkedNodes: PhrasingContent[] | undefined;
 
   // Underline has no native markdown representation; emit as inline HTML
@@ -423,16 +424,18 @@ const ctx: SerializeCtx = {
 
 // ---------------------------------------------------------------------------
 // Public API
-function withoutBaseEmbedTrailingSentinel(nodes: Descendant[]): Descendant[] {
+function withoutAtomicTrailingSentinel(nodes: Descendant[]): Descendant[] {
   if (nodes.length < 2) return nodes;
   const base = nodes[nodes.length - 2];
   const sentinel = nodes[nodes.length - 1];
   if (
     SlateText.isText(base) ||
-    base.type !== "base-embed" ||
+    (base.type !== "base-embed" && base.type !== "generated-region") ||
     SlateText.isText(sentinel) ||
     sentinel.type !== "paragraph" ||
-    sentinel.baseEmbedTrailingSentinel !== true ||
+    (base.type === "base-embed"
+      ? sentinel.baseEmbedTrailingSentinel !== true
+      : sentinel.generatedRegionTrailingSentinel !== true) ||
     Object.keys(sentinel).length !== 3 ||
     sentinel.children.length !== 1
   ) {
@@ -458,7 +461,7 @@ export function slateToMdast(nodes: Descendant[]): string {
   const root: Root = {
     type: "root",
     children: convertBlockChildren(
-      withoutBaseEmbedTrailingSentinel(nodes),
+      withoutAtomicTrailingSentinel(nodes),
     ) as RootContent[],
   };
 
@@ -467,14 +470,21 @@ export function slateToMdast(nodes: Descendant[]): string {
     rule: "-",
     extensions: [
       baseFenceToMarkdown(),
+      generatedRegionToMarkdown(),
       folioMathToMarkdown(),
       gfmToMarkdownWithEmptyTasks(),
       wikiLinkToMarkdownExtension(),
       singleTildeStrikethroughExtension(),
     ],
   });
-  const last = root.children.at(-1) as unknown as BaseFenceMdast | undefined;
-  if (last?.type === "baseFence" && !/[\r\n]$/.test(last.rawBlock)) {
+  const last = root.children.at(-1) as unknown as
+    | BaseFenceMdast
+    | { type: "generatedRegion"; rawBlock: string }
+    | undefined;
+  if (
+    (last?.type === "baseFence" || last?.type === "generatedRegion") &&
+    !/[\r\n]$/.test(last.rawBlock)
+  ) {
     return markdown.slice(0, -1);
   }
   return markdown;

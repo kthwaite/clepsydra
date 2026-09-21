@@ -26,6 +26,7 @@ import type {
 } from "#/editor/types";
 import { remarkFolioMath } from "#/lib/markdown/folioMath";
 import { baseEmbedFromCode } from "./baseEmbedMarkdown";
+import { generatedRegionBlocks } from "./generatedRegionMarkdown";
 import type { FolioInlineMathMdast, FolioMathMdast } from "./mdastTypes";
 
 // Re-export for the barrel
@@ -94,7 +95,17 @@ export function mdastToSlate(markdown: string): Descendant[] {
     definitions,
   };
 
-  const result = convertChildren(tree.children, markdown, context, true, true);
+  const result: Descendant[] = [];
+  for (const node of generatedRegionBlocks(tree.children, markdown)) {
+    if (node.type === "generated-region") {
+      result.push(node);
+    } else if (node.type === "recovered-markdown") {
+      result.push(...mdastToSlate(node.source));
+    } else {
+      const converted = convertBlockNode(node, markdown, context, true, true);
+      if (converted !== null) result.push(converted);
+    }
+  }
 
   // Slate invariant: document must have at least one block
   if (result.length === 0) {

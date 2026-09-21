@@ -50,6 +50,7 @@ function ensureTrailingParagraph(editor: Editor): boolean {
   if (
     !SlateElement.isElement(last) ||
     (last.type !== "base-embed" &&
+      last.type !== "generated-region" &&
       last.type !== "code-block" &&
       last.type !== "journal-time" &&
       last.type !== "table")
@@ -63,6 +64,9 @@ function ensureTrailingParagraph(editor: Editor): boolean {
       type: "paragraph",
       ...(last.type === "base-embed"
         ? { baseEmbedTrailingSentinel: true }
+        : {}),
+      ...(last.type === "generated-region"
+        ? { generatedRegionTrailingSentinel: true }
         : {}),
       children: [{ text: "" }],
     } as never,

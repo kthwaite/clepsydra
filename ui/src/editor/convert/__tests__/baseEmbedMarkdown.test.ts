@@ -90,6 +90,29 @@ function bodyOfUtf8Size(size: number): string {
 }
 
 describe("Base embed Markdown source preservation", () => {
+  it("roundtrips a template selection without requiring a table view", () => {
+    const markdown = baseFence(
+      lines(
+        'base = "tastings"',
+        'template = "beer-notes"',
+        "sort = []",
+        "limit = 1000",
+      ),
+    );
+    const editor = withSchema(createEditor());
+    editor.children = markdownToSlate(markdown);
+    Editor.normalize(editor, { force: true });
+    expect(editor.children[0]).toMatchObject({
+      type: "base-embed",
+      status: "configured",
+      base: "tastings",
+      template: "beer-notes",
+      sort: [],
+      limit: 1000,
+    });
+    expect(slateToMarkdown(editor.children)).toBe(markdown);
+  });
+
   const invalidRawBlocks = [
     {
       name: "comments and authored whitespace",

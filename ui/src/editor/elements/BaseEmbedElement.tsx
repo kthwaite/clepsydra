@@ -21,10 +21,18 @@ import {
   embedIsCompact,
   embedWidthStyle,
 } from "#/components/bases/embed-presentation";
+import { baseRenderSelection } from "#/components/bases/embed-query";
+import {
+  GeneratedPreviewDialog,
+  type PreparedGeneratedChange,
+} from "#/components/bases/GeneratedPreviewDialog";
 import { useWidthDrag, WidthResizer } from "#/components/ui/width-resizer";
 import { useBaseEmbedEditing } from "#/editor/baseEmbedEditing";
+import { useBaseRendering } from "#/editor/baseRendering";
+import type { ConfiguredBaseEmbedElement } from "#/editor/schema/types";
 import type { BaseEmbedElement as BaseEmbedNode } from "#/editor/types";
 import { EmbeddedBaseTable } from "./EmbeddedBaseTable";
+import { LiveBaseTemplate } from "./LiveBaseTemplate";
 
 interface BaseEmbedElementProps extends RenderElementProps {
   element: BaseEmbedNode;
@@ -44,6 +52,9 @@ export function BaseEmbedElement({
   const editor = useSlateStatic();
   const editing = useBaseEmbedEditing();
   const selected = useSelected();
+  const lifecycle = useBaseRendering();
+  const [generatedSelection, setGeneratedSelection] =
+    useState<ConfiguredBaseEmbedElement | null>(null);
   const path = ReactEditor.findPath(editor, element);
   const tableRef = useRef<BaseTableViewHandle>(null);
   const editRef = useRef<HTMLButtonElement>(null);
@@ -116,7 +127,10 @@ export function BaseEmbedElement({
 
   // Compact embeds have no header of their own: the same two controls move
   // into the table's toolbar, keeping one set of refs for entry focus.
-  const compact = element.status === "configured" && embedIsCompact(element);
+  const compact =
+    element.status === "configured" &&
+    !element.template &&
+    embedIsCompact(element);
   const authoredWidth =
     element.status === "configured" ? element.width : undefined;
   const setWidth = useCallback(
@@ -176,6 +190,36 @@ export function BaseEmbedElement({
       setWidth(width);
     },
   });
+
+  async function prepareInsertion(): Promise<PreparedGeneratedChange> {
+    if (!lifecycle || lifecycle.readonly)
+      throw new Error("Open a writable destination page first.");
+    // Schema descriptors import this renderer; load serialization after initialization.
+    const { slateToMarkdown } = await import("#/editor/convert");
+    const target = ReactEditor.findPath(editor, element);
+    if (
+      target.length !== 1 ||
+      element.status !== "unconfigured" ||
+      editor.children[target[0]] !== element
+    ) {
+      throw new Error(
+        "The insertion target changed. Insert a new Base block at the desired cursor position.",
+      );
+    }
+    const preceding = editor.children.slice(0, target[0]);
+    const body = slateToMarkdown(
+      editor.children.filter((node) => node !== element),
+    );
+    const prefix = preceding.length ? slateToMarkdown(preceding) : "";
+    const session = await lifecycle.beginGeneratedChange(body);
+    if (!session.body.startsWith(prefix)) {
+      session.cancel();
+      throw new Error(
+        "The saved insertion position changed. Choose the cursor position again.",
+      );
+    }
+    return { session, insertOffset: new TextEncoder().encode(prefix).length };
+  }
   const actions = (
     <>
       <button
@@ -243,7 +287,7 @@ export function BaseEmbedElement({
               </p>
               <p className="truncate text-sm text-ink">
                 {element.status === "configured"
-                  ? `${element.base} · ${element.view}`
+                  ? `${element.base}${element.view ? ` · ${element.view}` : ""}`
                   : element.status === "invalid"
                     ? "Persisted configuration needs repair"
                     : "Choose a saved Base and view"}
@@ -254,14 +298,19 @@ export function BaseEmbedElement({
         )}
 
         <div className={`min-w-0 ${compact ? "p-2" : "p-3"}`}>
-          {element.status === "configured" ? (
+          {element.status === "configured" && element.template ? (
+            <LiveBaseTemplate selection={baseRenderSelection(element)} />
+          ) : element.status === "configured" && element.view ? (
             <EmbeddedBaseTable
               ref={tableRef}
               element={element}
+              view={element.view}
               path={path}
               chrome={compact ? "compact" : "full"}
               {...(compact ? { actions } : {})}
             />
+          ) : element.status === "configured" ? (
+            <p role="alert">Choose a saved view for this table embed.</p>
           ) : element.status === "invalid" ? (
             <div role="alert" className="text-sm text-destructive">
               <p>
@@ -288,10 +337,24 @@ export function BaseEmbedElement({
         <BaseEmbedInspector
           isOpen={active}
           node={element}
+          onGenerate={
+            element.status === "unconfigured" &&
+            lifecycle &&
+            !lifecycle.readonly
+              ? setGeneratedSelection
+              : undefined
+          }
           onSave={commit}
           onCancel={cancel}
           onRestoreFocus={() => restoreFocus(path)}
         />
+        {generatedSelection ? (
+          <GeneratedPreviewDialog
+            selection={baseRenderSelection(generatedSelection)}
+            prepare={prepareInsertion}
+            onClose={() => setGeneratedSelection(null)}
+          />
+        ) : null}
       </fieldset>
       {children}
     </div>

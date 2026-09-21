@@ -5,5 +5,8 @@ pub mod base;
 pub mod base_document;
 pub mod base_embed;
 pub mod base_member;
+pub mod base_render;
+pub mod generated_region;
 pub mod property_value;
 pub mod query;
+pub mod template_document;
