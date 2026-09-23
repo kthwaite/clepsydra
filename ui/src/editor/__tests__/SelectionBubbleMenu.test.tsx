@@ -16,17 +16,18 @@ import {
   Text,
   Transforms,
 } from "slate";
-import { Editable, Slate, withReact } from "slate-react";
 import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-} from "vitest";
-import { SelectionBubbleMenu } from "#/editor/SelectionBubbleMenu";
+  Editable,
+  type RenderElementProps,
+  Slate,
+  withReact,
+} from "slate-react";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { PageSummary } from "#/api/types";
+import { slateToMdast } from "#/editor/convert/slate-to-mdast";
 import { renderLeaf } from "#/editor/elements/renderLeaf";
+import { SelectionBubbleMenu } from "#/editor/SelectionBubbleMenu";
+import { withSchema } from "#/editor/schema/withSchema";
 import type { CustomEditor } from "#/editor/types";
 
 const PROSE_VALUE: Descendant[] = [
@@ -229,19 +230,27 @@ interface HarnessOptions {
   value?: Descendant[];
   selection?: BaseRange;
   readOnly?: boolean;
+  pages?: Pick<PageSummary, "title" | "canonical_name" | "path">[];
 }
 
 async function renderBubbleMenu({
   value = PROSE_VALUE,
   selection = PROSE_SELECTION,
   readOnly = false,
+  pages = [],
 }: HarnessOptions = {}) {
-  const editor = withReact(createEditor());
+  const editor = withReact(withSchema(createEditor()));
   const user = userEvent.setup();
   const result = render(
     <Slate editor={editor} initialValue={value}>
-      <Editable readOnly={readOnly} renderLeaf={renderLeaf} />
-      <SelectionBubbleMenu readOnly={readOnly} />
+      <Editable
+        readOnly={readOnly}
+        renderLeaf={renderLeaf}
+        renderElement={({ attributes, children }: RenderElementProps) => (
+          <span {...attributes}>{children}</span>
+        )}
+      />
+      <SelectionBubbleMenu readOnly={readOnly} pages={pages} />
     </Slate>,
   );
   const editable = result.container.querySelector<HTMLElement>(
@@ -341,7 +350,6 @@ describe("SelectionBubbleMenu", () => {
     ).not.toBeInTheDocument();
   });
 
-
   it("stays hidden without throwing when DOM Range geometry is unavailable", async () => {
     const boundingRect = Object.getOwnPropertyDescriptor(
       Range.prototype,
@@ -392,6 +400,110 @@ describe("SelectionBubbleMenu", () => {
     ]) {
       expect(within(menu).getByRole("button", { name })).toBeVisible();
     }
+  });
+
+  it("links a selected first name to a full-name page without replacing surrounding text", async () => {
+    const { editor, user } = await renderBubbleMenu({
+      value: [
+        { type: "paragraph", children: [{ text: "Talk to Ada tomorrow" }] },
+      ],
+      selection: {
+        anchor: { path: [0, 0], offset: 8 },
+        focus: { path: [0, 0], offset: 11 },
+      },
+      pages: [
+        {
+          title: "Ada Lovelace",
+          canonical_name: "ada-lovelace",
+          path: "people/ada-lovelace.md",
+        },
+      ],
+    });
+
+    await user.click(
+      within(await toolbar()).getByRole("button", { name: "Add link" }),
+    );
+    const input = screen.getByRole("combobox", { name: "Link target" });
+    expect(input).toHaveFocus();
+    await user.type(input, "Lovelace");
+    await user.keyboard("{Enter}");
+
+    expect(editor.children[0]).toMatchObject({
+      type: "paragraph",
+      children: [
+        { text: "Talk to " },
+        { type: "wikilink", target: "Ada Lovelace", alias: "Ada" },
+        { text: " tomorrow" },
+      ],
+    });
+    expect(slateToMdast(editor.children)).toContain("[[Ada Lovelace|Ada]]");
+  });
+
+  it("wraps a selected label with a URL link and preserves neighboring text", async () => {
+    const { editor, user } = await renderBubbleMenu({
+      value: [{ type: "paragraph", children: [{ text: "See docs here" }] }],
+      selection: {
+        anchor: { path: [0, 0], offset: 4 },
+        focus: { path: [0, 0], offset: 8 },
+      },
+    });
+    await user.click(
+      within(await toolbar()).getByRole("button", { name: "Add link" }),
+    );
+    await user.type(
+      screen.getByRole("combobox", { name: "Link target" }),
+      "https://example.com",
+    );
+    await user.keyboard("{Enter}");
+    expect(editor.children[0]).toMatchObject({
+      type: "paragraph",
+      children: [
+        { text: "See " },
+        {
+          type: "link",
+          url: "https://example.com",
+          children: [{ text: "docs" }],
+        },
+        { text: " here" },
+      ],
+    });
+    expect(slateToMdast(editor.children)).toContain(
+      "[docs](https://example.com)",
+    );
+  });
+
+  it("does not offer links across block boundaries", async () => {
+    await renderBubbleMenu({
+      value: [
+        { type: "paragraph", children: [{ text: "First" }] },
+        { type: "paragraph", children: [{ text: "Second" }] },
+      ],
+      selection: {
+        anchor: { path: [0, 0], offset: 1 },
+        focus: { path: [1, 0], offset: 3 },
+      },
+    });
+    expect(
+      within(await toolbar()).queryByRole("button", { name: "Add link" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("cancels the link picker without changing selected text", async () => {
+    const { editor, editable, user } = await renderBubbleMenu();
+    await user.click(
+      within(await toolbar()).getByRole("button", { name: "Add link" }),
+    );
+    await user.type(
+      screen.getByRole("combobox", { name: "Link target" }),
+      "https://example.com",
+    );
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("combobox", { name: "Link target" }),
+    ).not.toBeInTheDocument();
+    expect(editor.children).toEqual(PROSE_VALUE);
+    expect(editor.selection).toEqual(PROSE_SELECTION);
+    expect(editable).toHaveFocus();
   });
 
   it.each(["Text colour", "Highlight colour"])(
@@ -764,9 +876,7 @@ describe("SelectionBubbleMenu", () => {
       expect(customInput).toHaveAttribute("type", "color");
       await user.click(customInput);
       fireEvent.change(customInput, { target: { value: "#123456" } });
-      await waitFor(() =>
-        expect(selectedLeaf(editor)[mark]).toBe("#123456"),
-      );
+      await waitFor(() => expect(selectedLeaf(editor)[mark]).toBe("#123456"));
       expect(editor.selection).toEqual(PROSE_SELECTION);
       await waitFor(() => expect(editable).toHaveFocus());
 
@@ -805,10 +915,7 @@ describe("SelectionBubbleMenu", () => {
       value: [
         {
           type: "paragraph",
-          children: [
-            { text: "prose" },
-            { text: "code", code: true },
-          ],
+          children: [{ text: "prose" }, { text: "code", code: true }],
         },
       ],
       selection: proseSelection,

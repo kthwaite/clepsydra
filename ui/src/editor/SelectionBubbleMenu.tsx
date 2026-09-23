@@ -11,16 +11,17 @@ import {
   Eraser,
   Highlighter,
   Italic,
+  Link2,
+  type LucideIcon,
   Palette,
   Strikethrough,
   Subscript,
   Superscript,
   Underline,
-  type LucideIcon,
 } from "lucide-react";
 import {
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
   useId,
@@ -31,16 +32,20 @@ import {
 import { TooltipTrigger } from "react-aria-components";
 import {
   type BaseRange,
-  type Editor as SlateEditor,
   Editor,
-  Element as SlateElement,
+  Path,
   Range,
+  type Editor as SlateEditor,
+  Element as SlateElement,
   Text,
   Transforms,
 } from "slate";
 import { ReactEditor, useSlate } from "slate-react";
+import type { PageSummary } from "#/api/types";
 import { IconButton } from "#/components/ui/icon-button";
 import { VesselTooltip } from "#/components/ui/tooltip";
+import { makeLink } from "#/editor/schema/elements/link";
+import { makeWikilink } from "#/editor/schema/elements/wikilink";
 import type { CustomText } from "#/editor/schema/types";
 import { cn } from "#/lib/cn";
 import { createRangeReference } from "./floatingSelectionReference";
@@ -298,16 +303,26 @@ function ColourPanel({
 
 export interface SelectionBubbleMenuProps {
   readOnly: boolean;
+  pages?: Pick<PageSummary, "title" | "canonical_name" | "path">[];
 }
 
-export function SelectionBubbleMenu({ readOnly }: SelectionBubbleMenuProps) {
+export function SelectionBubbleMenu({
+  readOnly,
+  pages = [],
+}: SelectionBubbleMenuProps) {
   const editor = useSlate();
   const selection = editor.selection;
   const highlightPanelId = useId();
   const textPanelId = useId();
+  const linkPanelId = useId();
+  const linkListId = useId();
+  const linkInputRef = useRef<HTMLInputElement>(null);
   const preservedRangeRef = useRef<BaseRange | null>(null);
   const previousSelectionRef = useRef<BaseRange | null>(null);
   const [openPalette, setOpenPalette] = useState<OpenPalette>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkQuery, setLinkQuery] = useState("");
+  const [linkIndex, setLinkIndex] = useState(0);
 
   const inspection =
     !readOnly && selection && !Range.isCollapsed(selection)
@@ -331,9 +346,16 @@ export function SelectionBubbleMenu({ readOnly }: SelectionBubbleMenuProps) {
     const selectionChanged = previousSelection
       ? !selection || !Range.equals(previousSelection, selection)
       : selection !== null;
-    if (selectionChanged || !visible) setOpenPalette(null);
+    if (selectionChanged || !visible) {
+      setOpenPalette(null);
+      setLinkOpen(false);
+    }
     previousSelectionRef.current = selection ? cloneRange(selection) : null;
   }, [selection, visible]);
+
+  useEffect(() => {
+    if (linkOpen) linkInputRef.current?.focus();
+  }, [linkOpen]);
 
   const reference = useMemo(
     () =>
@@ -399,6 +421,75 @@ export function SelectionBubbleMenu({ readOnly }: SelectionBubbleMenuProps) {
     },
     [applyToPreservedRange, editor],
   );
+  const startBlock = selection
+    ? Editor.above(editor, {
+        at: Range.start(selection),
+        match: (node) =>
+          SlateElement.isElement(node) && Editor.isBlock(editor, node),
+      })
+    : null;
+  const endBlock = selection
+    ? Editor.above(editor, {
+        at: Range.end(selection),
+        match: (node) =>
+          SlateElement.isElement(node) && Editor.isBlock(editor, node),
+      })
+    : null;
+  const linkable = Boolean(
+    visible &&
+      selection &&
+      startBlock &&
+      endBlock &&
+      Path.equals(startBlock[1], endBlock[1]) &&
+      !Editor.above(editor, {
+        at: Range.start(selection),
+        match: (node) => SlateElement.isElement(node) && node.type === "link",
+      }) &&
+      Editor.nodes(editor, {
+        at: selection,
+        match: (node) =>
+          SlateElement.isElement(node) &&
+          (node.type === "link" || node.type === "wikilink"),
+      }).next().done,
+  );
+  const query = linkQuery.toLowerCase();
+  const matches = linkOpen
+    ? pages
+        .filter(
+          (page) =>
+            (page.title ?? page.canonical_name).toLowerCase().includes(query) ||
+            page.canonical_name.toLowerCase().includes(query) ||
+            page.path.toLowerCase().includes(query),
+        )
+        .slice(0, 8)
+    : [];
+  const url = linkQuery.trim();
+  const externalUrl =
+    /^https?:\/\/\S+$/i.test(url) && URL.canParse(url) ? url : null;
+
+  const insertLink = (target: string, kind: "page" | "url") => {
+    const range = preservedRangeRef.current;
+    if (!range) return;
+    let label: string;
+    try {
+      label = Editor.string(editor, range);
+    } catch {
+      setLinkOpen(false);
+      return;
+    }
+    if (!label) return;
+    Transforms.select(editor, cloneRange(range));
+    if (kind === "page") {
+      Transforms.insertNodes(editor, makeWikilink({ target, alias: label }));
+    } else {
+      Transforms.wrapNodes(editor, makeLink({ url: target }), {
+        at: range,
+        split: true,
+      });
+    }
+    setLinkOpen(false);
+    ReactEditor.focus(editor);
+  };
 
   if (!visible || !selection || !inspection || !reference) return null;
 
@@ -424,6 +515,21 @@ export function SelectionBubbleMenu({ readOnly }: SelectionBubbleMenuProps) {
             </TooltipIconButton>
           );
         })}
+        {linkable && (
+          <TooltipIconButton
+            label="Add link"
+            controls={linkPanelId}
+            expanded={linkOpen}
+            onPress={() => {
+              setOpenPalette(null);
+              setLinkQuery("");
+              setLinkIndex(0);
+              setLinkOpen((current) => !current);
+            }}
+          >
+            <Link2 />
+          </TooltipIconButton>
+        )}
         <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-rule" />
         <TooltipIconButton
           label="Highlight colour"
@@ -448,6 +554,112 @@ export function SelectionBubbleMenu({ readOnly }: SelectionBubbleMenuProps) {
           <Palette />
         </TooltipIconButton>
       </div>
+      {linkOpen && (
+        <div
+          id={linkPanelId}
+          className="w-72 border-t border-rule p-2"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <input
+            ref={linkInputRef}
+            role="combobox"
+            aria-controls={linkListId}
+            aria-autocomplete="list"
+            aria-expanded={matches.length > 0 || Boolean(externalUrl)}
+            aria-activedescendant={
+              matches.length > 0 || externalUrl
+                ? `${linkListId}-option-${linkIndex}`
+                : undefined
+            }
+            aria-label="Link target"
+            placeholder="Find a page or enter a URL"
+            value={linkQuery}
+            onChange={(event) => {
+              setLinkQuery(event.target.value);
+              setLinkIndex(0);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                setLinkOpen(false);
+                ReactEditor.focus(editor);
+              } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                setLinkIndex((current) =>
+                  Math.max(
+                    0,
+                    Math.min(
+                      matches.length + Number(Boolean(externalUrl)) - 1,
+                      current + (event.key === "ArrowDown" ? 1 : -1),
+                    ),
+                  ),
+                );
+              } else if (event.key === "Enter") {
+                event.preventDefault();
+                event.stopPropagation();
+                const page = matches[linkIndex];
+                if (page) insertLink(page.title ?? page.canonical_name, "page");
+                else if (externalUrl) insertLink(externalUrl, "url");
+              }
+            }}
+            className="w-full border border-rule bg-paper px-2 py-1 text-sm text-ink outline-accent"
+          />
+          {matches.length > 0 || externalUrl ? (
+            <div
+              id={linkListId}
+              role="listbox"
+              aria-label="Link targets"
+              className="mt-1 max-h-52 overflow-y-auto"
+            >
+              {matches.map((page, index) => (
+                <div
+                  key={page.path}
+                  role="option"
+                  id={`${linkListId}-option-${index}`}
+                  tabIndex={-1}
+                  aria-selected={linkIndex === index}
+                  onMouseEnter={() => setLinkIndex(index)}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    insertLink(page.title ?? page.canonical_name, "page");
+                  }}
+                  className={cn(
+                    "cursor-pointer px-2 py-1 text-sm hover:bg-accent/20",
+                    linkIndex === index && "bg-accent/20",
+                  )}
+                >
+                  <div>{page.title ?? page.canonical_name}</div>
+                  <div className="truncate text-xs text-ink-mute">
+                    {page.path}
+                  </div>
+                </div>
+              ))}
+              {externalUrl && (
+                <div
+                  role="option"
+                  id={`${linkListId}-option-${matches.length}`}
+                  tabIndex={-1}
+                  aria-selected={linkIndex === matches.length}
+                  onMouseEnter={() => setLinkIndex(matches.length)}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    insertLink(externalUrl, "url");
+                  }}
+                  className={cn(
+                    "cursor-pointer px-2 py-1 text-sm hover:bg-accent/20",
+                    linkIndex === matches.length && "bg-accent/20",
+                  )}
+                >
+                  Link to URL
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="pt-2 text-xs text-ink-mute">No matching pages</p>
+          )}
+        </div>
+      )}
 
       {openPalette === "highlight" ? (
         <ColourPanel

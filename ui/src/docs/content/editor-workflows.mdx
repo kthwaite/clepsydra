@@ -141,7 +141,14 @@ to a plain bullet.
 holding the caret. With the caret anywhere else the editor leaves the chord to
 whatever else handles it rather than swallowing it.
 
-`Command+S` saves the Folio. There is no floating formatting toolbar.
+`Command+S` saves the Folio. Selecting prose opens the floating formatting
+toolbar. Choose **Add link**, then search for an existing Folio by title or path;
+the selected words become the link label while the target remains the Folio's
+full title. For example, selecting `Ada` and choosing `Ada Lovelace` writes
+`[[Ada Lovelace|Ada]]`. You can also enter an `http://` or `https://` URL to
+wrap the selected words in an external link. Use the arrow keys and `Enter` to
+choose a target, or `Escape` to cancel. Linking is available only within one
+text block, not across paragraphs or inside an existing link.
 
 `ArrowRight` at the end of trailing inline code drops the code mark, and typing
 `,` `.` `;` `:` `!` or `?` immediately after a marked span leaves the

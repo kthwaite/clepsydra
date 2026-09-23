@@ -892,7 +892,7 @@ export function SlateEditor({
                     className="min-h-[200px] w-full min-w-0 outline-none"
                     spellCheck
                   />
-                  <SelectionBubbleMenu readOnly={readOnly} />
+                  <SelectionBubbleMenu readOnly={readOnly} pages={pages} />
                 </TaskPropertyPopoverProvider>
                 {!readOnly && isVimEnabled && (
                   <VimStatusBar mode={vim.mode} pending={vim.pending} />
