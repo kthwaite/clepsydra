@@ -11,6 +11,10 @@ use std::process::Command;
 
 const APP_NAME: &str = "Clepsydra URL Handler.app";
 const BUNDLE_ID: &str = "md.clepsydra.url-handler";
+/// The Clepsydra app icon. `osacompile` names an applet's icon
+/// `applet.icns` and points `CFBundleIconFile` at it, so overwriting that
+/// file is enough to brand the bundle.
+const APPLET_ICON: &[u8] = include_bytes!("../assets/clepsydra.icns");
 const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
 /// AppleScript source for the applet. The binary path is embedded inside an
@@ -45,6 +49,11 @@ pub fn plistbuddy_commands(include_obsidian: bool) -> Vec<String> {
     cmds
 }
 
+/// Replace the applet's default script icon with the Clepsydra icon.
+pub fn install_icon(app_path: &Path) -> std::io::Result<()> {
+    std::fs::write(app_path.join("Contents/Resources/applet.icns"), APPLET_ICON)
+}
+
 fn run_checked(mut cmd: Command, what: &str) -> Result<(), Box<dyn std::error::Error>> {
     let status = cmd.status()?;
     if !status.success() {
@@ -76,11 +85,19 @@ pub fn install(
                 .arg("Delete :CFBundleIdentifier")
                 .arg(&plist)
                 .status();
+            // `CFBundleIconName` points at the Assets.car script icon, which
+            // outranks `CFBundleIconFile`; drop it so `applet.icns` shows.
+            let _ = Command::new("/usr/libexec/PlistBuddy")
+                .arg("-c")
+                .arg("Delete :CFBundleIconName")
+                .arg(&plist)
+                .status();
             for command in plistbuddy_commands(include_obsidian) {
                 let mut plistbuddy = Command::new("/usr/libexec/PlistBuddy");
                 plistbuddy.arg("-c").arg(&command).arg(&plist);
                 run_checked(plistbuddy, "PlistBuddy")?;
             }
+            install_icon(app_path)?;
             Ok(())
         },
         |app_path| {
@@ -198,6 +215,22 @@ mod tests {
             cmds.iter()
                 .any(|c| c == "Add :CFBundleURLTypes:1:CFBundleURLSchemes:0 string obsidian")
         );
+    }
+
+    #[test]
+    fn install_icon_replaces_the_applet_icon() {
+        let app = tempfile::tempdir().unwrap();
+        let resources = app.path().join("Contents/Resources");
+        std::fs::create_dir_all(&resources).unwrap();
+        std::fs::write(resources.join("applet.icns"), b"osacompile default").unwrap();
+
+        install_icon(app.path()).unwrap();
+
+        assert_eq!(
+            std::fs::read(resources.join("applet.icns")).unwrap(),
+            APPLET_ICON
+        );
+        assert!(APPLET_ICON.starts_with(b"icns"));
     }
 
     #[test]

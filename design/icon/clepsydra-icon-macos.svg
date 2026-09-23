@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Clepsydra">
+  <!-- Drop-dial. Palette: cobalt #1747E6 (field), bone #F6F1E6 (drop), ink #0E1A3A (hands). -->
+  <!-- macOS: 824px tile on the 1024 grid (100px margin), glyph scaled to match. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#1747E6"/>
+  <g transform="translate(512 512) scale(0.8047) translate(-512 -512)">
+    <path id="drop" fill="#F6F1E6" d="M512 140 C512 140 800 450 800 600 A288 288 0 0 1 224 600 C224 450 512 140 512 140 Z"/>
+    <!-- hour marks at 3, 6, 9: cut out in the field colour -->
+    <path stroke="#1747E6" stroke-width="26" stroke-linecap="round" d="M712.0 600.0 L752.0 600.0"/>
+    <path stroke="#1747E6" stroke-width="26" stroke-linecap="round" d="M512.0 800.0 L512.0 840.0"/>
+    <path stroke="#1747E6" stroke-width="26" stroke-linecap="round" d="M312.0 600.0 L272.0 600.0"/>
+    <path id="hands" fill="none" stroke="#0E1A3A" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" d="M512 420 L512 600 L636 672"/>
+    <circle id="pivot" cx="512" cy="600" r="30" fill="#1747E6"/>
+  </g>
+</svg>

@@ -1,4 +1,3 @@
-import { Link2 } from "lucide-react";
 import { type KeyboardEvent, type MouseEvent, useRef, useState } from "react";
 import { Path } from "slate";
 import {
@@ -8,6 +7,7 @@ import {
   useSlateStatic,
 } from "slate-react";
 import { CLink } from "#/components/codex/CLink";
+import { WikilinkIcon } from "#/editor/elements/WikilinkIcon";
 import { MissingWikilinkPopover } from "#/editor/MissingWikilinkPopover";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
@@ -82,8 +82,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     return (
       <span {...attributes}>
         <span contentEditable={false} className="align-baseline text-ink">
-          <Link2
-            aria-hidden
+          <WikilinkIcon
             size="0.85em"
             strokeWidth={1.8}
             className="mr-1 inline-block align-[-0.1em] text-accent"
@@ -134,8 +133,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
 
   const linkContent = (
     <>
-      <Link2
-        aria-hidden
+      <WikilinkIcon
         size="0.85em"
         strokeWidth={1.8}
         className={`mr-1 inline-block align-[-0.1em] ${iconClassName}`}

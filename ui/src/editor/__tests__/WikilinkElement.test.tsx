@@ -186,6 +186,7 @@ describe("WikilinkElement resolved", () => {
     const link = screen.getByRole("link", { name: "Clepsydra Design Notes" });
     expect(link.textContent).toBe("Clepsydra Design Notes");
     expect(link.firstElementChild).toMatchObject({ tagName: "svg" });
+    expect(link.firstElementChild).toHaveAttribute("data-icon", "drop-dial");
     expect(link.querySelectorAll("svg[aria-hidden='true']")).toHaveLength(1);
   });
 

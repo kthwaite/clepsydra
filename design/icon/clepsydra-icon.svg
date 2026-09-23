@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Clepsydra">
   <!-- Drop-dial. Palette: cobalt #1747E6 (field), bone #F6F1E6 (drop), ink #0E1A3A (hands). -->
-  <!-- Favicon and PWA "any" icon: rounded tile. -->
-  <rect width="1024" height="1024" rx="224" fill="#1747E6"/>
+  <!-- Master: full-bleed field; glyph inside the PWA maskable 80% safe circle. -->
+  <rect width="1024" height="1024" fill="#1747E6"/>
   <path id="drop" fill="#F6F1E6" d="M512 140 C512 140 800 450 800 600 A288 288 0 0 1 224 600 C224 450 512 140 512 140 Z"/>
   <!-- hour marks at 3, 6, 9: cut out in the field colour -->
   <path stroke="#1747E6" stroke-width="26" stroke-linecap="round" d="M712.0 600.0 L752.0 600.0"/>
