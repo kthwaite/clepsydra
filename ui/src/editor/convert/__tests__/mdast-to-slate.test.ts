@@ -147,9 +147,7 @@ describe("markdownToSlate", () => {
       expect(result).toEqual([
         {
           type: "paragraph",
-          children: [
-            { text: "nested", bold: true, color: "rebeccapurple" },
-          ],
+          children: [{ text: "nested", bold: true, color: "rebeccapurple" }],
         },
       ]);
     });

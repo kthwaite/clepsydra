@@ -94,7 +94,9 @@ describe("FilterBar", () => {
     expect(screen.getByTestId("filter-bar-chip-hold")).toHaveTextContent(
       "ON HOLD",
     );
-    expect(screen.queryByTestId("filter-bar-chip-owner")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("filter-bar-chip-owner"),
+    ).not.toBeInTheDocument();
   });
 
   it("uses the first three fields as primary chips when no mapping is supplied", () => {
@@ -109,14 +111,14 @@ describe("FilterBar", () => {
     expect(screen.getByTestId("filter-bar-chip-project")).toBeInTheDocument();
     expect(screen.getByTestId("filter-bar-chip-tags")).toBeInTheDocument();
     expect(screen.getByTestId("filter-bar-chip-hold")).toBeInTheDocument();
-    expect(screen.queryByTestId("filter-bar-chip-owner")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("filter-bar-chip-owner"),
+    ).not.toBeInTheDocument();
   });
 
   it("shows a resolved option label for one value and a selected-value count for several", () => {
     const { unmount } = render(
-      <Harness
-        initial={{ text: "", facets: { project: ["clepsydra"] } }}
-      />,
+      <Harness initial={{ text: "", facets: { project: ["clepsydra"] } }} />,
     );
 
     expect(screen.getByTestId("filter-bar-chip-project")).toHaveTextContent(
@@ -138,14 +140,14 @@ describe("FilterBar", () => {
   it("opens a primary chip's single option pane without clearing its value", async () => {
     const user = userEvent.setup();
     render(
-      <Harness
-        initial={{ text: "", facets: { project: ["clepsydra"] } }}
-      />,
+      <Harness initial={{ text: "", facets: { project: ["clepsydra"] } }} />,
     );
 
     await user.click(screen.getByTestId("filter-bar-chip-project"));
 
-    expect(screen.getByRole("dialog", { name: "PROJECT options" })).toBeVisible();
+    expect(
+      screen.getByRole("dialog", { name: "PROJECT options" }),
+    ).toBeVisible();
     expect(screen.queryByText("← FIELDS")).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Clepsydra" })).toHaveAttribute(
       "aria-selected",
@@ -170,7 +172,9 @@ describe("FilterBar", () => {
     const clearProject = screen.getByRole("button", {
       name: "Clear PROJECT filter",
     });
-    expect(clearProject).not.toBe(screen.getByTestId("filter-bar-chip-project"));
+    expect(clearProject).not.toBe(
+      screen.getByTestId("filter-bar-chip-project"),
+    );
     await user.click(clearProject);
 
     expect(screen.getByTestId("filter-bar-chip-project")).toHaveTextContent(
@@ -187,9 +191,7 @@ describe("FilterBar", () => {
   it("moves focus from a primary clear control to its surviving chip", async () => {
     const user = userEvent.setup();
     render(
-      <Harness
-        initial={{ text: "", facets: { project: ["clepsydra"] } }}
-      />,
+      <Harness initial={{ text: "", facets: { project: ["clepsydra"] } }} />,
     );
 
     screen.getByRole("button", { name: "Clear PROJECT filter" }).focus();
@@ -200,15 +202,15 @@ describe("FilterBar", () => {
 
   it("moves focus from a long-tail clear control to + FILTER", async () => {
     const user = userEvent.setup();
-    render(
-      <Harness initial={{ text: "", facets: { status: ["open"] } }} />,
-    );
+    render(<Harness initial={{ text: "", facets: { status: ["open"] } }} />);
 
     screen.getByRole("button", { name: "Clear STATUS filter" }).focus();
     await user.keyboard("{Enter}");
 
     expect(screen.getByTestId("filter-bar-add")).toHaveFocus();
-    expect(screen.queryByTestId("filter-bar-chip-status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("filter-bar-chip-status"),
+    ).not.toBeInTheDocument();
   });
 
   it("selects options in one pane and closes only single-value panes", async () => {
@@ -381,7 +383,9 @@ describe("FilterBar", () => {
     );
 
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "TAG options" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "TAG options" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent(
       "TAG: Rust",
     );
@@ -402,7 +406,9 @@ describe("FilterBar", () => {
     expect(screen.getByTestId("filter-bar-chip-status")).toHaveTextContent(
       "STATUS",
     );
-    expect(screen.getByRole("dialog", { name: "STATUS options" })).toBeVisible();
+    expect(
+      screen.getByRole("dialog", { name: "STATUS options" }),
+    ).toBeVisible();
     await user.click(screen.getByRole("option", { name: "Open" }));
     await user.keyboard("{Escape}");
 
@@ -415,7 +421,9 @@ describe("FilterBar", () => {
     await user.click(
       screen.getByRole("button", { name: "Clear STATUS filter" }),
     );
-    expect(screen.queryByTestId("filter-bar-chip-status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("filter-bar-chip-status"),
+    ).not.toBeInTheDocument();
   });
 
   it("toggles flag chips directly and exposes their selected state", async () => {
@@ -426,7 +434,9 @@ describe("FilterBar", () => {
     expect(hold).toHaveAttribute("aria-pressed", "false");
     await user.click(hold);
     expect(hold).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByRole("dialog", { name: "ON HOLD options" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "ON HOLD options" }),
+    ).not.toBeInTheDocument();
     await user.click(hold);
     expect(hold).toHaveAttribute("aria-pressed", "false");
   });
@@ -446,7 +456,9 @@ describe("FilterBar", () => {
 
     expect(screen.getByTestId("filter-bar-input")).toHaveValue("");
     expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent("TAG");
-    expect(screen.queryByTestId("filter-bar-chip-status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("filter-bar-chip-status"),
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId("filter-bar-clear")).not.toBeInTheDocument();
   });
 
@@ -483,7 +495,9 @@ describe("FilterBar", () => {
     expect(screen.queryByTestId("filter-bar-count")).not.toBeInTheDocument();
     await user.type(input, "abc");
     expect(input).toHaveValue("abc");
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("03 OF 09");
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
+      "03 OF 09",
+    );
 
     await user.keyboard("{Escape}");
     expect(input).toHaveValue("");

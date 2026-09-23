@@ -27,21 +27,13 @@ const FIELDS = [
     id: "tags",
     kind: "multi",
     label: "TAG",
-    options: [
-      { value: "reading" },
-      { value: "research" },
-      { value: "urgent" },
-    ],
+    options: [{ value: "reading" }, { value: "research" }, { value: "urgent" }],
   },
   {
     id: "year",
     kind: "single",
     label: "YEAR",
-    options: [
-      { value: "2026" },
-      { value: "2025" },
-      { value: "2024" },
-    ],
+    options: [{ value: "2026" }, { value: "2025" }, { value: "2024" }],
   },
 ] satisfies readonly FilterField[];
 

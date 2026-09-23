@@ -202,9 +202,9 @@ describe("Gazetteer controller", () => {
       name: "Gazetteer filters",
     });
     expect(within(restored).getByTestId("filter-bar-input")).toHaveValue("Al");
-    expect(within(restored).getByTestId("filter-bar-chip-tags")).toHaveTextContent(
-      "TAG: research",
-    );
+    expect(
+      within(restored).getByTestId("filter-bar-chip-tags"),
+    ).toHaveTextContent("TAG: research");
     expect(
       within(restored).getByRole("radio", { name: "Title" }),
     ).toBeChecked();
@@ -334,9 +334,10 @@ describe("Gazetteer controller", () => {
       "aria-selected",
       "false",
     );
-    expect(
-      screen.getByRole("option", { name: "clepsydra" }),
-    ).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("option", { name: "clepsydra" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
   });
 
   it("adds a tag facet through the desktop FilterBar and reflects it as a chip", async () => {
@@ -371,9 +372,7 @@ describe("Gazetteer controller", () => {
     expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent(
       "TAG: legacy-url-tag",
     );
-    await user.click(
-      screen.getByRole("button", { name: "Clear TAG filter" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Clear TAG filter" }));
     expect(onFilterChange).toHaveBeenCalledWith({ text: "", facets: {} });
   });
 

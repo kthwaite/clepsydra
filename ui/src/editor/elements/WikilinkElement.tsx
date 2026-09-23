@@ -82,11 +82,9 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     return (
       <span {...attributes}>
         <span contentEditable={false} className="align-baseline text-ink">
-          <WikilinkIcon
-            size="0.85em"
-            strokeWidth={1.8}
-            className="mr-1 inline-block align-[-0.1em] text-accent"
-          />
+          <span aria-hidden className="cl-mono text-accent">
+            [[
+          </span>
           <WikilinkInlineEditor
             initialDraft={draft}
             initialCaret={activeSession.initialCaret}
@@ -97,6 +95,9 @@ export function WikilinkElement({ attributes, children, element }: Props) {
               void openTarget(target);
             }}
           />
+          <span aria-hidden className="cl-mono text-accent">
+            ]]
+          </span>
         </span>
         {children}
       </span>

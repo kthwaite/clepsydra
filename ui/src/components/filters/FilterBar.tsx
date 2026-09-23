@@ -99,8 +99,7 @@ export function FilterBar({
   const visibleLongTailFields = fields.filter(
     (field) =>
       !primaryIds.has(field.id) &&
-      ((state.facets[field.id]?.length ?? 0) > 0 ||
-        activeFieldId === field.id),
+      ((state.facets[field.id]?.length ?? 0) > 0 || activeFieldId === field.id),
   );
   const visibleFields = [...primaryFields, ...visibleLongTailFields];
   const visibleFieldIds = new Set(visibleFields.map((field) => field.id));
@@ -393,9 +392,7 @@ function FacetChip({
                   placeholder="FILTER OPTIONS…"
                   className={inputClasses}
                   value={optionFilter}
-                  onChange={(event) =>
-                    onOptionFilterChange(event.target.value)
-                  }
+                  onChange={(event) => onOptionFilterChange(event.target.value)}
                 />
               )}
               <ListBox

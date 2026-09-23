@@ -223,9 +223,9 @@ describe("MobileGazetteer", () => {
     await user.click(screen.getByRole("button", { name: "Filters · 1" }));
     const dialog = screen.getByRole("dialog", { name: "Gazetteer filters" });
     expect(within(dialog).getByTestId("filter-bar-chip-tags")).toBeVisible();
-    expect(within(dialog).getByTestId("filter-bar-chip-tags")).toHaveTextContent(
-      "TAG: legacy-url-tag",
-    );
+    expect(
+      within(dialog).getByTestId("filter-bar-chip-tags"),
+    ).toHaveTextContent("TAG: legacy-url-tag");
     expect(
       within(dialog).queryByTestId("filter-bar-chip-tags-research"),
     ).not.toBeInTheDocument();

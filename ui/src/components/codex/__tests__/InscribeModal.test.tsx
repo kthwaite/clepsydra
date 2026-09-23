@@ -43,7 +43,6 @@ describe("InscribeModal", () => {
     expect(screen.queryByPlaceholderText("ideas/new-page")).toBeNull();
   });
 
-
   it("does not offer quotation as a creation kind", async () => {
     const user = userEvent.setup();
     render(<InscribeModal />);

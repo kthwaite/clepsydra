@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useOfflineStore } from "#/offline/offlineStore";
+import { API_CACHE_NAME } from "#/offline/swPolicy";
 import {
   DELTA_COALESCE_MS,
   OfflineSyncController,
@@ -10,7 +11,6 @@ import {
   WALKER_CONCURRENCY,
 } from "#/offline/sync";
 import { FakeCacheStorage, jsonResponse } from "#/offline/testing/fakeCaches";
-import { API_CACHE_NAME } from "#/offline/swPolicy";
 
 // openapi-fetch reads `globalThis.fetch` (and constructs requests with
 // `globalThis.Request`) once, when `fetchClient` is created (module load of

@@ -1,4 +1,6 @@
 /// <reference lib="webworker" />
+
+import { CacheableResponsePlugin } from "workbox-cacheable-response";
 import {
   cleanupOutdatedCaches,
   createHandlerBoundToURL,
@@ -6,7 +8,6 @@ import {
 } from "workbox-precaching";
 import { NavigationRoute, registerRoute } from "workbox-routing";
 import { NetworkFirst, NetworkOnly } from "workbox-strategies";
-import { CacheableResponsePlugin } from "workbox-cacheable-response";
 import {
   API_CACHE_NAME,
   classifyRequest,

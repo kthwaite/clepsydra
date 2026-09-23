@@ -434,21 +434,16 @@ describe("WikilinkElement editing and navigation", () => {
     expect(editor.children).toEqual(originalDescendants);
   });
 
-  it("renders the active draft as an inline textbox instead of a passive link", () => {
+  it("shows literal wikilink brackets around the active draft instead of the icon", () => {
     lookupMock.mockReturnValue("notes/target.md");
     renderWikilink("Target", "Label", { active: true });
 
-    expect(screen.getByRole("textbox", { name: "Edit wikilink" })).toHaveValue(
-      "Target|Label",
-    );
+    const input = screen.getByRole("textbox", { name: "Edit wikilink" });
+    expect(input).toHaveValue("Target|Label");
     expect(screen.queryByRole("link")).toBeNull();
-    expect(
-      screen
-        .getByRole("textbox", { name: "Edit wikilink" })
-        .parentElement?.parentElement?.querySelectorAll(
-          "svg[aria-hidden='true']",
-        ),
-    ).toHaveLength(1);
+    expect(screen.getByText("[[")).toBeInTheDocument();
+    expect(screen.getByText("]]")).toBeInTheDocument();
+    expect(input.parentElement?.parentElement?.querySelector("svg")).toBeNull();
   });
 
   it("delegates an active commit to the editing controller", async () => {

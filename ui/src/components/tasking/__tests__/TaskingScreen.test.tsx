@@ -620,9 +620,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     for (const label of ["Inbox", "Ready", "In Progress", "Review", "Done"]) {
       expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
     }
-    await userEvent.click(
-      screen.getByTestId("filter-bar-option-status-FIELD"),
-    );
+    await userEvent.click(screen.getByTestId("filter-bar-option-status-FIELD"));
 
     expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
     expect(screen.queryByText("Task Alpha 2")).not.toBeInTheDocument();
