@@ -179,14 +179,14 @@ describe("WikilinkElement resolved", () => {
     expect(typeof clink.onClick).toBe("function");
   });
 
-  it("keeps the standard styling without dangling classes", () => {
+  it("renders a single decorative leading icon and the target without brackets", () => {
     lookupMock.mockReturnValue("notes/clepsydra-design.md");
     renderWikilink("Clepsydra Design Notes");
 
-    const link = screen.getByRole("link");
-    expect(link.className).not.toContain("decoration-dashed");
-    expect(link.className).not.toContain("text-ink-mute");
-    expect(link.className).toContain("text-ink");
+    const link = screen.getByRole("link", { name: "Clepsydra Design Notes" });
+    expect(link.textContent).toBe("Clepsydra Design Notes");
+    expect(link.firstElementChild).toMatchObject({ tagName: "svg" });
+    expect(link.querySelectorAll("svg[aria-hidden='true']")).toHaveLength(1);
   });
 
   it("shows only the alias when a custom label exists", () => {
@@ -206,16 +206,15 @@ describe("WikilinkElement resolved", () => {
 });
 
 describe("WikilinkElement dangling", () => {
-  it("renders a dedicated muted dashed trigger instead of CLink", () => {
+  it("renders a muted missing-page trigger instead of CLink", () => {
     renderWikilink("Unwritten Page");
 
     expect(clinkCalls).toHaveLength(0);
-    const link = screen.getByRole("link");
+    const link = screen.getByRole("link", { name: "Unwritten Page" });
     expect(link).not.toHaveAttribute("href");
     expect(link.className).toContain("text-ink-mute");
-    expect(link.className).toContain("decoration-dashed");
-    expect(link.className).toContain("cursor-pointer");
-    expect(link.className).toContain("relative");
+    expect(link.textContent).toBe("Unwritten Page");
+    expect(link.querySelectorAll("svg[aria-hidden='true']")).toHaveLength(1);
   });
 
   it("shows only the alias for a dangling labeled link", () => {
@@ -442,6 +441,13 @@ describe("WikilinkElement editing and navigation", () => {
       "Target|Label",
     );
     expect(screen.queryByRole("link")).toBeNull();
+    expect(
+      screen
+        .getByRole("textbox", { name: "Edit wikilink" })
+        .parentElement?.parentElement?.querySelectorAll(
+          "svg[aria-hidden='true']",
+        ),
+    ).toHaveLength(1);
   });
 
   it("delegates an active commit to the editing controller", async () => {

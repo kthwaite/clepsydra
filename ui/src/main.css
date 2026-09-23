@@ -507,6 +507,25 @@ ul {
     background: var(--highlight);
 }
 
+/* Passive page references read as prose, not as highlighted Markdown syntax. */
+.cl-wikilink {
+    font-family: Georgia, "Times New Roman", serif;
+}
+
+.cl-link.cl-wikilink {
+    color: inherit;
+    border-bottom: 0;
+}
+
+.cl-link.cl-wikilink.text-ink-mute {
+    color: var(--ink-mute);
+}
+
+.cl-link.cl-wikilink:hover {
+    color: var(--accent);
+    background: transparent;
+}
+
 [data-link-resource]::after {
     content: "";
     display: inline-block;

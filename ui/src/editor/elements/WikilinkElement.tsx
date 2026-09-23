@@ -1,3 +1,4 @@
+import { Link2 } from "lucide-react";
 import { type KeyboardEvent, type MouseEvent, useRef, useState } from "react";
 import { Path } from "slate";
 import {
@@ -80,13 +81,13 @@ export function WikilinkElement({ attributes, children, element }: Props) {
         : `${element.target}|${element.alias}`;
     return (
       <span {...attributes}>
-        <span
-          contentEditable={false}
-          className="cl-mono align-baseline text-[0.95em] text-ink"
-        >
-          <span aria-hidden className="text-accent">
-            ⟦
-          </span>
+        <span contentEditable={false} className="align-baseline text-ink">
+          <Link2
+            aria-hidden
+            size="0.85em"
+            strokeWidth={1.8}
+            className="mr-1 inline-block align-[-0.1em] text-accent"
+          />
           <WikilinkInlineEditor
             initialDraft={draft}
             initialCaret={activeSession.initialCaret}
@@ -97,9 +98,6 @@ export function WikilinkElement({ attributes, children, element }: Props) {
               void openTarget(target);
             }}
           />
-          <span aria-hidden className="text-accent">
-            ⟧
-          </span>
         </span>
         {children}
       </span>
@@ -107,10 +105,8 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   }
 
   const dangling = resolved === null;
-  const linkClassName = dangling
-    ? "cl-mono align-baseline text-[0.95em] text-ink-mute underline decoration-dashed underline-offset-2 hover:text-accent"
-    : "cl-mono align-baseline text-[0.95em] text-ink hover:text-accent";
-  const bracketClassName = dangling ? "text-ink-mute" : "text-accent";
+  const linkClassName = `cl-wikilink ${dangling ? "text-ink-mute" : "text-ink"}`;
+  const iconClassName = dangling ? "text-ink-mute" : "text-accent";
 
   const handleActivation = (event: MouseEvent | KeyboardEvent) => {
     event.preventDefault();
@@ -138,13 +134,13 @@ export function WikilinkElement({ attributes, children, element }: Props) {
 
   const linkContent = (
     <>
-      <span aria-hidden className={bracketClassName}>
-        ⟦
-      </span>
-      <span className="px-[2px] not-italic">{displayText}</span>
-      <span aria-hidden className={bracketClassName}>
-        ⟧
-      </span>
+      <Link2
+        aria-hidden
+        size="0.85em"
+        strokeWidth={1.8}
+        className={`mr-1 inline-block align-[-0.1em] ${iconClassName}`}
+      />
+      <span>{displayText}</span>
     </>
   );
 
