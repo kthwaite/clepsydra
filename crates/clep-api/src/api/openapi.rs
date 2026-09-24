@@ -240,7 +240,9 @@ impl Modify for SchemaOverrides {
         // Sync
         crate::api::sync::run_sync,
         crate::api::sync::sync_status,
-        crate::api::sync::list_conflicts
+        crate::api::sync::list_conflicts,
+        crate::api::sync::compare_conflict,
+        crate::api::sync::resolve_conflict
     ),
     components(
         schemas(
@@ -353,6 +355,10 @@ impl Modify for SchemaOverrides {
             crate::api::sync::SyncStatusDto,
             crate::api::sync::ConflictPageDto,
             crate::api::sync::ConflictListDto,
+            crate::api::sync::ConflictSideDto,
+            crate::api::sync::ConflictCompareDto,
+            crate::api::sync::ConflictResolveRequest,
+            crate::api::sync::ConflictResolveDto,
             // Index
             crate::api::index_routes::RebuildResponse,
             crate::api::index_routes::OutlinkEntry,

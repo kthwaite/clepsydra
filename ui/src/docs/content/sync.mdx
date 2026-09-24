@@ -168,10 +168,38 @@ other side. The short id is derived from the incoming content, so re-running
 the same merge produces the same filename rather than a pile of copies.
 
 **Resolution is ordinary editing.** Open both, fold across whatever you want to
-keep, and delete the copy. There is no merge tool to learn and no conflicted
-file to repair. Identical edits on both devices produce no copy at all. The
-[Conflicts view](/conflicts) lists every copy still in the vault alongside its
-original, with a button to open either.
+keep, and delete the copy. There is no conflicted file to repair. Identical
+edits on both devices produce no copy at all. The [Conflicts view](/conflicts)
+lists every copy still in the vault alongside its original, with buttons to
+open either or to compare them.
+
+### Comparing and resolving
+
+**Compare** opens a side-by-side line diff: the original on the left as
+*Local (this device)*, the copy on the right as *Other (conflict copy)*. Sync
+bookkeeping is left out, so only real edits show — both sides carry the
+original's id, neither shows `updated_at`, and the copy's `conflict_of` and
+`(conflict ab12cd3)` title suffix are dropped. Frontmatter is compared like
+the body. Unchanged runs fold to three lines of context around each change,
+with a button to show the rest.
+
+Each change has a **Local / Other / Both** choice (arrow keys move between
+them); *Both* keeps the local lines, then the other lines. Every change starts
+on *Local*, and **All local** / **All other** set them all at once. The
+**Result** pane shows the page exactly as it will be saved. There is no
+free-text editing here — pick the sides, resolve, then edit the page as usual.
+
+**Resolve** writes the result into the original (its id kept, `updated_at`
+set to now) and moves the copy to the [Rubbish Bin](/rubbish), where it can be
+restored like any other page. Both steps are guarded by the revisions the
+comparison loaded: if either page changed since — another device synced, or
+you edited one in a tab — nothing is written and the view offers **Reload**.
+The two steps are not one transaction; if the copy cannot be binned after the
+original was saved, the error says so and the copy stays in the list.
+
+Encrypted pages, and pages whose frontmatter does not parse, cannot be
+compared here; the view says so and offers to open both for a merge by hand.
+A copy whose original was deleted or moved has no **Compare** button.
 
 Encrypted pages follow the same rule as any other, but in practice always end
 up as Conflict Copies: re-encrypting a note rewrites every armored line, so two
@@ -355,7 +383,9 @@ them. Fix them by hand; `clep doctor`'s `conflicts` section lists them.
   `clep sync status`
 - [Configuration](/docs/configuration#sync-settings) for the `[sync]` keys
 - [API Reference](/docs/api-reference#sync) for `POST /api/vault/sync`,
-  `GET /api/vault/sync/status`, and `GET /api/vault/sync/conflicts`
+  `GET /api/vault/sync/status`, `GET /api/vault/sync/conflicts`,
+  `GET /api/vault/sync/conflicts/compare`, and
+  `POST /api/vault/sync/conflicts/resolve`
 - [Encryption and Protected Pages](/docs/encryption-and-protected-pages) for
   moving identities between devices
 - [Troubleshooting](/docs/troubleshooting) for problems outside sync

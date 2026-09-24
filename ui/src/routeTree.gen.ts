@@ -16,6 +16,7 @@ import { Route as BasesSlugRouteImport } from "./routes/bases.$slug";
 import { Route as BasesSlugEditRouteImport } from "./routes/bases.$slug.edit";
 import { Route as BasesIndexRouteImport } from "./routes/bases.index";
 import { Route as ConflictsRouteImport } from "./routes/conflicts";
+import { Route as ConflictsCompareSplatRouteImport } from "./routes/conflicts_.compare.$";
 import { Route as DocsRouteImport } from "./routes/docs";
 import { Route as DocsSlugRouteImport } from "./routes/docs.$slug";
 import { Route as FeedsRouteImport } from "./routes/feeds";
@@ -124,6 +125,11 @@ const BasesSlugEditRoute = BasesSlugEditRouteImport.update({
   path: "/edit",
   getParentRoute: () => BasesSlugRoute,
 } as any);
+const ConflictsCompareSplatRoute = ConflictsCompareSplatRouteImport.update({
+  id: "/conflicts_/compare/$",
+  path: "/conflicts/compare/$",
+  getParentRoute: () => rootRouteImport,
+} as any);
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
@@ -145,6 +151,7 @@ export interface FileRoutesByFullPath {
   "/pages/$": typeof PagesSplatRoute;
   "/bases/": typeof BasesIndexRoute;
   "/bases/$slug/edit": typeof BasesSlugEditRoute;
+  "/conflicts/compare/$": typeof ConflictsCompareSplatRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
@@ -166,6 +173,7 @@ export interface FileRoutesByTo {
   "/pages/$": typeof PagesSplatRoute;
   "/bases": typeof BasesIndexRoute;
   "/bases/$slug/edit": typeof BasesSlugEditRoute;
+  "/conflicts/compare/$": typeof ConflictsCompareSplatRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
@@ -188,6 +196,7 @@ export interface FileRoutesById {
   "/pages/$": typeof PagesSplatRoute;
   "/bases/": typeof BasesIndexRoute;
   "/bases/$slug/edit": typeof BasesSlugEditRoute;
+  "/conflicts_/compare/$": typeof ConflictsCompareSplatRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
@@ -210,7 +219,8 @@ export interface FileRouteTypes {
     | "/docs/$slug"
     | "/pages/$"
     | "/bases/"
-    | "/bases/$slug/edit";
+    | "/bases/$slug/edit"
+    | "/conflicts/compare/$";
   fileRoutesByTo: FileRoutesByTo;
   to:
     | "/"
@@ -231,7 +241,8 @@ export interface FileRouteTypes {
     | "/docs/$slug"
     | "/pages/$"
     | "/bases"
-    | "/bases/$slug/edit";
+    | "/bases/$slug/edit"
+    | "/conflicts/compare/$";
   id:
     | "__root__"
     | "/"
@@ -252,7 +263,8 @@ export interface FileRouteTypes {
     | "/docs/$slug"
     | "/pages/$"
     | "/bases/"
-    | "/bases/$slug/edit";
+    | "/bases/$slug/edit"
+    | "/conflicts_/compare/$";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
@@ -273,6 +285,7 @@ export interface RootRouteChildren {
   BasesSlugRoute: typeof BasesSlugRouteWithChildren;
   PagesSplatRoute: typeof PagesSplatRoute;
   BasesIndexRoute: typeof BasesIndexRoute;
+  ConflictsCompareSplatRoute: typeof ConflictsCompareSplatRoute;
 }
 
 declare module "@tanstack/react-router" {
@@ -410,6 +423,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof BasesSlugEditRouteImport;
       parentRoute: typeof BasesSlugRoute;
     };
+    "/conflicts_/compare/$": {
+      id: "/conflicts_/compare/$";
+      path: "/conflicts/compare/$";
+      fullPath: "/conflicts/compare/$";
+      preLoaderRoute: typeof ConflictsCompareSplatRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
   }
 }
 
@@ -453,6 +473,7 @@ const rootRouteChildren: RootRouteChildren = {
   BasesSlugRoute: BasesSlugRouteWithChildren,
   PagesSplatRoute: PagesSplatRoute,
   BasesIndexRoute: BasesIndexRoute,
+  ConflictsCompareSplatRoute: ConflictsCompareSplatRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

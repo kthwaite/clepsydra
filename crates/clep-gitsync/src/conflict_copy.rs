@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use super::SyncError;
 use clep_vault::atomic_file::atomic_create;
-use clep_vault::page::{ExtraMap, parse_frontmatter, write_page_content};
+use clep_vault::page::{ExtraMap, FrontmatterError, parse_frontmatter, write_page_content};
 
 /// Length of the `sha256(theirs)` prefix in a Conflict Copy's name. Seven,
 /// not eight, so the copy of a dated journal file is never a canonical page
@@ -114,6 +114,56 @@ pub fn conflict_copy_content(original_rel: &str, theirs: &[u8], short: &str) -> 
     }
     meta.extra = extra;
     write_page_content(&meta, &body).into_bytes()
+}
+
+/// Both sides of a Conflict Copy in a form a line diff can compare: the
+/// original's text and the copy's text, with the copy-only noise
+/// [`conflict_copy_content`] added taken back out.
+///
+/// Each side is parsed and re-serialised with `write_page_content`, so
+/// frontmatter formatting never shows as a difference. On both sides `id` is
+/// the original's and `updated_at` is dropped. On the copy, `conflict_of` is
+/// dropped and a trailing ` (conflict <shortid>)` title suffix is removed; a
+/// title that was only the file-stem fallback becomes absent again when the
+/// original has none. Fails when either side's frontmatter does not parse.
+pub fn comparable_pair(original: &str, copy: &str) -> Result<(String, String), FrontmatterError> {
+    let (mut local, local_body) = parse_frontmatter(original)?;
+    let (mut other, other_body) = parse_frontmatter(copy)?;
+    local.updated_at = None;
+    other.updated_at = None;
+    other.id = local.id;
+    let original_rel = other
+        .extra
+        .remove("conflict_of")
+        .and_then(|value| value.as_str().map(str::to_owned));
+    other.title = other
+        .title
+        .map(|title| strip_conflict_suffix(&title).to_owned());
+    if local.title.is_none()
+        && let (Some(title), Some(rel)) = (other.title.as_deref(), original_rel.as_deref())
+        && title == file_stem(rel)
+    {
+        other.title = None;
+    }
+    Ok((
+        write_page_content(&local, &local_body),
+        write_page_content(&other, &other_body),
+    ))
+}
+
+/// `Plan (conflict abc1234)` -> `Plan`; any other title is returned as is.
+fn strip_conflict_suffix(title: &str) -> &str {
+    let Some(rest) = title.strip_suffix(')') else {
+        return title;
+    };
+    let Some((base, short)) = rest.rsplit_once(" (conflict ") else {
+        return title;
+    };
+    let is_short_id = short.len() == SHORT_ID_LEN
+        && short
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase());
+    if is_short_id { base } else { title }
 }
 
 /// Write the Conflict Copy of `original_rel` under `root`, returning the
@@ -250,6 +300,78 @@ mod tests {
             conflict_copy_content("a.png", &[0, 1, 2], "abc1234"),
             vec![0, 1, 2]
         );
+    }
+
+    const ORIGINAL: &str = "+++\nid = \"0192b6c0-0000-7000-8000-0000000000aa\"\ntitle = \"Plan\"\ntype = \"NOTE\"\ntags = [\"x\"]\ncreated_at = 2026-09-01T10:00:00Z\nupdated_at = 2026-09-02T10:00:00Z\nstatus = \"draft\"\n+++\nline one\nline two\n";
+
+    fn copy_of(theirs: &str) -> String {
+        String::from_utf8(conflict_copy_content(
+            "notes/plan.md",
+            theirs.as_bytes(),
+            "abc1234",
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn comparable_pair_of_an_unchanged_copy_is_identical() {
+        let (local, other) = comparable_pair(ORIGINAL, &copy_of(ORIGINAL)).unwrap();
+        assert_eq!(local, other);
+        assert!(local.contains("title = \"Plan\""), "{local}");
+        assert!(
+            local.contains("0192b6c0-0000-7000-8000-0000000000aa"),
+            "{local}"
+        );
+        assert!(!local.contains("conflict_of"), "{local}");
+        assert!(!local.contains("updated_at"), "{local}");
+        assert!(local.contains("status = \"draft\""), "{local}");
+    }
+
+    #[test]
+    fn comparable_pair_shows_a_body_edit_only_in_the_body() {
+        let theirs = ORIGINAL.replace("line two", "line 2");
+        let (local, other) = comparable_pair(ORIGINAL, &copy_of(&theirs)).unwrap();
+        let fm = |text: &str| text[..text.rfind("+++").unwrap()].to_string();
+        assert_eq!(fm(&local), fm(&other));
+        assert!(local.ends_with("line one\nline two\n"), "{local}");
+        assert!(other.ends_with("line one\nline 2\n"), "{other}");
+    }
+
+    #[test]
+    fn comparable_pair_drops_updated_at_differences() {
+        let theirs = ORIGINAL.replace("2026-09-02T10:00:00Z", "2026-09-20T08:30:00Z");
+        let (local, other) = comparable_pair(ORIGINAL, &copy_of(&theirs)).unwrap();
+        assert_eq!(local, other);
+    }
+
+    #[test]
+    fn comparable_pair_keeps_a_title_that_only_mentions_conflict() {
+        let original = ORIGINAL.replace("title = \"Plan\"", "title = \"Plan (conflict notes)\"");
+        let (local, other) = comparable_pair(&original, &copy_of(&original)).unwrap();
+        assert_eq!(local, other);
+        assert!(
+            other.contains("title = \"Plan (conflict notes)\""),
+            "{other}"
+        );
+    }
+
+    #[test]
+    fn comparable_pair_restores_an_absent_title() {
+        let original = ORIGINAL.replace("title = \"Plan\"\n", "");
+        let copy = copy_of(&original);
+        assert!(
+            copy.contains("title = \"plan (conflict abc1234)\""),
+            "{copy}"
+        );
+        let (local, other) = comparable_pair(&original, &copy).unwrap();
+        assert_eq!(local, other);
+        assert!(!other.contains("title"), "{other}");
+    }
+
+    #[test]
+    fn comparable_pair_rejects_unparseable_sides() {
+        assert!(comparable_pair("no frontmatter", &copy_of(ORIGINAL)).is_err());
+        assert!(comparable_pair(ORIGINAL, "no frontmatter").is_err());
     }
 
     #[test]

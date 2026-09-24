@@ -415,6 +415,14 @@ List the Conflict Copies present in the vault, read from the index rather than a
 
 The response is `items` plus `total` (the item count). Each item names the copy's `path` and `title`, its `original` (the `conflict_of` path whose local version won the merge) and that page's `original_title`, and `original_exists` — `false` when the original has since been deleted or moved.
 
+### `GET /api/vault/sync/conflicts/compare`
+Read a Conflict Copy (`?copy=<vault path>`) and the original its `conflict_of` names, side by side. Responses: `200` The original and the Conflict Copy in comparable form; `400` Invalid copy path; `404` The copy is missing, is not a Conflict Copy, or its original is missing; `422` A side is encrypted or has unparseable frontmatter (`detail.code` `resolve_by_hand`); `500` Internal server error.
+
+The response names `copy_path`, `original_path` and `original_title`, then `local` (the original) and `other` (the copy), each as `text` and `revision`. `text` is the page re-serialised so only real differences show: both sides carry the original's `id` and no `updated_at`, and the copy loses `conflict_of` and its ` (conflict <shortid>)` title suffix. `revision` is the revision of the raw file, for the resolve guard.
+
+### `POST /api/vault/sync/conflicts/resolve`
+Write a merged page into the original and move the Conflict Copy to the Rubbish Bin. The body is `copy`, `merged` (the whole page, frontmatter included), and `original_revision`/`copy_revision` from the compare response; both revisions are checked before anything is written. The server keeps the original's `id`, drops `conflict_of` and stamps `updated_at`. Responses: `200` `original_path` plus the copy's `archived` Rubbish Bin entry; `400` Invalid copy path, or merged text whose frontmatter does not parse; `404` As for compare; `409` The original or the copy changed since it was compared (`revision_conflict`); `422` As for compare; `500` Internal server error — when the original was saved but the copy could not be binned, the message says so and the copy remains.
+
 ## Tasks
 
 ### `GET /api/vault/tasks`

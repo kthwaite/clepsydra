@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   isPending: false,
   isError: false,
   openTab: vi.fn(),
+  navigate: vi.fn(),
 }));
 
 vi.mock("#/api/index", () => ({
@@ -16,6 +17,10 @@ vi.mock("#/api/index", () => ({
     isPending: mocks.isPending,
     isError: mocks.isError,
   }),
+}));
+
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => mocks.navigate,
 }));
 
 vi.mock("#/hooks/useOpenTab", () => ({
@@ -27,6 +32,7 @@ beforeEach(() => {
   mocks.isPending = false;
   mocks.isError = false;
   mocks.openTab.mockReset();
+  mocks.navigate.mockReset();
 });
 
 describe("ConflictsPanel", () => {
@@ -68,6 +74,12 @@ describe("ConflictsPanel", () => {
 
     await user.click(screen.getByRole("button", { name: /open original/i }));
     expect(mocks.openTab).toHaveBeenCalledWith("page", "notes/plan.md", "Plan");
+
+    await user.click(screen.getByRole("button", { name: /compare/i }));
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/conflicts/compare/$",
+      params: { _splat: "notes/plan.conflict.abc1234.md" },
+    });
   });
 
   it("shows empty, loading, error and missing-original states", () => {
@@ -107,6 +119,9 @@ describe("ConflictsPanel", () => {
     expect(within(item).getByText(/original missing/i)).toBeInTheDocument();
     expect(
       within(item).queryByRole("button", { name: /open original/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(item).queryByRole("button", { name: /compare/i }),
     ).not.toBeInTheDocument();
     expect(
       within(item).getByRole("button", { name: /open copy/i }),

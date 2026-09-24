@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -20,7 +20,7 @@ use crate::vault::rubbish::{
 
 pub const RUBBISH_PREVIEW_MAX_BYTES: usize = 4096;
 
-#[derive(Clone, Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct RubbishItemSummary {
     pub item_id: String,
     pub page_id: String,
