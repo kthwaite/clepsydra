@@ -1302,6 +1302,19 @@ pub async fn delete_page(
             ))
         }
     })?;
+    let summary = archive_page_bytes(&state, &vault_path, expected_bytes).await?;
+    Ok((StatusCode::CREATED, Json(summary)).into_response())
+}
+
+/// Archive the page at `vault_path` to the Rubbish Bin, guarded by
+/// `expected_bytes`: the archive fails as stale when the file on disk no
+/// longer holds exactly those bytes. Shared by `DELETE /pages/{path}` and
+/// Conflict Copy resolution.
+pub(crate) async fn archive_page_bytes(
+    state: &Arc<AppState>,
+    vault_path: &VaultPath,
+    expected_bytes: Vec<u8>,
+) -> Result<super::rubbish::RubbishItemSummary, ApiError> {
     let content = std::str::from_utf8(&expected_bytes).map_err(|error| {
         ApiError::internal(format!(
             "page {} is not UTF-8: {error}",
@@ -1360,12 +1373,12 @@ pub async fn delete_page(
             &state.index,
             Arc::clone(&state.hooks),
             command,
-            super::mutation_notifier(&state),
+            super::mutation_notifier(state),
         )
         .await
         .map_err(super::mutation_error)?;
 
-    Ok((StatusCode::CREATED, Json(summary)).into_response())
+    Ok(summary)
 }
 
 // ---------------------------------------------------------------------------

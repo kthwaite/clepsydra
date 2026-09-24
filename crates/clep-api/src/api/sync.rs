@@ -13,17 +13,22 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
+use super::rubbish::RubbishItemSummary;
+use crate::api::error::parse_request_path;
 use crate::vault::gitsync::SyncError;
-use crate::vault::gitsync::conflict_copy::ConflictCopy;
+use crate::vault::gitsync::conflict_copy::{ConflictCopy, comparable_pair};
 use crate::vault::gitsync::engine::{MergeSummary, PushStatus, SyncReport, SyncStatus};
 use crate::vault::gitsync::journal_merge::JournalMerge;
+use crate::vault::mutation_coordinator::{MutationError, ProjectAssignment, UpdatePageCommand};
+use crate::vault::page::{Page, PageMeta, page_revision, parse_frontmatter};
+use crate::vault::path::VaultPath;
 
 /// Message used wherever an uninitialised vault is refused, so the API and
 /// the CLI say the same thing.
@@ -67,6 +72,55 @@ pub struct ConflictPageDto {
 pub struct ConflictListDto {
     pub items: Vec<ConflictPageDto>,
     pub total: usize,
+}
+
+/// One side of a Conflict Copy, ready for a line diff.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ConflictSideDto {
+    /// The page in comparable form: re-serialised frontmatter with the
+    /// original's `id`, no `updated_at`, and none of the copy-only keys.
+    pub text: String,
+    /// Revision of the raw file bytes, for the resolve request's guard.
+    pub revision: String,
+}
+
+/// A Conflict Copy and its original, side by side.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ConflictCompareDto {
+    pub copy_path: String,
+    pub original_path: String,
+    pub original_title: Option<String>,
+    /// The original: the version that stayed at its path.
+    pub local: ConflictSideDto,
+    /// The copy: the incoming version sync wrote beside it.
+    pub other: ConflictSideDto,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct ConflictCompareQuery {
+    /// Vault-relative path of the Conflict Copy.
+    pub copy: String,
+}
+
+/// Write `merged` into the original and move the copy to the Rubbish Bin.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ConflictResolveRequest {
+    /// Vault-relative path of the Conflict Copy.
+    pub copy: String,
+    /// The whole resolved page, frontmatter included. Its `id` is replaced by
+    /// the original's and `conflict_of` is dropped.
+    pub merged: String,
+    /// `local.revision` from the compare response.
+    pub original_revision: String,
+    /// `other.revision` from the compare response.
+    pub copy_revision: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ConflictResolveDto {
+    pub original_path: String,
+    /// The copy's Rubbish Bin entry.
+    pub archived: RubbishItemSummary,
 }
 
 /// Duplicate journal pages for one date, folded into one page (D22).
@@ -348,11 +402,217 @@ pub async fn list_conflicts(
     }))
 }
 
+/// Conflicts only a person can resolve in an editor: an encrypted side, or
+/// frontmatter that does not parse.
+fn resolve_by_hand(message: impl Into<String>) -> ApiError {
+    ApiError::unprocessable_with_detail(message, serde_json::json!({ "code": "resolve_by_hand" }))
+}
+
+/// A page read for comparison: its raw text and parsed frontmatter.
+struct ConflictSide {
+    path: VaultPath,
+    raw: String,
+    meta: PageMeta,
+}
+
+impl ConflictSide {
+    fn revision(&self) -> String {
+        page_revision(&self.raw)
+    }
+}
+
+/// Read and parse the page at `path`. Missing is a 404; unparseable or
+/// encrypted is a 422 (D7).
+fn read_conflict_side(state: &AppState, path: VaultPath) -> Result<ConflictSide, ApiError> {
+    let page =
+        Page::from_file(&state.vault.resolve(&path), path.clone()).map_err(
+            |error| match error {
+                crate::vault::page::FrontmatterError::Io(error)
+                    if error.kind() == std::io::ErrorKind::NotFound =>
+                {
+                    ApiError::not_found(format!("page not found: {}", path.as_str()))
+                }
+                crate::vault::page::FrontmatterError::Io(error) => {
+                    ApiError::internal(format!("failed to read {}: {error}", path.as_str()))
+                }
+                error => resolve_by_hand(format!(
+                    "{} has frontmatter that does not parse ({error}); resolve it by hand",
+                    path.as_str()
+                )),
+            },
+        )?;
+    if page.is_encrypted() {
+        return Err(resolve_by_hand(format!(
+            "{} is encrypted; resolve it by hand",
+            path.as_str()
+        )));
+    }
+    Ok(ConflictSide {
+        path,
+        raw: page.raw_content,
+        meta: page.meta,
+    })
+}
+
+/// The copy at `copy` and the original its `conflict_of` names.
+fn read_conflict(state: &AppState, copy: &str) -> Result<(ConflictSide, ConflictSide), ApiError> {
+    let copy = read_conflict_side(state, parse_request_path(copy, "invalid copy path")?)?;
+    let original = copy
+        .meta
+        .extra
+        .get("conflict_of")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| {
+            ApiError::not_found(format!("{} is not a Conflict Copy", copy.path.as_str()))
+        })?;
+    let original = VaultPath::new(original).map_err(|_| {
+        ApiError::not_found(format!(
+            "{} names an invalid original: {original}",
+            copy.path.as_str()
+        ))
+    })?;
+    let original = read_conflict_side(state, original)?;
+    Ok((original, copy))
+}
+
+#[utoipa::path(
+    get,
+    path = "/sync/conflicts/compare",
+    context_path = "/api/vault",
+    tag = "Sync",
+    params(ConflictCompareQuery),
+    responses(
+        (status = 200, description = "The original and the Conflict Copy in comparable form", body = ConflictCompareDto),
+        (status = 400, description = "Invalid copy path", body = ApiError),
+        (status = 404, description = "The copy is missing, is not a Conflict Copy, or its original is missing", body = ApiError),
+        (status = 422, description = "A side is encrypted or has unparseable frontmatter; resolve it by hand", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn compare_conflict(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ConflictCompareQuery>,
+) -> Result<Json<ConflictCompareDto>, ApiError> {
+    let (original, copy) = read_conflict(&state, &query.copy)?;
+    let (local, other) = comparable_pair(&original.raw, &copy.raw).map_err(|error| {
+        resolve_by_hand(format!(
+            "frontmatter does not parse ({error}); resolve it by hand"
+        ))
+    })?;
+    Ok(Json(ConflictCompareDto {
+        copy_path: copy.path.as_str().to_string(),
+        original_path: original.path.as_str().to_string(),
+        original_title: original.meta.title.clone(),
+        local: ConflictSideDto {
+            text: local,
+            revision: original.revision(),
+        },
+        other: ConflictSideDto {
+            text: other,
+            revision: copy.revision(),
+        },
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sync/conflicts/resolve",
+    context_path = "/api/vault",
+    tag = "Sync",
+    request_body = ConflictResolveRequest,
+    responses(
+        (status = 200, description = "Original written and the copy moved to the Rubbish Bin", body = ConflictResolveDto),
+        (status = 400, description = "Invalid copy path, or merged text whose frontmatter does not parse", body = ApiError),
+        (status = 404, description = "The copy is missing, is not a Conflict Copy, or its original is missing", body = ApiError),
+        (status = 409, description = "The original or the copy changed since it was compared (`revision_conflict`)", body = ApiError),
+        (status = 422, description = "A side is encrypted or has unparseable frontmatter; resolve it by hand", body = ApiError),
+        (status = 500, description = "Internal server error; when the original was saved but the copy could not be binned, the message says so", body = ApiError)
+    )
+)]
+pub async fn resolve_conflict(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ConflictResolveRequest>,
+) -> Result<Json<ConflictResolveDto>, ApiError> {
+    let (original, copy) = read_conflict(&state, &request.copy)?;
+    // Both guards before any write: a stale copy must not leave a half-done
+    // resolution behind.
+    for (side, expected) in [
+        (&original, &request.original_revision),
+        (&copy, &request.copy_revision),
+    ] {
+        let current = side.revision();
+        if &current != expected {
+            return Err(ApiError::revision_conflict(current));
+        }
+    }
+    let (mut meta, body) = parse_frontmatter(&request.merged)
+        .map_err(|error| ApiError::bad_request(format!("merged page does not parse: {error}")))?;
+    if meta.encryption.is_some() {
+        return Err(ApiError::bad_request("merged page must not be encrypted"));
+    }
+    meta.id = original.meta.id;
+    meta.extra.remove("conflict_of");
+    meta.updated_at = Some(state.clock.now());
+
+    let notify = |notification: crate::vault::mutation_coordinator::MutationNotification| {
+        let _ = state
+            .change_tx
+            .send(crate::api::events::SyncNotification::IndexChanged {
+                upserted: notification.upserted,
+                removed: notification.removed,
+            });
+    };
+    let original_path = original.path.as_str().to_string();
+    let original_abs = state.vault.resolve(&original.path);
+    match state
+        .mutation_coordinator
+        .update_page(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            UpdatePageCommand {
+                path: original.path,
+                expected_content: original.raw,
+                meta,
+                body,
+                project: ProjectAssignment::Unchanged,
+                reconcile: false,
+            },
+            &notify,
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(MutationError::Stale(_)) => {
+            let current = std::fs::read_to_string(&original_abs).unwrap_or_default();
+            return Err(ApiError::revision_conflict(page_revision(&current)));
+        }
+        Err(error) => return Err(super::mutation_error(error)),
+    }
+
+    let archived =
+        super::pages::archive_page_bytes(&state, &copy.path, copy.raw.into_bytes())
+            .await
+            .map_err(|error| {
+                ApiError::internal(format!(
+                    "{original_path} was saved, but the Conflict Copy {} could not be moved to the Rubbish Bin and remains: {}",
+                    copy.path.as_str(),
+                    error.error
+                ))
+            })?;
+    Ok(Json(ConflictResolveDto {
+        original_path,
+        archived,
+    }))
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", post(run_sync))
         .route("/status", get(sync_status))
         .route("/conflicts", get(list_conflicts))
+        .route("/conflicts/compare", get(compare_conflict))
+        .route("/conflicts/resolve", post(resolve_conflict))
 }
 
 #[cfg(test)]
@@ -505,6 +765,232 @@ mod tests {
         assert_eq!(list.total, 1, "{list:?}");
         assert!(!list.items[0].original_exists);
         assert_eq!(list.items[0].original_title, None);
+    }
+
+    const PLAN_ID: &str = "0192b6c0-0000-7000-8000-0000000000f1";
+    const PLAN: &str = "+++\nid = \"0192b6c0-0000-7000-8000-0000000000f1\"\ntitle = \"Plan\"\ncreated_at = 2026-08-01T10:00:00Z\nupdated_at = 2026-09-01T10:00:00Z\n+++\nshared\nours\n";
+    const PLAN_COPY: &str = "notes/plan.conflict.abc1234.md";
+
+    /// A server over a vault holding `notes/plan.md` (`original`) and its
+    /// Conflict Copy of `theirs`, written the way the sync engine writes it.
+    async fn conflict_fixture(
+        original: &str,
+        theirs: &str,
+    ) -> (TestServer, Arc<AppState>, tempfile::TempDir) {
+        let (state, tmp) = crate::state_test_support::make_state().await;
+        let server =
+            TestServer::new(crate::api::api_router().with_state(Arc::clone(&state))).unwrap();
+        let root = state.vault.root().to_path_buf();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(root.join("notes/plan.md"), original).unwrap();
+        let copy = crate::vault::gitsync::conflict_copy::conflict_copy_content(
+            "notes/plan.md",
+            theirs.as_bytes(),
+            "abc1234",
+        );
+        std::fs::write(root.join(PLAN_COPY), copy).unwrap();
+        assert_eq!(
+            server.post("/index/rebuild").await.status_code(),
+            StatusCode::OK
+        );
+        (server, state, tmp)
+    }
+
+    fn read(state: &AppState, rel: &str) -> String {
+        std::fs::read_to_string(state.vault.root().join(rel)).unwrap()
+    }
+
+    fn revision(text: &str) -> String {
+        crate::vault::page::page_revision(text)
+    }
+
+    #[tokio::test]
+    async fn compare_returns_both_sides_in_comparable_form() {
+        let theirs = PLAN
+            .replace("ours", "theirs")
+            .replace("2026-09-01", "2026-09-05");
+        let (server, state, _tmp) = conflict_fixture(PLAN, &theirs).await;
+
+        let response = server
+            .get("/sync/conflicts/compare")
+            .add_query_param("copy", PLAN_COPY)
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::OK,
+            "{}",
+            response.text()
+        );
+        let compare: ConflictCompareDto = response.json();
+        assert_eq!(compare.copy_path, PLAN_COPY);
+        assert_eq!(compare.original_path, "notes/plan.md");
+        assert_eq!(compare.original_title.as_deref(), Some("Plan"));
+        assert_eq!(
+            compare.local.revision,
+            revision(&read(&state, "notes/plan.md"))
+        );
+        assert_eq!(compare.other.revision, revision(&read(&state, PLAN_COPY)));
+        // Only the body differs: same id, no copy-only keys, no timestamps.
+        assert_eq!(
+            compare.local.text.replace("ours", "theirs"),
+            compare.other.text,
+            "{compare:?}"
+        );
+        assert!(compare.other.text.contains(PLAN_ID), "{compare:?}");
+        assert!(!compare.other.text.contains("conflict"), "{compare:?}");
+    }
+
+    #[tokio::test]
+    async fn compare_is_404_for_a_page_that_is_not_a_copy_or_is_missing() {
+        let (server, _state, _tmp) = conflict_fixture(PLAN, PLAN).await;
+        for copy in ["notes/plan.md", "notes/nothing.conflict.abc1234.md"] {
+            let response = server
+                .get("/sync/conflicts/compare")
+                .add_query_param("copy", copy)
+                .await;
+            assert_eq!(response.status_code(), StatusCode::NOT_FOUND, "{copy}");
+        }
+    }
+
+    #[tokio::test]
+    async fn compare_is_404_when_the_original_is_gone() {
+        let (server, state, _tmp) = conflict_fixture(PLAN, PLAN).await;
+        std::fs::remove_file(state.vault.root().join("notes/plan.md")).unwrap();
+        let response = server
+            .get("/sync/conflicts/compare")
+            .add_query_param("copy", PLAN_COPY)
+            .await;
+        assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
+    }
+
+    fn protected_plan() -> String {
+        format!(
+            "+++\nid = \"{PLAN_ID}\"\ntitle = \"Plan\"\nencryption = {{ format = \"age\", version = 1, key_id = \"019fd000-0000-7000-8000-000000000002\" }}\n+++\n{}",
+            clep_test_support::PRIVATE_NOTE_AGE
+        )
+    }
+
+    #[tokio::test]
+    async fn compare_and_resolve_are_422_for_an_encrypted_side() {
+        let (server, state, _tmp) = conflict_fixture(&protected_plan(), PLAN).await;
+        let response = server
+            .get("/sync/conflicts/compare")
+            .add_query_param("copy", PLAN_COPY)
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{}",
+            response.text()
+        );
+
+        let response = server
+            .post("/sync/conflicts/resolve")
+            .json(&ConflictResolveRequest {
+                copy: PLAN_COPY.to_string(),
+                merged: PLAN.to_string(),
+                original_revision: revision(&read(&state, "notes/plan.md")),
+                copy_revision: revision(&read(&state, PLAN_COPY)),
+            })
+            .await;
+        assert_eq!(response.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    async fn compare(server: &TestServer) -> ConflictCompareDto {
+        server
+            .get("/sync/conflicts/compare")
+            .add_query_param("copy", PLAN_COPY)
+            .await
+            .json()
+    }
+
+    #[tokio::test]
+    async fn resolve_writes_the_original_and_bins_the_copy() {
+        let theirs = PLAN.replace("ours", "theirs");
+        let (server, state, _tmp) = conflict_fixture(PLAN, &theirs).await;
+        let sides = compare(&server).await;
+        let merged = sides.other.text.replace("theirs", "ours\ntheirs");
+
+        let response = server
+            .post("/sync/conflicts/resolve")
+            .json(&ConflictResolveRequest {
+                copy: PLAN_COPY.to_string(),
+                merged,
+                original_revision: sides.local.revision,
+                copy_revision: sides.other.revision,
+            })
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::OK,
+            "{}",
+            response.text()
+        );
+        let resolved: ConflictResolveDto = response.json();
+        assert_eq!(resolved.original_path, "notes/plan.md");
+        assert_eq!(resolved.archived.original_path, PLAN_COPY);
+
+        let written = read(&state, "notes/plan.md");
+        let (meta, body) = crate::vault::page::parse_frontmatter(&written).unwrap();
+        assert_eq!(meta.id.to_string(), PLAN_ID);
+        assert_eq!(meta.title.as_deref(), Some("Plan"));
+        assert!(!meta.extra.contains_key("conflict_of"), "{written}");
+        assert!(meta.updated_at.is_some());
+        assert_eq!(body, "shared\nours\ntheirs\n");
+        assert!(!state.vault.root().join(PLAN_COPY).exists());
+
+        let rubbish = server.get("/rubbish").await.text();
+        assert!(rubbish.contains(PLAN_COPY), "{rubbish}");
+        let list: ConflictListDto = server.get("/sync/conflicts").await.json();
+        assert_eq!(list.total, 0, "{list:?}");
+    }
+
+    #[tokio::test]
+    async fn resolve_with_a_stale_revision_is_409_and_changes_nothing() {
+        let theirs = PLAN.replace("ours", "theirs");
+        let (server, state, _tmp) = conflict_fixture(PLAN, &theirs).await;
+        let sides = compare(&server).await;
+        let original_before = read(&state, "notes/plan.md");
+        let copy_before = read(&state, PLAN_COPY);
+
+        for (original_revision, copy_revision) in [
+            ("stale".to_string(), sides.other.revision.clone()),
+            (sides.local.revision.clone(), "stale".to_string()),
+        ] {
+            let response = server
+                .post("/sync/conflicts/resolve")
+                .json(&ConflictResolveRequest {
+                    copy: PLAN_COPY.to_string(),
+                    merged: sides.other.text.clone(),
+                    original_revision,
+                    copy_revision,
+                })
+                .await;
+            assert_eq!(response.status_code(), StatusCode::CONFLICT);
+            let error: serde_json::Value = response.json();
+            assert_eq!(error["detail"]["code"], "revision_conflict", "{error}");
+            assert_eq!(read(&state, "notes/plan.md"), original_before);
+            assert_eq!(read(&state, PLAN_COPY), copy_before);
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_rejects_unparseable_merged_text() {
+        let (server, state, _tmp) = conflict_fixture(PLAN, PLAN).await;
+        let sides = compare(&server).await;
+        let original_before = read(&state, "notes/plan.md");
+        let response = server
+            .post("/sync/conflicts/resolve")
+            .json(&ConflictResolveRequest {
+                copy: PLAN_COPY.to_string(),
+                merged: "no frontmatter at all\n".to_string(),
+                original_revision: sides.local.revision,
+                copy_revision: sides.other.revision,
+            })
+            .await;
+        assert_eq!(response.status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(read(&state, "notes/plan.md"), original_before);
+        assert!(state.vault.root().join(PLAN_COPY).exists());
     }
 
     #[tokio::test]

@@ -1672,6 +1672,38 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/vault/sync/conflicts/compare": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["compare_conflict"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/sync/conflicts/resolve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["resolve_conflict"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/vault/sync/status": {
     parameters: {
       query?: never;
@@ -2283,6 +2315,16 @@ export interface components {
     CaptureRequest: {
       content: string;
     };
+    /** @description A Conflict Copy and its original, side by side. */
+    ConflictCompareDto: {
+      copy_path: string;
+      /** @description The original: the version that stayed at its path. */
+      local: components["schemas"]["ConflictSideDto"];
+      original_path: string;
+      original_title?: string | null;
+      /** @description The copy: the incoming version sync wrote beside it. */
+      other: components["schemas"]["ConflictSideDto"];
+    };
     /** @description One "theirs" side written beside the page it conflicted with (ADR 0004). */
     ConflictCopyDto: {
       /** @description Vault-relative path of the copy holding the incoming content. */
@@ -2314,6 +2356,35 @@ export interface components {
      * @enum {string}
      */
     ConflictPolicy: "skip" | "source_wins" | "manual";
+    ConflictResolveDto: {
+      /** @description The copy's Rubbish Bin entry. */
+      archived: components["schemas"]["RubbishItemSummary"];
+      original_path: string;
+    };
+    /** @description Write `merged` into the original and move the copy to the Rubbish Bin. */
+    ConflictResolveRequest: {
+      /** @description Vault-relative path of the Conflict Copy. */
+      copy: string;
+      /** @description `other.revision` from the compare response. */
+      copy_revision: string;
+      /**
+       * @description The whole resolved page, frontmatter included. Its `id` is replaced by
+       *     the original's and `conflict_of` is dropped.
+       */
+      merged: string;
+      /** @description `local.revision` from the compare response. */
+      original_revision: string;
+    };
+    /** @description One side of a Conflict Copy, ready for a line diff. */
+    ConflictSideDto: {
+      /** @description Revision of the raw file bytes, for the resolve request's guard. */
+      revision: string;
+      /**
+       * @description The page in comparable form: re-serialised frontmatter with the
+       *     original's `id`, no `updated_at`, and none of the copy-only keys.
+       */
+      text: string;
+    };
     ContentEntry: {
       computed_tags: string[];
       created_at?: string | null;
@@ -9406,6 +9477,134 @@ export interface operations {
         };
       };
       /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  compare_conflict: {
+    parameters: {
+      query: {
+        /** @description Vault-relative path of the Conflict Copy. */
+        copy: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The original and the Conflict Copy in comparable form */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConflictCompareDto"];
+        };
+      };
+      /** @description Invalid copy path */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description The copy is missing, is not a Conflict Copy, or its original is missing */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description A side is encrypted or has unparseable frontmatter; resolve it by hand */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  resolve_conflict: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConflictResolveRequest"];
+      };
+    };
+    responses: {
+      /** @description Original written and the copy moved to the Rubbish Bin */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConflictResolveDto"];
+        };
+      };
+      /** @description Invalid copy path, or merged text whose frontmatter does not parse */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description The copy is missing, is not a Conflict Copy, or its original is missing */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description The original or the copy changed since it was compared (`revision_conflict`) */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description A side is encrypted or has unparseable frontmatter; resolve it by hand */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error; when the original was saved but the copy could not be binned, the message says so */
       500: {
         headers: {
           [name: string]: unknown;
