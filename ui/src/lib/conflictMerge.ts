@@ -47,7 +47,16 @@ function chosenLines(
 ): string[] {
   if (choice === "local") return hunk.local;
   if (choice === "other") return hunk.other;
-  return [...hunk.local, ...hunk.other];
+  // Only the file's last line may lack `\n`; terminate it so the other
+  // side's first line does not glue onto it.
+  const local = hunk.local.map((line, index) =>
+    index === hunk.local.length - 1 &&
+    !line.endsWith("\n") &&
+    hunk.other.length > 0
+      ? `${line}\n`
+      : line,
+  );
+  return [...local, ...hunk.other];
 }
 
 /** Joins the segments, taking each hunk's side from `choices` (default `local`). */

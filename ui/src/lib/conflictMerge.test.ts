@@ -145,6 +145,11 @@ describe("assembleMerge", () => {
     );
   });
 
+  it("keeps both final lines apart when local lacks a final newline", () => {
+    const segments = diffSegments("a\nb", "a\nc\n");
+    expect(assembleMerge(segments, new Map([[0, "both"]]))).toBe("a\nb\nc\n");
+  });
+
   it("applies choices per hunk", () => {
     const segments = diffSegments("a\nb\nc\nd\ne\n", "A\nb\nC\nd\nE\n");
     const choices = new Map<number, Choice>([
