@@ -8,452 +8,452 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from "./routes/__root";
-import { Route as AcademicRouteImport } from "./routes/academic";
-import { Route as AgendaRouteImport } from "./routes/agenda";
-import { Route as ArchiveSplatRouteImport } from "./routes/archive.$";
-import { Route as BasesSlugRouteImport } from "./routes/bases.$slug";
-import { Route as BasesSlugEditRouteImport } from "./routes/bases.$slug.edit";
-import { Route as BasesIndexRouteImport } from "./routes/bases.index";
-import { Route as ConflictsRouteImport } from "./routes/conflicts";
-import { Route as ConflictsCompareSplatRouteImport } from "./routes/conflicts_.compare.$";
-import { Route as DocsRouteImport } from "./routes/docs";
-import { Route as DocsSlugRouteImport } from "./routes/docs.$slug";
-import { Route as FeedsRouteImport } from "./routes/feeds";
-import { Route as GazetteerRouteImport } from "./routes/gazetteer";
-import { Route as GraphRouteImport } from "./routes/graph";
-import { Route as IndexRouteImport } from "./routes/index";
-import { Route as PagesSplatRouteImport } from "./routes/pages/$";
-import { Route as RepairsRouteImport } from "./routes/repairs";
-import { Route as RubbishRouteImport } from "./routes/rubbish";
-import { Route as StatsRouteImport } from "./routes/stats";
-import { Route as TaskingRouteImport } from "./routes/tasking";
-import { Route as WorkspaceRouteImport } from "./routes/workspace";
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as AcademicRouteImport } from './routes/academic'
+import { Route as AgendaRouteImport } from './routes/agenda'
+import { Route as ConflictsRouteImport } from './routes/conflicts'
+import { Route as DocsRouteImport } from './routes/docs'
+import { Route as FeedsRouteImport } from './routes/feeds'
+import { Route as GazetteerRouteImport } from './routes/gazetteer'
+import { Route as GraphRouteImport } from './routes/graph'
+import { Route as RepairsRouteImport } from './routes/repairs'
+import { Route as RubbishRouteImport } from './routes/rubbish'
+import { Route as StatsRouteImport } from './routes/stats'
+import { Route as TaskingRouteImport } from './routes/tasking'
+import { Route as WorkspaceRouteImport } from './routes/workspace'
+import { Route as ArchiveSplatRouteImport } from './routes/archive.$'
+import { Route as BasesIndexRouteImport } from './routes/bases.index'
+import { Route as BasesSlugRouteImport } from './routes/bases.$slug'
+import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
+import { Route as PagesSplatRouteImport } from './routes/pages/$'
+import { Route as BasesSlugEditRouteImport } from './routes/bases.$slug.edit'
+import { Route as ConflictsCompareSplatRouteImport } from './routes/conflicts_.compare.$'
 
 const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const AcademicRoute = AcademicRouteImport.update({
-  id: "/academic",
-  path: "/academic",
+  id: '/academic',
+  path: '/academic',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const AgendaRoute = AgendaRouteImport.update({
-  id: "/agenda",
-  path: "/agenda",
+  id: '/agenda',
+  path: '/agenda',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const ConflictsRoute = ConflictsRouteImport.update({
-  id: "/conflicts",
-  path: "/conflicts",
+  id: '/conflicts',
+  path: '/conflicts',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const DocsRoute = DocsRouteImport.update({
-  id: "/docs",
-  path: "/docs",
+  id: '/docs',
+  path: '/docs',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const FeedsRoute = FeedsRouteImport.update({
-  id: "/feeds",
-  path: "/feeds",
+  id: '/feeds',
+  path: '/feeds',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const GazetteerRoute = GazetteerRouteImport.update({
-  id: "/gazetteer",
-  path: "/gazetteer",
+  id: '/gazetteer',
+  path: '/gazetteer',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const GraphRoute = GraphRouteImport.update({
-  id: "/graph",
-  path: "/graph",
+  id: '/graph',
+  path: '/graph',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const RepairsRoute = RepairsRouteImport.update({
-  id: "/repairs",
-  path: "/repairs",
+  id: '/repairs',
+  path: '/repairs',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const RubbishRoute = RubbishRouteImport.update({
-  id: "/rubbish",
-  path: "/rubbish",
+  id: '/rubbish',
+  path: '/rubbish',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const StatsRoute = StatsRouteImport.update({
-  id: "/stats",
-  path: "/stats",
+  id: '/stats',
+  path: '/stats',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const TaskingRoute = TaskingRouteImport.update({
-  id: "/tasking",
-  path: "/tasking",
+  id: '/tasking',
+  path: '/tasking',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const WorkspaceRoute = WorkspaceRouteImport.update({
-  id: "/workspace",
-  path: "/workspace",
+  id: '/workspace',
+  path: '/workspace',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const ArchiveSplatRoute = ArchiveSplatRouteImport.update({
-  id: "/archive/$",
-  path: "/archive/$",
+  id: '/archive/$',
+  path: '/archive/$',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const BasesIndexRoute = BasesIndexRouteImport.update({
-  id: "/bases/",
-  path: "/bases/",
+  id: '/bases/',
+  path: '/bases/',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const BasesSlugRoute = BasesSlugRouteImport.update({
-  id: "/bases/$slug",
-  path: "/bases/$slug",
+  id: '/bases/$slug',
+  path: '/bases/$slug',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const DocsSlugRoute = DocsSlugRouteImport.update({
-  id: "/$slug",
-  path: "/$slug",
+  id: '/$slug',
+  path: '/$slug',
   getParentRoute: () => DocsRoute,
-} as any);
+} as any)
 const PagesSplatRoute = PagesSplatRouteImport.update({
-  id: "/pages/$",
-  path: "/pages/$",
+  id: '/pages/$',
+  path: '/pages/$',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const BasesSlugEditRoute = BasesSlugEditRouteImport.update({
-  id: "/edit",
-  path: "/edit",
+  id: '/edit',
+  path: '/edit',
   getParentRoute: () => BasesSlugRoute,
-} as any);
+} as any)
 const ConflictsCompareSplatRoute = ConflictsCompareSplatRouteImport.update({
-  id: "/conflicts_/compare/$",
-  path: "/conflicts/compare/$",
+  id: '/conflicts_/compare/$',
+  path: '/conflicts/compare/$',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 
 export interface FileRoutesByFullPath {
-  "/": typeof IndexRoute;
-  "/academic": typeof AcademicRoute;
-  "/agenda": typeof AgendaRoute;
-  "/conflicts": typeof ConflictsRoute;
-  "/docs": typeof DocsRouteWithChildren;
-  "/feeds": typeof FeedsRoute;
-  "/gazetteer": typeof GazetteerRoute;
-  "/graph": typeof GraphRoute;
-  "/repairs": typeof RepairsRoute;
-  "/rubbish": typeof RubbishRoute;
-  "/stats": typeof StatsRoute;
-  "/tasking": typeof TaskingRoute;
-  "/workspace": typeof WorkspaceRoute;
-  "/archive/$": typeof ArchiveSplatRoute;
-  "/bases/$slug": typeof BasesSlugRouteWithChildren;
-  "/docs/$slug": typeof DocsSlugRoute;
-  "/pages/$": typeof PagesSplatRoute;
-  "/bases/": typeof BasesIndexRoute;
-  "/bases/$slug/edit": typeof BasesSlugEditRoute;
-  "/conflicts/compare/$": typeof ConflictsCompareSplatRoute;
+  '/': typeof IndexRoute
+  '/academic': typeof AcademicRoute
+  '/agenda': typeof AgendaRoute
+  '/conflicts': typeof ConflictsRoute
+  '/docs': typeof DocsRouteWithChildren
+  '/feeds': typeof FeedsRoute
+  '/gazetteer': typeof GazetteerRoute
+  '/graph': typeof GraphRoute
+  '/repairs': typeof RepairsRoute
+  '/rubbish': typeof RubbishRoute
+  '/stats': typeof StatsRoute
+  '/tasking': typeof TaskingRoute
+  '/workspace': typeof WorkspaceRoute
+  '/archive/$': typeof ArchiveSplatRoute
+  '/bases/$slug': typeof BasesSlugRouteWithChildren
+  '/docs/$slug': typeof DocsSlugRoute
+  '/pages/$': typeof PagesSplatRoute
+  '/bases/': typeof BasesIndexRoute
+  '/bases/$slug/edit': typeof BasesSlugEditRoute
+  '/conflicts/compare/$': typeof ConflictsCompareSplatRoute
 }
 export interface FileRoutesByTo {
-  "/": typeof IndexRoute;
-  "/academic": typeof AcademicRoute;
-  "/agenda": typeof AgendaRoute;
-  "/conflicts": typeof ConflictsRoute;
-  "/docs": typeof DocsRouteWithChildren;
-  "/feeds": typeof FeedsRoute;
-  "/gazetteer": typeof GazetteerRoute;
-  "/graph": typeof GraphRoute;
-  "/repairs": typeof RepairsRoute;
-  "/rubbish": typeof RubbishRoute;
-  "/stats": typeof StatsRoute;
-  "/tasking": typeof TaskingRoute;
-  "/workspace": typeof WorkspaceRoute;
-  "/archive/$": typeof ArchiveSplatRoute;
-  "/bases/$slug": typeof BasesSlugRouteWithChildren;
-  "/docs/$slug": typeof DocsSlugRoute;
-  "/pages/$": typeof PagesSplatRoute;
-  "/bases": typeof BasesIndexRoute;
-  "/bases/$slug/edit": typeof BasesSlugEditRoute;
-  "/conflicts/compare/$": typeof ConflictsCompareSplatRoute;
+  '/': typeof IndexRoute
+  '/academic': typeof AcademicRoute
+  '/agenda': typeof AgendaRoute
+  '/conflicts': typeof ConflictsRoute
+  '/docs': typeof DocsRouteWithChildren
+  '/feeds': typeof FeedsRoute
+  '/gazetteer': typeof GazetteerRoute
+  '/graph': typeof GraphRoute
+  '/repairs': typeof RepairsRoute
+  '/rubbish': typeof RubbishRoute
+  '/stats': typeof StatsRoute
+  '/tasking': typeof TaskingRoute
+  '/workspace': typeof WorkspaceRoute
+  '/archive/$': typeof ArchiveSplatRoute
+  '/bases/$slug': typeof BasesSlugRouteWithChildren
+  '/docs/$slug': typeof DocsSlugRoute
+  '/pages/$': typeof PagesSplatRoute
+  '/bases': typeof BasesIndexRoute
+  '/bases/$slug/edit': typeof BasesSlugEditRoute
+  '/conflicts/compare/$': typeof ConflictsCompareSplatRoute
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport;
-  "/": typeof IndexRoute;
-  "/academic": typeof AcademicRoute;
-  "/agenda": typeof AgendaRoute;
-  "/conflicts": typeof ConflictsRoute;
-  "/docs": typeof DocsRouteWithChildren;
-  "/feeds": typeof FeedsRoute;
-  "/gazetteer": typeof GazetteerRoute;
-  "/graph": typeof GraphRoute;
-  "/repairs": typeof RepairsRoute;
-  "/rubbish": typeof RubbishRoute;
-  "/stats": typeof StatsRoute;
-  "/tasking": typeof TaskingRoute;
-  "/workspace": typeof WorkspaceRoute;
-  "/archive/$": typeof ArchiveSplatRoute;
-  "/bases/$slug": typeof BasesSlugRouteWithChildren;
-  "/docs/$slug": typeof DocsSlugRoute;
-  "/pages/$": typeof PagesSplatRoute;
-  "/bases/": typeof BasesIndexRoute;
-  "/bases/$slug/edit": typeof BasesSlugEditRoute;
-  "/conflicts_/compare/$": typeof ConflictsCompareSplatRoute;
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/academic': typeof AcademicRoute
+  '/agenda': typeof AgendaRoute
+  '/conflicts': typeof ConflictsRoute
+  '/docs': typeof DocsRouteWithChildren
+  '/feeds': typeof FeedsRoute
+  '/gazetteer': typeof GazetteerRoute
+  '/graph': typeof GraphRoute
+  '/repairs': typeof RepairsRoute
+  '/rubbish': typeof RubbishRoute
+  '/stats': typeof StatsRoute
+  '/tasking': typeof TaskingRoute
+  '/workspace': typeof WorkspaceRoute
+  '/archive/$': typeof ArchiveSplatRoute
+  '/bases/$slug': typeof BasesSlugRouteWithChildren
+  '/docs/$slug': typeof DocsSlugRoute
+  '/pages/$': typeof PagesSplatRoute
+  '/bases/': typeof BasesIndexRoute
+  '/bases/$slug/edit': typeof BasesSlugEditRoute
+  '/conflicts_/compare/$': typeof ConflictsCompareSplatRoute
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath;
+  fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | "/"
-    | "/academic"
-    | "/agenda"
-    | "/conflicts"
-    | "/docs"
-    | "/feeds"
-    | "/gazetteer"
-    | "/graph"
-    | "/repairs"
-    | "/rubbish"
-    | "/stats"
-    | "/tasking"
-    | "/workspace"
-    | "/archive/$"
-    | "/bases/$slug"
-    | "/docs/$slug"
-    | "/pages/$"
-    | "/bases/"
-    | "/bases/$slug/edit"
-    | "/conflicts/compare/$";
-  fileRoutesByTo: FileRoutesByTo;
+    | '/'
+    | '/academic'
+    | '/agenda'
+    | '/conflicts'
+    | '/docs'
+    | '/feeds'
+    | '/gazetteer'
+    | '/graph'
+    | '/repairs'
+    | '/rubbish'
+    | '/stats'
+    | '/tasking'
+    | '/workspace'
+    | '/archive/$'
+    | '/bases/$slug'
+    | '/docs/$slug'
+    | '/pages/$'
+    | '/bases/'
+    | '/bases/$slug/edit'
+    | '/conflicts/compare/$'
+  fileRoutesByTo: FileRoutesByTo
   to:
-    | "/"
-    | "/academic"
-    | "/agenda"
-    | "/conflicts"
-    | "/docs"
-    | "/feeds"
-    | "/gazetteer"
-    | "/graph"
-    | "/repairs"
-    | "/rubbish"
-    | "/stats"
-    | "/tasking"
-    | "/workspace"
-    | "/archive/$"
-    | "/bases/$slug"
-    | "/docs/$slug"
-    | "/pages/$"
-    | "/bases"
-    | "/bases/$slug/edit"
-    | "/conflicts/compare/$";
+    | '/'
+    | '/academic'
+    | '/agenda'
+    | '/conflicts'
+    | '/docs'
+    | '/feeds'
+    | '/gazetteer'
+    | '/graph'
+    | '/repairs'
+    | '/rubbish'
+    | '/stats'
+    | '/tasking'
+    | '/workspace'
+    | '/archive/$'
+    | '/bases/$slug'
+    | '/docs/$slug'
+    | '/pages/$'
+    | '/bases'
+    | '/bases/$slug/edit'
+    | '/conflicts/compare/$'
   id:
-    | "__root__"
-    | "/"
-    | "/academic"
-    | "/agenda"
-    | "/conflicts"
-    | "/docs"
-    | "/feeds"
-    | "/gazetteer"
-    | "/graph"
-    | "/repairs"
-    | "/rubbish"
-    | "/stats"
-    | "/tasking"
-    | "/workspace"
-    | "/archive/$"
-    | "/bases/$slug"
-    | "/docs/$slug"
-    | "/pages/$"
-    | "/bases/"
-    | "/bases/$slug/edit"
-    | "/conflicts_/compare/$";
-  fileRoutesById: FileRoutesById;
+    | '__root__'
+    | '/'
+    | '/academic'
+    | '/agenda'
+    | '/conflicts'
+    | '/docs'
+    | '/feeds'
+    | '/gazetteer'
+    | '/graph'
+    | '/repairs'
+    | '/rubbish'
+    | '/stats'
+    | '/tasking'
+    | '/workspace'
+    | '/archive/$'
+    | '/bases/$slug'
+    | '/docs/$slug'
+    | '/pages/$'
+    | '/bases/'
+    | '/bases/$slug/edit'
+    | '/conflicts_/compare/$'
+  fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute;
-  AcademicRoute: typeof AcademicRoute;
-  AgendaRoute: typeof AgendaRoute;
-  ConflictsRoute: typeof ConflictsRoute;
-  DocsRoute: typeof DocsRouteWithChildren;
-  FeedsRoute: typeof FeedsRoute;
-  GazetteerRoute: typeof GazetteerRoute;
-  GraphRoute: typeof GraphRoute;
-  RepairsRoute: typeof RepairsRoute;
-  RubbishRoute: typeof RubbishRoute;
-  StatsRoute: typeof StatsRoute;
-  TaskingRoute: typeof TaskingRoute;
-  WorkspaceRoute: typeof WorkspaceRoute;
-  ArchiveSplatRoute: typeof ArchiveSplatRoute;
-  BasesSlugRoute: typeof BasesSlugRouteWithChildren;
-  PagesSplatRoute: typeof PagesSplatRoute;
-  BasesIndexRoute: typeof BasesIndexRoute;
-  ConflictsCompareSplatRoute: typeof ConflictsCompareSplatRoute;
+  IndexRoute: typeof IndexRoute
+  AcademicRoute: typeof AcademicRoute
+  AgendaRoute: typeof AgendaRoute
+  ConflictsRoute: typeof ConflictsRoute
+  DocsRoute: typeof DocsRouteWithChildren
+  FeedsRoute: typeof FeedsRoute
+  GazetteerRoute: typeof GazetteerRoute
+  GraphRoute: typeof GraphRoute
+  RepairsRoute: typeof RepairsRoute
+  RubbishRoute: typeof RubbishRoute
+  StatsRoute: typeof StatsRoute
+  TaskingRoute: typeof TaskingRoute
+  WorkspaceRoute: typeof WorkspaceRoute
+  ArchiveSplatRoute: typeof ArchiveSplatRoute
+  BasesSlugRoute: typeof BasesSlugRouteWithChildren
+  PagesSplatRoute: typeof PagesSplatRoute
+  BasesIndexRoute: typeof BasesIndexRoute
+  ConflictsCompareSplatRoute: typeof ConflictsCompareSplatRoute
 }
 
-declare module "@tanstack/react-router" {
+declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    "/": {
-      id: "/";
-      path: "/";
-      fullPath: "/";
-      preLoaderRoute: typeof IndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/academic": {
-      id: "/academic";
-      path: "/academic";
-      fullPath: "/academic";
-      preLoaderRoute: typeof AcademicRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/agenda": {
-      id: "/agenda";
-      path: "/agenda";
-      fullPath: "/agenda";
-      preLoaderRoute: typeof AgendaRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/conflicts": {
-      id: "/conflicts";
-      path: "/conflicts";
-      fullPath: "/conflicts";
-      preLoaderRoute: typeof ConflictsRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/docs": {
-      id: "/docs";
-      path: "/docs";
-      fullPath: "/docs";
-      preLoaderRoute: typeof DocsRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/feeds": {
-      id: "/feeds";
-      path: "/feeds";
-      fullPath: "/feeds";
-      preLoaderRoute: typeof FeedsRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/gazetteer": {
-      id: "/gazetteer";
-      path: "/gazetteer";
-      fullPath: "/gazetteer";
-      preLoaderRoute: typeof GazetteerRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/graph": {
-      id: "/graph";
-      path: "/graph";
-      fullPath: "/graph";
-      preLoaderRoute: typeof GraphRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/repairs": {
-      id: "/repairs";
-      path: "/repairs";
-      fullPath: "/repairs";
-      preLoaderRoute: typeof RepairsRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/rubbish": {
-      id: "/rubbish";
-      path: "/rubbish";
-      fullPath: "/rubbish";
-      preLoaderRoute: typeof RubbishRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/stats": {
-      id: "/stats";
-      path: "/stats";
-      fullPath: "/stats";
-      preLoaderRoute: typeof StatsRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/tasking": {
-      id: "/tasking";
-      path: "/tasking";
-      fullPath: "/tasking";
-      preLoaderRoute: typeof TaskingRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/workspace": {
-      id: "/workspace";
-      path: "/workspace";
-      fullPath: "/workspace";
-      preLoaderRoute: typeof WorkspaceRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/archive/$": {
-      id: "/archive/$";
-      path: "/archive/$";
-      fullPath: "/archive/$";
-      preLoaderRoute: typeof ArchiveSplatRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/bases/": {
-      id: "/bases/";
-      path: "/bases";
-      fullPath: "/bases/";
-      preLoaderRoute: typeof BasesIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/bases/$slug": {
-      id: "/bases/$slug";
-      path: "/bases/$slug";
-      fullPath: "/bases/$slug";
-      preLoaderRoute: typeof BasesSlugRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/docs/$slug": {
-      id: "/docs/$slug";
-      path: "/$slug";
-      fullPath: "/docs/$slug";
-      preLoaderRoute: typeof DocsSlugRouteImport;
-      parentRoute: typeof DocsRoute;
-    };
-    "/pages/$": {
-      id: "/pages/$";
-      path: "/pages/$";
-      fullPath: "/pages/$";
-      preLoaderRoute: typeof PagesSplatRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/bases/$slug/edit": {
-      id: "/bases/$slug/edit";
-      path: "/edit";
-      fullPath: "/bases/$slug/edit";
-      preLoaderRoute: typeof BasesSlugEditRouteImport;
-      parentRoute: typeof BasesSlugRoute;
-    };
-    "/conflicts_/compare/$": {
-      id: "/conflicts_/compare/$";
-      path: "/conflicts/compare/$";
-      fullPath: "/conflicts/compare/$";
-      preLoaderRoute: typeof ConflictsCompareSplatRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/academic': {
+      id: '/academic'
+      path: '/academic'
+      fullPath: '/academic'
+      preLoaderRoute: typeof AcademicRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agenda': {
+      id: '/agenda'
+      path: '/agenda'
+      fullPath: '/agenda'
+      preLoaderRoute: typeof AgendaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/conflicts': {
+      id: '/conflicts'
+      path: '/conflicts'
+      fullPath: '/conflicts'
+      preLoaderRoute: typeof ConflictsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/feeds': {
+      id: '/feeds'
+      path: '/feeds'
+      fullPath: '/feeds'
+      preLoaderRoute: typeof FeedsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gazetteer': {
+      id: '/gazetteer'
+      path: '/gazetteer'
+      fullPath: '/gazetteer'
+      preLoaderRoute: typeof GazetteerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/graph': {
+      id: '/graph'
+      path: '/graph'
+      fullPath: '/graph'
+      preLoaderRoute: typeof GraphRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/repairs': {
+      id: '/repairs'
+      path: '/repairs'
+      fullPath: '/repairs'
+      preLoaderRoute: typeof RepairsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rubbish': {
+      id: '/rubbish'
+      path: '/rubbish'
+      fullPath: '/rubbish'
+      preLoaderRoute: typeof RubbishRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stats': {
+      id: '/stats'
+      path: '/stats'
+      fullPath: '/stats'
+      preLoaderRoute: typeof StatsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tasking': {
+      id: '/tasking'
+      path: '/tasking'
+      fullPath: '/tasking'
+      preLoaderRoute: typeof TaskingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workspace': {
+      id: '/workspace'
+      path: '/workspace'
+      fullPath: '/workspace'
+      preLoaderRoute: typeof WorkspaceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/archive/$': {
+      id: '/archive/$'
+      path: '/archive/$'
+      fullPath: '/archive/$'
+      preLoaderRoute: typeof ArchiveSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bases/': {
+      id: '/bases/'
+      path: '/bases'
+      fullPath: '/bases/'
+      preLoaderRoute: typeof BasesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bases/$slug': {
+      id: '/bases/$slug'
+      path: '/bases/$slug'
+      fullPath: '/bases/$slug'
+      preLoaderRoute: typeof BasesSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/$slug': {
+      id: '/docs/$slug'
+      path: '/$slug'
+      fullPath: '/docs/$slug'
+      preLoaderRoute: typeof DocsSlugRouteImport
+      parentRoute: typeof DocsRoute
+    }
+    '/pages/$': {
+      id: '/pages/$'
+      path: '/pages/$'
+      fullPath: '/pages/$'
+      preLoaderRoute: typeof PagesSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bases/$slug/edit': {
+      id: '/bases/$slug/edit'
+      path: '/edit'
+      fullPath: '/bases/$slug/edit'
+      preLoaderRoute: typeof BasesSlugEditRouteImport
+      parentRoute: typeof BasesSlugRoute
+    }
+    '/conflicts_/compare/$': {
+      id: '/conflicts_/compare/$'
+      path: '/conflicts/compare/$'
+      fullPath: '/conflicts/compare/$'
+      preLoaderRoute: typeof ConflictsCompareSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 interface DocsRouteChildren {
-  DocsSlugRoute: typeof DocsSlugRoute;
+  DocsSlugRoute: typeof DocsSlugRoute
 }
 
 const DocsRouteChildren: DocsRouteChildren = {
   DocsSlugRoute: DocsSlugRoute,
-};
+}
 
-const DocsRouteWithChildren = DocsRoute._addFileChildren(DocsRouteChildren);
+const DocsRouteWithChildren = DocsRoute._addFileChildren(DocsRouteChildren)
 
 interface BasesSlugRouteChildren {
-  BasesSlugEditRoute: typeof BasesSlugEditRoute;
+  BasesSlugEditRoute: typeof BasesSlugEditRoute
 }
 
 const BasesSlugRouteChildren: BasesSlugRouteChildren = {
   BasesSlugEditRoute: BasesSlugEditRoute,
-};
+}
 
 const BasesSlugRouteWithChildren = BasesSlugRoute._addFileChildren(
   BasesSlugRouteChildren,
-);
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -474,7 +474,7 @@ const rootRouteChildren: RootRouteChildren = {
   PagesSplatRoute: PagesSplatRoute,
   BasesIndexRoute: BasesIndexRoute,
   ConflictsCompareSplatRoute: ConflictsCompareSplatRoute,
-};
+}
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>();
+  ._addFileTypes<FileRouteTypes>()
