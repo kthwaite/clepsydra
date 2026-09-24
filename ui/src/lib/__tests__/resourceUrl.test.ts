@@ -28,4 +28,15 @@ describe("resource URL resolution", () => {
       path: "notes/project.md",
     });
   });
+
+  it("opens prefixed external links in the browser, not as vault pages", () => {
+    expect(resolveLinkTarget("arxiv:2301.00001")).toEqual({
+      kind: "browser",
+      href: "https://arxiv.org/abs/2301.00001",
+    });
+    expect(resolveLinkTarget("wiki:Hysteresis")).toEqual({
+      kind: "browser",
+      href: "https://en.wikipedia.org/wiki/Hysteresis",
+    });
+  });
 });

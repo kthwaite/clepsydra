@@ -103,3 +103,22 @@ export function expandPrefixedLink(
   const expanded = RULES[provider](rawValue);
   return expanded ? { provider, ...expanded } : null;
 }
+
+const PREFIXED_URL = /^([A-Za-z]+):(?!\/\/)(.+)$/s;
+
+/**
+ * Expand a stored `prefix:value` link target (e.g. `arxiv:2301.00001`) to its
+ * external URL. Link destinations are percent-encoded, so the value is decoded
+ * before expansion. Returns null for anything that is not a known prefix.
+ */
+export function expandPrefixedUrl(url: string): string | null {
+  const match = PREFIXED_URL.exec(url);
+  if (!match) return null;
+  let value: string;
+  try {
+    value = decodeURIComponent(match[2]);
+  } catch {
+    return null;
+  }
+  return expandPrefixedLink(match[1], value)?.url ?? null;
+}
