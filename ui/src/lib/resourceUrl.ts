@@ -1,3 +1,5 @@
+import { expandPrefixedUrl } from "#/editor/prefixedExternalLinks";
+
 const CAS_SCHEME = /^cas:/i;
 const BROWSER_SCHEME = /^(https?:|mailto:)/i;
 
@@ -18,6 +20,8 @@ export function resolveLinkTarget(url: string): LinkTarget {
   if (isCasResource(url) || BROWSER_SCHEME.test(url)) {
     return { kind: "browser", href: resolveResourceUrl(url) };
   }
+  const expanded = expandPrefixedUrl(url);
+  if (expanded) return { kind: "browser", href: expanded };
   return { kind: "vault", path: url };
 }
 

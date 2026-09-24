@@ -11,6 +11,7 @@ import { MathExpression } from "#/components/MathExpression";
 import { MermaidCodeBlock } from "#/components/MermaidCodeBlock";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { expandPrefixedUrl } from "#/editor/prefixedExternalLinks";
 import { classifyLinkResource } from "#/lib/linkResource";
 import {
   BLOCK_REFERENCE_SCHEME,
@@ -82,6 +83,8 @@ const transformMarkdownUrl: UrlTransform = (url, key, node) => {
   ) {
     return url;
   }
+  const expanded = expandPrefixedUrl(url);
+  if (expanded) return expanded;
   return isCasResource(url)
     ? resolveResourceUrl(url)
     : defaultUrlTransform(url);

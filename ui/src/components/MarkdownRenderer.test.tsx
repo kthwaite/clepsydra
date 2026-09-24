@@ -170,6 +170,14 @@ describe("MarkdownRenderer", () => {
     );
   });
 
+  it("expands prefixed external links to their external URL", () => {
+    render(<MarkdownRenderer content="[paper](arxiv:2301.00001)" />);
+    const link = screen.getByRole("link", { name: "paper" });
+    expect(link).toHaveAttribute("href", "https://arxiv.org/abs/2301.00001");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("data-link-resource", "arxiv");
+  });
+
   it("does not mark internal page links", () => {
     render(<MarkdownRenderer content="[Local](/pages/notes/local.md)" />);
     expect(screen.getByRole("link", { name: "Local" })).not.toHaveAttribute(
