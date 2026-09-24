@@ -90,8 +90,10 @@ export const queryKeys = {
     prefix: ["sync"] as const,
     conflicts: () => [...queryKeys.sync.prefix, "conflicts"] as const,
     conflictsPath: "/api/vault/sync/conflicts" as const,
-    compare: (copy: string) =>
-      [...queryKeys.sync.prefix, "compare", copy] as const,
+    // Outside `prefix` on purpose: vault events invalidate `prefix`, and a
+    // refetch that brings new revisions would reset the operator's choices.
+    // The resolve's revision guard reports staleness instead (409 → Reload).
+    compare: (copy: string) => ["sync-compare", copy] as const,
     comparePath: "/api/vault/sync/conflicts/compare" as const,
     resolvePath: "/api/vault/sync/conflicts/resolve" as const,
   },

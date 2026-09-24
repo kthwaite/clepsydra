@@ -52,6 +52,16 @@ describe("useConflictCompare", () => {
     });
   });
 
+  it("is not refreshed by the vault-event invalidation of the sync prefix", async () => {
+    const queryClient = freshQueryClient();
+    queryClient.setQueryData(queryKeys.sync.compare(request.copy), {});
+    await queryClient.invalidateQueries({ queryKey: queryKeys.sync.prefix });
+    expect(
+      queryClient.getQueryState(queryKeys.sync.compare(request.copy))
+        ?.isInvalidated,
+    ).toBe(false);
+  });
+
   it("throws the status and detail code of an error", async () => {
     vi.spyOn(fetchClient, "GET").mockResolvedValue({
       error: {
