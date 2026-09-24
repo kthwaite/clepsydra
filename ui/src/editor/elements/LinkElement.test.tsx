@@ -1,11 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { RenderElementProps } from "slate-react";
 import { describe, expect, it, vi } from "vitest";
 import { LinkElement } from "#/editor/elements/LinkElement";
 import type { LinkElement as LinkElementType } from "#/editor/types";
 
+const openTab = vi.hoisted(() => vi.fn());
+
 vi.mock("#/hooks/useOpenTab", () => ({
-  useOpenTab: () => vi.fn(),
+  useOpenTab: () => openTab,
 }));
 
 const attributes = {
@@ -45,5 +47,22 @@ describe("LinkElement resource marks", () => {
   it("exposes a CAS link through the vault blob endpoint", () => {
     const link = renderLink("cas:sha256:abc123");
     expect(link).toHaveAttribute("href", "/api/vault/cas/sha256:abc123");
+  });
+
+  it("marks and opens a prefixed link as its external URL", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const link = renderLink("arxiv:2301.00001");
+    expect(link).toHaveAttribute("href", "https://arxiv.org/abs/2301.00001");
+    expect(link).toHaveAttribute("data-link-resource", "arxiv");
+
+    fireEvent.click(link, { metaKey: true });
+
+    expect(open).toHaveBeenCalledWith(
+      "https://arxiv.org/abs/2301.00001",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(openTab).not.toHaveBeenCalled();
+    open.mockRestore();
   });
 });

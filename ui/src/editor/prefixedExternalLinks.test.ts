@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { classifyLinkResource } from "#/lib/linkResource";
-import { expandPrefixedLink } from "./prefixedExternalLinks";
+import { expandPrefixedLink, expandPrefixedUrl } from "./prefixedExternalLinks";
 
 describe("expandPrefixedLink", () => {
   it.each([
@@ -118,5 +118,35 @@ describe("expandPrefixedLink", () => {
     const expanded = expandPrefixedLink(prefix, value);
     expect(expanded).not.toBeNull();
     expect(classifyLinkResource(expanded?.url ?? "")).toBe(resource);
+  });
+});
+
+describe("expandPrefixedUrl", () => {
+  it.each([
+    ["arxiv:2301.00001", "https://arxiv.org/abs/2301.00001"],
+    ["arXiv:hep-th/9901001v2", "https://arxiv.org/abs/hep-th/9901001v2"],
+    [
+      "wiki:Shipping_Forecast",
+      "https://en.wikipedia.org/wiki/Shipping_Forecast",
+    ],
+    [
+      "wiki:Frankfurt%20School",
+      "https://en.wikipedia.org/wiki/Frankfurt_School",
+    ],
+    ["youtube:dQw4w9WgXcQ", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+  ])("expands stored link target %s", (url, expected) => {
+    expect(expandPrefixedUrl(url)).toBe(expected);
+  });
+
+  it.each([
+    "https://arxiv.org/abs/2301.00001",
+    "notes/page.md",
+    "arxiv:not-an-id",
+    "doi:10.1000/example",
+    "arxiv://2301.00001",
+    "wiki:%E0%A4%A",
+    "cas:sha256:abc",
+  ])("leaves %s alone", (url) => {
+    expect(expandPrefixedUrl(url)).toBeNull();
   });
 });

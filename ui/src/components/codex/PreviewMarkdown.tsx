@@ -1,8 +1,13 @@
-import Markdown, { type Components } from "react-markdown";
+import Markdown, {
+  type Components,
+  defaultUrlTransform,
+  type UrlTransform,
+} from "react-markdown";
 import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
 import { MathExpression } from "#/components/MathExpression";
+import { expandPrefixedUrl } from "#/editor/prefixedExternalLinks";
 import { classifyLinkResource } from "#/lib/linkResource";
 import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
 
@@ -145,6 +150,9 @@ const components: Components = {
   ),
 };
 
+const transformPreviewUrl: UrlTransform = (url) =>
+  expandPrefixedUrl(url) ?? defaultUrlTransform(url);
+
 /**
  * Compact, non-interactive markdown renderer for the preview card. Render inside
  * a height-clamped container; see PreviewBody.
@@ -152,7 +160,11 @@ const components: Components = {
 export function PreviewMarkdown({ content }: { content: string }) {
   return (
     <div className="folio-markdown-preview">
-      <Markdown remarkPlugins={remarkPlugins} components={components}>
+      <Markdown
+        remarkPlugins={remarkPlugins}
+        components={components}
+        urlTransform={transformPreviewUrl}
+      >
         {content}
       </Markdown>
     </div>

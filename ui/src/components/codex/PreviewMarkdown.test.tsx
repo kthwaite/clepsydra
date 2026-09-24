@@ -14,6 +14,15 @@ describe("PreviewMarkdown", () => {
     expect(screen.queryByRole("link", { name: "Wikipedia" })).toBeNull();
   });
 
+  it("marks prefixed external links with their resource", () => {
+    render(<PreviewMarkdown content="[paper](arxiv:2301.00001)" />);
+
+    expect(screen.getByText("paper")).toHaveAttribute(
+      "data-link-resource",
+      "arxiv",
+    );
+  });
+
   it("renders both delimiter families as inline and display math", () => {
     const { container } = render(
       <PreviewMarkdown
