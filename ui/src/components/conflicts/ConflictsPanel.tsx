@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import { useSyncConflicts } from "#/api/index";
 import { Button } from "#/components/ui/button";
 import { useOpenTab } from "#/hooks/useOpenTab";
@@ -5,6 +6,7 @@ import { useOpenTab } from "#/hooks/useOpenTab";
 export function ConflictsPanel() {
   const conflictsQuery = useSyncConflicts();
   const openTab = useOpenTab();
+  const navigate = useNavigate();
   const items = conflictsQuery.data?.items ?? [];
   const total = conflictsQuery.data?.total ?? 0;
 
@@ -27,8 +29,9 @@ export function ConflictsPanel() {
         <p className="mt-3 max-w-2xl text-sm text-ink-2">
           Each entry is a page another device changed at the same time as this
           one; the local version kept its place, the other version was saved as
-          a copy. Fold anything you want to keep into the original, then delete
-          the copy.
+          a copy. Compare the two to pick what to keep, hunk by hunk; resolving
+          writes the result into the original and moves the copy to the Rubbish
+          Bin.
         </p>
       </header>
 
@@ -87,6 +90,20 @@ export function ConflictsPanel() {
                 ) : null}
               </div>
               <div className="flex shrink-0 gap-2">
+                {item.original_exists ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onPress={() =>
+                      void navigate({
+                        to: "/conflicts/compare/$",
+                        params: { _splat: item.path },
+                      })
+                    }
+                  >
+                    Compare
+                  </Button>
+                ) : null}
                 <Button
                   size="sm"
                   variant="ghost"

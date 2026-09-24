@@ -90,6 +90,10 @@ export const queryKeys = {
     prefix: ["sync"] as const,
     conflicts: () => [...queryKeys.sync.prefix, "conflicts"] as const,
     conflictsPath: "/api/vault/sync/conflicts" as const,
+    compare: (copy: string) =>
+      [...queryKeys.sync.prefix, "compare", copy] as const,
+    comparePath: "/api/vault/sync/conflicts/compare" as const,
+    resolvePath: "/api/vault/sync/conflicts/resolve" as const,
   },
 } as const;
 

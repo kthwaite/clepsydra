@@ -29,6 +29,7 @@ const OWN_CODEX_VIEW_BY_ROUTE_ID: Record<string, string> = {
   "/agenda": "agenda",
   "/repairs": "repairs",
   "/conflicts": "conflicts",
+  "/conflicts_/compare/$": "conflicts",
   "/feeds": "feeds",
   "/rubbish": "rubbish",
   "/docs": "docs",

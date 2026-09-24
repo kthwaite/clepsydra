@@ -80,6 +80,12 @@ export const FEATURE_INVENTORY = [
     disposition: { kind: "reference", slug: "sync" },
   },
   {
+    id: "/conflicts/compare/$",
+    label: "Sync conflict compare and resolve",
+    surface: "route",
+    disposition: { kind: "reference", slug: "sync" },
+  },
+  {
     id: "/rubbish",
     label: "Rubbish Bin",
     surface: "route",
