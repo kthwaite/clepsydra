@@ -116,6 +116,7 @@ import {
   subscribeFolioHistoryRestorationRequests,
   validateTextPointSnapshot,
 } from "#/store/folioRestoration";
+import { useFooterContext } from "#/store/footerContext";
 import {
   registerWorkspaceTransitionGuard,
   runWorkspaceTransition,
@@ -947,6 +948,15 @@ export function Folio({ tabId, path }: FolioProps) {
   const wordCount = useMemo(
     () => countWordsFromSlate(visibleEditorValue),
     [visibleEditorValue],
+  );
+  const isActiveTab = useWorkspaceStore((s) => s.activeTabId === tabId);
+  useFooterContext(
+    isActiveTab
+      ? [
+          path,
+          ...(wordCount > 0 ? [`${wordCount.toLocaleString()} words`] : []),
+        ]
+      : null,
   );
   const toc = useMemo(() => buildToc(visibleEditorValue), [visibleEditorValue]);
   const conversationDiagnostics = useMemo(
