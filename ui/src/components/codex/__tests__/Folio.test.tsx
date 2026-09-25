@@ -18,7 +18,7 @@ import {
 import { ReactEditor } from "slate-react";
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AttachmentsApi from "#/api/attachments";
-import type { OutlinkEntry, TagCount } from "#/api/types";
+import type { BacklinkEntry, OutlinkEntry, TagCount } from "#/api/types";
 import type { CustomEditor } from "#/editor/types";
 
 // The recovery panel is the PRIMARY (declarative) invalid-tab path: usePage
@@ -29,6 +29,8 @@ const {
   blockerState,
   journalTodayState,
   outlinksState,
+  backlinksState,
+  similarState,
   attachmentRemoveMock,
   attachmentUploadMock,
   mobileLayoutState,
@@ -62,6 +64,10 @@ const {
     isLoading: false,
   },
   outlinksState: { data: undefined as OutlinkEntry[] | undefined },
+  backlinksState: { data: undefined as BacklinkEntry[] | undefined },
+  similarState: {
+    data: undefined as { items: { path: string; title: string }[] } | undefined,
+  },
   mobileLayoutState: { matches: false },
   mountedSlateEditors: [] as Editor[],
   pageActionsMock: vi.fn(),
@@ -139,9 +145,9 @@ vi.mock("#/components/codex/useScrollSpy", () => ({
   useScrollSpy: useScrollSpyMock,
 }));
 vi.mock("#/api/index", () => ({
-  useBacklinks: () => ({ data: undefined }),
+  useBacklinks: () => backlinksState,
   useOutlinks: () => outlinksState,
-  useSimilar: () => ({ data: undefined }),
+  useSimilar: () => similarState,
   useTagSuggestions: useTagSuggestionsMock,
   useTags: useTagsMock,
 }));
@@ -330,6 +336,8 @@ beforeEach(() => {
   journalTodayState.data = null;
   journalTodayState.isLoading = false;
   outlinksState.data = undefined;
+  backlinksState.data = undefined;
+  similarState.data = undefined;
   clearFolioRestoration("t1");
   clearFolioHistoryState();
   folioPropertiesMock.mockClear();
@@ -725,6 +733,51 @@ describe("Folio invalid-tab recovery", () => {
     ).toBeInTheDocument();
   });
 
+  it("stacks Linked from, Links out and Similar with no tabs", () => {
+    backlinksState.data = [
+      {
+        kind: "wiki",
+        source_id: "p-hero",
+        source_path: "notes/hero.md",
+        source_title: "Hero of Alexandria",
+        target_raw: "Alpha",
+        context: "builds on alpha with the siphon",
+      },
+    ];
+    similarState.data = { items: [{ path: "notes/near.md", title: "Near" }] };
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    expect(
+      within(rail)
+        .getAllByRole("heading", { level: 2 })
+        .map((h) => h.textContent),
+    ).toEqual(["Linked from", "Links out", "Similar"]);
+    expect(within(rail).queryByRole("button", { name: /^Tags/ })).toBeNull();
+
+    const title = within(rail).getByRole("link", {
+      name: /Hero of Alexandria/,
+    });
+    expect(title.querySelector("[data-link-title]")).toHaveClass(
+      "font-serif",
+      "text-[21px]",
+    );
+    const mark = rail.querySelector("mark");
+    expect(mark).toHaveTextContent("alpha");
+    expect(mark?.closest("[data-link-snippet]")).toHaveTextContent(
+      "builds on alpha with the siphon",
+    );
+  });
+
+  it("says so when nothing links here, and hides Similar when empty", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    expect(within(rail).getByText("No pages link here yet.")).toBeVisible();
+    expect(within(rail).queryByRole("heading", { name: "Similar" })).toBeNull();
+  });
+
   it("suggests indexed tags while editing folio tags", async () => {
     const user = userEvent.setup();
     usePageEditorMock.mockReturnValue(editableEditor());
@@ -845,7 +898,6 @@ describe("Folio outbound links", () => {
   });
 
   it("excludes metadata edges from the Links count, badge, and list", async () => {
-    const user = userEvent.setup();
     outlinksState.data = [
       ...Array.from({ length: 5 }, (_, index) => ({
         kind: "property_ref",
@@ -865,10 +917,15 @@ describe("Folio outbound links", () => {
 
     render(<Folio tabId="t1" path="notes/alpha.md" />);
 
-    const linksTab = screen.getByRole("button", { name: /^Links/ });
-    expect(linksTab).toHaveTextContent("1");
-    await user.click(linksTab);
-    expect(screen.getByText("Real")).toBeVisible();
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    const linksOut = within(rail)
+      .getByRole("heading", { name: "Links out" })
+      .closest("section");
+    assert(linksOut, "Links out section");
+    expect(linksOut.querySelector("[data-section-caption]")).toHaveTextContent(
+      "1",
+    );
+    expect(within(linksOut).getByText("Real")).toBeVisible();
     expect(screen.queryByText("tag-0")).toBeNull();
   });
 });
@@ -1693,7 +1750,7 @@ describe("Folio mobile presentation", () => {
     expect(
       screen.getByRole("dialog", { name: "Page relationships" }),
     ).toBeVisible();
-    expect(screen.getByText("Backlinks")).toBeVisible();
+    expect(screen.getByText("Linked from")).toBeVisible();
   });
 
   it("rehydrates unsaved body state across breakpoint changes", async () => {

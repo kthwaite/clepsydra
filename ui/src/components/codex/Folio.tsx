@@ -55,6 +55,7 @@ import {
   visibleFolioOutlinks,
 } from "#/components/codex/folio-utils";
 import { buildToc, type TocEntry } from "#/components/codex/folioToc";
+import { highlightMatch } from "#/components/codex/highlightMatch";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { LockedFolio } from "#/components/codex/LockedFolio";
 import { MobileFolioLayout } from "#/components/codex/MobileFolioLayout";
@@ -229,8 +230,6 @@ function RawMarkdownNavigationGuard({
   );
 }
 
-const R_TAB_KEY = "clp.folio.r.tab";
-type RTab = "backlinks" | "links" | "tags";
 const EMPTY_EDITOR_VALUE: [] = [];
 
 function containsBlockId(nodes: Descendant[]): boolean {
@@ -520,24 +519,6 @@ export function Folio({ tabId, path }: FolioProps) {
   // location — the entire follow mechanism.
   const followMove = (data: { path?: string }) => {
     if (data.path && data.path !== path) updateTabPath(tabId, data.path);
-  };
-
-  const [rTab, setRTab] = useState<RTab>(() => {
-    try {
-      const v = window.localStorage.getItem(R_TAB_KEY);
-      if (v === "backlinks" || v === "links" || v === "tags") return v;
-    } catch {
-      // ignore
-    }
-    return "backlinks";
-  });
-  const selectRTab = (t: RTab) => {
-    setRTab(t);
-    try {
-      window.localStorage.setItem(R_TAB_KEY, t);
-    } catch {
-      // ignore
-    }
   };
 
   useEffect(() => {
@@ -1517,81 +1498,76 @@ export function Folio({ tabId, path }: FolioProps) {
     </Section>
   );
 
+  const similarItems = similar?.items ?? [];
   const relationships = (
     <>
-      <div className="flex items-stretch border-b border-rule">
-        <RTabBtn
-          label="Backlinks"
-          n={backlinks?.length ?? 0}
-          active={rTab === "backlinks"}
-          onClick={() => selectRTab("backlinks")}
-        />
-        <RTabBtn
-          label="Links"
-          n={visibleOutlinks.length}
-          active={rTab === "links"}
-          onClick={() => selectRTab("links")}
-        />
-        <RTabBtn
-          label="Tags"
-          n={(editor.tags ?? []).length}
-          active={rTab === "tags"}
-          onClick={() => selectRTab("tags")}
-        />
-        <span className="flex-1" />
-      </div>
+      <Section
+        compact
+        label="Linked from"
+        caption={String(backlinks?.length ?? 0)}
+      >
+        {(backlinks ?? []).length === 0 ? (
+          <p className="m-0 text-[13px] text-mute">No pages link here yet.</p>
+        ) : (
+          <div className="flex flex-col gap-6">
+            {(backlinks ?? []).map((b) => (
+              <CLink
+                key={`${b.source_path}:${b.target_raw}`}
+                path={b.source_path}
+                className={cn(
+                  "cl-link-plain flex flex-col gap-1.5 rounded",
+                  FOCUS_RING_NATIVE,
+                )}
+              >
+                <span
+                  data-link-title
+                  className="font-serif text-[21px] leading-[1.2] text-ink"
+                >
+                  {b.source_title || b.source_path}
+                </span>
+                {b.context ? (
+                  <span
+                    data-link-snippet
+                    className="text-[13.5px] leading-[1.55] text-mute"
+                  >
+                    {highlightMatch(b.context, [
+                      b.target_raw,
+                      editor.title ?? "",
+                    ])}
+                  </span>
+                ) : null}
+              </CLink>
+            ))}
+          </div>
+        )}
+      </Section>
 
-      <div className="px-3 py-3">
-        {rTab === "backlinks" && (
+      <Section
+        compact
+        pip="dim"
+        label="Links out"
+        caption={String(visibleOutlinks.length)}
+      >
+        <LinkList
+          empty="No outbound links yet."
+          items={visibleOutlinks.map((o) => ({
+            path: o.target_path,
+            title: o.target_raw || o.target_path,
+          }))}
+        />
+      </Section>
+
+      {similarItems.length > 0 ? (
+        <Section compact pip="dim" label="Similar">
           <LinkList
-            empty="No backlinks — this folio stands alone."
-            items={(backlinks ?? []).map((b) => ({
-              path: b.source_path,
-              title: b.source_title || b.source_path,
+            empty=""
+            items={similarItems.map((s) => ({
+              path: s.path,
+              title: s.title || s.path,
             }))}
           />
-        )}
-        {rTab === "links" && (
-          <>
-            <LinkList
-              empty="No outbound links yet."
-              items={visibleOutlinks.map((o) => ({
-                path: o.target_path,
-                title: o.target_raw || o.target_path,
-              }))}
-            />
-            {(similar?.items.length ?? 0) > 0 && (
-              <>
-                <div className="cl-mono mt-4 mb-1 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-                  ≈ Similar
-                </div>
-                <LinkList
-                  empty=""
-                  items={(similar?.items ?? []).map((s) => ({
-                    path: s.path,
-                    title: s.title || s.path,
-                  }))}
-                />
-              </>
-            )}
-          </>
-        )}
-        {rTab === "tags" &&
-          ((editor.tags ?? []).length === 0 ? (
-            <p className="m-0 text-[13px] text-mute">∅ No tags.</p>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {(editor.tags ?? []).map((t) => (
-                <span
-                  key={t}
-                  className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] uppercase tracking-[0.08em] text-ink-2"
-                >
-                  {t}
-                </span>
-              ))}
-            </div>
-          ))}
-      </div>
+        </Section>
+      ) : null}
     </>
   );
 
@@ -2092,34 +2068,6 @@ function Prop({ k, children }: { k: string; children: React.ReactNode }) {
   );
 }
 
-function RTabBtn({
-  label,
-  n,
-  active,
-  onClick,
-}: {
-  label: string;
-  n: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "cl-mono flex cursor-pointer items-center gap-1.5 border-r border-rule-soft px-2.5 py-1.5 text-[9px] uppercase tracking-[0.14em]",
-        active
-          ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
-          : "text-ink-mute hover:text-ink",
-      )}
-    >
-      {label}
-      <span className={active ? "text-accent" : "text-ink-mute"}>{n}</span>
-    </button>
-  );
-}
-
 function LinkList({
   items,
   empty,
@@ -2131,22 +2079,25 @@ function LinkList({
     return empty ? <p className="m-0 text-[13px] text-mute">{empty}</p> : null;
   }
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2.5">
       {items.map((it) => (
-        <div key={it.path} className="grid grid-cols-[16px_1fr] gap-1.5">
+        <CLink
+          key={it.path}
+          path={it.path}
+          className={cn(
+            "cl-link-plain flex min-w-0 items-center gap-2 rounded text-[14px] text-ink-2 hover:text-ink",
+            FOCUS_RING_NATIVE,
+          )}
+        >
           <KindIcon
             kind={resolveKindAndColor(it.path)}
+            tone="mono"
             className="flex-shrink-0"
           />
-          <div className="min-w-0">
-            <CLink path={it.path} className="block text-[12px] text-ink">
-              {it.title}
-            </CLink>
-            <span className="cl-mono block text-[9px] text-ink-mute">
-              {shortFolio(it.path)}
-            </span>
-          </div>
-        </div>
+          <span className="truncate" title={it.path}>
+            {it.title}
+          </span>
+        </CLink>
       ))}
     </div>
   );

@@ -449,6 +449,15 @@ samp.cl-mono {
     background: var(--highlight);
 }
 
+/* Block links (Folio rail entries): the card carries its own type, so no
+   accent underline or hover band. */
+.cl-link.cl-link-plain,
+.cl-link.cl-link-plain:hover {
+    color: inherit;
+    border-bottom: 0;
+    background: transparent;
+}
+
 /* Passive page references read as prose, not as highlighted Markdown syntax. */
 .cl-wikilink {
     font-family: Georgia, "Times New Roman", serif;

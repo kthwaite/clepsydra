@@ -1,0 +1,34 @@
+import type { ReactNode } from "react";
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Splits `text` on every case-insensitive occurrence of any non-empty needle
+ * and wraps the matches in an `accent-tint` mark (the Folio "Linked from"
+ * snippet, spec §5.6). Text only — never parsed as HTML.
+ */
+export function highlightMatch(text: string, needles: string[]): ReactNode {
+  const terms = [...new Set(needles.map((n) => n.trim()).filter(Boolean))]
+    // Longest first, so "Heron" wins over its prefix "Hero".
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp);
+  if (terms.length === 0) return text;
+  const pattern = new RegExp(`(${terms.join("|")})`, "gi");
+  const parts = text.split(pattern);
+  if (parts.length === 1) return text;
+  return parts.map((part, index) =>
+    // split() with one capture group puts matches at odd indices.
+    index % 2 === 1 ? (
+      <mark
+        // biome-ignore lint/suspicious/noArrayIndexKey: parts are positional and never reorder
+        key={index}
+        className="rounded-[3px] bg-accent-tint px-0.5 text-ink-2"
+      >
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
