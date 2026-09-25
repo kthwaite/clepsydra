@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
+  Fragment,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   useEffect,
@@ -17,9 +18,11 @@ import {
   type StaticCommandAction,
 } from "#/components/codex/commandRegistry";
 import { shortFolio } from "#/components/codex/folio-utils";
+import { Tick } from "#/components/codex/Tick";
 import { goToView } from "#/components/codex/viewRegistry";
 import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import { useTheme } from "#/components/ThemeProvider";
+import { Button } from "#/components/ui/button";
 import { useDebounce } from "#/hooks/useDebounce";
 import {
   useActivateTabWithFolioHistory,
@@ -35,21 +38,22 @@ import { useUiStore } from "#/store/ui";
 import { selectActiveTab, useWorkspaceStore } from "#/store/workspace";
 
 type Command = {
-  /** Drives the KIND column tag: cmd → CMD, note → FILE, tag → TAG. */
+  /** Result group: Commands, Pages or Tags. */
   kind: "cmd" | "note" | "tag";
-  /** ID column — machine id, keybinding, or short folio path. */
+  /** Stable identity (command id, page path, tag). Never shown. */
   id: string;
-  /** TITLE column. */
   title: string;
-  /** Optional dimmed sub-line beneath the title (e.g. search snippet). */
+  /** Right-hand meta: shortcut chord, short page code, or tag count. */
+  hint?: string;
+  /** Optional line beneath the title (a page's search snippet). */
   sub?: string;
   action: () => void;
 };
 
-const KIND_LABEL: Record<Command["kind"], string> = {
-  cmd: "CMD",
-  note: "FILE",
-  tag: "TAG",
+const GROUP_LABEL: Record<Command["kind"], string> = {
+  cmd: "Commands",
+  note: "Pages",
+  tag: "Tags",
 };
 
 export function CommandPalette() {
@@ -124,9 +128,10 @@ function CommandPaletteContent() {
     () =>
       enabledStaticCommands(features).map((command) => ({
         kind: "cmd",
-        id: command.shortcut
+        id: command.id,
+        hint: command.shortcut
           ? formatChord(SHORTCUTS[command.shortcut].chord)
-          : command.id,
+          : undefined,
         title: command.title,
         action: () => {
           const action: StaticCommandAction = command.action;
@@ -254,7 +259,8 @@ function CommandPaletteContent() {
     if (!currentSearchResults) return [];
     return currentSearchResults.map((r) => ({
       kind: "note" as const,
-      id: shortFolio(r.path),
+      id: r.path,
+      hint: shortFolio(r.path),
       title: r.title || r.path,
       sub: r.snippet?.replace(/<\/?mark>/g, "") || r.path,
       action: () => openTab("page", r.path, r.title || r.path),
@@ -266,7 +272,8 @@ function CommandPaletteContent() {
     return tags.slice(0, 12).map((t) => ({
       kind: "tag" as const,
       id: `tag.${t.tag}`,
-      title: `${t.tag} · ${t.count ?? 0}`,
+      title: t.tag,
+      hint: String(t.count ?? 0),
       action: () =>
         leaveWorkspace(() =>
           navigate({
@@ -320,6 +327,16 @@ function CommandPaletteContent() {
     return [...verbsMatch, ...noteCommands, ...tagsMatch].slice(0, 14);
   }, [q, verbCommands, noteCommands, tagCommands, quireCommands]);
 
+  // Rows are tall and the list scrolls without a visible bar, so keep the
+  // keyboard selection in view as it moves.
+  const listRef = useRef<HTMLDivElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run when the selection or the result set changes
+  useEffect(() => {
+    listRef.current
+      ?.querySelector<HTMLElement>("[data-active]")
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [sel, filtered]);
+
   const onKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -340,18 +357,13 @@ function CommandPaletteContent() {
   return (
     <CodexModalShell
       ariaLabel="Command console"
-      maxWidthClassName="max-w-[680px]"
+      maxWidthClassName="max-w-[640px]"
       onDismiss={close}
       onKeyDown={onKey}
-      panelClassName="flex flex-col"
+      panelClassName="flex flex-col rounded-[18px]"
       widthClassName="w-[92%]"
     >
-      {/* header / channel */}
-      <div className="flex items-center gap-[10px] border-b border-ink px-[14px] py-[8px]">
-        <span className="cl-mono tracking-[0.16em] text-ink-mute">CHANNEL</span>
-        <span className="cl-mono font-bold tracking-[0.08em] text-accent">
-          CLP&gt;
-        </span>
+      <label className="flex h-[72px] items-center gap-3.5 px-[26px]">
         <input
           ref={inputRef}
           value={q}
@@ -361,124 +373,107 @@ function CommandPaletteContent() {
           }}
           placeholder="Search pages · kind:recipe (tag:beer | tag:wine)"
           aria-label="Command query"
-          className="cl-mono flex-1 border-none bg-transparent text-[14px] tracking-[0.02em] text-ink outline-none placeholder:text-ink-faint"
+          className="flex-1 bg-transparent text-[21px] text-ink outline-none placeholder:text-faint"
         />
-        <span className="cl-mono border border-ink/40 px-[6px] py-[1px] text-[10px] tracking-[0.08em] text-ink-mute">
-          ESC
-        </span>
-      </div>
-      {/* results */}
-      <div className="cl-noscroll max-h-[340px] overflow-auto py-[4px]">
+        <span className="text-[12.5px] text-mute">esc</span>
+      </label>
+      <div
+        ref={listRef}
+        className="cl-noscroll max-h-[420px] overflow-auto px-3.5 pb-4"
+      >
         {showSearchLoading && (
           <div
             role="status"
             aria-live="polite"
-            className="cl-mono px-3 py-[24px] text-center text-[11px] tracking-[0.16em] text-ink-faint"
+            className="px-3 py-6 text-center text-[13.5px] text-mute"
           >
-            — SEARCHING —
+            Searching…
           </div>
         )}
         {showSearchError && (
           <div
             role="alert"
-            className="cl-mono flex items-center justify-between gap-3 px-3 py-[16px] text-[11px] tracking-[0.08em] text-warn"
+            className="flex items-center justify-between gap-3 px-3 py-4 text-[13.5px] text-hot"
           >
             <span>{formatApiError(searchError, "Search failed.")}</span>
             {!searchSyntaxError && (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 aria-label="Retry search"
-                onClick={() => void retrySearch()}
-                className="border border-current px-2 py-1 tracking-[0.12em]"
+                onPress={() => void retrySearch()}
               >
-                RETRY
-              </button>
+                Retry
+              </Button>
             )}
           </div>
         )}
         {!showSearchLoading && !showSearchError && filtered.length === 0 && (
-          <div className="cl-mono px-3 py-[24px] text-center text-[11px] tracking-[0.16em] text-ink-faint">
-            — NO RESULTS —
+          <div className="px-3 py-6 text-center text-[13.5px] text-mute">
+            No results
           </div>
         )}
         {filtered.map((c, i) => {
           const active = i === sel;
+          const startsGroup = i === 0 || filtered[i - 1].kind !== c.kind;
           return (
-            <button
-              type="button"
-              key={`${c.kind}:${c.id}`}
-              data-active={active || undefined}
-              onMouseMove={(e) => onRowPointerMove(e, i)}
-              onClick={() => {
-                c.action();
-                close();
-              }}
-              className={cn(
-                "grid w-full cursor-pointer grid-cols-[50px_112px_1fr_20px] items-center gap-[10px] px-[14px] py-[4px] text-left leading-[1.4]",
-                active && "bg-ink",
+            <Fragment key={`${c.kind}:${c.id}`}>
+              {startsGroup && (
+                <h3 className="flex items-center gap-2.5 px-3 pt-3.5 pb-1.5 font-serif text-[17px] italic text-mute">
+                  <Tick />
+                  {GROUP_LABEL[c.kind]}
+                </h3>
               )}
-            >
-              <span
+              <button
+                type="button"
+                data-active={active || undefined}
+                data-command-id={c.id}
+                onMouseMove={(e) => onRowPointerMove(e, i)}
+                onClick={() => {
+                  c.action();
+                  close();
+                }}
                 className={cn(
-                  "cl-mono  tracking-[0.16em]",
-                  active ? "text-paper" : "text-accent",
+                  "flex w-full min-w-0 cursor-pointer flex-col rounded-xl px-3 py-2.5 text-left",
+                  active && "bg-accent-tint",
                 )}
               >
-                {KIND_LABEL[c.kind]}
-              </span>
-              <span
-                className={cn(
-                  "cl-mono overflow-hidden text-ellipsis whitespace-nowrap  tracking-[0.04em]",
-                  active ? "text-paper" : "text-ink-2",
-                )}
-              >
-                {c.id}
-              </span>
-              <span className="flex min-w-0 flex-col">
-                <span
-                  className={cn(
-                    "cl-mono overflow-hidden text-ellipsis whitespace-nowrap uppercase tracking-[0.02em]",
-                    active ? "text-paper" : "text-ink",
-                  )}
-                >
-                  {c.title}
-                </span>
-                {c.sub && (
+                <span className="flex w-full min-w-0 items-baseline gap-3.5">
                   <span
                     className={cn(
-                      "cl-mono mt-[1px] overflow-hidden text-ellipsis whitespace-nowrap normal-case",
-                      active ? "text-paper/75" : "text-ink-mute",
+                      "min-w-0 truncate text-ink",
+                      c.kind === "note"
+                        ? "font-serif text-[20px] leading-tight"
+                        : "text-[15.5px]",
                     )}
                   >
+                    {c.title}
+                  </span>
+                  <span className="flex-1" />
+                  {c.hint && (
+                    <span className="flex-shrink-0 text-[13px] text-mute">
+                      {c.hint}
+                    </span>
+                  )}
+                </span>
+                {c.kind === "note" && c.sub && (
+                  <span className="mt-0.5 w-full truncate text-[13.5px] text-mute">
                     {c.sub}
                   </span>
                 )}
-              </span>
-              <span className={cn(active ? "text-paper" : "text-ink-faint")}>
-                ⏎
-              </span>
-            </button>
+              </button>
+            </Fragment>
           );
         })}
       </div>
-      {/* footer / keycap legend */}
-      <div className="cl-mono flex items-center gap-[18px] border-t border-ink px-[14px] py-[6px] uppercase tracking-[0.14em] text-ink">
+      <div className="flex items-center gap-6 bg-ground px-[26px] pt-3.5 pb-[18px] text-[12.5px] text-mute">
+        <span>↑↓ move</span>
+        <span>↵ open</span>
+        <span>esc close</span>
+        <span className="flex-1" />
         <span>
-          <span className="border border-ink/40 px-[4px] py-[1px]">↑</span>
-          <span className="ml-[3px] border border-ink/40 px-[4px] py-[1px]">
-            ↓
-          </span>{" "}
-          nav
+          {filtered.length} {filtered.length === 1 ? "result" : "results"}
         </span>
-        <span>
-          <span className="border border-ink/40 px-[4px] py-[1px]">⏎</span>{" "}
-          dispatch
-        </span>
-        <span>
-          <span className="border border-ink/40 px-[4px] py-[1px]">ESC</span>{" "}
-          close
-        </span>
-        <span className="ml-auto">{filtered.length} HITS</span>
       </div>
     </CodexModalShell>
   );
