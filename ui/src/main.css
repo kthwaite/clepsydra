@@ -230,8 +230,8 @@ ul {
 }
 
 ::selection {
-    background: var(--accent);
-    color: #000;
+    background: var(--accent-tint);
+    color: inherit;
 }
 
 /* Slate placeholder must not appear selected (Cmd/Ctrl+A still paints the
@@ -251,8 +251,8 @@ ul {
    ============================================================================= */
 
 .cl-root {
-    font-family: var(--font-mono);
-    font-size: 13px;
+    font-family: var(--font-sans);
+    font-size: 14px;
     line-height: 1.5;
     letter-spacing: 0.005em;
     -webkit-font-smoothing: antialiased;
@@ -260,8 +260,8 @@ ul {
 }
 
 .cl-root *::selection {
-    background: var(--accent);
-    color: #000;
+    background: var(--accent-tint);
+    color: inherit;
 }
 
 /* Stopgap (spec §6 phase 1): Vessel's tracked caps labels read as plain sans

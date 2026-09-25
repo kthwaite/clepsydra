@@ -44,6 +44,12 @@ describe("Stone & Lamp fonts", () => {
     expect(prop(cap, "letter-spacing")).toBe("normal");
   });
 
+  it("keeps the app frame (.cl-root) in sans at 14px, not mono", () => {
+    const root = rule(".cl-root");
+    expect(prop(root, "font-family")).toBe("var(--font-sans)");
+    expect(prop(root, "font-size")).toBe("14px");
+  });
+
   it("keeps Vessel buttons in sans until Button replaces them (phase 3)", () => {
     expect(prop(rule(".cl-btn"), "font-family")).toBe("var(--font-sans)");
   });

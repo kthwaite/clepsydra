@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contrast, customProps, mainCss, rule } from "./css-contract";
+import { contrast, customProps, mainCss, prop, rule } from "./css-contract";
 
 const night = customProps(rule(":root"));
 const bone = customProps(rule(".paper"));
@@ -126,6 +126,15 @@ describe("Stone & Lamp palette", () => {
         expect(body[k]).toMatch(/^0 \d+px \d+px /);
       }
     }
+  });
+
+  it.each([
+    "::selection",
+    ".cl-root *::selection",
+  ])("paints %s with the accent tint, keeping text colour", (sel) => {
+    const r = rule(sel);
+    expect(prop(r, "background")).toBe("var(--accent-tint)");
+    expect(prop(r, "color")).toBe("inherit");
   });
 
   it.each([
