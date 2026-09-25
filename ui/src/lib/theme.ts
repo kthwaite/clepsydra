@@ -1,9 +1,9 @@
-// VESSEL theme + operator-preference state.
+// Stone & Lamp theme + operator-preference state.
 //
-// Dark is the base palette (defined on :root with no class), so dark renders
-// with zero classes and no FOUC. Light ("paper") mode is opt-in via a `.paper`
-// class on <html>. Accent / density / diegetic-chrome are applied as
-// data-attributes on <html> and consumed by main.css.
+// Charcoal (dark) is the base palette on :root; bone (light) is `.paper` on
+// <html>. Bone is the default for new installs; a stored preference wins.
+// Accent / density / diegetic-chrome are data-attributes on <html> consumed
+// by main.css.
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -33,17 +33,17 @@ export const ACCENT_STORAGE_KEY = "clepsydra.accent";
 export const DENSITY_STORAGE_KEY = "clepsydra.density";
 export const DIEGETIC_STORAGE_KEY = "clepsydra.diegetic";
 
-// Dark is the resting default (decision: dark-default Vessel).
-const DEFAULT_THEME: ThemeMode = "dark";
+// Bone is the resting default (Stone & Lamp spec §9 Q1).
+const DEFAULT_THEME: ThemeMode = "light";
 const DEFAULT_ACCENT: Accent = "barbican";
 const DEFAULT_DENSITY: Density = "default";
 const DEFAULT_DIEGETIC = true;
 
 export function getSystemTheme(): Exclude<ThemeMode, "system"> {
-  if (typeof window === "undefined") return "dark";
-  return window.matchMedia?.("(prefers-color-scheme: light)").matches
-    ? "light"
-    : "dark";
+  if (typeof window === "undefined") return "light";
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
 }
 
 export function resolveTheme(mode: ThemeMode): Exclude<ThemeMode, "system"> {
@@ -107,11 +107,24 @@ export const storeDensity = (d: Density) => store(DENSITY_STORAGE_KEY, d);
 export const storeDiegetic = (on: boolean) =>
   store(DIEGETIC_STORAGE_KEY, on ? "on" : "off");
 
+/** Browser-chrome colour per resolved theme — the `ground` token. Keep in
+ *  sync with public/theme-bootstrap.js (a test enforces it). */
+export const THEME_COLOR = { light: "#F4EFE4", dark: "#151412" } as const;
+
 export function applyThemeClass(resolved: Exclude<ThemeMode, "system">) {
   const root = document.documentElement;
-  // Dark is the base palette → light adds `.paper`.
+  // Charcoal is the base palette → light adds `.paper`.
   root.classList.toggle("paper", resolved === "light");
   root.style.colorScheme = resolved;
+  let meta = document.querySelector<HTMLMetaElement>(
+    'meta[name="theme-color"]',
+  );
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.name = "theme-color";
+    document.head.append(meta);
+  }
+  meta.content = THEME_COLOR[resolved];
 }
 
 export function applyAccent(accent: Accent) {
