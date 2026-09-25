@@ -616,19 +616,74 @@ describe("Sheaf tab drag-and-drop wiring", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("registers empty sheaf space so a drop ungroups the tab at the end", () => {
+  it("registers the trailing segment so a drop ungroups the tab at the end", () => {
     seed(false);
-    const { container } = render(<Sheaf activeTabId="t3" />);
-    const sheaf = container.firstElementChild;
-    if (!sheaf) throw new Error("Sheaf root was not rendered");
+    render(<Sheaf activeTabId="t3" />);
+    const trailing = screen.getAllByRole("group").at(-1) as HTMLElement;
 
     const source = sourceFor(screen.getByRole("button", { name: "Alpha" }));
-    const target = dropTargetFor(sheaf);
+    const target = dropTargetFor(trailing);
+    expect(target.element).toBe(trailing);
     dispatchDrop({ source, target });
 
     const state = useWorkspaceStore.getState();
     expect(state.tabs.map((tab) => tab.id)).toEqual(["t2", "t3", "t1"]);
     expect(state.tabs.find((tab) => tab.id === "t1")?.quireId).toBeUndefined();
+  });
+
+  it("joins a quire when a tab is dropped on the quire's segment", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    const segment = screen.getByRole("group", { name: "thesis" });
+
+    const source = sourceFor(screen.getByRole("button", { name: "Gamma" }));
+    const target = dropTargetFor(segment);
+    expect(target.element).toBe(segment);
+    dispatchDrop({ source, target });
+
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).toEqual(["t1", "t2", "t3"]);
+    expect(state.tabs.find((tab) => tab.id === "t3")?.quireId).toBe("q1");
+  });
+
+  it("places a tab after an earlier loose segment's last tab, ungrouped", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t0", type: "page", path: "z.md", label: "Zero" },
+        { id: "t1", type: "page", path: "a.md", label: "Alpha", quireId: "q1" },
+        { id: "t2", type: "page", path: "b.md", label: "Beta", quireId: "q1" },
+        { id: "t3", type: "page", path: "c.md", label: "Gamma" },
+      ],
+      activeTabId: "t3",
+      quires: {
+        q1: { id: "q1", name: "thesis", color: "sepia", collapsed: false },
+      },
+      openHistory: [],
+    });
+    render(<Sheaf activeTabId="t3" />);
+    const first = screen.getAllByRole("group")[0];
+
+    const source = sourceFor(screen.getByRole("button", { name: "Beta" }));
+    dispatchDrop({ source, target: dropTargetFor(first) });
+
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).toEqual(["t0", "t2", "t1", "t3"]);
+    expect(state.tabs.find((tab) => tab.id === "t2")?.quireId).toBeUndefined();
+  });
+
+  it("does not treat the gaps between segments as a drop target", () => {
+    seed(false);
+    const { container } = render(<Sheaf activeTabId="t3" />);
+    const root = container.firstElementChild;
+    expect(dnd.dropTargets.some((t) => t.element === root)).toBe(false);
+  });
+
+  it("sits tabs flush inside a segment, so no gap falls between them", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    for (const group of screen.getAllByRole("group")) {
+      expect(group.className).not.toMatch(/(^|\s)gap-/);
+    }
   });
 
   it("keeps drag cleanup alive after the source tab closes", () => {
@@ -684,9 +739,9 @@ describe("Sheaf tab drag-and-drop wiring", () => {
 
   it("lets only the innermost tab target handle a bubbled drop", () => {
     seed(false);
-    const { container } = render(<Sheaf activeTabId="t3" />);
-    const sheaf = container.firstElementChild;
-    if (!sheaf) throw new Error("Sheaf root was not rendered");
+    render(<Sheaf activeTabId="t3" />);
+    // Gamma's own segment is the ancestor target the drop bubbles to.
+    const sheaf = screen.getAllByRole("group").at(-1) as HTMLElement;
     const source = sourceFor(screen.getByRole("button", { name: "Alpha" }));
     const tabTarget = dropTargetFor(
       screen.getByRole("button", { name: "Gamma" }),

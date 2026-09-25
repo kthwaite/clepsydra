@@ -65,8 +65,6 @@ export function Sheaf({
   const quires = useWorkspaceStore((s) => s.quires);
   const activateTab = useActivateTabWithFolioHistory();
   const toggleQuireCollapse = useWorkspaceStore((s) => s.toggleQuireCollapse);
-  const moveTab = useWorkspaceStore((s) => s.moveTab);
-
   const pageTabs = tabs.filter((tab) => tab.type === "page");
   const runs = sheafRuns(sheafSegments(pageTabs, quires));
 
@@ -149,22 +147,6 @@ export function Sheaf({
     [onTabDndEnd, onTabDndStart],
   );
 
-  useEffect(() => {
-    const element = sheafRef.current;
-    if (!element) return;
-
-    return dropTargetForElements({
-      element,
-      getData: () => ({ kind: "sheaf-background" }),
-      canDrop: ({ source }) => getSheafTabId(source.data) !== null,
-      onDrop: ({ source, self, location }) => {
-        if (location.current.dropTargets[0]?.element !== self.element) return;
-        const sourceTabId = getSheafTabId(source.data);
-        if (sourceTabId) moveTab(sourceTabId, { position: "end" });
-      },
-    });
-  }, [moveTab]);
-
   const renderTab = (tab: TabDescriptor) => (
     <FolioTab
       key={tab.id}
@@ -199,6 +181,7 @@ export function Sheaf({
             key={run.quire.id}
             label={run.quire.name}
             rule={quireRule(run.quire)}
+            drop={{ quireId: run.quire.id }}
           >
             <QuireHeader
               quire={run.quire}
@@ -220,6 +203,7 @@ export function Sheaf({
             label="Ungrouped"
             rule="var(--rule)"
             grow={index === runs.length - 1}
+            drop={looseDrop(run.tabs, index === runs.length - 1)}
           >
             {run.tabs.map(renderTab)}
             {index === runs.length - 1 && (
@@ -244,25 +228,64 @@ export function Sheaf({
   );
 }
 
+type SegmentDrop = Parameters<
+  ReturnType<typeof useWorkspaceStore.getState>["moveTab"]
+>[1];
+
+/** Where a drop on a loose segment's own space lands: the trailing segment
+ *  means "end of the row"; an earlier one means "after its last tab". */
+function looseDrop(tabs: TabDescriptor[], trailing: boolean): SegmentDrop {
+  const last = tabs.at(-1);
+  return trailing || !last
+    ? { position: "end" }
+    : { tabId: last.id, position: "after" };
+}
+
 /** One C3 segment: a run of tabs over a 1px rule in its quire's hue (or the
- *  neutral rule for ungrouped tabs). */
+ *  neutral rule for ungrouped tabs). Its own space is a drop target, so a
+ *  drop between its tabs never falls through; the gaps between segments
+ *  accept nothing. */
 function Segment({
   label,
   rule,
   grow,
+  drop,
   children,
 }: {
   label: string;
   rule: string;
   grow?: boolean;
+  drop: SegmentDrop;
   children: React.ReactNode;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const moveTab = useWorkspaceStore((s) => s.moveTab);
+  const dropKey = JSON.stringify(drop);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const target = JSON.parse(dropKey) as SegmentDrop;
+    return dropTargetForElements({
+      element,
+      getData: () => ({ kind: "sheaf-segment" }),
+      canDrop: ({ source }) => getSheafTabId(source.data) !== null,
+      onDrop: ({ source, self, location }) => {
+        // Tabs and the quire label inside handle their own drops.
+        if (location.current.dropTargets[0]?.element !== self.element) return;
+        const sourceTabId = getSheafTabId(source.data);
+        if (sourceTabId) moveTab(sourceTabId, target);
+      },
+    });
+  }, [dropKey, moveTab]);
+
   return (
     // biome-ignore lint/a11y/useSemanticElements: a run of tab buttons, not form controls; a fieldset would add form semantics and default borders, so an ARIA group names the quire instead.
     <div
+      ref={ref}
       role="group"
       aria-label={label}
-      className={cn("flex flex-shrink-0 items-stretch gap-1", grow && "flex-1")}
+      className={cn("flex flex-shrink-0 items-stretch", grow && "flex-1")}
       style={{ boxShadow: `inset 0 -1px 0 0 ${rule}` }}
     >
       {children}
