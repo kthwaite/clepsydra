@@ -6,7 +6,11 @@ import {
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { useSaveStatus } from "#/hooks/useSaveStatus";
+import { usePreviewBase } from "#/api/bases";
+import { useRefreshFeeds } from "#/api/feeds";
+import { usePreviewMutation } from "#/api/index";
+import { useGeocode } from "#/api/location";
+import { NO_SAVE, useSaveStatus } from "#/hooks/useSaveStatus";
 
 function setup() {
   const client = new QueryClient({
@@ -19,6 +23,10 @@ function setup() {
     () => ({
       status: useSaveStatus(),
       ok: useMutation({ mutationFn: async () => "ok" }),
+      read: useMutation({
+        mutationFn: async () => "preview",
+        meta: NO_SAVE,
+      }),
       bad: useMutation({
         mutationFn: async () => {
           throw new Error("nope");
@@ -51,5 +59,46 @@ describe("useSaveStatus", () => {
     });
     await waitFor(() => expect(result.current.status.saving).toBe(false));
     expect(result.current.status.savedAt).toBeNull();
+  });
+});
+
+describe("useSaveStatus ignores requests that save nothing", () => {
+  it("never shows Saving or Saved for a NO_SAVE mutation", async () => {
+    const { result } = setup();
+    await act(() => result.current.read.mutateAsync());
+    expect(result.current.status).toEqual({ saving: false, savedAt: null });
+  });
+
+  it.each([
+    ["Base preview", () => usePreviewBase()],
+    ["move preview", () => usePreviewMutation()],
+    ["geocode search", () => useGeocode()],
+    ["feed refresh", () => useRefreshFeeds()],
+  ])("tags the %s request as NO_SAVE", async (_name, hook) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("{}", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const client = new QueryClient({
+      defaultOptions: { mutations: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(
+      () =>
+        hook() as unknown as {
+          mutateAsync: (v: unknown) => Promise<unknown>;
+        },
+      { wrapper },
+    );
+    await act(async () => {
+      await result.current.mutateAsync({}).catch(() => undefined);
+    });
+    const [mutation] = client.getMutationCache().getAll();
+    expect(mutation?.meta).toEqual({ noSave: true });
+    vi.restoreAllMocks();
   });
 });

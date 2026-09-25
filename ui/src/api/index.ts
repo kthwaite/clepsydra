@@ -6,6 +6,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { NO_SAVE } from "#/api/mutationMeta";
 import type { components, operations } from "#/api/schema";
 import { $api, fetchClient } from "./client";
 import { isInvalidSearchQuery } from "./error";
@@ -118,6 +119,7 @@ function parseMutationPreview(value: unknown): MutationPreview {
 
 export function usePreviewMutation() {
   return useMutation<MutationPreview, Error, MutationPreviewRequest>({
+    meta: NO_SAVE,
     mutationFn: async (body) => {
       const { data, error } = await fetchClient.POST(
         "/api/vault/index/preview-mutation",

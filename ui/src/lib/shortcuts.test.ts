@@ -240,3 +240,23 @@ describe("code-matched chords (layout-shifted keys)", () => {
     );
   });
 });
+
+describe("AltGr keystrokes are characters, not shortcuts", () => {
+  it("does not treat AltGr+[ (Ctrl+Alt+[ on Swiss/French/Belgian layouts) as the sidebar chord", () => {
+    const chord = SHORTCUTS["folio.toggleLeft"].chord;
+    const altGr = {
+      ...ev("[", { ctrlKey: true, altKey: true }, "BracketLeft"),
+      getModifierState: (k: string) => k === "AltGraph",
+    };
+    expect(matchesChord(altGr, chord, false)).toBe(false);
+  });
+
+  it("still matches a real Ctrl+Alt+[ on non-Mac", () => {
+    const chord = SHORTCUTS["folio.toggleLeft"].chord;
+    const real = {
+      ...ev("[", { ctrlKey: true, altKey: true }, "BracketLeft"),
+      getModifierState: () => false,
+    };
+    expect(matchesChord(real, chord, false)).toBe(true);
+  });
+});

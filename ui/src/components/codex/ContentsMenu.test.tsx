@@ -169,4 +169,14 @@ describe("ContentsMenu", () => {
       within(gaz).getByText(formatChord(SHORTCUTS["nav.gazetteer"].chord)),
     ).toBeVisible();
   });
+
+  it("shows a focus ring when reached by keyboard", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.tab();
+    const trigger = screen.getByRole("button", { name: "Contents" });
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute("data-focus-visible");
+    expect(trigger.className).toMatch(/data-\[focus-visible\]:ring-2/);
+  });
 });

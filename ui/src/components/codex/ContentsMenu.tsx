@@ -98,7 +98,7 @@ export function ContentsMenu({
       <Button
         aria-current={active ? "page" : undefined}
         className={cn(
-          "relative flex cursor-pointer items-center gap-1 text-[14px] outline-none",
+          "relative flex cursor-pointer items-center gap-1 rounded-full text-[14px] outline-none data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent data-[focus-visible]:ring-offset-4 data-[focus-visible]:ring-offset-ground",
           active ? "font-medium text-ink" : "text-mute hover:text-ink",
         )}
       >

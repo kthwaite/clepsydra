@@ -346,7 +346,11 @@ export const GLOBAL_SHORTCUT_IDS = (
 type KeyLike = Pick<
   KeyboardEvent,
   "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey"
-> & { code?: string };
+> & {
+  code?: string;
+  // Method syntax: React narrows the key to its ModifierKey union.
+  getModifierState?(key: "AltGraph"): boolean;
+};
 
 /** The one chord-matching predicate. Letters compare case-insensitively and
  *  shift is only enforced on letters when the chord declares it (so ⌘⇧B
@@ -357,6 +361,9 @@ export function matchesChord(
   chord: Chord,
   isMac: boolean = IS_MAC,
 ): boolean {
+  // AltGr reports as Ctrl+Alt; on many layouts it types characters such as
+  // [ and ], which must reach the editor rather than fire a chord.
+  if (e.getModifierState?.("AltGraph")) return false;
   const want = chord.key.length === 1 ? chord.key.toLowerCase() : chord.key;
   if (chord.code !== undefined) {
     if (e.code !== chord.code) return false;
