@@ -28,10 +28,10 @@ import { Popover } from "#/components/ui/popover";
 import { cn } from "#/lib/cn";
 
 const menuClass =
-  "cl-mono min-w-[180px] max-w-[min(320px,calc(100vw-16px))] overflow-auto border-[1.5px] border-ink bg-paper py-1 text-[10px] uppercase tracking-[0.08em] text-ink outline-none";
+  "min-w-[200px] max-w-[min(320px,calc(100vw-16px))] overflow-auto rounded-xl bg-raise p-1.5 text-[13.5px] text-ink shadow-lg outline-none";
 
 const itemClass =
-  "group flex cursor-default items-center gap-2 px-3 py-[5px] outline-none data-[focused]:bg-ink data-[focused]:text-paper data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40";
+  "group flex cursor-default items-center gap-2.5 rounded-lg px-3 py-1.5 outline-none data-[focused]:bg-sink data-[selected]:bg-accent-tint data-[disabled]:cursor-not-allowed data-[disabled]:opacity-45";
 
 function splitTriggerChildren(
   componentName: string,
@@ -125,11 +125,7 @@ export function MenuItem({
       textValue={textValue}
       data-variant={variant}
       className={composeRenderProps(className, (className) =>
-        cn(
-          itemClass,
-          "data-[variant=destructive]:text-destructive data-[variant=destructive]:data-[focused]:text-paper",
-          className,
-        ),
+        cn(itemClass, "data-[variant=destructive]:text-hot", className),
       )}
     >
       {composeRenderProps(
@@ -156,7 +152,7 @@ export function MenuItem({
             ) : swatch ? (
               <span
                 aria-hidden="true"
-                className="size-3.5 shrink-0 border border-current"
+                className="size-3 shrink-0 rounded-full"
                 data-slot="swatch"
                 style={{ backgroundColor: swatch }}
               />
@@ -166,16 +162,13 @@ export function MenuItem({
                 {children}
               </Text>
               {description && (
-                <Text
-                  className="text-[9px] normal-case tracking-normal opacity-70"
-                  slot="description"
-                >
+                <Text className="text-[12px] text-mute" slot="description">
                   {description}
                 </Text>
               )}
             </span>
             {shortcut && (
-              <Keyboard className="ml-auto shrink-0 font-[inherit] text-[9px] tracking-normal opacity-70">
+              <Keyboard className="ml-auto shrink-0 font-sans text-[12px] text-faint">
                 {shortcut}
               </Keyboard>
             )}
@@ -197,12 +190,7 @@ export function MenuSection<T extends object>(props: AriaMenuSectionProps<T>) {
 }
 
 export function MenuSeparator({ className, ...props }: SeparatorProps) {
-  return (
-    <AriaSeparator
-      {...props}
-      className={cn("my-1 border-t border-rule-soft", className)}
-    />
-  );
+  return <AriaSeparator {...props} className={cn("my-1 h-1.5", className)} />;
 }
 
 export function SubmenuTrigger(props: AriaSubmenuTriggerProps) {

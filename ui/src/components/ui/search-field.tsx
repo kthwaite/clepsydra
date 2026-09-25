@@ -19,14 +19,17 @@ export function SearchField({
   return (
     <RACSearchField
       {...props}
-      className={cn("group flex items-center gap-2", className)}
+      className={cn(
+        "group flex h-10 items-center gap-2 rounded-full bg-sink px-4 has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-accent",
+        className,
+      )}
     >
-      <Search className="h-4 w-4 text-muted-foreground" />
+      <Search className="h-4 w-4 text-mute" />
       <Input
         placeholder={placeholder}
-        className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        className="flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-mute"
       />
-      <Button className="p-1 text-muted-foreground data-[hovered]:text-foreground group-data-[empty]:hidden">
+      <Button className="rounded-full p-1 text-mute data-[hovered]:text-ink group-data-[empty]:hidden">
         <X className="h-3 w-3" />
       </Button>
     </RACSearchField>

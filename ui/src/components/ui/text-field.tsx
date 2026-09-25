@@ -9,6 +9,7 @@ import {
   type ValidationResult,
 } from "react-aria-components";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 
 export interface TextFieldProps extends RACTextFieldProps {
   label: string;
@@ -29,20 +30,21 @@ export function TextField({
 }: TextFieldProps) {
   return (
     <RACTextField {...props} className={cn("group flex flex-col", className)}>
-      <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-        {label}
-      </Label>
+      <Label className="text-[12.5px] text-mute">{label}</Label>
       <Input
         ref={inputRef}
         placeholder={placeholder}
-        className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm outline-none data-[focused]:border-ring data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50"
+        className={cn(
+          "mt-1.5 h-10 w-full rounded-full bg-sink px-4 text-[14px] text-ink placeholder:text-mute data-[disabled]:cursor-not-allowed data-[disabled]:opacity-45 data-[invalid]:ring-2 data-[invalid]:ring-hot",
+          FOCUS_RING,
+        )}
       />
       {description && (
-        <Text slot="description" className="mt-2 text-xs text-muted-foreground">
+        <Text slot="description" className="mt-1.5 text-[12.5px] text-mute">
           {description}
         </Text>
       )}
-      <FieldError className="mt-2 text-xs text-destructive">
+      <FieldError className="mt-1.5 text-[12.5px] text-hot">
         {errorMessage}
       </FieldError>
     </RACTextField>

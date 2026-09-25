@@ -10,6 +10,7 @@ export function IconButton({ children, className, ...props }: IconButtonProps) {
     <Button
       {...props}
       size="icon"
+      variant={props.variant ?? "ghost"}
       className={cn("[&_svg]:h-4 [&_svg]:w-4", className)}
     >
       {children}

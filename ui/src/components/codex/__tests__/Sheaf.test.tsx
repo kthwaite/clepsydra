@@ -468,7 +468,7 @@ describe("Sheaf context menu integration", () => {
 
     const menu = await screen.findByRole("menu", { name: "Gamma" });
     expect(
-      await within(menu).findByRole("menuitem", { name: "CLOSE" }),
+      await within(menu).findByRole("menuitem", { name: "Close" }),
     ).toBeVisible();
   });
 
@@ -483,7 +483,7 @@ describe("Sheaf context menu integration", () => {
       keys: "[MouseRight]",
     });
     expect(
-      await screen.findByRole("menuitem", { name: "CLOSE" }),
+      await screen.findByRole("menuitem", { name: "Close" }),
     ).toBeVisible();
 
     await user.pointer({
@@ -495,10 +495,10 @@ describe("Sheaf context menu integration", () => {
       name: /quire thesis/i,
     });
     expect(
-      await within(quireMenu).findByRole("menuitem", { name: "RENAME…" }),
+      await within(quireMenu).findByRole("menuitem", { name: "Rename…" }),
     ).toBeVisible();
     expect(
-      within(quireMenu).getByRole("menuitem", { name: "COLLAPSE" }),
+      within(quireMenu).getByRole("menuitem", { name: "Collapse" }),
     ).toBeVisible();
     await waitFor(() => {
       expect(
@@ -934,6 +934,16 @@ describe("Sheaf tab preview gating", () => {
 });
 
 describe("Sheaf C3 segments", () => {
+  it("gives the + and tab buttons a visible keyboard focus ring", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    for (const name of ["New page", "Alpha"]) {
+      expect(screen.getByRole("button", { name })).toHaveClass(
+        "focus-visible:ring-2",
+      );
+    }
+  });
+
   it("keeps ungrouped runs in place, each on a neutral segment", () => {
     useWorkspaceStore.setState({
       tabs: [

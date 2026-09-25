@@ -141,13 +141,9 @@ describe("Select", () => {
       "py-1",
       "first:pt-0",
       "last:pb-0",
-      "[&>header]:px-2",
-      "[&>header]:py-1",
-      "[&>header]:text-xs",
-      "[&>header]:font-bold",
-      "[&>header]:uppercase",
-      "[&>header]:tracking-widest",
-      "[&>header]:text-muted-foreground",
+      "[&>header]:px-3",
+      "[&>header]:text-[12px]",
+      "[&>header]:text-mute",
     );
     const ada = within(group).getByRole("option", { name: "Ada" });
 
@@ -207,9 +203,8 @@ describe("Select", () => {
     const trigger = screen.getByRole("button", { name: /Status/ });
     expect(trigger.closest(".group")).toHaveAttribute("data-invalid", "true");
     expect(trigger).toHaveClass(
-      "group-data-[invalid]:border-destructive",
-      "data-[pressed]:bg-accent",
-      "data-[pressed]:text-accent-foreground",
+      "group-data-[invalid]:ring-hot",
+      "data-[pressed]:bg-sink/60",
     );
 
     await user.pointer({ target: trigger, keys: "[MouseLeft>]" });
@@ -257,8 +252,8 @@ describe("Select", () => {
       "outline-none",
     );
     expect(document.querySelector(".react-aria-Popover")).toHaveClass(
-      "border-border",
-      "bg-popover",
+      "rounded-xl",
+      "bg-raise",
       "shadow-lg",
     );
   });
@@ -295,11 +290,11 @@ describe("Select", () => {
     );
     expect(screen.getByRole("option", { name: "One" })).toHaveClass(
       "caller-selected",
-      "bg-accent",
+      "bg-accent-tint",
     );
     expect(screen.getByRole("option", { name: "Two" })).toHaveClass(
       "caller-disabled",
-      "opacity-50",
+      "opacity-45",
     );
   });
 });

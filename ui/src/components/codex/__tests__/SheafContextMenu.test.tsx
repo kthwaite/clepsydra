@@ -62,7 +62,7 @@ describe("SheafContextMenu — tab target", () => {
     seed();
     const user = await renderMenu({ kind: "tab", tabId: "t1" });
 
-    await user.click(await screen.findByRole("menuitem", { name: "CLOSE" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Close" }));
 
     expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
       "t2",
@@ -78,7 +78,7 @@ describe("SheafContextMenu — tab target", () => {
       within(rootMenu).queryByRole("menuitem", { name: /^(un)?pin$/i }),
     ).not.toBeInTheDocument();
     await user.click(
-      within(rootMenu).getByRole("menuitem", { name: "CLOSE OTHERS" }),
+      within(rootMenu).getByRole("menuitem", { name: "Close others" }),
     );
 
     expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
@@ -91,7 +91,7 @@ describe("SheafContextMenu — tab target", () => {
     const user = await renderMenu({ kind: "tab", tabId: "t1" });
 
     await user.click(
-      await screen.findByRole("menuitem", { name: "CLOSE ALL" }),
+      await screen.findByRole("menuitem", { name: "Close all" }),
     );
 
     await expectRootMenuDismissed();
@@ -110,7 +110,7 @@ describe("SheafContextMenu — tab target", () => {
     seed();
     const user = await renderMenu({ kind: "tab", tabId: "t1" });
     await user.click(
-      await screen.findByRole("menuitem", { name: "CLOSE ALL" }),
+      await screen.findByRole("menuitem", { name: "Close all" }),
     );
     const dialog = await screen.findByRole("dialog", {
       name: "Close all tabs",
@@ -132,7 +132,7 @@ describe("SheafContextMenu — tab target", () => {
     seed();
     const user = await renderMenu({ kind: "tab", tabId: "t1" });
     await user.click(
-      await screen.findByRole("menuitem", { name: "CLOSE ALL" }),
+      await screen.findByRole("menuitem", { name: "Close all" }),
     );
     const dialog = await screen.findByRole("dialog", {
       name: "Close all tabs",
@@ -154,9 +154,9 @@ describe("SheafContextMenu — tab target", () => {
     const user = await renderMenu({ kind: "tab", tabId: "t1" });
 
     await user.click(
-      await screen.findByRole("menuitem", { name: "ADD TO QUIRE" }),
+      await screen.findByRole("menuitem", { name: "Add to quire" }),
     );
-    await user.click(await screen.findByRole("menuitem", { name: "THESIS" }));
+    await user.click(await screen.findByRole("menuitem", { name: "thesis" }));
 
     expect(
       useWorkspaceStore.getState().tabs.find((tab) => tab.id === "t1")?.quireId,
@@ -168,7 +168,7 @@ describe("SheafContextMenu — tab target", () => {
     const user = await renderMenu({ kind: "tab", tabId: "t2" });
 
     await user.click(
-      await screen.findByRole("menuitem", { name: "REMOVE FROM QUIRE" }),
+      await screen.findByRole("menuitem", { name: "Remove from quire" }),
     );
 
     expect(
@@ -181,7 +181,7 @@ describe("SheafContextMenu — tab target", () => {
     const user = await renderMenu({ kind: "tab", tabId: "t1" });
 
     await user.click(
-      await screen.findByRole("menuitem", { name: "NEW QUIRE…" }),
+      await screen.findByRole("menuitem", { name: "New quire…" }),
     );
 
     await expectRootMenuDismissed();
@@ -194,7 +194,7 @@ describe("SheafContextMenu — tab target", () => {
     seed();
     const user = await renderMenu({ kind: "tab", tabId: "t1" });
     await user.click(
-      await screen.findByRole("menuitem", { name: "NEW QUIRE…" }),
+      await screen.findByRole("menuitem", { name: "New quire…" }),
     );
     const dialog = await screen.findByRole("dialog", { name: "New quire" });
 
@@ -210,7 +210,7 @@ describe("SheafContextMenu — tab target", () => {
     seed();
     const user = await renderMenu({ kind: "tab", tabId: "t1" });
     await user.click(
-      await screen.findByRole("menuitem", { name: "NEW QUIRE…" }),
+      await screen.findByRole("menuitem", { name: "New quire…" }),
     );
     const dialog = await screen.findByRole("dialog", { name: "New quire" });
 
@@ -232,7 +232,7 @@ describe("SheafContextMenu — tab target", () => {
     seed();
     const user = await renderMenu({ kind: "tab", tabId: "t1" });
     const closeOthers = await screen.findByRole("menuitem", {
-      name: "CLOSE OTHERS",
+      name: "Close others",
     });
 
     // Model the render-to-activation race without notifying React and unmounting
@@ -255,7 +255,7 @@ describe("SheafContextMenu — quire target", () => {
   it("opens a compact prefilled rename dialog and Escape leaves it unchanged", async () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
-    await user.click(await screen.findByRole("menuitem", { name: "RENAME…" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Rename…" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Rename quire" });
     expect(dialog.parentElement).toHaveClass("max-w-sm");
@@ -274,7 +274,7 @@ describe("SheafContextMenu — quire target", () => {
   it("cancels a rename without mutating the quire", async () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
-    await user.click(await screen.findByRole("menuitem", { name: "RENAME…" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Rename…" }));
     const dialog = await screen.findByRole("dialog", { name: "Rename quire" });
     const field = within(dialog).getByRole("textbox");
     await user.clear(field);
@@ -291,7 +291,7 @@ describe("SheafContextMenu — quire target", () => {
   it("trims and submits a renamed quire", async () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
-    await user.click(await screen.findByRole("menuitem", { name: "RENAME…" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Rename…" }));
     const dialog = await screen.findByRole("dialog", { name: "Rename quire" });
     const field = within(dialog).getByRole("textbox");
     await user.clear(field);
@@ -309,19 +309,19 @@ describe("SheafContextMenu — quire target", () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
 
-    await user.click(await screen.findByRole("menuitem", { name: "COLOR" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Colour" }));
     expect(
-      await screen.findByRole("menuitemradio", { name: "SEPIA" }),
+      await screen.findByRole("menuitemradio", { name: "Sepia" }),
     ).toHaveAttribute("aria-checked", "true");
     await user.click(
-      await screen.findByRole("menuitemradio", { name: "MADDER" }),
+      await screen.findByRole("menuitemradio", { name: "Madder" }),
     );
     expect(useWorkspaceStore.getState().quires.q1.color).toBe("madder");
 
     await openMenu(user);
-    await user.click(await screen.findByRole("menuitem", { name: "COLOR" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Colour" }));
     expect(
-      await screen.findByRole("menuitemradio", { name: "MADDER" }),
+      await screen.findByRole("menuitemradio", { name: "Madder" }),
     ).toHaveAttribute("aria-checked", "true");
   });
 
@@ -329,11 +329,11 @@ describe("SheafContextMenu — quire target", () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
 
-    await user.click(await screen.findByRole("menuitem", { name: "COLLAPSE" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Collapse" }));
     expect(useWorkspaceStore.getState().quires.q1.collapsed).toBe(true);
 
     await openMenu(user);
-    await user.click(await screen.findByRole("menuitem", { name: "EXPAND" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Expand" }));
     expect(useWorkspaceStore.getState().quires.q1.collapsed).toBe(false);
   });
 
@@ -341,7 +341,7 @@ describe("SheafContextMenu — quire target", () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
 
-    await user.click(await screen.findByRole("menuitem", { name: "UNGROUP" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Ungroup" }));
 
     const state = useWorkspaceStore.getState();
     expect(state.quires.q1).toBeUndefined();
@@ -352,7 +352,7 @@ describe("SheafContextMenu — quire target", () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
     const closeQuire = await screen.findByRole("menuitem", {
-      name: "CLOSE QUIRE",
+      name: "Close quire",
     });
 
     expect(closeQuire).toHaveAttribute("data-variant", "destructive");
@@ -368,7 +368,7 @@ describe("SheafContextMenu — quire target", () => {
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
 
     await user.click(
-      await screen.findByRole("menuitem", { name: "CLOSE ALL TABS" }),
+      await screen.findByRole("menuitem", { name: "Close all tabs" }),
     );
     const dialog = await screen.findByRole("dialog", {
       name: "Close all tabs",

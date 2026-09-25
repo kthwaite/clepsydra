@@ -27,9 +27,9 @@ import {
   reconcileFeedDisclosurePreferences,
   writeFeedDisclosurePreferences,
 } from "#/store/feedDisclosure";
-import { Card } from "./Card";
 import { CodexModalShell } from "./CodexModalShell";
 import { canonicalFeedGroups, FeedGroupComboBox } from "./FeedGroupComboBox";
+import { Section } from "./Section";
 
 export function FeedManagement() {
   const feedsQuery = useFeeds();
@@ -153,7 +153,7 @@ export function FeedManagement() {
           fallback="The feed operation could not be completed."
         />
       ) : null}
-      <Card
+      <Section
         label="Subscriptions"
         wrapHeader
         caption={
@@ -295,7 +295,7 @@ export function FeedManagement() {
           isImporting={importOpml.isPending}
           onImport={(opml) => importOpml.mutate({ opml })}
         />
-      </Card>
+      </Section>
 
       {isSubscribeOpen ? (
         <SubscribeFeedDialog

@@ -104,3 +104,10 @@ it("remains a passive pointer-transparent card", () => {
 
   expect(document.querySelector(".pointer-events-none")).not.toBeNull();
 });
+
+it("is a raised, rounded card with a soft shadow and no border", () => {
+  render(<TabPreviewCard path="notes/target.md" rect={rect} />);
+  const card = document.body.querySelector(":scope > div.pointer-events-none");
+  expect(card).toHaveClass("bg-raise", "rounded-xl", "shadow-lg");
+  expect(card?.className).not.toMatch(/border/);
+});

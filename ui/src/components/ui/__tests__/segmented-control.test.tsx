@@ -49,4 +49,26 @@ describe("SegmentedControl", () => {
       "true",
     );
   });
+
+  it("sits on a sink track and raises the selected segment", () => {
+    render(
+      <SegmentedControl
+        label="Mode"
+        value="a"
+        options={[
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+        ]}
+        onChange={() => {}}
+      />,
+    );
+    const group = screen.getByRole("radiogroup", { name: "Mode" });
+    expect(group.querySelector("[data-slot=segment-track]")).toHaveClass(
+      "bg-sink",
+      "rounded-full",
+    );
+    const alpha = screen.getByRole("radio", { name: "Alpha" }).closest("label");
+    expect(alpha).toHaveClass("data-[selected]:bg-raise");
+    expect(alpha?.className ?? "").not.toMatch(/uppercase|tracking-/);
+  });
 });

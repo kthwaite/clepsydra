@@ -15,9 +15,13 @@ import {
   TooltipTrigger,
 } from "react-aria-components";
 import { VesselTooltip } from "#/components/ui/tooltip";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 
-const CONTROL_CLASS =
-  "cl-mono inline-flex h-8 w-8 cursor-pointer items-center justify-center border border-rule bg-paper text-ink-mute outline-none data-[hovered]:text-accent data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-accent max-md:h-11 max-md:w-11";
+const CONTROL_CLASS = cn(
+  "inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-raise text-mute shadow-md data-[hovered]:text-accent max-md:h-11 max-md:w-11",
+  FOCUS_RING,
+);
 
 function LightboxControl({
   label,
@@ -99,7 +103,7 @@ export function Lightbox({
       isOpen={isOpen}
       isDismissable
       onOpenChange={onOpenChange}
-      className="fixed inset-0 z-50 bg-paper/95"
+      className="fixed inset-0 z-50 bg-ground/95"
     >
       <Modal className="h-dvh w-screen">
         <RACDialog
@@ -185,7 +189,7 @@ export function Lightbox({
               </div>
               <p
                 aria-live="polite"
-                className="cl-mono pointer-events-none text-[9px] uppercase tracking-[0.18em] text-ink-mute"
+                className="pointer-events-none text-[12.5px] text-mute"
               >
                 {`${Math.round(transform.k * 100)}%`}
               </p>

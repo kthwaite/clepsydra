@@ -10,6 +10,7 @@ import {
   type TabsProps as RACTabsProps,
 } from "react-aria-components";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 
 export function Tabs({ className, ...props }: RACTabsProps) {
   return <RACTabs {...props} className={cn("flex flex-col", className)} />;
@@ -19,7 +20,7 @@ export function TabList<T extends object>({
   className,
   ...props
 }: RACTabListProps<T>) {
-  return <RACTabList {...props} className={cn("flex gap-4", className)} />;
+  return <RACTabList {...props} className={cn("flex gap-5", className)} />;
 }
 
 export function Tab({ className, ...props }: RACTabProps) {
@@ -28,10 +29,10 @@ export function Tab({ className, ...props }: RACTabProps) {
       {...props}
       className={composeRenderProps(className, (prev) =>
         cn(
-          "cursor-default pb-1 text-xs uppercase tracking-wider outline-none transition-colors",
-          "text-muted-foreground data-[hovered]:text-foreground",
-          "data-[selected]:border-b-2 data-[selected]:border-foreground data-[selected]:font-bold data-[selected]:text-foreground",
-          "data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-ring data-[focus-visible]:outline-offset-2",
+          "cursor-default rounded-sm pb-1.5 text-[14px] transition-colors",
+          "text-mute data-[hovered]:text-ink",
+          "data-[selected]:font-medium data-[selected]:text-ink data-[selected]:underline data-[selected]:decoration-accent data-[selected]:decoration-[1.5px] data-[selected]:underline-offset-[7px]",
+          FOCUS_RING,
           prev,
         ),
       )}

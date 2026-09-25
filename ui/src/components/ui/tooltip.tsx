@@ -3,8 +3,9 @@ import { Tooltip, type TooltipProps } from "react-aria-components";
 import { cn } from "#/lib/cn";
 
 /**
- * The Vessel tooltip: mono, hard-edged, accent left rule. Wrap the trigger in
- * RAC's `TooltipTrigger`; this is only the bubble.
+ * The app tooltip: a small ink bubble with ground-coloured text. Wrap the
+ * trigger in RAC's `TooltipTrigger`; this is only the bubble. (The name
+ * predates Stone & Lamp and is kept for its importers.)
  */
 export function VesselTooltip({
   children,
@@ -22,7 +23,7 @@ export function VesselTooltip({
       placement={placement}
       offset={offset}
       className={cn(
-        "cl-serif z-50 border border-rule border-l-2 border-l-accent bg-paper-2 px-2 py-0.5  tracking-[0.08em] text-ink",
+        "z-50 rounded-lg bg-ink px-2.5 py-1 text-[12.5px] text-ground shadow-md",
         className,
       )}
     >

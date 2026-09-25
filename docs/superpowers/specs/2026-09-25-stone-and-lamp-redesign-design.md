@@ -1,6 +1,6 @@
 # Stone & Lamp — frontend redesign (Vessel successor)
 
-**Status:** design approved in mockups, 2026-09-25, including mobile. All open questions are resolved. Phases 1, 2a (shell) and 2b (Sheaf C3) built; phase 3 (primitives) next.
+**Status:** design approved in mockups, 2026-09-25, including mobile. All open questions are resolved. Phases 1, 2a (shell), 2b (Sheaf C3) and 3 (primitives) built; phase 4 (core screens) next.
 **Mockups:** https://claude.ai/artifact/WAmCEdwj8osAmkLkRxGkQd (canvas "Clepsydra redesign"; Folio, Atrium, Tasking, Command palette, Contents, System sheet, tab-row options A–E, C2, C3).
 **Replaces:** the Vessel design language (`docs/plans/2026-05-29-clepsydra-vessel-redesign.md`, `ui/CLAUDE.md` § Vessel).
 **Inputs:** the drop-dial app icon (`design/icon/clepsydra-icon.svg`, bc7be02c); the `_lookbook/` reference images.

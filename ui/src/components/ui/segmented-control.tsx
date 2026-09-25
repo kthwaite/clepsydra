@@ -33,6 +33,7 @@ export function SegmentedControl({
       onChange={onChange}
       className={className}
       optionsClassName={optionsClassName}
+      segmented
     >
       {options.map((option) => (
         <Radio key={option.id} value={option.id} className={itemClassName}>

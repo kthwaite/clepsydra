@@ -47,10 +47,13 @@ export function Checkbox({
         cn("group flex flex-col gap-1", className),
       )}
     >
-      <CheckboxButton className="group relative flex cursor-default items-start gap-2 text-sm text-foreground outline-none transition-colors data-[disabled]:cursor-not-allowed data-[disabled]:text-muted-foreground">
+      <CheckboxButton className="group relative flex cursor-default items-start gap-2 text-[14px] text-ink outline-none transition-colors data-[disabled]:cursor-not-allowed data-[disabled]:text-mute">
         {({ isSelected, isIndeterminate }) => (
           <>
-            <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center border border-input bg-background text-primary-foreground transition-colors group-data-[hovered]:border-ring group-data-[pressed]:bg-accent group-data-[focus-visible]:outline group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-ring group-data-[focus-visible]:outline-offset-2 group-data-[invalid]:border-destructive group-data-[selected]:border-primary group-data-[selected]:bg-primary group-data-[indeterminate]:border-primary group-data-[indeterminate]:bg-primary group-data-[disabled]:opacity-50">
+            <span
+              data-slot="checkbox-box"
+              className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[5px] bg-sink text-raise shadow-[inset_0_0_0_1.5px_var(--faint)] transition-colors group-data-[selected]:bg-accent group-data-[selected]:shadow-none group-data-[indeterminate]:bg-accent group-data-[indeterminate]:shadow-none group-data-[invalid]:shadow-[inset_0_0_0_1.5px_var(--hot)] group-data-[focus-visible]:ring-2 group-data-[focus-visible]:ring-accent group-data-[focus-visible]:ring-offset-2 group-data-[focus-visible]:ring-offset-ground group-data-[disabled]:opacity-45"
+            >
               {isIndeterminate ? (
                 <Minus aria-hidden className="size-3" />
               ) : isSelected ? (
@@ -62,11 +65,11 @@ export function Checkbox({
         )}
       </CheckboxButton>
       {description ? (
-        <Description className="ml-6 text-xs text-muted-foreground">
+        <Description className="ml-6 text-[12.5px] text-mute">
           {description}
         </Description>
       ) : null}
-      <FieldError className="ml-6 text-xs text-destructive">
+      <FieldError className="ml-6 text-[12.5px] text-hot">
         {errorMessage}
       </FieldError>
     </CheckboxField>

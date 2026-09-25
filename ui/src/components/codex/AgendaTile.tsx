@@ -6,7 +6,7 @@ import { TaskStatusButton } from "#/components/ui/task-status-button";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { localDateKey } from "#/lib/time";
-import { Card } from "./Card";
+import { Section } from "./Section";
 
 const AGENDA_FILTERS = { status: "todo", sort: "agenda", limit: 8 } as const;
 const MAX_ROWS = 8;
@@ -24,7 +24,7 @@ function AgendaFrame({ children, className, total }: AgendaFrameProps) {
   const navigate = useNavigate();
 
   return (
-    <Card
+    <Section
       className={className}
       label="Outstanding agenda"
       caption={total === undefined ? undefined : `${total} outstanding`}
@@ -41,7 +41,7 @@ function AgendaFrame({ children, className, total }: AgendaFrameProps) {
       tight
     >
       {children}
-    </Card>
+    </Section>
   );
 }
 

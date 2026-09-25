@@ -10,6 +10,7 @@ import {
 import { Button, Tag, TagGroup, TagList } from "react-aria-components";
 import { formatApiError } from "#/api/error";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 
 export type TagInputVariant = "default" | "codex";
 
@@ -204,9 +205,9 @@ export function TagInput({
     <fieldset
       aria-label={label}
       className={cn(
-        "relative m-0 flex min-w-0 flex-wrap items-center gap-1 border-0 p-0",
+        "relative m-0 flex min-w-0 flex-wrap items-center gap-1.5 border-0 p-0",
         variant === "codex" &&
-          "mt-1 border border-rule p-1 focus-within:border-accent",
+          "mt-1 rounded-[14px] bg-sink px-2 py-1.5 has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-accent",
         className,
       )}
       onMouseDown={(event) => {
@@ -216,7 +217,7 @@ export function TagInput({
         }
       }}
     >
-      <label htmlFor={inputId} className="text-xs text-muted-foreground">
+      <label htmlFor={inputId} className="text-[12.5px] text-mute">
         {label}:
       </label>
       {readOnlyValues.length > 0 && (
@@ -230,9 +231,8 @@ export function TagInput({
                 id={item.id}
                 textValue={item.name}
                 className={cn(
-                  "flex items-center gap-1 border border-border bg-muted px-2 py-0.5 text-xs",
-                  variant === "codex" &&
-                    "cl-mono inline-flex border-rule bg-paper-2 px-1.5 py-[1px] text-[11px] tracking-[0.04em] text-ink-2",
+                  "flex h-7 items-center gap-1 rounded-full px-2.5 text-[13px] text-ink-2",
+                  variant === "codex" ? "bg-raise" : "bg-sink",
                 )}
               >
                 {`${valuePrefix}${item.name}`}
@@ -257,9 +257,8 @@ export function TagInput({
                 id={item.id}
                 textValue={item.name}
                 className={cn(
-                  "flex items-center gap-1 border border-border bg-muted px-2 py-0.5 text-xs",
-                  variant === "codex" &&
-                    "cl-mono inline-flex border-rule bg-paper-2 px-1.5 py-[1px] text-[11px] tracking-[0.04em] text-ink-2",
+                  "flex h-7 items-center gap-1 rounded-full px-2.5 text-[13px] text-ink-2",
+                  variant === "codex" ? "bg-raise" : "bg-sink",
                 )}
               >
                 {({ allowsRemoving }) => (
@@ -268,7 +267,10 @@ export function TagInput({
                     {allowsRemoving && (
                       <Button
                         slot="remove"
-                        className="text-muted-foreground hover:text-foreground"
+                        className={cn(
+                          "rounded-full p-0.5 text-mute hover:text-ink",
+                          FOCUS_RING,
+                        )}
                       >
                         <X className="h-3 w-3" />
                       </Button>
@@ -307,18 +309,17 @@ export function TagInput({
             : undefined
         }
         className={cn(
-          "min-w-[80px] flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground",
-          variant === "codex" &&
-            "cl-mono min-w-[8ch] border-none p-[2px] text-[12px] text-ink placeholder:text-ink-mute",
+          "min-w-[80px] flex-1 bg-transparent text-[13.5px] text-ink outline-none placeholder:text-mute",
+          variant === "codex" && "min-w-[8ch] p-[2px]",
         )}
       />
       {query && suggestionsLoading ? (
-        <span role="status" className="text-xs text-muted-foreground">
+        <span role="status" className="text-[12.5px] text-mute">
           Loading tag suggestions…
         </span>
       ) : null}
       {query && suggestionsError ? (
-        <span className="flex items-center gap-2 text-xs text-destructive">
+        <span className="flex items-center gap-2 text-[12.5px] text-hot">
           <span role="alert">
             {formatApiError(suggestionsError, "Tag suggestions unavailable")}
           </span>
@@ -345,8 +346,7 @@ export function TagInput({
           role="listbox"
           aria-label="Tag suggestions"
           className={cn(
-            "absolute left-0 right-0 top-full z-20 m-0 max-h-[200px] list-none overflow-auto border border-border bg-background p-0.5",
-            variant === "codex" && "cl-mono border-rule bg-paper",
+            "absolute left-0 right-0 top-full z-20 m-0 mt-1 max-h-[200px] list-none overflow-auto rounded-xl bg-raise p-1.5 shadow-lg",
           )}
         >
           {matches.map((suggestion, index) => (
@@ -361,13 +361,8 @@ export function TagInput({
                 addValue(suggestion);
               }}
               className={cn(
-                "cursor-pointer px-2 py-1 text-xs",
-                variant === "codex" &&
-                  "text-[11px] tracking-[0.04em] text-ink-2",
-                index === selected &&
-                  (variant === "codex"
-                    ? "bg-highlight font-bold text-ink"
-                    : "bg-muted font-bold"),
+                "cursor-pointer rounded-lg px-3 py-1.5 text-[13.5px] text-ink",
+                index === selected && "bg-accent-tint font-medium",
               )}
             >
               {`${valuePrefix}${suggestion}`}

@@ -10,7 +10,11 @@ export interface PopoverProps extends Omit<AriaPopoverProps, "children"> {
   hideArrow?: boolean;
 }
 
-export function Popover({ children, hideArrow, ...props }: PopoverProps) {
+export function Popover({
+  children,
+  hideArrow = true,
+  ...props
+}: PopoverProps) {
   return (
     <AriaPopover
       {...props}

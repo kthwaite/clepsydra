@@ -1,5 +1,6 @@
 import { Check, Circle, Loader2, X } from "lucide-react";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 const STATUS_ICONS: Record<string, typeof Circle> = {
   todo: Circle,
@@ -48,7 +49,8 @@ export function TaskStatusButton({
       disabled={isDisabled}
       aria-label={accessibleLabel ?? `Mark Todo ${next}`}
       className={cn(
-        "mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center border border-border text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50",
+        "mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] bg-sink text-mute shadow-[inset_0_0_0_1.5px_var(--faint)] hover:text-ink disabled:opacity-45",
+        FOCUS_RING_NATIVE,
         className,
       )}
     >

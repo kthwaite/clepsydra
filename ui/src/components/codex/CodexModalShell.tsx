@@ -32,7 +32,7 @@ export function CodexModalShell({
       onOpenChange={(open) => {
         if (!open) onDismiss();
       }}
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/35 pt-0 md:pt-20"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-0 md:pt-20"
     >
       <Modal
         className={cn(
@@ -44,7 +44,7 @@ export function CodexModalShell({
         <RACDialog
           aria-label={ariaLabel}
           className={cn(
-            "border-[1.5px] border-ink bg-paper font-body text-ink outline-none max-md:h-full max-md:overflow-y-auto",
+            "overflow-hidden rounded-2xl bg-raise text-ink shadow-xl outline-none max-md:h-full max-md:overflow-y-auto max-md:rounded-none",
             panelClassName,
           )}
         >
