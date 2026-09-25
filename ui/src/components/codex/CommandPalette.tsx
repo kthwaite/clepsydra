@@ -327,6 +327,16 @@ function CommandPaletteContent() {
     return [...verbsMatch, ...noteCommands, ...tagsMatch].slice(0, 14);
   }, [q, verbCommands, noteCommands, tagCommands, quireCommands]);
 
+  // Rows are tall and the list scrolls without a visible bar, so keep the
+  // keyboard selection in view as it moves.
+  const listRef = useRef<HTMLDivElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run when the selection or the result set changes
+  useEffect(() => {
+    listRef.current
+      ?.querySelector<HTMLElement>("[data-active]")
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [sel, filtered]);
+
   const onKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -367,7 +377,10 @@ function CommandPaletteContent() {
         />
         <span className="text-[12.5px] text-mute">esc</span>
       </label>
-      <div className="cl-noscroll max-h-[420px] overflow-auto px-3.5 pb-4">
+      <div
+        ref={listRef}
+        className="cl-noscroll max-h-[420px] overflow-auto px-3.5 pb-4"
+      >
         {showSearchLoading && (
           <div
             role="status"

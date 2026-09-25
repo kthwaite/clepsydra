@@ -651,6 +651,23 @@ describe("CommandPalette keyboard navigation", () => {
       "quire-2",
     );
   });
+  it("scrolls the active row into view as the selection moves", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+    await user.click(screen.getByRole("textbox", { name: "Command query" }));
+    scrollIntoView.mockClear();
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    const active = document.querySelector("[data-active]");
+    expect(active).not.toBeNull();
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(active);
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
+  });
 });
 
 describe("CommandPalette pointer highlight", () => {
