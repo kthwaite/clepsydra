@@ -56,3 +56,31 @@ describe("Section", () => {
     expect(section?.className ?? "").not.toMatch(/border|bg-/);
   });
 });
+
+describe("Section compact", () => {
+  it("draws a smaller muted eyebrow and a 17px body indent for rails", () => {
+    const { container } = render(
+      <Section label="On this page" compact>
+        <p>body</p>
+      </Section>,
+    );
+    const heading = screen.getByRole("heading", { name: "On this page" });
+    expect(heading).toHaveClass("text-[18px]", "text-mute");
+    expect(heading).not.toHaveClass("text-[22px]");
+    expect(container.querySelector("[data-section-body]")).toHaveClass(
+      "pl-[17px]",
+    );
+  });
+
+  it("keeps the default eyebrow at 22px ink", () => {
+    render(
+      <Section label="Recent">
+        <p>body</p>
+      </Section>,
+    );
+    expect(screen.getByRole("heading", { name: "Recent" })).toHaveClass(
+      "text-[22px]",
+      "text-ink",
+    );
+  });
+});
