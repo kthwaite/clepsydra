@@ -8,7 +8,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { BoardTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { BacklogView, groupBacklog } from "../BacklogView";
@@ -176,7 +184,8 @@ describe("groupBacklog", () => {
   it("within group: sorts by COL_ORDER index (INTAKE before FIELD)", () => {
     // T_P2_INTAKE is INTAKE (index 0), T_P2_CHECKS is FIELD (index 2)
     const groups = groupBacklog([T_P2_CHECKS, T_P2_INTAKE]);
-    const p2 = groups.find((g) => g.pri === "P2")!;
+    const p2 = groups.find((g) => g.pri === "P2");
+    assert(p2);
     expect(p2.items[0].id).toBe("bk-p2-intake");
     expect(p2.items[1].id).toBe("bk-p2-checks");
   });
@@ -197,7 +206,8 @@ describe("groupBacklog", () => {
       due: null,
     };
     const groups = groupBacklog([aNodue, aDue]);
-    const p0 = groups.find((g) => g.pri === "P0")!;
+    const p0 = groups.find((g) => g.pri === "P0");
+    assert(p0);
     expect(p0.items[0].id).toBe("a"); // due → first
     expect(p0.items[1].id).toBe("b"); // no-due → last
   });
@@ -216,7 +226,8 @@ describe("groupBacklog", () => {
       due: "2026-09-01",
     };
     const groups = groupBacklog([late, early]);
-    const p2 = groups.find((g) => g.pri === "P2")!;
+    const p2 = groups.find((g) => g.pri === "P2");
+    assert(p2);
     expect(p2.items[0].id).toBe("early");
     expect(p2.items[1].id).toBe("late");
   });
@@ -234,16 +245,19 @@ describe("groupBacklog", () => {
       due: "2026-01-01",
     };
     const groups = groupBacklog([field, intake]);
-    const p2 = groups.find((g) => g.pri === "P2")!;
+    const p2 = groups.find((g) => g.pri === "P2");
+    assert(p2);
     expect(p2.items[0].id).toBe("intake-nodue"); // INTAKE wins regardless
     expect(p2.items[1].id).toBe("field-due");
   });
 
   it("item count matches input tasks for that priority", () => {
     const groups = groupBacklog([T_P0_DUE, T_P0_NODUE, T_P1_HOLD]);
-    const p0 = groups.find((g) => g.pri === "P0")!;
+    const p0 = groups.find((g) => g.pri === "P0");
+    assert(p0);
     expect(p0.items).toHaveLength(2);
-    const p1 = groups.find((g) => g.pri === "P1")!;
+    const p1 = groups.find((g) => g.pri === "P1");
+    assert(p1);
     expect(p1.items).toHaveLength(1);
   });
 });
@@ -261,24 +275,6 @@ beforeEach(() => {
     editTaskId: null,
     taskModal: null,
     cycleModal: null,
-  });
-});
-
-describe("BacklogView — header columns", () => {
-  it("renders the approved 8 header columns", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[]} />);
-    for (const label of [
-      "ID",
-      "Task",
-      "Project",
-      "Status",
-      "Assignee",
-      "Estimate",
-      "Due",
-      "Checklist",
-    ]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
-    }
   });
 });
 

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mutateMock } = vi.hoisted(() => ({ mutateMock: vi.fn() }));
 vi.mock("#/api/journal", () => ({
@@ -21,7 +21,9 @@ describe("CaptureAsideModal", () => {
     fireEvent.change(screen.getByLabelText("Aside"), {
       target: { value: "  a thought  " },
     });
-    fireEvent.submit(screen.getByLabelText("Aside").closest("form")!);
+    const form = screen.getByLabelText("Aside").closest("form");
+    assert.isNotNull(form);
+    fireEvent.submit(form);
     expect(mutateMock).toHaveBeenCalledWith("a thought", expect.anything());
     expect(useUiStore.getState().isCaptureAsideOpen).toBe(false);
   });
@@ -34,7 +36,9 @@ describe("CaptureAsideModal", () => {
     fireEvent.change(screen.getByLabelText("Aside"), {
       target: { value: "x" },
     });
-    fireEvent.submit(screen.getByLabelText("Aside").closest("form")!);
+    const form = screen.getByLabelText("Aside").closest("form");
+    assert.isNotNull(form);
+    fireEvent.submit(form);
     expect(screen.getByText(/Capture failed/)).toBeInTheDocument();
     expect(useUiStore.getState().isCaptureAsideOpen).toBe(true);
   });

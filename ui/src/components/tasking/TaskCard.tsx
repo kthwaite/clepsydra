@@ -62,6 +62,7 @@ export function TaskCard({
   } = checklistProgress(t.checks);
 
   const { bar: barColor, text: priTextColor } = priColor(t.priority);
+  const link = t.link;
 
   return (
     <div
@@ -197,16 +198,16 @@ export function TaskCard({
         {t.estimate && (
           <span className="font-variant-numeric">{t.estimate}</span>
         )}
-        {t.link && (
+        {link && (
           <button
             type="button"
             className="pointer-events-auto relative z-[1] cursor-pointer border-b border-dotted border-[var(--cool)] text-[var(--cool)] hover:bg-[var(--cool)] hover:text-[var(--bg)]"
             onClick={(e) => {
               e.stopPropagation();
-              onOpenDossier?.(t.link!);
+              onOpenDossier?.(link);
             }}
           >
-            {t.link}
+            {link}
           </button>
         )}
         <span

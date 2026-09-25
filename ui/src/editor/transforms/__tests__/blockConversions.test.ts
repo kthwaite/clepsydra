@@ -25,10 +25,10 @@ describe("applyBlockConversion", () => {
       deleteRange: triggerRange(2),
       conversion: { type: "heading", level: 2 },
     });
-    const node = editor.children[0] as any;
-    expect(node.type).toBe("heading");
-    expect(node.level).toBe(2);
-    expect(node.children[0].text).toBe("");
+    const node = editor.children[0];
+    expect(node).toHaveProperty("type", "heading");
+    expect(node).toHaveProperty("level", 2);
+    expect(node).toHaveProperty("children.0.text", "");
   });
 
   it("BC-02: bulleted-list wraps paragraph in list-item > paragraph", () => {
@@ -37,10 +37,10 @@ describe("applyBlockConversion", () => {
       at: [0],
       conversion: { type: "bulleted-list" },
     });
-    const list = editor.children[0] as any;
-    expect(list.type).toBe("bulleted-list");
-    expect(list.children[0].type).toBe("list-item");
-    expect(list.children[0].children[0].type).toBe("paragraph");
+    const list = editor.children[0];
+    expect(list).toHaveProperty("type", "bulleted-list");
+    expect(list).toHaveProperty("children.0.type", "list-item");
+    expect(list).toHaveProperty("children.0.children.0.type", "paragraph");
   });
 
   it("BC-03: numbered-list produces an ordered list", () => {
@@ -49,15 +49,15 @@ describe("applyBlockConversion", () => {
       at: [0],
       conversion: { type: "numbered-list" },
     });
-    expect((editor.children[0] as any).type).toBe("numbered-list");
+    expect(editor.children[0]).toHaveProperty("type", "numbered-list");
   });
 
   it("BC-04: task produces a bulleted list-item with checked: false", () => {
     const editor = editorWithParagraph("");
     applyBlockConversion(editor, { at: [0], conversion: { type: "task" } });
-    const list = editor.children[0] as any;
-    expect(list.type).toBe("bulleted-list");
-    expect(list.children[0].checked).toBe(false);
+    const list = editor.children[0];
+    expect(list).toHaveProperty("type", "bulleted-list");
+    expect(list).toHaveProperty("children.0.checked", false);
   });
 
   it("BC-04b: task with checked: true produces a checked item", () => {
@@ -66,8 +66,8 @@ describe("applyBlockConversion", () => {
       at: [0],
       conversion: { type: "task", checked: true },
     });
-    const list = editor.children[0] as any;
-    expect(list.children[0].checked).toBe(true);
+    const list = editor.children[0];
+    expect(list).toHaveProperty("children.0.checked", true);
   });
 
   it("BC-05: blockquote wraps the paragraph", () => {
@@ -76,9 +76,9 @@ describe("applyBlockConversion", () => {
       at: [0],
       conversion: { type: "blockquote" },
     });
-    const bq = editor.children[0] as any;
-    expect(bq.type).toBe("blockquote");
-    expect(bq.children[0].type).toBe("paragraph");
+    const bq = editor.children[0];
+    expect(bq).toHaveProperty("type", "blockquote");
+    expect(bq).toHaveProperty("children.0.type", "paragraph");
   });
 
   it("BC-06: code-block sets type and language", () => {
@@ -87,9 +87,9 @@ describe("applyBlockConversion", () => {
       at: [0],
       conversion: { type: "code-block", language: "rust" },
     });
-    const cb = editor.children[0] as any;
-    expect(cb.type).toBe("code-block");
-    expect(cb.language).toBe("rust");
+    const cb = editor.children[0];
+    expect(cb).toHaveProperty("type", "code-block");
+    expect(cb).toHaveProperty("language", "rust");
   });
 
   it("BC-07: thematic-break sets type and inserts a trailing paragraph", () => {
@@ -98,8 +98,8 @@ describe("applyBlockConversion", () => {
       at: [0],
       conversion: { type: "thematic-break" },
     });
-    expect((editor.children[0] as any).type).toBe("thematic-break");
-    expect((editor.children[1] as any).type).toBe("paragraph");
+    expect(editor.children[0]).toHaveProperty("type", "thematic-break");
+    expect(editor.children[1]).toHaveProperty("type", "paragraph");
   });
 
   it("BC-08: a new bulleted-list merges with the adjacent list above", () => {
@@ -121,9 +121,9 @@ describe("applyBlockConversion", () => {
       conversion: { type: "bulleted-list" },
     });
     expect(editor.children).toHaveLength(1);
-    const list = editor.children[0] as any;
-    expect(list.type).toBe("bulleted-list");
-    expect(list.children).toHaveLength(2);
+    const list = editor.children[0];
+    expect(list).toHaveProperty("type", "bulleted-list");
+    expect(list).toHaveProperty("children.length", 2);
   });
 
   it("BC-09: slash-style delete + convert merges with the adjacent list above", () => {
@@ -153,9 +153,9 @@ describe("applyBlockConversion", () => {
       conversion: { type: "bulleted-list" },
     });
     expect(editor.children).toHaveLength(1);
-    const list = editor.children[0] as any;
-    expect(list.children).toHaveLength(2);
-    expect(list.children[0].children[0].children[0].text).toBe("a");
-    expect(list.children[1].children[0].children[0].text).toBe("");
+    const list = editor.children[0];
+    expect(list).toHaveProperty("children.length", 2);
+    expect(list).toHaveProperty("children.0.children.0.children.0.text", "a");
+    expect(list).toHaveProperty("children.1.children.0.children.0.text", "");
   });
 });

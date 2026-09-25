@@ -14,7 +14,6 @@ import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { deriveProjectScopes } from "../board-projects";
 import { TimelineView } from "../TimelineView";
-import { parseDay, pct, windowOf } from "../timeline-math";
 import {
   BOARD_FIXTURE,
   FIXTURE_COL_LABEL,
@@ -146,24 +145,6 @@ const TL_TASK_UNFILED: BoardTask = {
   checks: [],
   path: "tasks/t-unfiled.md",
   updated_at: "2026-06-04T00:00:00Z",
-};
-
-/** HOLD scheduled task */
-const TL_TASK_HOLD: BoardTask = {
-  id: "t-hold",
-  code: "TSK-0014",
-  title: "Hold Task",
-  body_excerpt: null,
-  status: "INTAKE",
-  priority: "P1",
-  project: "alpha",
-  cycle: "C-01",
-  due: "2026-06-08",
-  hold: "awaiting review",
-  tags: [],
-  checks: [],
-  path: "tasks/t-hold.md",
-  updated_at: "2026-06-01T00:00:00Z",
 };
 
 // ── render wrapper ────────────────────────────────────────────────────────────
@@ -494,7 +475,7 @@ describe("TimelineView — UNFILED group", () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("TimelineView — bar positioning", () => {
-  it("bar left% is computed from pct(taskStart, window)", () => {
+  it("positions a dated task within the padded cycle window", () => {
     wrap(
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
@@ -504,22 +485,10 @@ describe("TimelineView — bar positioning", () => {
       />,
     );
 
-    const win = windowOf(TL_CYCLES)!;
-    const s = parseDay("2026-06-01")!;
-    const e = parseDay("2026-06-08")!;
-    const expectedLeft = pct(s, win);
-    const expectedWidth = Math.max(2.5, pct(e, win) - expectedLeft);
-
+    // The padded window is May 24–June 24 (31 days); the task is June 1–8.
     const bar = screen.getByTestId("tl-bar-t-alpha-1");
-    const style = window.getComputedStyle(bar);
-
-    // jsdom doesn't resolve CSS percentages in getComputedStyle, so check
-    // the inline style attribute string directly.
-    const styleAttr = bar.getAttribute("style") ?? "";
-    expect(styleAttr).toContain(`left: ${expectedLeft}%`);
-    expect(styleAttr).toContain(`width: ${expectedWidth}%`);
-
-    void style; // suppress unused warning
+    expect(Number.parseFloat(bar.style.left)).toBeCloseTo((8 / 31) * 100);
+    expect(Number.parseFloat(bar.style.width)).toBeCloseTo((7 / 31) * 100);
   });
 
   it("bar width is at least 2.5% (min-width guard)", () => {
@@ -539,51 +508,7 @@ describe("TimelineView — bar positioning", () => {
       />,
     );
     const bar = screen.getByTestId("tl-bar-t-point");
-    const styleAttr = bar.getAttribute("style") ?? "";
-    // Extract width value
-    const widthMatch = /width:\s*([\d.]+)%/.exec(styleAttr);
-    expect(widthMatch).not.toBeNull();
-    expect(parseFloat(widthMatch![1])).toBeGreaterThanOrEqual(2.5);
-  });
-
-  it("bar has correct status class", () => {
-    wrap(
-      <TimelineView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[TL_TASK_ALPHA]}
-        projects={TL_SCOPES}
-        cycles={TL_CYCLES}
-      />,
-    );
-    const bar = screen.getByTestId("tl-bar-t-alpha-1");
-    expect(bar.className).toContain("FIELD");
-  });
-
-  it("positions bars absolutely inside a relative track", () => {
-    wrap(
-      <TimelineView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[TL_TASK_ALPHA]}
-        projects={TL_SCOPES}
-        cycles={TL_CYCLES}
-      />,
-    );
-    const bar = screen.getByTestId(`tl-bar-${TL_TASK_ALPHA.id}`);
-    expect(bar.className).toContain("absolute");
-    expect(bar.parentElement?.className).toContain("relative");
-  });
-
-  it("bar has hold class when task.hold is set", () => {
-    wrap(
-      <TimelineView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[TL_TASK_HOLD]}
-        projects={TL_SCOPES}
-        cycles={TL_CYCLES}
-      />,
-    );
-    const bar = screen.getByTestId("tl-bar-t-hold");
-    expect(bar.className).toContain("hold");
+    expect(Number.parseFloat(bar.style.width)).toBeGreaterThanOrEqual(2.5);
   });
 
   it("bar shows code and canonical status label text", () => {

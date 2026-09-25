@@ -16,6 +16,7 @@ import {
 } from "#/editor/schema/elements/list";
 import { makeParagraph } from "#/editor/schema/elements/paragraph";
 import { insertJournalTimeHeading } from "#/editor/transforms/journalTime";
+import type { CodeBlockElement } from "#/editor/types";
 
 export type BlockConversion =
   | { type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6 }
@@ -53,7 +54,7 @@ export function applyBlockConversion(
       case "heading":
         Transforms.setNodes(
           editor,
-          { type: "heading", level: conversion.level } as any,
+          { type: "heading", level: conversion.level },
           { at },
         );
         break;
@@ -70,9 +71,9 @@ export function applyBlockConversion(
         Transforms.wrapNodes(editor, makeBlockquote({}), { at });
         break;
       case "code-block": {
-        const props: Record<string, unknown> = { type: "code-block" };
+        const props: Partial<CodeBlockElement> = { type: "code-block" };
         if (conversion.language) props.language = conversion.language;
-        Transforms.setNodes(editor, props as any, { at });
+        Transforms.setNodes(editor, props, { at });
         break;
       }
       case "journal-time":
@@ -81,7 +82,7 @@ export function applyBlockConversion(
         });
         break;
       case "thematic-break": {
-        Transforms.setNodes(editor, { type: "thematic-break" } as any, { at });
+        Transforms.setNodes(editor, { type: "thematic-break" }, { at });
         const nextPath = Path.next(at);
         Transforms.insertNodes(editor, makeParagraph({}), { at: nextPath });
         Transforms.select(editor, {
@@ -127,10 +128,7 @@ function mergeWithAdjacentList(
     const prevPath = Path.previous(listPath);
     try {
       const prevNode = Node.get(editor, prevPath);
-      if (
-        SlateElement.isElement(prevNode) &&
-        (prevNode as any).type === listType
-      ) {
+      if (SlateElement.isElement(prevNode) && prevNode.type === listType) {
         const ourNode = Node.get(editor, listPath);
         if (!SlateElement.isElement(ourNode)) return;
         const count = ourNode.children.length;
@@ -140,7 +138,7 @@ function mergeWithAdjacentList(
         for (let i = 0; i < count; i++) {
           Transforms.moveNodes(editor, {
             at: [...listPath, 0],
-            to: [...prevPath, (prevNode as any).children.length],
+            to: [...prevPath, prevNode.children.length],
           });
         }
         Transforms.removeNodes(editor, { at: listPath });
@@ -153,9 +151,8 @@ function mergeWithAdjacentList(
 }
 
 function withBatch(editor: Editor, fn: () => void): void {
-  const histEditor = editor as unknown as HistoryEditor;
   if (typeof HistoryEditor.withNewBatch === "function") {
-    HistoryEditor.withNewBatch(histEditor, () => {
+    HistoryEditor.withNewBatch(editor, () => {
       Editor.withoutNormalizing(editor, fn);
     });
   } else {

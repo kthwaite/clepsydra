@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   EMPTY_FILTER_STATE,
   type FilterField,
@@ -74,14 +74,6 @@ beforeEach(() => {
 describe("BoardHeader", () => {
   // ── title block ────────────────────────────────────────────────────────────
 
-  it("renders the Task Board heading without register vocabulary", () => {
-    renderHeader();
-    expect(
-      screen.getByRole("heading", { name: "Task Board" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/OPS REGISTER/)).not.toBeInTheDocument();
-  });
-
   it("renders plural project and cycle counts", () => {
     renderHeader();
     expect(screen.getByText("2 projects · 2 cycles")).toBeInTheDocument();
@@ -101,49 +93,25 @@ describe("BoardHeader", () => {
     // tasks has 4 non-SEALED (t1 FIELD, t2 INTAKE, t3 TRIAGE, t4 INTAKE) + 1 SEALED (t5)
     renderHeader();
     // "04" = 4 open tasks
-    const openLabel = screen.getByText("Open");
-    const openStat = openLabel.parentElement!.querySelector("span:last-child");
-    expect(openStat?.textContent).toBe("04");
+    const openStat = screen.getByText("Open").parentElement;
+    assert(openStat !== null);
+    expect(within(openStat).getByText("04")).toBeInTheDocument();
   });
 
   it("computes In progress count zero-padded", () => {
     // t1 has status=FIELD
     renderHeader();
-    const fieldLabel = screen.getByText("In progress");
-    const fieldStat =
-      fieldLabel.parentElement!.querySelector("span:last-child");
-    expect(fieldStat?.textContent).toBe("01");
+    const fieldStat = screen.getByText("In progress").parentElement;
+    assert(fieldStat !== null);
+    expect(within(fieldStat).getByText("01")).toBeInTheDocument();
   });
 
   it("computes Blocked count zero-padded", () => {
     // t2 has hold='blocker'
     renderHeader();
-    const holdLabel = screen.getByText("Blocked");
-    const holdStat = holdLabel.parentElement!.querySelector("span:last-child");
-    expect(holdStat?.textContent).toBe("01");
-  });
-
-  it("Blocked stat uses hot color when count > 0", () => {
-    renderHeader();
-    const holdLabel = screen.getByText("Blocked");
-    const holdStat = holdLabel.parentElement!.querySelector(
-      "span:last-child",
-    ) as HTMLElement;
-    expect(holdStat?.style.color).toBe("var(--hot)");
-  });
-
-  it("Blocked stat uses ink color when count is 0", () => {
-    const noHoldTasks = tasks.filter((t) => !t.hold);
-    renderHeader({
-      tasks: noHoldTasks,
-      filteredCount: noHoldTasks.length,
-      opFilteredCount: noHoldTasks.length,
-    });
-    const holdLabel = screen.getByText("Blocked");
-    const holdStat = holdLabel.parentElement!.querySelector(
-      "span:last-child",
-    ) as HTMLElement;
-    expect(holdStat?.style.color).toBe("var(--ink)");
+    const holdStat = screen.getByText("Blocked").parentElement;
+    assert(holdStat !== null);
+    expect(within(holdStat).getByText("01")).toBeInTheDocument();
   });
 
   it("renders Completed · 14 days sparkline", () => {

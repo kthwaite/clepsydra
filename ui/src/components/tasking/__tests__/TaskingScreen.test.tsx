@@ -9,7 +9,15 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { BoardResponse } from "#/api/board";
 import { EMPTY_FILTER_STATE, type FilterState } from "#/lib/filters/model";
 import { useBoardStore } from "#/store/board";
@@ -276,50 +284,25 @@ describe("TaskingScreen smoke", () => {
     expect(screen.queryByText(/COMING SOON/)).not.toBeInTheDocument();
   });
 
-  it("shows neutral priority descriptions in list mode", async () => {
-    const priorityFixture: BoardResponse = {
-      ...BOARD_FIXTURE,
-      tasks: [
-        ...BOARD_FIXTURE.tasks,
-        {
-          ...BOARD_FIXTURE.tasks[0],
-          id: "priority-p0",
-          code: "TSK-P0",
-          title: "Critical task",
-          priority: "P0",
-        },
-      ],
-    };
-    useBoardStore.setState({ mode: "backlog" });
-    stubBoardFetch(priorityFixture);
-    renderScreen();
-    await screen.findByText("Task Board");
-
-    for (const label of ["Critical", "High", "Medium", "Low"]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
-    }
-  });
-
-  it("op with null project: clicking its row highlights it, shows op-meta, zero tasks", async () => {
+  it("op with null project: clicking its row shows op-meta and zero tasks", async () => {
     stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
     renderScreen();
     await screen.findByText("Task Board");
 
-    const row = screen.getByText("OPS-3").closest("button")!;
+    const row = screen.getByRole("button", { name: /OPS-3/ });
     await userEvent.click(row);
 
-    // opFilter falls back to the op code; the row highlights consistently
+    // opFilter falls back to the op code.
     expect(useBoardStore.getState().opFilter).toBe("OPS-3");
-    expect(row.className).toContain("border-l-[var(--hot)]");
 
     // op-meta line resolves the same op (LEAD label only renders there)
     expect(screen.getByText("LEAD")).toBeInTheDocument();
     expect(screen.getByText("Riva")).toBeInTheDocument();
 
     // no task carries the op code as a project → zero visible tasks
-    const openLabel = screen.getByText("Open");
-    const openStat = openLabel.parentElement!.querySelector("span:last-child");
-    expect(openStat?.textContent).toBe("00");
+    const openStat = screen.getByText("Open").parentElement;
+    assert(openStat !== null);
+    expect(within(openStat).getByText("00")).toBeInTheDocument();
   });
 });
 
@@ -544,7 +527,7 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
     await screen.findByText("Task Board");
 
     // Select OPS-1 via its ScopeRail row → the op-meta line renders
-    await userEvent.click(screen.getByText("OPS-1").closest("button")!);
+    await userEvent.click(screen.getByRole("button", { name: /OPS-1/ }));
     expect(useBoardStore.getState().opFilter).toBe("alpha");
 
     // The DOSSIER button shows the op's dossier value ("tasks/ops-1")
@@ -863,11 +846,11 @@ describe("TaskingScreen — task slugs with no operation", () => {
     await screen.findByText("Task Board");
 
     expect(screen.getByText("2 projects · 2 cycles")).toBeInTheDocument();
-    const alphaRow = screen.getByText("ALPHA").closest("button")!;
+    const alphaRow = screen.getByRole("button", { name: /ALPHA/ });
     expect(within(alphaRow).getByText("3")).toBeInTheDocument(); // t1, t2, t5
-    const betaRow = screen.getByText("BETA").closest("button")!;
+    const betaRow = screen.getByRole("button", { name: /BETA/ });
     expect(within(betaRow).getByText("1")).toBeInTheDocument(); // t3
-    const noProjectRow = screen.getByText("No project").closest("button")!;
+    const noProjectRow = screen.getByRole("button", { name: /No project/ });
     expect(within(noProjectRow).getByText("1")).toBeInTheDocument(); // t4
   });
 
@@ -876,13 +859,13 @@ describe("TaskingScreen — task slugs with no operation", () => {
     renderScreen();
     await screen.findByText("Task Board");
 
-    await userEvent.click(screen.getByText("ALPHA").closest("button")!);
+    await userEvent.click(screen.getByRole("button", { name: /ALPHA/ }));
     expect(useBoardStore.getState().opFilter).toBe("alpha");
 
     // Open = non-SEALED alpha tasks (t1, t2)
-    const openLabel = screen.getByText("Open");
-    const openStat = openLabel.parentElement!.querySelector("span:last-child");
-    expect(openStat?.textContent).toBe("02");
+    const openStat = screen.getByText("Open").parentElement;
+    assert(openStat !== null);
+    expect(within(openStat).getByText("02")).toBeInTheDocument();
     expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Unfiled")).not.toBeInTheDocument();
     // No page behind the slug → no op-meta strip

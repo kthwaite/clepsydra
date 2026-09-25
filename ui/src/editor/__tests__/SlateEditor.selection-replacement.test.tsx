@@ -17,7 +17,7 @@ import {
   Transforms,
 } from "slate";
 import type { HistoryEditor } from "slate-history";
-import { beforeAll, beforeEach, expect, it, vi } from "vitest";
+import { assert, beforeAll, beforeEach, expect, it, vi } from "vitest";
 
 // Slate detects native beforeinput support while its module loads. jsdom omits
 // getTargetRanges, so provide the active DOM range before importing slate-react.
@@ -197,7 +197,8 @@ it("replaces a one-character selection once before continuing to type", async ()
   await user.keyboard("xy");
 
   expect(Node.string(editor)).toBe("axyc");
-  expect(Range.isCollapsed(editor.selection!)).toBe(true);
+  assert(editor.selection);
+  expect(Range.isCollapsed(editor.selection)).toBe(true);
   expect(editor.selection?.anchor).toEqual({ path: [0, 0], offset: 3 });
 });
 
@@ -207,7 +208,8 @@ it("replaces a one-character selection with punctuation once", async () => {
   await user.keyboard("!,");
 
   expect(Node.string(editor)).toBe("a!,c");
-  expect(Range.isCollapsed(editor.selection!)).toBe(true);
+  assert(editor.selection);
+  expect(Range.isCollapsed(editor.selection)).toBe(true);
   expect(editor.selection?.anchor).toEqual({ path: [0, 0], offset: 3 });
 });
 

@@ -17,7 +17,7 @@ import {
 } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { useState } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BasePreviewResponse, PropertyDefinition } from "#/api/bases";
 import { BasePreview } from "#/components/bases/BasePreview";
 import type {
@@ -429,7 +429,7 @@ describe("ViewsEditor", () => {
     expect(screen.getByText("No views configured")).toBeInTheDocument();
     expect(emptyChange).not.toHaveBeenCalled();
     await userEvent.click(
-      screen.getAllByRole("button", { name: "Add view" }).at(-1)!,
+      within(rendered.container).getByRole("button", { name: "Add view" }),
     );
     expect(latest<DraftView[]>(emptyChange)).toHaveLength(1);
     rendered.unmount();
@@ -695,9 +695,9 @@ describe("ViewsEditor", () => {
     });
     const firstBodyRow = bodyHandles[0].closest("tr");
     const laterBodyHandle = bodyHandles[1];
-    expect(firstBodyRow).not.toBeNull();
+    assert.isNotNull(firstBodyRow);
 
-    dispatchDrop(sourceFor(laterBodyHandle), targetFor(firstBodyRow!), "top");
+    dispatchDrop(sourceFor(laterBodyHandle), targetFor(firstBodyRow), "top");
 
     expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
       "title",
@@ -711,10 +711,10 @@ describe("ViewsEditor", () => {
     expect(destinationHandle).toBe(laterBodyHandle);
     await waitFor(() => expect(destinationHandle).toHaveFocus());
     const destinationRow = destinationHandle.closest("tr");
-    expect(destinationRow).not.toBeNull();
+    assert.isNotNull(destinationRow);
 
     fireEvent.click(
-      within(destinationRow!).getByRole("button", {
+      within(destinationRow).getByRole("button", {
         name: "Remove body column",
       }),
     );

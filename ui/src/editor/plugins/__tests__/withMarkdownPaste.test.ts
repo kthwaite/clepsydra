@@ -1,6 +1,11 @@
-import { createEditor, type Editor, Element as SlateElement } from "slate";
+import {
+  createEditor,
+  type Editor,
+  Element as SlateElement,
+  Text,
+} from "slate";
 import { withHistory } from "slate-history";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { slateToMarkdown } from "#/editor/convert";
 import { withSchema } from "#/editor/schema/withSchema";
 import { withAutoformat } from "../autoformat/withAutoformat";
@@ -56,10 +61,10 @@ describe("withMarkdownPaste", () => {
     const { editor, base } = makeEditor();
     emptyParagraph(editor);
     editor.insertData(fakeData({ "text/plain": "## Title" }));
-    const node = editor.children[0] as any;
-    expect(node.type).toBe("heading");
-    expect(node.level).toBe(2);
-    expect(node.children[0].text).toBe("Title");
+    const node = editor.children[0];
+    expect(node).toHaveProperty("type", "heading");
+    expect(node).toHaveProperty("level", 2);
+    expect(node).toHaveProperty("children.0.text", "Title");
     expect(base).not.toHaveBeenCalled();
   });
 
@@ -67,10 +72,10 @@ describe("withMarkdownPaste", () => {
     const { editor } = makeEditor();
     emptyParagraph(editor);
     editor.insertData(fakeData({ "text/plain": "# H\n\n- a\n- b" }));
-    expect((editor.children[0] as any).type).toBe("heading");
-    const list = editor.children[1] as any;
-    expect(list.type).toBe("bulleted-list");
-    expect(list.children).toHaveLength(2);
+    expect(editor.children[0]).toHaveProperty("type", "heading");
+    const list = editor.children[1];
+    expect(list).toHaveProperty("type", "bulleted-list");
+    expect(list).toHaveProperty("children.length", 2);
   });
 
   it("MP-03: pasting `**bold**` mid-paragraph merges inline", () => {
@@ -82,10 +87,10 @@ describe("withMarkdownPaste", () => {
     };
     editor.insertData(fakeData({ "text/plain": "**bold**" }));
     expect(editor.children).toHaveLength(1);
-    const para = editor.children[0] as any;
-    expect(para.type).toBe("paragraph");
-    const bold = para.children.find((c: any) => c.bold === true);
-    expect(bold.text).toBe("bold");
+    const para = editor.children[0];
+    assert(SlateElement.isElement(para) && para.type === "paragraph");
+    const bold = para.children.find((c) => Text.isText(c) && c.bold === true);
+    expect(bold).toMatchObject({ text: "bold" });
   });
 
   it("MP-04: an internal slate fragment defers to base insertData", () => {
@@ -99,7 +104,7 @@ describe("withMarkdownPaste", () => {
     );
     expect(base).toHaveBeenCalledTimes(1);
     // markdown path did NOT run: still a single empty paragraph
-    expect((editor.children[0] as any).type).toBe("paragraph");
+    expect(editor.children[0]).toHaveProperty("type", "paragraph");
   });
 
   it("MP-04b: a copied math fragment keeps the internal paste fast path", () => {
@@ -153,10 +158,14 @@ describe("withMarkdownPaste", () => {
     // appends a trailing paragraph after a document-final code block, so
     // assert on code-block count rather than total children.
     expect(base).not.toHaveBeenCalled();
-    const blocks = editor.children as any[];
-    expect(blocks.filter((n) => n.type === "code-block")).toHaveLength(1);
-    expect(blocks[0].type).toBe("code-block");
-    expect(blocks[0].children[0].text).toBe("## Title");
+    const blocks = editor.children;
+    expect(
+      blocks.filter(
+        (n) => SlateElement.isElement(n) && n.type === "code-block",
+      ),
+    ).toHaveLength(1);
+    expect(blocks[0]).toHaveProperty("type", "code-block");
+    expect(blocks[0]).toHaveProperty("children.0.text", "## Title");
   });
 
   it("MP-05b: multiline paste inside a code-block stays one block", () => {
@@ -170,10 +179,15 @@ describe("withMarkdownPaste", () => {
       fakeData({ "text/plain": "const a = 1;\nconst b = 2;\nconst c = 3;" }),
     );
     expect(base).not.toHaveBeenCalled();
-    const blocks = editor.children as any[];
-    expect(blocks.filter((n) => n.type === "code-block")).toHaveLength(1);
-    expect(blocks[0].type).toBe("code-block");
-    expect(blocks[0].children[0].text).toBe(
+    const blocks = editor.children;
+    expect(
+      blocks.filter(
+        (n) => SlateElement.isElement(n) && n.type === "code-block",
+      ),
+    ).toHaveLength(1);
+    expect(blocks[0]).toHaveProperty("type", "code-block");
+    expect(blocks[0]).toHaveProperty(
+      "children.0.text",
       "const a = 1;\nconst b = 2;\nconst c = 3;",
     );
   });
@@ -186,7 +200,7 @@ describe("withMarkdownPaste", () => {
       focus: { path: [0, 0], offset: 0 },
     };
     editor.insertData(fakeData({ "text/plain": "a\r\nb\rc" }));
-    expect((editor.children[0] as any).children[0].text).toBe("a\nb\nc");
+    expect(editor.children[0]).toHaveProperty("children.0.text", "a\nb\nc");
   });
 
   it("MP-05e: an internal fragment pasted inside a code-block inserts its plain text", () => {
@@ -206,9 +220,13 @@ describe("withMarkdownPaste", () => {
       }),
     );
     expect(base).not.toHaveBeenCalled();
-    const blocks = editor.children as any[];
-    expect(blocks.filter((n) => n.type === "code-block")).toHaveLength(1);
-    expect(blocks[0].children[0].text).toBe("line1\nline2");
+    const blocks = editor.children;
+    expect(
+      blocks.filter(
+        (n) => SlateElement.isElement(n) && n.type === "code-block",
+      ),
+    ).toHaveLength(1);
+    expect(blocks[0]).toHaveProperty("children.0.text", "line1\nline2");
   });
 
   it("MP-05d: a non-text paste inside a code-block still defers to base", () => {

@@ -74,7 +74,7 @@ w = z^2
     const rawHtml = '<input aria-label="edit math">';
     const { container } = render(
       <PreviewMarkdown
-        content={`${String.raw`$x^2$`}\n\n[reference](https://example.test)\n\n![remote](https://example.test/math.png)\n\n${rawHtml}`}
+        content={`$x^2$\n\n[reference](https://example.test)\n\n![remote](https://example.test/math.png)\n\n${rawHtml}`}
       />,
     );
 

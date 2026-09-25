@@ -16,7 +16,7 @@ import {
   Text,
 } from "slate";
 import { ReactEditor } from "slate-react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AttachmentsApi from "#/api/attachments";
 import type { OutlinkEntry, TagCount } from "#/api/types";
 import type { CustomEditor } from "#/editor/types";
@@ -724,7 +724,8 @@ describe("Folio invalid-tab recovery", () => {
 
     render(<Folio tabId="t1" path="notes/alpha.md" />);
 
-    const recent = screen.getByText("Recent").parentElement!;
+    const recent = screen.getByText("Recent").parentElement;
+    assert.isNotNull(recent);
     expect(
       within(recent).queryByRole("button", { name: /pin tab/i }),
     ).not.toBeInTheDocument();
@@ -777,8 +778,8 @@ describe("Folio outbound links", () => {
     render(<Folio tabId="t1" path="notes/alpha.md" />);
 
     const vitals = screen.getByText("Vitals").parentElement;
-    expect(vitals).not.toBeNull();
-    expect(within(vitals!).getByText("Links").closest("div")).toHaveTextContent(
+    assert.isNotNull(vitals);
+    expect(within(vitals).getByText("Links").closest("div")).toHaveTextContent(
       "1",
     );
     const linksTab = screen.getByRole("button", { name: /^Links/ });

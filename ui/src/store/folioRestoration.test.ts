@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   captureFolioHistoryLocation,
   clearFolioHistoryForTab,
@@ -186,7 +194,8 @@ describe("Folio history restoration registry", () => {
       captureFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md"),
     ).toBe(true);
     source.scrollTop = 999;
-    source.anchor!.path[0] = 4;
+    assert.isNotNull(source.anchor);
+    source.anchor.path[0] = 4;
 
     const first = readFolioHistoryLocation(
       "history-alpha",
@@ -196,7 +205,9 @@ describe("Folio history restoration registry", () => {
     expect(first?.scrollTop).toBe(120);
     expect(first?.anchor?.path).toEqual([0, 0]);
 
-    first!.focus!.path[0] = 8;
+    assert.isNotNull(first);
+    assert.isNotNull(first.focus);
+    first.focus.path[0] = 8;
     expect(
       readFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md")
         ?.focus?.path,

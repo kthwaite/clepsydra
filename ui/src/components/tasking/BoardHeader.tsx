@@ -186,6 +186,7 @@ export function BoardHeader({
   const onHold = tasks.filter((t) => Boolean(t.hold)).length;
 
   const opHealthColor = healthColor(activeOp?.health ?? "");
+  const dossier = activeOp?.dossier;
 
   return (
     <header className="flex-none overflow-hidden border-b border-[var(--rule)] bg-[var(--paper-2)]">
@@ -374,7 +375,7 @@ export function BoardHeader({
               {activeOp.target ?? "—"}
             </b>
           </span>
-          {activeOp.dossier && (
+          {dossier && (
             <>
               <span className="text-[var(--ink-faint)]">·</span>
               <span>
@@ -382,9 +383,9 @@ export function BoardHeader({
                 <button
                   type="button"
                   className="cursor-pointer border-b border-dotted border-[var(--cool)] text-[var(--cool)] transition-colors hover:bg-[var(--cool)] hover:text-[var(--paper)]"
-                  onClick={() => onOpenDossier?.(activeOp.dossier!)}
+                  onClick={() => onOpenDossier?.(dossier)}
                 >
-                  {activeOp.dossier}
+                  {dossier}
                 </button>
               </span>
             </>

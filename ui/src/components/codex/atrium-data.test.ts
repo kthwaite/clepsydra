@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
   buildHeatmap,
   daystampLabel,
@@ -56,8 +56,8 @@ describe("buildHeatmap", () => {
 
   function heatDay(heat: Heatmap, date: string) {
     const day = heat.weeks.flat().find((candidate) => candidate.date === date);
-    expect(day).toBeDefined();
-    return day!;
+    assert.isDefined(day);
+    return day;
   }
 
   it("attaches UTC counts and newest-first page metadata to each day", () => {

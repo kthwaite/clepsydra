@@ -93,7 +93,10 @@ function restoreSource(node: FolioMathNode, source: string): MutableNode {
     : { type: "paragraph", children: [text], position: node.position };
 }
 
-function annotateNode(node: FolioMathNode, source: string): MutableNode | void {
+function annotateNode(
+  node: FolioMathNode,
+  source: string,
+): MutableNode | undefined {
   const start = node.position?.start.offset;
   const end = node.position?.end.offset;
   if (start === undefined || end === undefined) return;
@@ -342,7 +345,7 @@ function serializeDollarInline(node: InlineMath, state: State): string {
       ) {
         position--;
       }
-      value = value.slice(0, position) + " " + value.slice(match.index + 1);
+      value = `${value.slice(0, position)} ${value.slice(match.index + 1)}`;
       match = expression.exec(value);
     }
   }

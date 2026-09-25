@@ -1,6 +1,12 @@
-import { createEditor, type Editor, Transforms } from "slate";
+import {
+  createEditor,
+  type Editor,
+  Element as SlateElement,
+  Text,
+  Transforms,
+} from "slate";
 import { withHistory } from "slate-history";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { withSchema } from "../../../schema/withSchema";
 import { tryInlineTransform } from "../inlineTransforms";
 
@@ -14,8 +20,9 @@ function editorWith(text: string, offset: number) {
   return editor;
 }
 
-function getLeaves(editor: Editor): any[] {
-  const para = editor.children[0] as any;
+function getLeaves(editor: Editor) {
+  const para = editor.children[0];
+  assert(SlateElement.isElement(para));
   return para.children;
 }
 
@@ -25,9 +32,9 @@ describe("tryInlineTransform", () => {
     const result = tryInlineTransform(editor, "*");
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
-    expect(leaves.some((l: any) => l.italic === true && l.text === "a")).toBe(
-      true,
-    );
+    expect(
+      leaves.some((l) => Text.isText(l) && l.italic === true && l.text === "a"),
+    ).toBe(true);
   });
 
   it("IT-02: **a** → bold", () => {
@@ -35,9 +42,9 @@ describe("tryInlineTransform", () => {
     const result = tryInlineTransform(editor, "*");
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
-    expect(leaves.some((l: any) => l.bold === true && l.text === "a")).toBe(
-      true,
-    );
+    expect(
+      leaves.some((l) => Text.isText(l) && l.bold === true && l.text === "a"),
+    ).toBe(true);
   });
 
   it("IT-03: _a_ → italic", () => {
@@ -45,9 +52,9 @@ describe("tryInlineTransform", () => {
     const result = tryInlineTransform(editor, "_");
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
-    expect(leaves.some((l: any) => l.italic === true && l.text === "a")).toBe(
-      true,
-    );
+    expect(
+      leaves.some((l) => Text.isText(l) && l.italic === true && l.text === "a"),
+    ).toBe(true);
   });
 
   it("IT-03: __a__ → bold", () => {
@@ -55,9 +62,9 @@ describe("tryInlineTransform", () => {
     const result = tryInlineTransform(editor, "_");
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
-    expect(leaves.some((l: any) => l.bold === true && l.text === "a")).toBe(
-      true,
-    );
+    expect(
+      leaves.some((l) => Text.isText(l) && l.bold === true && l.text === "a"),
+    ).toBe(true);
   });
 
   it("IT-04: ~a~ → strikethrough", () => {
@@ -66,7 +73,9 @@ describe("tryInlineTransform", () => {
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
     expect(
-      leaves.some((l: any) => l.strikethrough === true && l.text === "a"),
+      leaves.some(
+        (l) => Text.isText(l) && l.strikethrough === true && l.text === "a",
+      ),
     ).toBe(true);
   });
 
@@ -75,20 +84,24 @@ describe("tryInlineTransform", () => {
     const result = tryInlineTransform(editor, "`");
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
-    expect(leaves.some((l: any) => l.code === true && l.text === "a")).toBe(
-      true,
-    );
+    expect(
+      leaves.some((l) => Text.isText(l) && l.code === true && l.text === "a"),
+    ).toBe(true);
   });
 
   it("IT-06: [text](url) → link element", () => {
     const editor = editorWith("[click](https://a.b", 19);
     const result = tryInlineTransform(editor, ")");
     expect(result).toBe(true);
-    const para = editor.children[0] as any;
-    const linkEl = para.children.find((c: any) => c.type === "link");
-    expect(linkEl).toBeDefined();
-    expect(linkEl.url).toBe("https://a.b");
-    expect(linkEl.children[0].text).toBe("click");
+    const para = editor.children[0];
+    assert(SlateElement.isElement(para));
+    const linkEl = para.children.find(
+      (c) => SlateElement.isElement(c) && c.type === "link",
+    );
+    expect(linkEl).toMatchObject({
+      url: "https://a.b",
+      children: [{ text: "click" }],
+    });
   });
 
   it("IT-07: mid-word _ does not trigger", () => {
@@ -110,7 +123,9 @@ describe("tryInlineTransform", () => {
       expect(result).toBe(true);
       const leaves = getLeaves(editor);
       expect(
-        leaves.some((l: any) => l.code === true && l.text === "foo bar"),
+        leaves.some(
+          (l) => Text.isText(l) && l.code === true && l.text === "foo bar",
+        ),
       ).toBe(true);
     });
 
@@ -120,7 +135,9 @@ describe("tryInlineTransform", () => {
       expect(result).toBe(true);
       const leaves = getLeaves(editor);
       expect(
-        leaves.some((l: any) => l.code === true && l.text === "bar baz"),
+        leaves.some(
+          (l) => Text.isText(l) && l.code === true && l.text === "bar baz",
+        ),
       ).toBe(true);
     });
 
@@ -130,7 +147,9 @@ describe("tryInlineTransform", () => {
       expect(result).toBe(true);
       const leaves = getLeaves(editor);
       expect(
-        leaves.some((l: any) => l.italic === true && l.text === "it"),
+        leaves.some(
+          (l) => Text.isText(l) && l.italic === true && l.text === "it",
+        ),
       ).toBe(true);
     });
 
@@ -140,7 +159,9 @@ describe("tryInlineTransform", () => {
       expect(result).toBe(true);
       const leaves = getLeaves(editor);
       expect(
-        leaves.some((l: any) => l.bold === true && l.text === "bold"),
+        leaves.some(
+          (l) => Text.isText(l) && l.bold === true && l.text === "bold",
+        ),
       ).toBe(true);
     });
 
@@ -150,7 +171,9 @@ describe("tryInlineTransform", () => {
       expect(result).toBe(true);
       const leaves = getLeaves(editor);
       expect(
-        leaves.some((l: any) => l.strikethrough === true && l.text === "st"),
+        leaves.some(
+          (l) => Text.isText(l) && l.strikethrough === true && l.text === "st",
+        ),
       ).toBe(true);
     });
 
@@ -160,7 +183,9 @@ describe("tryInlineTransform", () => {
       expect(result).toBe(true);
       const leaves = getLeaves(editor);
       expect(
-        leaves.some((l: any) => l.code === true && l.text === "quoted"),
+        leaves.some(
+          (l) => Text.isText(l) && l.code === true && l.text === "quoted",
+        ),
       ).toBe(true);
     });
 
@@ -168,10 +193,12 @@ describe("tryInlineTransform", () => {
       const editor = editorWith("([docs](https://a.b", 19);
       const result = tryInlineTransform(editor, ")");
       expect(result).toBe(true);
-      const para = editor.children[0] as any;
-      const linkEl = para.children.find((c: any) => c.type === "link");
-      expect(linkEl).toBeDefined();
-      expect(linkEl.url).toBe("https://a.b");
+      const para = editor.children[0];
+      assert(SlateElement.isElement(para));
+      const linkEl = para.children.find(
+        (c) => SlateElement.isElement(c) && c.type === "link",
+      );
+      expect(linkEl).toMatchObject({ url: "https://a.b" });
     });
 
     it("] after ([label scaffolds the link syntax", () => {

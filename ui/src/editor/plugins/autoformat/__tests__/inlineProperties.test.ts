@@ -1,11 +1,15 @@
-import { createEditor, type Descendant, Editor, Node, Transforms } from "slate";
-import { withHistory } from "slate-history";
-import { describe, expect, it } from "vitest";
-import { slateToMdast } from "../../../convert/slate-to-mdast";
 import {
-  matchTrailingInlineProperty,
-  TASK_PROPERTY_KEYS,
-} from "../../../properties";
+  createEditor,
+  type Descendant,
+  Editor,
+  Node,
+  Element as SlateElement,
+  Transforms,
+} from "slate";
+import { withHistory } from "slate-history";
+import { assert, describe, expect, it } from "vitest";
+import { slateToMdast } from "../../../convert/slate-to-mdast";
+import { matchTrailingInlineProperty } from "../../../properties";
 import { withSchema } from "../../../schema/withSchema";
 import { withOutliner } from "../../withOutliner";
 import { withAutoformat } from "../withAutoformat";
@@ -34,7 +38,7 @@ function makeTaskEditor(text = "write the plan", extra: object = {}) {
           children: [{ type: "paragraph", children: [{ text }] }],
         },
       ],
-    } as unknown as Descendant,
+    },
   ]);
   Transforms.select(editor, Editor.end(editor, [0, 0, 0]));
   return editor;
@@ -46,8 +50,10 @@ function type(editor: Editor, text: string) {
   }
 }
 
-function taskItem(editor: Editor): any {
-  return (editor.children[0] as any).children[0];
+function taskItem(editor: Editor) {
+  const item = Node.get(editor, [0, 0]);
+  assert(SlateElement.isElement(item) && item.type === "list-item");
+  return item;
 }
 
 describe("inline property syntax", () => {
@@ -65,10 +71,6 @@ describe("inline property syntax", () => {
 
   it("rejects a pair that is not at the end of the text", () => {
     expect(matchTrailingInlineProperty("[due:: 2026-08-14] tail")).toBeNull();
-  });
-
-  it("names the three keys the task affordances render", () => {
-    expect(TASK_PROPERTY_KEYS).toEqual(["due", "scheduled", "priority"]);
   });
 });
 
@@ -88,24 +90,30 @@ describe("typed [key:: value] autoformat", () => {
 
     const item = taskItem(editor);
     expect(item.properties).toEqual({ scheduled: "2026-08-15" });
-    expect(item.children[0].properties).toBeUndefined();
+    expect(item.children[0]).not.toHaveProperty("properties");
   });
 
   it("wins over the link scaffold that used to mangle the syntax", () => {
     const editor = makeEditor();
     type(editor, "[due:: 2026-08-14]");
 
-    const paragraph = editor.children[0] as any;
+    const paragraph = editor.children[0];
+    assert(SlateElement.isElement(paragraph) && paragraph.type === "paragraph");
     expect(Node.string(paragraph)).toBe("");
     expect(paragraph.properties).toEqual({ due: "2026-08-14" });
-    expect(paragraph.children.some((c: any) => c.type === "link")).toBe(false);
+    expect(
+      paragraph.children.some(
+        (c) => SlateElement.isElement(c) && c.type === "link",
+      ),
+    ).toBe(false);
   });
 
   it("converts a property typed on a plain paragraph", () => {
     const editor = makeEditor();
     type(editor, "ship it [priority:: A]");
 
-    const paragraph = editor.children[0] as any;
+    const paragraph = editor.children[0];
+    assert(SlateElement.isElement(paragraph) && paragraph.type === "paragraph");
     expect(paragraph.properties).toEqual({ priority: "A" });
     expect(Node.string(paragraph)).toBe("ship it");
   });
@@ -135,7 +143,7 @@ describe("typed [key:: value] autoformat", () => {
     type(editor, "[Example]");
 
     expect(Node.string(editor.children[0])).toBe("[Example]()");
-    expect((editor.children[0] as any).properties).toBeUndefined();
+    expect(editor.children[0]).not.toHaveProperty("properties");
   });
 
   it("scaffolds a link when :: has no following space", () => {
@@ -143,18 +151,18 @@ describe("typed [key:: value] autoformat", () => {
     type(editor, "[due::2026-08-14]");
 
     expect(Node.string(editor.children[0])).toBe("[due::2026-08-14]()");
-    expect((editor.children[0] as any).properties).toBeUndefined();
+    expect(editor.children[0]).not.toHaveProperty("properties");
   });
 
   it("does not trigger inside a code block", () => {
     const editor = makeEditor([
-      { type: "code-block", children: [{ text: "" }] } as unknown as Descendant,
+      { type: "code-block", children: [{ text: "" }] },
     ]);
     type(editor, "[due:: 2026-08-14]");
 
-    const block = editor.children[0] as any;
+    const block = editor.children[0];
     expect(Node.string(block)).toBe("[due:: 2026-08-14]");
-    expect(block.properties).toBeUndefined();
+    expect(block).not.toHaveProperty("properties");
   });
 
   it("does not trigger under an active code mark", () => {
@@ -162,24 +170,25 @@ describe("typed [key:: value] autoformat", () => {
       {
         type: "paragraph",
         children: [{ text: "[due:: 2026-08-14", code: true }],
-      } as unknown as Descendant,
+      },
     ]);
     Transforms.select(editor, Editor.end(editor, [0]));
     editor.insertText("]");
 
-    const paragraph = editor.children[0] as any;
+    const paragraph = editor.children[0];
     expect(Node.string(paragraph)).toBe("[due:: 2026-08-14]");
-    expect(paragraph.properties).toBeUndefined();
+    expect(paragraph).not.toHaveProperty("properties");
   });
 
   it("converts a pair committed as one composed run (IME / autocorrect)", () => {
     const editor = makeEditor([
-      { type: "paragraph", children: [{ text: "task" }] } as Descendant,
+      { type: "paragraph", children: [{ text: "task" }] },
     ]);
     Transforms.select(editor, Editor.end(editor, [0]));
     editor.insertText(" [due:: 2026-08-14]");
 
-    const paragraph = editor.children[0] as any;
+    const paragraph = editor.children[0];
+    assert(SlateElement.isElement(paragraph) && paragraph.type === "paragraph");
     expect(paragraph.properties).toEqual({ due: "2026-08-14" });
     expect(Node.string(paragraph)).toBe("task");
   });

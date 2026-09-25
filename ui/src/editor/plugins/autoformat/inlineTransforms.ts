@@ -73,7 +73,7 @@ function isInCodeBlock(editor: Editor): boolean {
     match: (n) =>
       SlateElement.isElement(n) &&
       !Editor.isEditor(n) &&
-      (n as any).type === "code-block",
+      n.type === "code-block",
   });
   return !!match;
 }
@@ -90,11 +90,10 @@ function getTextBefore(
 
   const { anchor } = selection;
   const [node] = Editor.node(editor, anchor.path);
-  if (!("text" in (node as any))) return null;
+  if (!Text.isText(node)) return null;
 
-  const text = (node as any).text as string;
-  const textBefore = text.slice(0, anchor.offset);
-  return { text: textBefore, path: anchor.path as unknown as number[] };
+  const textBefore = node.text.slice(0, anchor.offset);
+  return { text: textBefore, path: anchor.path };
 }
 
 export function selectTextAfterInline(editor: Editor, inlinePath: Path): void {
@@ -214,17 +213,17 @@ function tryMarkTransform(
 
   // Perform the transform
   // Range from opener start to cursor (which is at offset; the closer char hasn't been inserted)
-  const rangeStart: Point = { path: path as any, offset: openerStart };
-  const rangeEnd: Point = { path: path as any, offset };
+  const rangeStart: Point = { path, offset: openerStart };
+  const rangeEnd: Point = { path, offset };
 
-  HistoryEditor.withNewBatch(editor as any, () => {
+  HistoryEditor.withNewBatch(editor, () => {
     Editor.withoutNormalizing(editor, () => {
       // Delete the markdown syntax
       Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
       Transforms.delete(editor);
 
       // Insert content with mark
-      Transforms.insertNodes(editor, { text: content, [mark]: true } as any);
+      Transforms.insertNodes(editor, { text: content, [mark]: true });
     });
   });
 

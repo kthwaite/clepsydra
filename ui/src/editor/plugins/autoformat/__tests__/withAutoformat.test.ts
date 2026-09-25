@@ -14,7 +14,7 @@ import { withSchema } from "../../../schema/withSchema";
 import { withOutliner } from "../../withOutliner";
 import { withAutoformat } from "../withAutoformat";
 
-function makeEditor(value?: any[]) {
+function makeEditor(value?: Descendant[]) {
   const editor = withAutoformat(withOutliner(withHistory(createEditor())));
   editor.children = value ?? [{ type: "paragraph", children: [{ text: "" }] }];
   Transforms.select(editor, {
@@ -61,33 +61,32 @@ describe("withAutoformat integration", () => {
     it("# + space converts to heading 1", () => {
       const editor = makeEditor();
       type(editor, "# ");
-      expect((editor.children[0] as any).type).toBe("heading");
-      expect((editor.children[0] as any).level).toBe(1);
+      expect(editor.children[0]).toHaveProperty("type", "heading");
+      expect(editor.children[0]).toHaveProperty("level", 1);
     });
 
     it("- + space converts to bulleted list", () => {
       const editor = makeEditor();
       type(editor, "- ");
-      const firstChild = editor.children[0] as any;
-      expect(firstChild.type).toBe("bulleted-list");
+      expect(editor.children[0]).toMatchObject({ type: "bulleted-list" });
     });
 
     it("--- converts to thematic break", () => {
       const editor = makeEditor();
       type(editor, "---");
-      expect((editor.children[0] as any).type).toBe("thematic-break");
+      expect(editor.children[0]).toHaveProperty("type", "thematic-break");
     });
 
     it("> + space converts to blockquote", () => {
       const editor = makeEditor();
       type(editor, "> ");
-      expect((editor.children[0] as any).type).toBe("blockquote");
+      expect(editor.children[0]).toHaveProperty("type", "blockquote");
     });
 
     it("1. + space converts to numbered list", () => {
       const editor = makeEditor();
       type(editor, "1. ");
-      expect((editor.children[0] as any).type).toBe("numbered-list");
+      expect(editor.children[0]).toHaveProperty("type", "numbered-list");
     });
   });
 
@@ -547,37 +546,42 @@ describe("withAutoformat integration", () => {
     it("*text* applies italic", () => {
       const editor = makeEditor();
       type(editor, "*hello*");
-      const para = editor.children[0] as any;
-      const leaves = para.children;
-      expect(leaves.some((l: any) => l.italic && l.text === "hello")).toBe(
-        true,
-      );
+      const leaves = elementChildren(editor.children[0]);
+      expect(
+        leaves.some((l) => Text.isText(l) && l.italic && l.text === "hello"),
+      ).toBe(true);
     });
 
     it("~text~ applies strikethrough", () => {
       const editor = makeEditor();
       type(editor, "~hello~");
-      const para = editor.children[0] as any;
-      const leaves = para.children;
+      const leaves = elementChildren(editor.children[0]);
       expect(
-        leaves.some((l: any) => l.strikethrough && l.text === "hello"),
+        leaves.some(
+          (l) => Text.isText(l) && l.strikethrough && l.text === "hello",
+        ),
       ).toBe(true);
     });
 
     it("keeps strikethrough literal until the closing ~ is typed", () => {
       const editor = makeEditor();
       type(editor, "~hello");
-      const para = editor.children[0] as any;
+      const para = editor.children[0];
       expect(Node.string(para)).toBe("~hello");
-      expect(para.children.some((leaf: any) => leaf.strikethrough)).toBe(false);
+      expect(
+        elementChildren(para).some(
+          (leaf) => Text.isText(leaf) && leaf.strikethrough,
+        ),
+      ).toBe(false);
     });
 
     it("`text` applies code mark", () => {
       const editor = makeEditor();
       type(editor, "`code`");
-      const para = editor.children[0] as any;
-      const leaves = para.children;
-      expect(leaves.some((l: any) => l.code && l.text === "code")).toBe(true);
+      const leaves = elementChildren(editor.children[0]);
+      expect(
+        leaves.some((l) => Text.isText(l) && l.code && l.text === "code"),
+      ).toBe(true);
     });
 
     it("converts a typed labeled wikilink into a wikilink element", () => {
@@ -599,12 +603,13 @@ describe("withAutoformat integration", () => {
     it("`text` inside parentheses applies code mark", () => {
       const editor = makeEditor();
       type(editor, "(`foo bar`");
-      const para = editor.children[0] as any;
-      const leaves = para.children;
-      expect(leaves.some((l: any) => l.code && l.text === "foo bar")).toBe(
+      const leaves = elementChildren(editor.children[0]);
+      expect(
+        leaves.some((l) => Text.isText(l) && l.code && l.text === "foo bar"),
+      ).toBe(true);
+      expect(leaves.some((l) => Text.isText(l) && l.text.includes("("))).toBe(
         true,
       );
-      expect(leaves.some((l: any) => l.text.includes("("))).toBe(true);
     });
 
     it("] after [label inserts () and places the caret inside", () => {
@@ -623,8 +628,10 @@ describe("withAutoformat integration", () => {
       type(editor, "[Example]");
       type(editor, "https://example.com)");
 
-      const children = (editor.children[0] as any).children;
-      const link = children.find((child: any) => child.type === "link");
+      const children = elementChildren(editor.children[0]);
+      const link = children.find(
+        (child) => SlateElement.isElement(child) && child.type === "link",
+      );
       expect(link).toMatchObject({
         type: "link",
         url: "https://example.com",
@@ -659,8 +666,8 @@ describe("withAutoformat integration", () => {
 
       expect(Node.string(editor.children[0])).toBe("[Example]()");
       expect(
-        (editor.children[0] as any).children.some(
-          (child: any) => child.type === "link",
+        elementChildren(editor.children[0]).some(
+          (child) => SlateElement.isElement(child) && child.type === "link",
         ),
       ).toBe(false);
     });
@@ -1327,17 +1334,17 @@ describe("withAutoformat integration", () => {
       const editor = makeEditor();
       type(editor, "```ts");
       editor.insertBreak();
-      expect((editor.children[0] as any).type).toBe("code-block");
-      expect((editor.children[0] as any).language).toBe("ts");
+      expect(editor.children[0]).toHaveProperty("type", "code-block");
+      expect(editor.children[0]).toHaveProperty("language", "ts");
     });
 
     it("Enter in list item creates new item", () => {
       const editor = makeEditor();
       type(editor, "- hello");
       editor.insertBreak();
-      const list = editor.children[0] as any;
-      expect(list.type).toBe("bulleted-list");
-      expect(list.children.length).toBe(2);
+      const list = editor.children[0];
+      expect(list).toHaveProperty("type", "bulleted-list");
+      expect(elementChildren(list)).toHaveLength(2);
     });
   });
 
@@ -1351,8 +1358,8 @@ describe("withAutoformat integration", () => {
         focus: { path: [0, 0], offset: 5 },
       });
       editor.insertBreak();
-      expect((editor.children[0] as any).type).toBe("heading");
-      expect((editor.children[1] as any).type).toBe("paragraph");
+      expect(editor.children[0]).toHaveProperty("type", "heading");
+      expect(editor.children[1]).toHaveProperty("type", "paragraph");
       // Cursor lands in the new paragraph.
       expect(editor.selection?.anchor.path).toEqual([1, 0]);
     });
@@ -1366,7 +1373,7 @@ describe("withAutoformat integration", () => {
         focus: { path: [0, 0], offset: 0 },
       });
       editor.insertBreak();
-      expect((editor.children[1] as any).type).toBe("paragraph");
+      expect(editor.children[1]).toHaveProperty("type", "paragraph");
     });
 
     it("Enter in the middle of a heading splits into two headings", () => {
@@ -1378,8 +1385,8 @@ describe("withAutoformat integration", () => {
         focus: { path: [0, 0], offset: 2 },
       });
       editor.insertBreak();
-      expect((editor.children[0] as any).type).toBe("heading");
-      expect((editor.children[1] as any).type).toBe("heading");
+      expect(editor.children[0]).toHaveProperty("type", "heading");
+      expect(editor.children[1]).toHaveProperty("type", "heading");
     });
   });
 
@@ -1399,7 +1406,7 @@ describe("withAutoformat integration", () => {
       editor.insertBreak();
       // Still a single code-block, now containing a trailing newline.
       expect(editor.children.length).toBe(1);
-      expect((editor.children[0] as any).type).toBe("code-block");
+      expect(editor.children[0]).toHaveProperty("type", "code-block");
       expect(Node.string(editor.children[0])).toBe("const x = 1\n");
     });
 
@@ -1413,7 +1420,7 @@ describe("withAutoformat integration", () => {
       });
       editor.insertBreak();
       expect(editor.children.length).toBe(1);
-      expect((editor.children[0] as any).type).toBe("code-block");
+      expect(editor.children[0]).toHaveProperty("type", "code-block");
       expect(Node.string(editor.children[0])).toBe("a\nb");
     });
   });
@@ -1427,15 +1434,17 @@ describe("withAutoformat integration", () => {
   // resolved into Slate marks/elements, matching char-by-char typing.
   describe("composition / multi-char insertText (IME & dead-key)", () => {
     function leaves(editor: Editor) {
-      return (editor.children[0] as any).children;
+      return elementChildren(editor.children[0]);
     }
 
     it("`code` delivered as one composed string applies the code mark", () => {
       const editor = makeEditor();
       editor.insertText("`code`");
-      expect(leaves(editor).some((l: any) => l.code && l.text === "code")).toBe(
-        true,
-      );
+      expect(
+        leaves(editor).some(
+          (l) => Text.isText(l) && l.code && l.text === "code",
+        ),
+      ).toBe(true);
       expect(Node.string(editor.children[0])).toBe("code");
     });
 
@@ -1443,9 +1452,11 @@ describe("withAutoformat integration", () => {
       const editor = makeEditor();
       type(editor, "`code"); // opener + content typed normally
       editor.insertText("`x"); // dead-key closer commits fused with following char
-      expect(leaves(editor).some((l: any) => l.code && l.text === "code")).toBe(
-        true,
-      );
+      expect(
+        leaves(editor).some(
+          (l) => Text.isText(l) && l.code && l.text === "code",
+        ),
+      ).toBe(true);
       // the fused trailing character survives as plain text after the span
       expect(Node.string(editor.children[0])).toBe("codex");
     });
@@ -1454,47 +1465,60 @@ describe("withAutoformat integration", () => {
       const editor = makeEditor();
       editor.insertText("~struck~");
       expect(
-        leaves(editor).some((l: any) => l.strikethrough && l.text === "struck"),
+        leaves(editor).some(
+          (l) => Text.isText(l) && l.strikethrough && l.text === "struck",
+        ),
       ).toBe(true);
     });
 
     it("*it* composed string applies italic", () => {
       const editor = makeEditor();
       editor.insertText("*it*");
-      expect(leaves(editor).some((l: any) => l.italic && l.text === "it")).toBe(
-        true,
-      );
+      expect(
+        leaves(editor).some(
+          (l) => Text.isText(l) && l.italic && l.text === "it",
+        ),
+      ).toBe(true);
     });
 
     it("**bo** composed string applies bold", () => {
       const editor = makeEditor();
       editor.insertText("**bo**");
-      expect(leaves(editor).some((l: any) => l.bold && l.text === "bo")).toBe(
-        true,
-      );
+      expect(
+        leaves(editor).some((l) => Text.isText(l) && l.bold && l.text === "bo"),
+      ).toBe(true);
     });
 
     it("[t](https://a.b) composed string applies a link element", () => {
       const editor = makeSchemaEditor();
       editor.insertText("[t](https://a.b)");
-      const link = leaves(editor).find((c: any) => c.type === "link");
-      expect(link).toBeDefined();
-      expect(link.url).toBe("https://a.b");
-      expect(link.children[0].text).toBe("t");
+      const link = leaves(editor).find(
+        (c) => SlateElement.isElement(c) && c.type === "link",
+      );
+      expect(link).toMatchObject({
+        url: "https://a.b",
+        children: [{ text: "t" }],
+      });
     });
 
     it("plain composed text with no delimiters is left untouched", () => {
       const editor = makeEditor();
       editor.insertText("hello world");
       expect(Node.string(editor.children[0])).toBe("hello world");
-      expect(leaves(editor).every((l: any) => !l.code && !l.bold)).toBe(true);
+      expect(
+        leaves(editor).every((l) => Text.isText(l) && !l.code && !l.bold),
+      ).toBe(true);
     });
 
     it("composed text with an unpaired delimiter is left untouched", () => {
       const editor = makeEditor();
       editor.insertText("a ) b");
       expect(Node.string(editor.children[0])).toBe("a ) b");
-      expect(leaves(editor).some((c: any) => c.type === "link")).toBe(false);
+      expect(
+        leaves(editor).some(
+          (c) => SlateElement.isElement(c) && c.type === "link",
+        ),
+      ).toBe(false);
     });
   });
 });

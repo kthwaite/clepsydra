@@ -722,7 +722,7 @@ describe("configured Base embed canonical TOML", () => {
         filter: {
           field: "field",
           op: "eq",
-          value: { ["key\ud800"]: "value" },
+          value: { "key\ud800": "value" },
         },
       },
     ],

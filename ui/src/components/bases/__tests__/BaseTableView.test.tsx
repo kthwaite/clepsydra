@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef, type ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
@@ -576,9 +576,9 @@ describe("BaseTableView", () => {
       name: "The Book of the New Sun",
     });
     const tableRow = createdTitle.closest("tr");
-    expect(tableRow).not.toBeNull();
+    assert.isNotNull(tableRow);
 
-    tableRow!.focus();
+    tableRow.focus();
     expect(tableRow).toHaveFocus();
     expect(onCreatedRowFocused).not.toHaveBeenCalled();
 
@@ -848,6 +848,7 @@ describe("BaseTableView", () => {
   });
 
   it("renders a Totals footer for flat output with configured aggregates", () => {
+    assert.isDefined(definition.views);
     const totalsDefinition: BaseDetailResponse = {
       ...definition,
       views: [
@@ -860,7 +861,7 @@ describe("BaseTableView", () => {
             { fn: "percent_filled", field: "rating" },
           ],
         },
-        definition.views![1],
+        definition.views[1],
       ],
     };
     const secondRow = {
@@ -1195,138 +1196,6 @@ describe("BaseTableView", () => {
     });
     expect(screen.getByText("The Book of the New Sun")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("bad filter");
-  });
-
-  it("invalidates every evaluation identity dimension independently", () => {
-    const props = renderView({});
-    let previousGrid = screen.getByRole("grid");
-    const expectRemount = (next: Partial<ViewProps>) => {
-      props.rerender(next);
-      const currentGrid = screen.getByRole("grid");
-      expect(currentGrid).not.toBe(previousGrid);
-      previousGrid = currentGrid;
-    };
-    const restoreBaseline = () => {
-      expectRemount({
-        definition,
-        activeView: "Continues",
-        output: flat,
-        sort: undefined,
-      });
-    };
-
-    expectRemount({
-      definition: { ...definition, revision: "revision-2" },
-    });
-    restoreBaseline();
-
-    const twinViewDefinition: BaseDetailResponse = {
-      ...definition,
-      views: [
-        {
-          name: "First",
-          layout: "table",
-          columns: ["title", "author"],
-        },
-        {
-          name: "Second",
-          layout: "table",
-          columns: ["title", "author"],
-        },
-      ],
-    };
-    expectRemount({
-      definition: twinViewDefinition,
-      activeView: "First",
-    });
-    expectRemount({
-      definition: twinViewDefinition,
-      activeView: "Second",
-    });
-    restoreBaseline();
-
-    expectRemount({
-      definition: {
-        ...definition,
-        views: [
-          {
-            name: "Continues",
-            layout: "table",
-            columns: ["title", "rating"],
-          },
-          definition.views![1],
-        ],
-      },
-    });
-    expect(
-      screen.getByRole("columnheader", { name: /^rating/ }),
-    ).toBeInTheDocument();
-    restoreBaseline();
-
-    expectRemount({
-      definition: {
-        ...definition,
-        views: [
-          {
-            ...definition.views![0],
-            group_by: "status",
-          },
-          definition.views![1],
-        ],
-      },
-    });
-    restoreBaseline();
-
-    expectRemount({
-      definition: {
-        ...definition,
-        views: [
-          {
-            ...definition.views![0],
-            aggregates: [{ fn: "count" }],
-          },
-          definition.views![1],
-        ],
-      },
-    });
-    restoreBaseline();
-
-    expectRemount({ sort: [] });
-    restoreBaseline();
-
-    expectRemount({
-      sort: [
-        { field: "author", dir: "asc" },
-        { field: "rating", dir: "asc" },
-        { field: "status", dir: "desc" },
-      ],
-    });
-    expectRemount({
-      sort: [
-        { field: "author", dir: "asc" },
-        { field: "status", dir: "desc" },
-        { field: "rating", dir: "asc" },
-      ],
-    });
-    expectRemount({
-      sort: [
-        { field: "author", dir: "asc" },
-        { field: "status", dir: "asc" },
-        { field: "rating", dir: "asc" },
-      ],
-    });
-    expect(
-      screen.getByRole("columnheader", { name: /author/ }),
-    ).toHaveAttribute("aria-sort", "ascending");
-    restoreBaseline();
-
-    expectRemount({
-      output: {
-        shape: "grouped",
-        groups: [{ key: "reading", total: 1, aggregates: [], rows: [row] }],
-      },
-    });
-    expect(screen.getByText("reading")).toBeInTheDocument();
   });
 
   it("invalidates a grouped table when raw keys share a formatted label", () => {

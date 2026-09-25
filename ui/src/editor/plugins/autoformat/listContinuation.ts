@@ -9,6 +9,7 @@ import {
 } from "slate";
 import { HistoryEditor } from "slate-history";
 import { isListElement, isListItem } from "#/editor/plugins/listUtils";
+import type { ListItemElement } from "#/editor/types";
 
 /**
  * Get the text content of the first paragraph child of a list-item.
@@ -195,7 +196,7 @@ export function tryListContinuation(
     // LC-01/LC-02: Cursor at end of non-empty text -> new sibling item
     batchOp(() => {
       Editor.withoutNormalizing(editor, () => {
-        const newItem: any = {
+        const newItem: ListItemElement = {
           type: "list-item",
           children: [
             {
@@ -209,7 +210,7 @@ export function tryListContinuation(
         }
 
         const nextItemPath = Path.next(itemPath);
-        Transforms.insertNodes(editor, newItem as SlateElement, {
+        Transforms.insertNodes(editor, newItem, {
           at: nextItemPath,
         });
 
@@ -237,7 +238,7 @@ export function tryListContinuation(
       });
 
       // Create new item with the remaining text
-      const newItem: any = {
+      const newItem: ListItemElement = {
         type: "list-item",
         children: [
           {
@@ -251,7 +252,7 @@ export function tryListContinuation(
       }
 
       const nextItemPath = Path.next(itemPath);
-      Transforms.insertNodes(editor, newItem as SlateElement, {
+      Transforms.insertNodes(editor, newItem, {
         at: nextItemPath,
       });
 

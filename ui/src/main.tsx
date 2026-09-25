@@ -28,7 +28,12 @@ declare module "@tanstack/react-router" {
   }
 }
 
-const rootElement = document.getElementById("root")!;
+const rootElement = document.getElementById("root");
+if (!rootElement) {
+  throw new Error(
+    'Cannot mount Clepsydra: missing root element with id "root".',
+  );
+}
 if (!rootElement.innerHTML) {
   const root = ReactDOM.createRoot(rootElement);
   root.render(

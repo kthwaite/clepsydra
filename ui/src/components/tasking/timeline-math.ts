@@ -62,11 +62,15 @@ export function windowOf(cycles: BoardCycle[]): TLWindow | null {
     if (e !== null) maxEnd = maxEnd === null ? e : Math.max(maxEnd, e);
   }
 
-  if (minStart === null && maxEnd === null) return null;
+  if (minStart === null) {
+    if (maxEnd === null) return null;
+    minStart = maxEnd;
+  }
+  if (maxEnd === null) maxEnd = minStart;
 
   // Use whichever bound we have; fall back to the other bound ±TL_WINDOW_PAD_DAYS
-  const start = (minStart ?? maxEnd!) - TL_WINDOW_PAD_DAYS * DAY_MS;
-  const end = (maxEnd ?? minStart!) + TL_WINDOW_PAD_DAYS * DAY_MS;
+  const start = minStart - TL_WINDOW_PAD_DAYS * DAY_MS;
+  const end = maxEnd + TL_WINDOW_PAD_DAYS * DAY_MS;
 
   return { start, end };
 }

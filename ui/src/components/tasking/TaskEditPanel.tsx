@@ -166,6 +166,7 @@ export function TaskEditPanel({
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
   const patch = usePatchTask();
   const archive = useArchiveTask();
+  const link = task.link;
 
   // Local mirror of text fields that debounce before patching
   const [titleVal, setTitleVal] = useState(task.title);
@@ -738,11 +739,11 @@ export function TaskEditPanel({
                   onChange={(e) => setLinkVal(e.target.value)}
                   data-testid="edit-panel-link"
                 />
-                {task.link && (
+                {link && (
                   <button
                     type="button"
                     className="cl-btn whitespace-nowrap"
-                    onClick={() => onOpenDossier?.(task.link!)}
+                    onClick={() => onOpenDossier?.(link)}
                     data-testid="edit-panel-open-dossier"
                     aria-label="Open related page"
                   >

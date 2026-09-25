@@ -632,14 +632,17 @@ describe("markdownToSlate", () => {
 
     it("extracts blockId from parent in nested list", () => {
       const result = markdownToSlate("- Parent ^abc123DEF0\n  - Child\n");
-      const list = result[0] as any;
-      const parent = list.children[0];
-      expect(parent.blockId).toBe("abc123DEF0");
-      // Text should be cleaned
-      const firstChild = parent.children[0];
-      if (firstChild.text !== undefined) {
-        expect(firstChild.text.trim()).toBe("Parent");
-      }
+      expect(result[0]).toMatchObject({
+        children: [
+          {
+            blockId: "abc123DEF0",
+            children: [
+              { type: "paragraph", children: [{ text: "Parent" }] },
+              { type: "bulleted-list" },
+            ],
+          },
+        ],
+      });
     });
 
     it("does not extract IDs shorter than 10 chars", () => {

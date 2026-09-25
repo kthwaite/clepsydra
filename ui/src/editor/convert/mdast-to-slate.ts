@@ -149,7 +149,7 @@ function conversationMarkerFromBlockquote(
   node: Extract<RootContent, { type: "blockquote" }>,
 ): { marker: ConversationMarker; body: RootContent[] } | null {
   const first = node.children[0];
-  if (!first || first.type !== "paragraph" || first.children.length === 0) {
+  if (first?.type !== "paragraph" || first.children.length === 0) {
     return null;
   }
   const firstChild = first.children[0];

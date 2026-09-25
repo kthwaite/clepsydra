@@ -868,12 +868,12 @@ export const BaseTableView = forwardRef<
     >
       <TableHeader>
         {visibleColumns.map((column) => {
+          const property = properties.get(column);
           const allowsSorting =
             !readOnly &&
             (SYSTEM_COLUMNS[column] !== undefined
               ? SYSTEM_COLUMNS[column]
-              : properties.get(column) != null &&
-                canSort(properties.get(column)!.type));
+              : property != null && canSort(property.type));
           return (
             <Column
               key={column}
@@ -950,152 +950,157 @@ export const BaseTableView = forwardRef<
             id={row.id}
             className="group border-b border-rule/50 data-[hovered]:bg-highlight"
           >
-            {visibleColumns.map((column) => (
-              <Cell key={column} className="px-1 py-0.5 align-top">
-                {/* One menu serves the row; each cell forwards its context
+            {visibleColumns.map((column) => {
+              const property = properties.get(column);
+              return (
+                <Cell key={column} className="px-1 py-0.5 align-top">
+                  {/* One menu serves the row; each cell forwards its context
                     events to the `⋯` button that owns it. */}
-                <div className="flex min-w-0 items-center">
-                  <CellContextTrigger
-                    row={row}
-                    column={column}
-                    onContextTarget={setContextTarget}
-                  >
-                    {column === "title" ? (
-                      readOnly || memberDraftOpen ? (
-                        <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink">
-                          {row.title ?? row.path}
-                        </span>
-                      ) : (
-                        <button
-                          ref={
-                            row.id === focusCreatedId
-                              ? setCreatedTitleRef
-                              : forwardFocusRequest?.view ===
-                                    equivalentActiveView &&
-                                  String(row.id) === forwardFocusRequest.rowId
-                                ? forwardFocusRequest.ref
-                                : undefined
+                  <div className="flex min-w-0 items-center">
+                    <CellContextTrigger
+                      row={row}
+                      column={column}
+                      onContextTarget={setContextTarget}
+                    >
+                      {column === "title" ? (
+                        readOnly || memberDraftOpen ? (
+                          <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink">
+                            {row.title ?? row.path}
+                          </span>
+                        ) : (
+                          <button
+                            ref={
+                              row.id === focusCreatedId
+                                ? setCreatedTitleRef
+                                : forwardFocusRequest?.view ===
+                                      equivalentActiveView &&
+                                    String(row.id) === forwardFocusRequest.rowId
+                                  ? forwardFocusRequest.ref
+                                  : undefined
+                            }
+                            type="button"
+                            data-row-title={String(row.id)}
+                            className="cl-mono cursor-pointer truncate text-left text-[12px] text-ink underline-offset-2 hover:text-accent hover:underline"
+                            onClick={() => onOpenPage(row.path)}
+                          >
+                            {row.title ?? row.path}
+                          </button>
+                        )
+                      ) : column === "body" ? (
+                        <BodyExcerptCell
+                          value={
+                            (row.columns as Record<string, CellValue>).body ??
+                            null
                           }
-                          type="button"
-                          data-row-title={String(row.id)}
-                          className="cl-mono cursor-pointer truncate text-left text-[12px] text-ink underline-offset-2 hover:text-accent hover:underline"
-                          onClick={() => onOpenPage(row.path)}
-                        >
-                          {row.title ?? row.path}
-                        </button>
-                      )
-                    ) : column === "body" ? (
-                      <BodyExcerptCell
-                        value={
-                          (row.columns as Record<string, CellValue>).body ??
-                          null
-                        }
-                        pageLabel={row.title ?? row.path}
-                        path={row.path}
-                        onOpenPage={onOpenPage}
-                      />
-                    ) : !readOnly &&
-                      !memberDraftOpen &&
-                      SYSTEM_COLUMNS[column] === undefined &&
-                      properties.has(column) ? (
-                      <EditableCell
-                        value={
-                          (row.columns as Record<string, CellValue>)[column] ??
-                          null
-                        }
-                        definition={properties.get(column)!}
-                        isEditing={
-                          activeCell?.rowId === String(row.id) &&
-                          activeCell.column === column &&
-                          asciiCaseFold(activeCell.view) ===
-                            equivalentActiveView
-                        }
-                        onEdit={() => {
-                          pendingForwardFocus.current = undefined;
-                          nextForwardFocusToken.current += 1;
-                          setForwardFocusRequest(undefined);
-                          setActiveCell({
-                            rowId: String(row.id),
-                            column,
-                            view: activeView,
-                          });
-                        }}
-                        onCancel={() => {
-                          if (pendingForwardFocus.current) return;
-                          pendingForwardFocus.current = undefined;
-                          setForwardFocusRequest(undefined);
-                          setActiveCell(null);
-                        }}
-                        onCommit={(value, hint) => {
-                          pendingForwardFocus.current = undefined;
-                          nextForwardFocusToken.current += 1;
-                          setForwardFocusRequest(undefined);
-                          setActiveCell(null);
-                          onCommitCell(row, column, value, hint);
-                        }}
-                        onCommitNext={(value, hint) => {
-                          const token = nextForwardFocusToken.current + 1;
-                          nextForwardFocusToken.current = token;
-                          pendingForwardFocus.current = undefined;
-                          setForwardFocusRequest(undefined);
-                          onCommitCell(row, column, value, hint);
-                          const nextColumn = nextEditableColumn(column);
-                          if (nextColumn) {
+                          pageLabel={row.title ?? row.path}
+                          path={row.path}
+                          onOpenPage={onOpenPage}
+                        />
+                      ) : !readOnly &&
+                        !memberDraftOpen &&
+                        SYSTEM_COLUMNS[column] === undefined &&
+                        property !== undefined ? (
+                        <EditableCell
+                          value={
+                            (row.columns as Record<string, CellValue>)[
+                              column
+                            ] ?? null
+                          }
+                          definition={property}
+                          isEditing={
+                            activeCell?.rowId === String(row.id) &&
+                            activeCell.column === column &&
+                            asciiCaseFold(activeCell.view) ===
+                              equivalentActiveView
+                          }
+                          onEdit={() => {
+                            pendingForwardFocus.current = undefined;
+                            nextForwardFocusToken.current += 1;
+                            setForwardFocusRequest(undefined);
                             setActiveCell({
                               rowId: String(row.id),
-                              column: nextColumn,
+                              column,
                               view: activeView,
                             });
-                            return;
-                          }
-                          const rowIndex = rows.findIndex(
-                            (candidate) =>
-                              String(candidate.id) === String(row.id),
-                          );
-                          const targetRowId = String(
-                            rows[rowIndex + 1]?.id ?? row.id,
-                          );
-                          const request: ForwardFocusRequest = {
-                            token,
-                            view: equivalentActiveView,
-                            rowId: targetRowId,
-                            node: null,
-                            ref: (node) => setForwardTitleRef(token, node),
-                          };
-                          pendingForwardFocus.current = request;
-                          setForwardFocusRequest(request);
-                          setActiveCell(null);
-                        }}
+                          }}
+                          onCancel={() => {
+                            if (pendingForwardFocus.current) return;
+                            pendingForwardFocus.current = undefined;
+                            setForwardFocusRequest(undefined);
+                            setActiveCell(null);
+                          }}
+                          onCommit={(value, hint) => {
+                            pendingForwardFocus.current = undefined;
+                            nextForwardFocusToken.current += 1;
+                            setForwardFocusRequest(undefined);
+                            setActiveCell(null);
+                            onCommitCell(row, column, value, hint);
+                          }}
+                          onCommitNext={(value, hint) => {
+                            const token = nextForwardFocusToken.current + 1;
+                            nextForwardFocusToken.current = token;
+                            pendingForwardFocus.current = undefined;
+                            setForwardFocusRequest(undefined);
+                            onCommitCell(row, column, value, hint);
+                            const nextColumn = nextEditableColumn(column);
+                            if (nextColumn) {
+                              setActiveCell({
+                                rowId: String(row.id),
+                                column: nextColumn,
+                                view: activeView,
+                              });
+                              return;
+                            }
+                            const rowIndex = rows.findIndex(
+                              (candidate) =>
+                                String(candidate.id) === String(row.id),
+                            );
+                            const targetRowId = String(
+                              rows[rowIndex + 1]?.id ?? row.id,
+                            );
+                            const request: ForwardFocusRequest = {
+                              token,
+                              view: equivalentActiveView,
+                              rowId: targetRowId,
+                              node: null,
+                              ref: (node) => setForwardTitleRef(token, node),
+                            };
+                            pendingForwardFocus.current = request;
+                            setForwardFocusRequest(request);
+                            setActiveCell(null);
+                          }}
+                        />
+                      ) : (
+                        // System fields and undeclared keys are read-only.
+                        <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink-2">
+                          {formatCellValue(
+                            (row.columns as Record<string, CellValue>)[
+                              column
+                            ] ?? null,
+                          )}
+                        </span>
+                      )}
+                    </CellContextTrigger>
+                    {column === visibleColumns[0] && hasRowActions ? (
+                      <RowActionsButton
+                        row={row}
+                        readOnly={readOnly}
+                        actions={rowActions}
+                        cell={contextCell(row)}
+                        restoreFocus={
+                          contextTarget?.rowId === String(row.id)
+                            ? contextTarget.origin
+                            : null
+                        }
+                        onContextTarget={setContextTarget}
+                        onAddQuickFilter={onAddQuickFilter}
+                        onCopyValue={onCopyValue}
                       />
-                    ) : (
-                      // System fields and undeclared keys are read-only.
-                      <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink-2">
-                        {formatCellValue(
-                          (row.columns as Record<string, CellValue>)[column] ??
-                            null,
-                        )}
-                      </span>
-                    )}
-                  </CellContextTrigger>
-                  {column === visibleColumns[0] && hasRowActions ? (
-                    <RowActionsButton
-                      row={row}
-                      readOnly={readOnly}
-                      actions={rowActions}
-                      cell={contextCell(row)}
-                      restoreFocus={
-                        contextTarget?.rowId === String(row.id)
-                          ? contextTarget.origin
-                          : null
-                      }
-                      onContextTarget={setContextTarget}
-                      onAddQuickFilter={onAddQuickFilter}
-                      onCopyValue={onCopyValue}
-                    />
-                  ) : null}
-                </div>
-              </Cell>
-            ))}
+                    ) : null}
+                  </div>
+                </Cell>
+              );
+            })}
           </Row>
         )}
       </TableBody>

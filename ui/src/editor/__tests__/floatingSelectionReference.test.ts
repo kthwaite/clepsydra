@@ -1,4 +1,4 @@
-import { type BaseSelection, Range } from "slate";
+import { type BaseSelection, createEditor, Range } from "slate";
 import { ReactEditor } from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSelectionReference } from "../floatingSelectionReference";
@@ -16,32 +16,9 @@ vi.mock("slate-react", async () => {
 });
 
 function makeEditor(selection: BaseSelection) {
-  return {
-    children: [],
-    operations: [],
-    selection,
-    marks: null,
-    isInline: () => false,
-    isVoid: () => false,
-    apply: () => undefined,
-    normalizeNode: () => undefined,
-    onChange: () => undefined,
-    insertText: () => undefined,
-    deleteBackward: () => undefined,
-    deleteForward: () => undefined,
-    deleteFragment: () => undefined,
-    addMark: () => undefined,
-    removeMark: () => undefined,
-    insertBreak: () => undefined,
-    insertSoftBreak: () => undefined,
-    insertFragment: () => undefined,
-    insertNode: () => undefined,
-    setNodes: () => undefined,
-    setFragmentData: () => undefined,
-    getFragment: () => [],
-    getDirtyPaths: () => [],
-    shouldNormalize: () => true,
-  } as any;
+  const editor = createEditor();
+  editor.selection = selection;
+  return editor;
 }
 
 describe("createSelectionReference", () => {
@@ -81,7 +58,7 @@ describe("createSelectionReference", () => {
       anchor: { path: [0, 0], offset: 2 },
       focus: { path: [0, 0], offset: 2 },
     });
-    expect(Range.isCollapsed(editor.selection)).toBe(true);
+    expect(editor.selection && Range.isCollapsed(editor.selection)).toBe(true);
 
     const reference = createSelectionReference(editor);
     expect(reference).not.toBeNull();

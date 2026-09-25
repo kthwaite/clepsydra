@@ -173,13 +173,14 @@ export function TimelineView({
   }
 
   // ── Axis band helpers ──────────────────────────────────────────────────────
+  const displayWindow = win;
 
   function bandStyle(c: BoardCycle): React.CSSProperties | null {
     const s = parseDay(c.start);
     const e = parseDay(c.end);
     if (s === null && e === null) return null;
-    const l = s !== null ? pct(s, win!) : 0;
-    const r = e !== null ? pct(e, win!) : 100;
+    const l = s !== null ? pct(s, displayWindow) : 0;
+    const r = e !== null ? pct(e, displayWindow) : 100;
     const w = Math.max(0, r - l);
     return { left: `${l}%`, width: `${w}%` };
   }
@@ -248,8 +249,8 @@ export function TimelineView({
 
               {/* Task rows */}
               {g.items.map(({ task: t, s, e }) => {
-                const l = pct(s, win!);
-                const w = Math.max(2.5, pct(e, win!) - l);
+                const l = pct(s, displayWindow);
+                const w = Math.max(2.5, pct(e, displayWindow) - l);
 
                 return (
                   <div
@@ -285,7 +286,7 @@ export function TimelineView({
                             key={c.id}
                             className="tl-grid absolute top-0 bottom-0 w-px"
                             style={{
-                              left: `${pct(cs, win!)}%`,
+                              left: `${pct(cs, displayWindow)}%`,
                               background:
                                 c.state === "ACTIVE"
                                   ? "color-mix(in oklab, var(--cool) 22%, transparent)"

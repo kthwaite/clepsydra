@@ -1,4 +1,4 @@
-import { createEditor, Transforms } from "slate";
+import { createEditor, Node, Transforms } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
 import { markdownToSlate, slateToMarkdown } from "../../../convert";
@@ -38,12 +38,12 @@ describe("tryListContinuation", () => {
     });
     const result = tryListContinuation(editor);
     expect(result).toBe(true);
-    const list = editor.children[0] as any;
-    expect(list.children.length).toBe(2);
-    const newItem = list.children[1];
-    expect(newItem.type).toBe("list-item");
-    expect(newItem.children[0].type).toBe("paragraph");
-    expect(newItem.children[0].children[0].text).toBe("");
+    const list = editor.children[0];
+    expect(list).toHaveProperty("children.length", 2);
+    const newItem = Node.get(editor, [0, 1]);
+    expect(newItem).toHaveProperty("type", "list-item");
+    expect(newItem).toHaveProperty("children.0.type", "paragraph");
+    expect(newItem).toHaveProperty("children.0.children.0.text", "");
   });
 
   it("LC-02: Enter in non-empty task item creates checked:false next item", () => {
@@ -60,8 +60,8 @@ describe("tryListContinuation", () => {
     });
     const result = tryListContinuation(editor);
     expect(result).toBe(true);
-    const newItem = (editor.children[0] as any).children[1];
-    expect(newItem.checked).toBe(false);
+    const newItem = Node.get(editor, [0, 1]);
+    expect(newItem).toHaveProperty("checked", false);
   });
 
   it("LC-06: empty task continuation survives save/reload and normal removal", () => {
@@ -138,9 +138,9 @@ describe("tryListContinuation", () => {
     });
     const result = tryListContinuation(editor);
     expect(result).toBe(true);
-    expect((editor.children[0] as any).type).toBe("bulleted-list");
-    expect((editor.children[0] as any).children.length).toBe(1);
-    expect((editor.children[1] as any).type).toBe("paragraph");
+    expect(editor.children[0]).toHaveProperty("type", "bulleted-list");
+    expect(editor.children[0]).toHaveProperty("children.length", 1);
+    expect(editor.children[1]).toHaveProperty("type", "paragraph");
   });
 
   it("LC-03: Enter on empty nested item outdents", () => {
@@ -173,8 +173,8 @@ describe("tryListContinuation", () => {
     });
     const result = tryListContinuation(editor);
     expect(result).toBe(true);
-    const list = editor.children[0] as any;
-    expect(list.children.length).toBe(2);
+    const list = editor.children[0];
+    expect(list).toHaveProperty("children.length", 2);
   });
 
   it("LC-05: Enter mid-item splits text", () => {
@@ -190,9 +190,15 @@ describe("tryListContinuation", () => {
     });
     const result = tryListContinuation(editor);
     expect(result).toBe(true);
-    const list = editor.children[0] as any;
-    expect(list.children.length).toBe(2);
-    expect(list.children[0].children[0].children[0].text).toBe("hello");
-    expect(list.children[1].children[0].children[0].text).toBe(" world");
+    const list = editor.children[0];
+    expect(list).toHaveProperty("children.length", 2);
+    expect(list).toHaveProperty(
+      "children.0.children.0.children.0.text",
+      "hello",
+    );
+    expect(list).toHaveProperty(
+      "children.1.children.0.children.0.text",
+      " world",
+    );
   });
 });

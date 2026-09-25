@@ -7,7 +7,7 @@ import {
   Transforms,
 } from "slate";
 import { withHistory } from "slate-history";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { withSchema } from "../../schema/withSchema";
 import {
   indentListItem,
@@ -600,14 +600,15 @@ describe("withOutliner empty-children fallback", () => {
           },
         ],
       },
-    ] as any;
+    ];
     Editor.normalize(editor, { force: true });
 
-    const listItem = (editor.children[0] as any).children[0];
+    const listItem = Node.get(editor, [0, 0]);
+    assert(SlateElement.isElement(listItem));
     expect(listItem.children.length).toBeGreaterThanOrEqual(1);
     const firstChild = listItem.children[0];
     expect(SlateElement.isElement(firstChild)).toBe(true);
-    expect((firstChild as any).type).toBe("paragraph");
+    expect(firstChild).toHaveProperty("type", "paragraph");
   });
 });
 

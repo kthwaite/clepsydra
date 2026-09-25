@@ -11,7 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { createEditor, type Descendant, Node, Transforms } from "slate";
 import { Editable, ReactEditor, Slate, withReact } from "slate-react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   type ConversationPresentation,
   ConversationPresentationProvider,
@@ -416,7 +416,8 @@ describe("SlateEditor read-only contract", () => {
       </QueryClientProvider>,
     );
 
-    expect(Node.string(editorRef.current!)).toBe("original");
+    assert(editorRef.current);
+    expect(Node.string(editorRef.current)).toBe("original");
     expect(focus).not.toHaveBeenCalled();
     expect(onInsertionHandled).not.toHaveBeenCalled();
     expect(onChange).not.toHaveBeenCalled();

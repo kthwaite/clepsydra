@@ -1,6 +1,14 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { type ReactNode, StrictMode, useEffect } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   clearFolioHistoryState,
   readFolioHistoryRestorationRequest,
@@ -153,7 +161,8 @@ describe("EncryptionProvider", () => {
   it("keeps actions stable while primitive status consumers update", async () => {
     render(<Harness />);
     await waitFor(() => expect(latestActions).not.toBeNull());
-    const actions = latestActions!;
+    const actions = latestActions;
+    assert.isNotNull(actions);
     const actionRendersBefore = actionRenderCount;
     const statusRendersBefore = statusRenderCount;
 
@@ -172,7 +181,8 @@ describe("EncryptionProvider", () => {
   it("flushes every editor before dropping the identity", async () => {
     render(<Harness />);
     await waitFor(() => expect(latestActions).not.toBeNull());
-    const actions = latestActions!;
+    const actions = latestActions;
+    assert.isNotNull(actions);
     await act(async () => {
       await actions.unlockWithImportedIdentity(fixtureIdentity);
     });
@@ -209,7 +219,8 @@ describe("EncryptionProvider", () => {
   it("refuses to lock when a flusher fails and honors unregister", async () => {
     render(<Harness />);
     await waitFor(() => expect(latestActions).not.toBeNull());
-    const actions = latestActions!;
+    const actions = latestActions;
+    assert.isNotNull(actions);
     await act(async () => {
       await actions.unlockWithImportedIdentity(fixtureIdentity);
     });

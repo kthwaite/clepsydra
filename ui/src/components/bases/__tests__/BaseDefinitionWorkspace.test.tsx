@@ -1,6 +1,14 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { BaseDetailResponse, BaseMutationResponse } from "#/api/bases";
 import { BaseDefinitionWorkspace } from "#/components/bases/BaseDefinitionWorkspace";
 
@@ -899,10 +907,10 @@ describe("BaseDefinitionWorkspace", () => {
         (button) =>
           button.getAttribute("data-diagnostic-path") === "views[1].name",
       );
-    expect(secondDiagnostic).toBeDefined();
+    assert.isDefined(secondDiagnostic);
 
     await user.click(screen.getByRole("button", { name: "Select All" }));
-    await user.click(secondDiagnostic!);
+    await user.click(secondDiagnostic);
 
     expect(screen.getByLabelText("View name")).toHaveValue("aLL");
     expect(screen.getByLabelText("View name")).toHaveFocus();

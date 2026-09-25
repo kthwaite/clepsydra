@@ -25,7 +25,7 @@ const CODE_FENCE_RE = /^```(\w*)$/;
 // ---------------------------------------------------------------------------
 
 function isBlock(node: unknown): node is SlateElement {
-  return SlateElement.isElement(node) && !Editor.isEditor(node as any);
+  return SlateElement.isElement(node) && !Editor.isEditor(node);
 }
 
 /**
@@ -36,13 +36,13 @@ function getCurrentBlock(editor: Editor): [SlateElement, Path] | undefined {
   const { selection } = editor;
   if (!selection || !Range.isCollapsed(selection)) return undefined;
 
-  const [match] = Editor.nodes(editor, {
+  const [match] = Editor.nodes<SlateElement>(editor, {
     at: selection,
     match: (n) => isBlock(n),
     mode: "lowest",
   });
 
-  return match as [SlateElement, Path] | undefined;
+  return match;
 }
 
 /**
@@ -97,17 +97,14 @@ export function tryBlockTransform(editor: Editor): boolean {
   if (!blockEntry) return false;
 
   const [block, blockPath] = blockEntry;
-  const blockType = (block as any).type;
+  const blockType = block.type;
 
   // Task promotion: paragraph inside a list-item
   if (blockType === "paragraph" && blockPath.length >= 2) {
     const parentPath = Path.parent(blockPath);
     try {
       const parent = Node.get(editor, parentPath);
-      if (
-        SlateElement.isElement(parent) &&
-        (parent as any).type === "list-item"
-      ) {
+      if (SlateElement.isElement(parent) && parent.type === "list-item") {
         return tryTaskPromotion(editor, blockEntry, parentPath);
       }
     } catch {
@@ -207,7 +204,7 @@ function tryTaskPromotion(
         },
       });
       // Set checked on the list-item
-      Transforms.setNodes(editor, { checked } as any, { at: listItemPath });
+      Transforms.setNodes(editor, { checked }, { at: listItemPath });
     });
   });
 
@@ -227,7 +224,7 @@ export function tryThematicBreak(editor: Editor): boolean {
   if (!blockEntry) return false;
 
   const [block, blockPath] = blockEntry;
-  if ((block as any).type !== "paragraph") return false;
+  if (block.type !== "paragraph") return false;
 
   const text = getBlockTriggerText(editor, blockEntry, {
     requireLineEnd: true,
@@ -257,7 +254,7 @@ export function tryCodeFence(editor: Editor): boolean {
   if (!blockEntry) return false;
 
   const [block, blockPath] = blockEntry;
-  if ((block as any).type !== "paragraph") return false;
+  if (block.type !== "paragraph") return false;
 
   const text = getBlockTriggerText(editor, blockEntry, {
     requireLineEnd: true,

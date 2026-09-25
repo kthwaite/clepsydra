@@ -1,4 +1,4 @@
-import { createEditor, Transforms } from "slate";
+import { createEditor, Node, Transforms } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
 import { withOutliner } from "../../withOutliner";
@@ -43,51 +43,51 @@ describe("tryBlockTransform (paragraph -> block)", () => {
     const editor = editorWithParagraph("#", 1);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    expect((editor.children[0] as any).type).toBe("heading");
-    expect((editor.children[0] as any).level).toBe(1);
+    expect(editor.children[0]).toHaveProperty("type", "heading");
+    expect(editor.children[0]).toHaveProperty("level", 1);
   });
 
   it("BT-02: ###### + space -> heading level 6", () => {
     const editor = editorWithParagraph("######", 6);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    expect((editor.children[0] as any).type).toBe("heading");
-    expect((editor.children[0] as any).level).toBe(6);
+    expect(editor.children[0]).toHaveProperty("type", "heading");
+    expect(editor.children[0]).toHaveProperty("level", 6);
   });
 
   it("BT-03: 1. + space -> numbered list", () => {
     const editor = editorWithParagraph("1.", 2);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const list = editor.children[0] as any;
-    expect(list.type).toBe("numbered-list");
-    expect(list.children[0].type).toBe("list-item");
-    expect(list.children[0].children[0].type).toBe("paragraph");
+    const list = editor.children[0];
+    expect(list).toHaveProperty("type", "numbered-list");
+    expect(list).toHaveProperty("children.0.type", "list-item");
+    expect(list).toHaveProperty("children.0.children.0.type", "paragraph");
   });
 
   it("BT-04: - + space -> bulleted list", () => {
     const editor = editorWithParagraph("-", 1);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const list = editor.children[0] as any;
-    expect(list.type).toBe("bulleted-list");
-    expect(list.children[0].type).toBe("list-item");
-    expect(list.children[0].children[0].type).toBe("paragraph");
+    const list = editor.children[0];
+    expect(list).toHaveProperty("type", "bulleted-list");
+    expect(list).toHaveProperty("children.0.type", "list-item");
+    expect(list).toHaveProperty("children.0.children.0.type", "paragraph");
   });
 
   it("BT-04: * + space -> bulleted list", () => {
     const editor = editorWithParagraph("*", 1);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    expect((editor.children[0] as any).type).toBe("bulleted-list");
+    expect(editor.children[0]).toHaveProperty("type", "bulleted-list");
   });
 
   it("BT-05: > + space -> blockquote", () => {
     const editor = editorWithParagraph(">", 1);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    expect((editor.children[0] as any).type).toBe("blockquote");
-    expect((editor.children[0] as any).children[0].type).toBe("paragraph");
+    expect(editor.children[0]).toHaveProperty("type", "blockquote");
+    expect(editor.children[0]).toHaveProperty("children.0.type", "paragraph");
   });
 
   it("does not transform non-paragraph blocks", () => {
@@ -109,32 +109,32 @@ describe("tryBlockTransform (list-item task promotion)", () => {
     const editor = editorWithListItem("[ ]", 3);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const li = (editor.children[0] as any).children[0];
-    expect(li.checked).toBe(false);
-    expect(li.children[0].children[0].text).toBe("");
+    const li = Node.get(editor, [0, 0]);
+    expect(li).toHaveProperty("checked", false);
+    expect(li).toHaveProperty("children.0.children.0.text", "");
   });
 
   it("BT-08: [x] + space in list-item -> checked:true", () => {
     const editor = editorWithListItem("[x]", 3);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    expect((editor.children[0] as any).children[0].checked).toBe(true);
+    expect(editor.children[0]).toHaveProperty("children.0.checked", true);
   });
 
   it("[X] + space -> checked:true (uppercase)", () => {
     const editor = editorWithListItem("[X]", 3);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    expect((editor.children[0] as any).children[0].checked).toBe(true);
+    expect(editor.children[0]).toHaveProperty("children.0.checked", true);
   });
 
   it("[] + space in list-item -> checked:false (empty brackets)", () => {
     const editor = editorWithListItem("[]", 2);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const li = (editor.children[0] as any).children[0];
-    expect(li.checked).toBe(false);
-    expect(li.children[0].children[0].text).toBe("");
+    const li = Node.get(editor, [0, 0]);
+    expect(li).toHaveProperty("checked", false);
+    expect(li).toHaveProperty("children.0.children.0.text", "");
   });
 });
 
@@ -143,37 +143,37 @@ describe("tryBlockTransform (paragraph -> task list)", () => {
     const editor = editorWithParagraph("[]", 2);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const list = editor.children[0] as any;
-    expect(list.type).toBe("bulleted-list");
-    expect(list.children[0].type).toBe("list-item");
-    expect(list.children[0].checked).toBe(false);
+    const list = editor.children[0];
+    expect(list).toHaveProperty("type", "bulleted-list");
+    expect(list).toHaveProperty("children.0.type", "list-item");
+    expect(list).toHaveProperty("children.0.checked", false);
   });
 
   it("[ ] + space in paragraph -> task list (checked:false)", () => {
     const editor = editorWithParagraph("[ ]", 3);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const list = editor.children[0] as any;
-    expect(list.type).toBe("bulleted-list");
-    expect(list.children[0].checked).toBe(false);
+    const list = editor.children[0];
+    expect(list).toHaveProperty("type", "bulleted-list");
+    expect(list).toHaveProperty("children.0.checked", false);
   });
 
   it("[x] + space in paragraph -> task list (checked:true)", () => {
     const editor = editorWithParagraph("[x]", 3);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const list = editor.children[0] as any;
-    expect(list.type).toBe("bulleted-list");
-    expect(list.children[0].checked).toBe(true);
+    const list = editor.children[0];
+    expect(list).toHaveProperty("type", "bulleted-list");
+    expect(list).toHaveProperty("children.0.checked", true);
   });
 
   it("[X] + space in paragraph -> task list (checked:true, uppercase)", () => {
     const editor = editorWithParagraph("[X]", 3);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const list = editor.children[0] as any;
-    expect(list.type).toBe("bulleted-list");
-    expect(list.children[0].checked).toBe(true);
+    const list = editor.children[0];
+    expect(list).toHaveProperty("type", "bulleted-list");
+    expect(list).toHaveProperty("children.0.checked", true);
   });
 
   it("appends task shortcut to previous bulleted list", () => {
@@ -197,10 +197,10 @@ describe("tryBlockTransform (paragraph -> task list)", () => {
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
     expect(editor.children.length).toBe(1);
-    const list = editor.children[0] as any;
-    expect(list.type).toBe("bulleted-list");
-    expect(list.children.length).toBe(2);
-    expect(list.children[1].checked).toBe(false);
+    const list = editor.children[0];
+    expect(list).toHaveProperty("type", "bulleted-list");
+    expect(list).toHaveProperty("children.length", 2);
+    expect(list).toHaveProperty("children.1.checked", false);
   });
 });
 
@@ -209,10 +209,10 @@ describe("tryBlockTransform (trigger before existing text)", () => {
     const editor = editorWithParagraph("##hello world", 2);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const heading = editor.children[0] as any;
-    expect(heading.type).toBe("heading");
-    expect(heading.level).toBe(2);
-    expect(heading.children[0].text).toBe("hello world");
+    const heading = editor.children[0];
+    expect(heading).toHaveProperty("type", "heading");
+    expect(heading).toHaveProperty("level", 2);
+    expect(heading).toHaveProperty("children.0.text", "hello world");
   });
 
   it("leaves the cursor before the preserved text", () => {
@@ -225,27 +225,30 @@ describe("tryBlockTransform (trigger before existing text)", () => {
     const editor = editorWithParagraph("-milk", 1);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const list = editor.children[0] as any;
-    expect(list.type).toBe("bulleted-list");
-    expect(list.children[0].children[0].children[0].text).toBe("milk");
+    const list = editor.children[0];
+    expect(list).toHaveProperty("type", "bulleted-list");
+    expect(list).toHaveProperty(
+      "children.0.children.0.children.0.text",
+      "milk",
+    );
   });
 
   it("> + space at the start of a non-empty line -> blockquote, text preserved", () => {
     const editor = editorWithParagraph(">quoted", 1);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const quote = editor.children[0] as any;
-    expect(quote.type).toBe("blockquote");
-    expect(quote.children[0].children[0].text).toBe("quoted");
+    const quote = editor.children[0];
+    expect(quote).toHaveProperty("type", "blockquote");
+    expect(quote).toHaveProperty("children.0.children.0.text", "quoted");
   });
 
   it("[ ] + space at the start of a non-empty list item -> task, text preserved", () => {
     const editor = editorWithListItem("[ ]buy milk", 3);
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
-    const li = (editor.children[0] as any).children[0];
-    expect(li.checked).toBe(false);
-    expect(li.children[0].children[0].text).toBe("buy milk");
+    const li = Node.get(editor, [0, 0]);
+    expect(li).toHaveProperty("checked", false);
+    expect(li).toHaveProperty("children.0.children.0.text", "buy milk");
   });
 
   it("does not transform when text precedes the trigger", () => {
@@ -271,8 +274,8 @@ describe("tryThematicBreak", () => {
     const editor = editorWithParagraph("--", 2);
     const result = tryThematicBreak(editor);
     expect(result).toBe(true);
-    expect((editor.children[0] as any).type).toBe("thematic-break");
-    expect((editor.children[1] as any).type).toBe("paragraph");
+    expect(editor.children[0]).toHaveProperty("type", "thematic-break");
+    expect(editor.children[1]).toHaveProperty("type", "paragraph");
   });
 
   it("does not trigger on non-paragraph", () => {
@@ -311,7 +314,7 @@ describe("list merge policy", () => {
     const result = tryBlockTransform(editor);
     expect(result).toBe(true);
     expect(editor.children.length).toBe(1);
-    expect((editor.children[0] as any).type).toBe("bulleted-list");
-    expect((editor.children[0] as any).children.length).toBe(2);
+    expect(editor.children[0]).toHaveProperty("type", "bulleted-list");
+    expect(editor.children[0]).toHaveProperty("children.length", 2);
   });
 });

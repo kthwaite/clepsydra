@@ -288,7 +288,7 @@ function tryBlockquoteContinuation(editor: Editor): boolean {
           {
             type: "paragraph",
             children: [{ text: "" }],
-          } as any,
+          },
           { at: afterPath },
         );
         Transforms.select(editor, {

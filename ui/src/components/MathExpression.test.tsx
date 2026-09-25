@@ -70,7 +70,7 @@ describe("MathExpression", () => {
   it("activates an interactive expression when clicked", async () => {
     const user = userEvent.setup();
     const onActivate = vi.fn();
-    const { container } = render(
+    render(
       <MathExpression
         tex="x^2"
         delimiter="$"
@@ -80,11 +80,11 @@ describe("MathExpression", () => {
       />,
     );
 
-    const wrapper = container.querySelector(".folio-math");
+    const wrapper = screen.getByRole("button");
     expect(wrapper).toHaveClass("folio-math--interactive");
     expect(wrapper).toHaveAttribute("role", "button");
     expect(wrapper).toHaveAttribute("tabindex", "0");
-    await user.click(wrapper!);
+    await user.click(wrapper);
     expect(onActivate).toHaveBeenCalledOnce();
   });
 

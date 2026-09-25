@@ -1,6 +1,6 @@
-import { createEditor, type Editor, Transforms } from "slate";
+import { createEditor, type Editor, Node, Transforms } from "slate";
 import { withHistory } from "slate-history";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { tryAutoPair, tryOvertype } from "../autoPair";
 
 function editorWith(text: string, offset: number) {
@@ -28,11 +28,12 @@ function editorWithSelection(
 }
 
 function getText(editor: Editor): string {
-  return (editor.children[0] as any).children[0].text;
+  return Node.leaf(editor, [0, 0]).text;
 }
 
 function getCursorOffset(editor: Editor): number {
-  return editor.selection!.anchor.offset;
+  assert(editor.selection);
+  return editor.selection.anchor.offset;
 }
 
 describe("tryOvertype", () => {

@@ -1,13 +1,15 @@
 import { render } from "@testing-library/react";
+import type { RenderLeafProps } from "slate-react";
 import { describe, expect, it } from "vitest";
+import type { CustomText } from "#/editor/types";
 import { renderLeaf } from "../renderLeaf";
 
-function leaf(marks: Record<string, unknown>, text = "hello") {
-  const props = {
-    attributes: { "data-slate-leaf": true } as any,
+function leaf(marks: Omit<CustomText, "text">, text = "hello") {
+  const props: RenderLeafProps = {
+    attributes: { "data-slate-leaf": true },
     children: <span>{text}</span>,
-    leaf: { text, ...marks } as any,
-    text: { text, ...marks } as any,
+    leaf: { text, ...marks },
+    text: { text, ...marks },
   };
   return renderLeaf(props);
 }

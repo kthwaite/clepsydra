@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
   captureFolioHistoryLocation,
   clearFolioHistoryState,
@@ -179,9 +179,10 @@ describe("useWorkspaceStore block focus requests", () => {
     const activeTab = opened.tabs.find((tab) => tab.id === opened.activeTabId);
     expect(activeTab?.focusBlockId).toBe("abc123DEF0");
 
-    useWorkspaceStore.getState().clearTabFocus(activeTab!.id);
+    assert.isDefined(activeTab);
+    useWorkspaceStore.getState().clearTabFocus(activeTab.id);
     expect(
-      useWorkspaceStore.getState().tabs.find((tab) => tab.id === activeTab!.id)
+      useWorkspaceStore.getState().tabs.find((tab) => tab.id === activeTab.id)
         ?.focusBlockId,
     ).toBeUndefined();
   });
@@ -199,16 +200,12 @@ describe("useWorkspaceStore block focus requests", () => {
       .openTab("page", "source.md", "Source", { blockId: "abc123DEF0" });
 
     const first = useWorkspaceStore.getState().tabs[0];
-    expect(first.focusRequestId).toBeDefined();
+    assert.isDefined(first.focusRequestId);
     expect(
-      useWorkspaceStore
-        .getState()
-        .takeTabFocus(first.id, first.focusRequestId!),
+      useWorkspaceStore.getState().takeTabFocus(first.id, first.focusRequestId),
     ).toBe("abc123DEF0");
     expect(
-      useWorkspaceStore
-        .getState()
-        .takeTabFocus(first.id, first.focusRequestId!),
+      useWorkspaceStore.getState().takeTabFocus(first.id, first.focusRequestId),
     ).toBeUndefined();
 
     useWorkspaceStore
@@ -216,10 +213,11 @@ describe("useWorkspaceStore block focus requests", () => {
       .openTab("page", "source.md", "Source", { blockId: "abc123DEF0" });
     const second = useWorkspaceStore.getState().tabs[0];
     expect(second.focusRequestId).not.toBe(first.focusRequestId);
+    assert.isDefined(second.focusRequestId);
     expect(
       useWorkspaceStore
         .getState()
-        .takeTabFocus(second.id, second.focusRequestId!),
+        .takeTabFocus(second.id, second.focusRequestId),
     ).toBe("abc123DEF0");
   });
 
@@ -243,7 +241,8 @@ describe("useWorkspaceStore block focus requests", () => {
       .openTab("page", "source.md", "Source", { blockId: "abc123DEF0" });
     const source = useWorkspaceStore
       .getState()
-      .tabs.find((tab) => tab.path === "source.md")!;
+      .tabs.find((tab) => tab.path === "source.md");
+    assert.isDefined(source);
 
     useWorkspaceStore.getState().activateTab("other");
 

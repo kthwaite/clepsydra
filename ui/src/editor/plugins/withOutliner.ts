@@ -1,4 +1,5 @@
 import {
+  type Descendant,
   Editor,
   Node,
   Path,
@@ -8,6 +9,7 @@ import {
   Transforms,
 } from "slate";
 import { isListElement, isListItem } from "#/editor/plugins/listUtils";
+import type { ListItemElement } from "#/editor/types";
 
 /**
  * List boundary deletion: join adjacent compatible lists before falling back to
@@ -116,7 +118,7 @@ function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
   // paragraph so Backspace never silently deletes child items.
   const itemNode = Node.get(editor, itemPath);
   if (!SlateElement.isElement(itemNode)) return;
-  let paragraphChildren: any[] = [{ text: "" }];
+  let paragraphChildren: Descendant[] = [{ text: "" }];
   let foundParagraph = false;
   for (const child of itemNode.children) {
     if (SlateElement.isElement(child) && child.type === "paragraph") {
@@ -140,12 +142,10 @@ function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
 
   Editor.withoutNormalizing(editor, () => {
     // Capture trailing siblings before mutation so we can rebuild a list below.
-    const trailingItems: SlateElement[] = [];
+    const trailingItems: ListItemElement[] = [];
     for (let i = itemIndex + 1; i < siblingCount; i++) {
       const sibPath = [...parentListPath, i];
-      trailingItems.push(
-        JSON.parse(JSON.stringify(Node.get(editor, sibPath))) as SlateElement,
-      );
+      trailingItems.push(JSON.parse(JSON.stringify(Node.get(editor, sibPath))));
     }
 
     // Remove trailing siblings (back-to-front to keep paths stable) and the item itself.
@@ -172,20 +172,20 @@ function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
 
     Transforms.insertNodes(
       editor,
-      { type: "paragraph", children: paragraphChildren } as any,
+      { type: "paragraph", children: paragraphChildren },
       { at: insertAt },
     );
 
     let nextInsertAt = Path.next(insertAt);
     for (const nestedList of nestedLists) {
-      Transforms.insertNodes(editor, nestedList as any, { at: nextInsertAt });
+      Transforms.insertNodes(editor, nestedList, { at: nextInsertAt });
       nextInsertAt = Path.next(nextInsertAt);
     }
 
     if (trailingItems.length > 0) {
       Transforms.insertNodes(
         editor,
-        { type: parentList.type, children: trailingItems } as any,
+        { type: parentList.type, children: trailingItems },
         { at: nextInsertAt },
       );
     }

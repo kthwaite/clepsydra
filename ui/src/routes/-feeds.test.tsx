@@ -260,8 +260,15 @@ describe("feeds route controls", () => {
     if (typeof validateSearch !== "function") {
       throw new Error("Expected a callable search validator");
     }
-    expect(validateSearch({} as any)).toMatchObject({ view: "all" });
-    expect(validateSearch({ view: "not-a-view" } as any)).toMatchObject({
+    expect(
+      validateSearch({ __TSearchSchemaInput__: "TSearchSchemaInput" }),
+    ).toMatchObject({ view: "all" });
+    expect(
+      validateSearch({
+        __TSearchSchemaInput__: "TSearchSchemaInput",
+        view: "not-a-view",
+      }),
+    ).toMatchObject({
       view: "all",
     });
   });

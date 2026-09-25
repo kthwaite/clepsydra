@@ -46,6 +46,11 @@ function nodeShape(kind: Kind): {
 
 interface SimNode extends SimulationNodeDatum, GraphNode {}
 
+interface PositionedSimNode extends SimNode {
+  x: number;
+  y: number;
+}
+
 interface ForceGraphProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -99,23 +104,34 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
 
     // Build simulation data (copies to avoid mutating props)
     const simNodes: SimNode[] = nodes.map((n) => ({ ...n }));
-    const nodeMap = new Map(simNodes.map((n) => [n.id, n]));
-    const simLinks = edges
-      .filter((e) => nodeMap.has(e.source) && nodeMap.has(e.target))
-      .map((e) => ({
-        source: nodeMap.get(e.source)!,
-        target: nodeMap.get(e.target)!,
-        kind: e.kind,
-      }));
 
-    // Stop any prior simulation
+    // D3 initializes coordinates synchronously before returning the simulation.
     simRef.current?.stop();
+    const sim = forceSimulation(simNodes);
+    if (
+      !simNodes.every(
+        (node): node is PositionedSimNode =>
+          node.x !== undefined && node.y !== undefined,
+      )
+    ) {
+      sim.stop();
+      throw new Error("Graph simulation did not initialize node coordinates.");
+    }
+    const nodeMap = new Map(simNodes.map((n) => [n.id, n]));
+    const simLinks = [];
+    for (const edge of edges) {
+      const source = nodeMap.get(edge.source);
+      const target = nodeMap.get(edge.target);
+      if (source && target) {
+        simLinks.push({ source, target, kind: edge.kind });
+      }
+    }
 
-    const sim = forceSimulation(simNodes)
+    sim
       .force(
         "link",
-        forceLink(simLinks)
-          .id((d) => (d as SimNode).id)
+        forceLink<SimNode, (typeof simLinks)[number]>(simLinks)
+          .id((d) => d.id)
           .distance(80),
       )
       .force("charge", forceManyBody().strength(-200))
@@ -157,7 +173,7 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
     // Nodes — a transparent 44×44 interaction surface owns click/drag while
     // the visible kind glyph remains pointer-transparent.
     const nodeSel = gSel
-      .selectAll<SVGGElement, SimNode>("g.node")
+      .selectAll<SVGGElement, PositionedSimNode>("g.node")
       .data(simNodes)
       .join("g")
       .attr("class", "node cursor-pointer");
@@ -195,7 +211,7 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
 
     // Labels
     const labelSel = gSel
-      .selectAll<SVGTextElement, SimNode>("text")
+      .selectAll<SVGTextElement, PositionedSimNode>("text")
       .data(simNodes)
       .join("text")
       .text((d) => d.title || d.path)
@@ -205,7 +221,7 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .attr("dy", 4);
 
     // Drag
-    const dragBehavior = drag<SVGGElement, SimNode>()
+    const dragBehavior = drag<SVGGElement, PositionedSimNode>()
       .on("start", (event, d) => {
         if (!event.active) sim.alphaTarget(0.3).restart();
         d.fx = event.x as number | null;
@@ -224,14 +240,14 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
 
     sim.on("tick", () => {
       linkSel
-        .attr("x1", (d) => (d.source as SimNode).x!)
-        .attr("y1", (d) => (d.source as SimNode).y!)
-        .attr("x2", (d) => (d.target as SimNode).x!)
-        .attr("y2", (d) => (d.target as SimNode).y!);
+        .attr("x1", (d) => d.source.x)
+        .attr("y1", (d) => d.source.y)
+        .attr("x2", (d) => d.target.x)
+        .attr("y2", (d) => d.target.y);
 
       nodeSel.attr("transform", (d) => `translate(${d.x},${d.y})`);
 
-      labelSel.attr("x", (d) => d.x!).attr("y", (d) => d.y!);
+      labelSel.attr("x", (d) => d.x).attr("y", (d) => d.y);
     });
 
     return () => {

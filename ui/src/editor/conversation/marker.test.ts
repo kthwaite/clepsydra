@@ -84,7 +84,7 @@ describe("conversation marker grammar", () => {
 
   it("diagnoses only marker candidate blockquote lines", () => {
     const markdown = [
-      "> [!AI-USER source=sha256:" + HASH + " sequence=1]",
+      `> [!AI-USER source=sha256:${HASH} sequence=1]`,
       "> [!AI-ASSISTANT source=sha256:not-a-hash sequence=2]",
       "A paragraph containing [!AI-USER source=noise] is ordinary prose.",
       "> ordinary quote [!AI-USER source=noise]",

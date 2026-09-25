@@ -18,7 +18,15 @@ import {
   Transforms,
 } from "slate";
 import { ReactEditor } from "slate-react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  assert,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { IS_MAC } from "#/lib/shortcuts";
 
 const harnessState = vi.hoisted(() => {
@@ -368,7 +376,8 @@ describe("Base slash command and editing session", () => {
     );
     expect(nodes.map(([node]) => node)).toEqual([decoy]);
     expect(nodes.some(([node]) => node === original)).toBe(false);
-    expect(Node.string(editor.children[editor.selection!.anchor.path[0]])).toBe(
+    assert(editor.selection);
+    expect(Node.string(editor.children[editor.selection.anchor.path[0]])).toBe(
       "",
     );
   });

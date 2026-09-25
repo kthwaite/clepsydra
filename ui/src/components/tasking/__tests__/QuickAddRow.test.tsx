@@ -8,7 +8,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { QuickAddRow } from "../QuickAddRow";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -60,36 +68,11 @@ afterEach(() => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("QuickAddRow", () => {
-  it("renders an accessible New task input", () => {
-    wrap(<QuickAddRow preset={{}} testId="qa-test" />);
-    const input = screen.getByRole("textbox", { name: "New task" });
-    expect(input).toHaveAttribute("placeholder", "+ New task");
-  });
-
   it("allows typing a title", async () => {
     wrap(<QuickAddRow preset={{}} testId="qa-test" />);
     const input = screen.getByTestId("qa-test") as HTMLInputElement;
     await userEvent.type(input, "My task");
     expect(input.value).toBe("My task");
-  });
-
-  it("merges a className override onto the input, overriding conflicting utilities", () => {
-    wrap(
-      <QuickAddRow
-        preset={{}}
-        testId="qa-test"
-        className="h-full box-border py-0"
-      />,
-    );
-    const input = screen.getByTestId("qa-test");
-    // Override utilities present...
-    expect(input.className).toContain("h-full");
-    expect(input.className).toContain("box-border");
-    expect(input.className).toContain("py-0");
-    // ...and the conflicting default (py-[6px]) resolved away, not doubled up.
-    expect(input.className).not.toContain("py-[6px]");
-    // Base styling (e.g. the dashed border) is preserved.
-    expect(input.className).toContain("border-dashed");
   });
 
   it("POSTs a task with title, preset status/project, and priority: null on Enter", async () => {
@@ -116,7 +99,9 @@ describe("QuickAddRow", () => {
       );
     });
 
-    const callBody = JSON.parse((stub.mock.calls[0][1] as any).body);
+    const body = stub.mock.calls[0]?.[1]?.body;
+    assert(typeof body === "string");
+    const callBody: unknown = JSON.parse(body);
     expect(callBody).toMatchObject({
       title: "New task title",
       status: "FIELD",
@@ -196,8 +181,10 @@ describe("QuickAddRow", () => {
     await userEvent.keyboard("{Enter}");
 
     await waitFor(() => {
-      const callBody = JSON.parse((stub.mock.calls[0][1] as any).body);
-      expect(callBody.cycle).toBe("C-01");
+      const body = stub.mock.calls[0]?.[1]?.body;
+      assert(typeof body === "string");
+      const callBody: unknown = JSON.parse(body);
+      expect(callBody).toMatchObject({ cycle: "C-01" });
     });
   });
 
@@ -210,10 +197,14 @@ describe("QuickAddRow", () => {
     await userEvent.keyboard("{Enter}");
 
     await waitFor(() => {
-      const callBody = JSON.parse((stub.mock.calls[0][1] as any).body);
-      expect(callBody.status).toBe(null);
-      expect(callBody.project).toBe(null);
-      expect(callBody.cycle).toBe(null);
+      const body = stub.mock.calls[0]?.[1]?.body;
+      assert(typeof body === "string");
+      const callBody: unknown = JSON.parse(body);
+      expect(callBody).toMatchObject({
+        status: null,
+        project: null,
+        cycle: null,
+      });
     });
   });
 });

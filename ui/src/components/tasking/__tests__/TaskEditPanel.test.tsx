@@ -23,7 +23,15 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { BoardResponse, BoardTask } from "#/api/board";
 import { queryKeys } from "#/api/keys";
 import { useBoardStore } from "#/store/board";
@@ -420,11 +428,10 @@ describe("TaskEditPanel — immediate patches", () => {
         ([, opts]) => opts?.method === "PATCH",
       );
       expect(patchCalls.length).toBeGreaterThan(0);
-      const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.status).toBe("REVIEW");
+      const requestBody = patchCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({ status: "REVIEW" });
     });
   });
 
@@ -443,11 +450,10 @@ describe("TaskEditPanel — immediate patches", () => {
         ([, opts]) => opts?.method === "PATCH",
       );
       expect(patchCalls.length).toBeGreaterThan(0);
-      const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.priority).toBe("P0");
+      const requestBody = patchCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({ priority: "P0" });
     });
   });
 
@@ -464,11 +470,10 @@ describe("TaskEditPanel — immediate patches", () => {
         ([, opts]) => opts?.method === "PATCH",
       );
       expect(patchCalls.length).toBeGreaterThan(0);
-      const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.cycle).toBeNull();
+      const requestBody = patchCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({ cycle: null });
     });
   });
 
@@ -486,11 +491,10 @@ describe("TaskEditPanel — immediate patches", () => {
         ([, opts]) => opts?.method === "PATCH",
       );
       expect(patchCalls.length).toBeGreaterThan(0);
-      const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.cycle).toBe("C-02");
+      const requestBody = patchCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({ cycle: "C-02" });
     });
   });
 
@@ -506,12 +510,11 @@ describe("TaskEditPanel — immediate patches", () => {
         ([, opts]) => opts?.method === "PATCH",
       );
       expect(patchCalls.length).toBeGreaterThan(0);
-      const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
+      const requestBody = patchCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
       // "" is the wire sentinel for "clear project → UNFILED"
-      expect(body.project).toBe("");
+      expect(body).toMatchObject({ project: "" });
     });
   });
 });
@@ -548,11 +551,10 @@ describe("TaskEditPanel — debounced patches", () => {
       ([, opts]) => opts?.method === "PATCH",
     );
     expect(patchCalls.length).toBeGreaterThan(0);
-    const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
-      string,
-      unknown
-    >;
-    expect(body.title).toBe("UPDATED TITLE");
+    const requestBody = patchCalls[0]?.[1]?.body;
+    assert(typeof requestBody === "string");
+    const body: unknown = JSON.parse(requestBody);
+    expect(body).toMatchObject({ title: "UPDATED TITLE" });
   });
 
   it("start edit fires PATCH {start} after 300ms debounce", async () => {
@@ -580,10 +582,9 @@ describe("TaskEditPanel — debounced patches", () => {
       ([, opts]) => opts?.method === "PATCH",
     );
     expect(patchCalls.length).toBeGreaterThan(0);
-    const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
-      string,
-      unknown
-    >;
+    const requestBody = patchCalls[0]?.[1]?.body;
+    assert(typeof requestBody === "string");
+    const body: unknown = JSON.parse(requestBody);
     expect(body).toEqual({ start: "2026-08-02" });
   });
 
@@ -613,11 +614,10 @@ describe("TaskEditPanel — debounced patches", () => {
       ([, opts]) => opts?.method === "PATCH",
     );
     expect(patchCalls.length).toBe(1);
-    const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
-      string,
-      unknown
-    >;
-    expect(body.title).toBe("FLUSHED TITLE");
+    const requestBody = patchCalls[0]?.[1]?.body;
+    assert(typeof requestBody === "string");
+    const body: unknown = JSON.parse(requestBody);
+    expect(body).toMatchObject({ title: "FLUSHED TITLE" });
   });
 });
 
@@ -642,11 +642,10 @@ describe("TaskEditPanel — hold toggle", () => {
         ([, opts]) => opts?.method === "PATCH",
       );
       expect(patchCalls.length).toBeGreaterThan(0);
-      const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.hold).toBe("BLOCKED");
+      const requestBody = patchCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({ hold: "BLOCKED" });
     });
   });
 
@@ -661,11 +660,10 @@ describe("TaskEditPanel — hold toggle", () => {
         ([, opts]) => opts?.method === "PATCH",
       );
       expect(patchCalls.length).toBeGreaterThan(0);
-      const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.hold).toBeNull();
+      const requestBody = patchCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({ hold: null });
     });
   });
 
@@ -686,11 +684,10 @@ describe("TaskEditPanel — hold toggle", () => {
         ([, opts]) => opts?.method === "PATCH",
       );
       expect(patchCalls.length).toBeGreaterThan(0);
-      const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.hold).toBe("BLOCKED");
+      const requestBody = patchCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({ hold: "BLOCKED" });
     });
 
     // Re-render with task.hold = "BLOCKED" (optimistic board state)

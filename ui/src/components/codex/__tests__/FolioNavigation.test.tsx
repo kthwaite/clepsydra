@@ -24,7 +24,7 @@ import {
 import "./FolioProperties.mock";
 import { createEditor, type Descendant, type Editor, Transforms } from "slate";
 import { Editable, Slate, withReact } from "slate-react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -763,15 +763,11 @@ describe("mobile Folio Back", () => {
 
     act(() => useWorkspaceStore.getState().activateTab("other"));
     pageEditorState.isLoading = false;
-    act(() =>
-      useWorkspaceStore
-        .getState()
-        .activateTab(
-          useWorkspaceStore
-            .getState()
-            .tabs.find((tab) => tab.path === "notes/alpha.md")!.id,
-        ),
-    );
+    const alphaTab = useWorkspaceStore
+      .getState()
+      .tabs.find((tab) => tab.path === "notes/alpha.md");
+    assert.isDefined(alphaTab);
+    act(() => useWorkspaceStore.getState().activateTab(alphaTab.id));
 
     await screen.findByText("Focused source block");
     expect(scrollIntoView).not.toHaveBeenCalled();

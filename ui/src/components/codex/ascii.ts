@@ -82,7 +82,7 @@ export const ASCII_KEYHOLE = String.raw`
     \  |  /
      \_|_/`;
 
-export const ASCII_QUILL = String.raw`
+export const ASCII_QUILL = `
                   .'/
                 .' /
               .'  /

@@ -10,7 +10,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { BoardCycle, BoardTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { cycleStats } from "../board-stats";
@@ -454,12 +462,11 @@ describe("CycleView — lanes", () => {
   it("tasks appear in COL_ORDER across lanes", () => {
     renderCycleView(ACTIVE_CYCLE, C01_TASKS);
     const lanes = screen.getAllByTestId(/^cv-lane-[A-Z]+$/);
-    const laneIds = lanes.map((el) =>
-      el.getAttribute("data-testid")!.replace("cv-lane-", ""),
-    );
-    // TRIAGE (index 1) before FIELD (index 2) before SEALED (index 4)
-    expect(laneIds.indexOf("TRIAGE")).toBeLessThan(laneIds.indexOf("FIELD"));
-    expect(laneIds.indexOf("FIELD")).toBeLessThan(laneIds.indexOf("SEALED"));
+    expect(lanes.map((el) => el.getAttribute("data-testid"))).toEqual([
+      "cv-lane-TRIAGE",
+      "cv-lane-FIELD",
+      "cv-lane-SEALED",
+    ]);
   });
 
   it("renders task row with code, title, project, assignee", () => {
@@ -704,8 +711,10 @@ describe("TaskingScreen integration — cycle mode", () => {
     renderScreen();
     await screen.findByRole("heading", { name: "Task Board" });
 
-    const cycleEmptyState = screen.getByText("No tasks in Cycle 02")
-      .parentElement!;
+    const cycleEmptyState = screen.getByText(
+      "No tasks in Cycle 02",
+    ).parentElement;
+    assert(cycleEmptyState !== null);
     await userEvent.click(
       within(cycleEmptyState).getByRole("button", { name: /New task/i }),
     );
@@ -727,8 +736,10 @@ describe("TaskingScreen integration — cycle mode", () => {
     renderScreen();
     await screen.findByRole("heading", { name: "Task Board" });
 
-    const cycleEmptyState = screen.getByText("No tasks in Cycle 02")
-      .parentElement!;
+    const cycleEmptyState = screen.getByText(
+      "No tasks in Cycle 02",
+    ).parentElement;
+    assert(cycleEmptyState !== null);
     await userEvent.click(
       within(cycleEmptyState).getByRole("button", { name: /New task/i }),
     );
@@ -759,7 +770,7 @@ describe("ScopeRail — cycle selection still passes", () => {
     await screen.findByRole("heading", { name: "Task Board" });
 
     // Click C-02 in the rail
-    const c02btn = screen.getByText("C-02").closest("button")!;
+    const c02btn = screen.getByRole("button", { name: /C-02/ });
     await userEvent.click(c02btn);
 
     expect(useBoardStore.getState().cycleSel).toBe("C-02");

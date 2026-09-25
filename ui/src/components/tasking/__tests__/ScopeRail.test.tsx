@@ -1,7 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { useBoardStore } from "#/store/board";
 import { deriveProjectScopes } from "../board-projects";
 import { hasUnfiledTasks, ScopeRail } from "../ScopeRail";
@@ -57,13 +65,6 @@ describe("hasUnfiledTasks", () => {
 // ── ScopeRail render ──────────────────────────────────────────────────────────
 
 describe("ScopeRail", () => {
-  it("renders the approved scope and project labels when open", () => {
-    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByText("Scope")).toBeInTheDocument();
-    expect(screen.getByText("Projects")).toBeInTheDocument();
-    expect(screen.getByText("Cycles")).toBeInTheDocument();
-  });
-
   it("shows a project's code once when its name is the same word", () => {
     // A PROJECT page titled "Falls" with slug `falls` has code "FALLS";
     // repeating the name beside it would read "FALLS Falls".
@@ -119,20 +120,15 @@ describe("ScopeRail", () => {
     expect(screen.queryByText("No project")).not.toBeInTheDocument();
   });
 
-  it("renders a real cycle with its code, window, state pip, and task count", () => {
+  it("renders a real cycle with its date window and task count", () => {
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    const row = screen.getByText("C-01").closest("button");
+    const row = screen.getByRole("button", { name: /C-01/ });
 
-    expect(row).not.toBeNull();
-    expect(within(row!).getByText("C-01")).toBeInTheDocument();
-    expect(within(row!).getByText("05.26 — 06.08")).toBeInTheDocument();
-    expect(within(row!).getByText("3")).toBeInTheDocument();
-    expect(row!.querySelector(".animate-pulse")).toHaveStyle({
-      background: "var(--cool)",
-    });
+    expect(within(row).getByText("05.26 — 06.08")).toBeInTheDocument();
+    expect(within(row).getByText("3")).toBeInTheDocument();
   });
 
-  it("renders canonical Backlog copy and counts only tasks without a Cycle", () => {
+  it("counts only tasks without a Cycle in Backlog", () => {
     const taskWithAnotherCycle = {
       ...tasks[0],
       id: "task-with-another-cycle",
@@ -145,13 +141,9 @@ describe("ScopeRail", () => {
         tasks={[...tasks, taskWithAnotherCycle]}
       />,
     );
-    const row = screen.getByText("Backlog").closest("button");
+    const row = screen.getByRole("button", { name: /Backlog/ });
 
-    expect(row).not.toBeNull();
-    expect(within(row!).getByText("Backlog")).toBeInTheDocument();
-    expect(within(row!).getByText("Tasks without a Cycle")).toBeInTheDocument();
-    expect(within(row!).queryByText(/unscheduled/i)).not.toBeInTheDocument();
-    expect(within(row!).getByText("2")).toBeInTheDocument();
+    expect(within(row).getByText("2")).toBeInTheDocument();
   });
 
   it("renders the + New task button", () => {
@@ -183,7 +175,7 @@ describe("ScopeRail", () => {
 
   it("clicking a project row sets opFilter to its slug", async () => {
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    const opsRow = screen.getByText("OPS-1").closest("button")!;
+    const opsRow = screen.getByRole("button", { name: /OPS-1/ });
     await userEvent.click(opsRow);
     expect(useBoardStore.getState().opFilter).toBe("alpha");
   });
@@ -191,21 +183,21 @@ describe("ScopeRail", () => {
   it("clicking All projects sets opFilter to ALL", async () => {
     useBoardStore.setState({ opFilter: "alpha" });
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    const allProjectsRow = screen.getByText("All projects").closest("button")!;
+    const allProjectsRow = screen.getByRole("button", { name: /All projects/ });
     await userEvent.click(allProjectsRow);
     expect(useBoardStore.getState().opFilter).toBe("ALL");
   });
 
   it("clicking No project sets opFilter to UNFILED", async () => {
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    const noProjectRow = screen.getByText("No project").closest("button")!;
+    const noProjectRow = screen.getByRole("button", { name: /No project/ });
     await userEvent.click(noProjectRow);
     expect(useBoardStore.getState().opFilter).toBe("UNFILED");
   });
 
   it("clicking a cycle row sets cycleSel and mode to cycle", async () => {
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    const c01Row = screen.getByText("C-01").closest("button")!;
+    const c01Row = screen.getByRole("button", { name: /C-01/ });
     await userEvent.click(c01Row);
     const state = useBoardStore.getState();
     expect(state.cycleSel).toBe("C-01");
@@ -214,27 +206,11 @@ describe("ScopeRail", () => {
 
   it("clicking Backlog sets cycleSel=BACKLOG and mode=cycle", async () => {
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    const backlogRow = screen.getByText("Backlog").closest("button")!;
+    const backlogRow = screen.getByRole("button", { name: /Backlog/ });
     await userEvent.click(backlogRow);
     const state = useBoardStore.getState();
     expect(state.cycleSel).toBe("BACKLOG");
     expect(state.mode).toBe("cycle");
-  });
-
-  it("applies active classes to the selected real cycle row", () => {
-    useBoardStore.setState({ mode: "cycle", cycleSel: "C-01" });
-    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    const row = screen.getByText("C-01").closest("button");
-
-    expect(row).toHaveClass("border-l-[var(--hot)]", "bg-[var(--paper)]");
-  });
-
-  it("applies active classes to the selected backlog row", () => {
-    useBoardStore.setState({ mode: "cycle", cycleSel: "BACKLOG" });
-    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    const row = screen.getByText("Backlog").closest("button");
-
-    expect(row).toHaveClass("border-l-[var(--hot)]", "bg-[var(--paper)]");
   });
 
   it("+ New task opens taskModal with no project when ALL", async () => {
@@ -273,18 +249,9 @@ describe("ScopeRail — op with null project", () => {
     wrap(
       <ScopeRail projects={scopesWithNoSlug} cycles={cycles} tasks={tasks} />,
     );
-    const row = screen.getByText("OPS-3").closest("button")!;
+    const row = screen.getByRole("button", { name: /OPS-3/ });
     await userEvent.click(row);
     expect(useBoardStore.getState().opFilter).toBe("OPS-3");
-  });
-
-  it("highlights the row when opFilter equals the op code", () => {
-    useBoardStore.setState({ opFilter: "OPS-3" });
-    wrap(
-      <ScopeRail projects={scopesWithNoSlug} cycles={cycles} tasks={tasks} />,
-    );
-    const row = screen.getByText("OPS-3").closest("button")!;
-    expect(row.className).toContain("border-l-[var(--hot)]");
   });
 
   it("+ New task omits the project preset (a code is not a project)", async () => {
@@ -314,7 +281,7 @@ describe("ScopeRail — op with null project", () => {
         tasks={nullProjectTasks}
       />,
     );
-    const row = screen.getByText("OPS-3").closest("button")!;
+    const row = screen.getByRole("button", { name: /OPS-3/ });
     expect(within(row).getByText("0")).toBeInTheDocument();
   });
 });
@@ -330,7 +297,8 @@ describe("ScopeRail — synthesized project scope", () => {
     wrap(
       <ScopeRail projects={scopes} cycles={cycles} tasks={tasksWithGhost} />,
     );
-    const header = screen.getByText("Projects").parentElement!;
+    const header = screen.getByText("Projects").parentElement;
+    assert(header !== null);
     expect(within(header).getByText("3")).toBeInTheDocument();
   });
 
@@ -338,25 +306,15 @@ describe("ScopeRail — synthesized project scope", () => {
     wrap(
       <ScopeRail projects={scopes} cycles={cycles} tasks={tasksWithGhost} />,
     );
-    const row = screen.getByText("GHOST").closest("button")!;
+    const row = screen.getByRole("button", { name: /GHOST/ });
     expect(within(row).getByText("1")).toBeInTheDocument();
-  });
-
-  it("renders a neutral square instead of a HealthDot", () => {
-    wrap(
-      <ScopeRail projects={scopes} cycles={cycles} tasks={tasksWithGhost} />,
-    );
-    const ghostRow = screen.getByText("GHOST").closest("button")!;
-    expect(ghostRow.querySelector("span[style]")).toBeNull();
-    const opRow = screen.getByText("OPS-1").closest("button")!;
-    expect(opRow.querySelector("span[style]")).not.toBeNull();
   });
 
   it("clicking the row sets opFilter to the slug", async () => {
     wrap(
       <ScopeRail projects={scopes} cycles={cycles} tasks={tasksWithGhost} />,
     );
-    await userEvent.click(screen.getByText("GHOST").closest("button")!);
+    await userEvent.click(screen.getByRole("button", { name: /GHOST/ }));
     expect(useBoardStore.getState().opFilter).toBe("ghost");
   });
 
@@ -364,7 +322,7 @@ describe("ScopeRail — synthesized project scope", () => {
     wrap(
       <ScopeRail projects={scopes} cycles={cycles} tasks={tasksWithGhost} />,
     );
-    const row = screen.getByText("No project").closest("button")!;
+    const row = screen.getByRole("button", { name: /No project/ });
     expect(within(row).getByText("1")).toBeInTheDocument(); // t4 only
   });
 

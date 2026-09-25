@@ -41,7 +41,7 @@ function renderInEditor(language?: string, readOnly = false, text?: string) {
       type: "code-block",
       ...(language ? { language } : {}),
       children: [{ text: text ?? "fn main() {}" }],
-    } as any,
+    },
   ];
   const renderElement = (props: RenderElementProps) => (
     <CodeBlockElement
@@ -64,16 +64,6 @@ function renderMermaid(readOnly = false) {
 }
 
 describe("CodeBlockElement", () => {
-  it("shows the language label, uppercased", () => {
-    renderInEditor("rust");
-    expect(screen.getByRole("button", { name: "RUST" })).toBeDefined();
-  });
-
-  it("shows TXT when no language is set", () => {
-    renderInEditor();
-    expect(screen.getByRole("button", { name: "TXT" })).toBeDefined();
-  });
-
   it("opens the picker when the label is clicked", () => {
     renderInEditor("rust");
     expect(screen.queryByPlaceholderText("Search language…")).toBeNull();

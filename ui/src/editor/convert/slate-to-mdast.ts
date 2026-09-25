@@ -1,5 +1,6 @@
 import type {
   BlockContent,
+  Delete,
   InlineCode,
   ListItem,
   Nodes,
@@ -8,6 +9,7 @@ import type {
   RootContent,
 } from "mdast";
 import { gfmToMarkdown } from "mdast-util-gfm";
+import type {} from "mdast-util-gfm-strikethrough";
 import type { Options } from "mdast-util-to-markdown";
 import { toMarkdown } from "mdast-util-to-markdown";
 import type { Descendant } from "slate";
@@ -54,7 +56,7 @@ function wikiLinkToMarkdownExtension(): Options {
 function singleTildeStrikethroughExtension(): Options {
   return {
     handlers: {
-      delete(node: any, _parent: any, state: any, info: any) {
+      delete(node: Delete, _parent, state, info) {
         const exit = state.enter("strikethrough");
         const value = state.containerPhrasing(node, {
           ...info,

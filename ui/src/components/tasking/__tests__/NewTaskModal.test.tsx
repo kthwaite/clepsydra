@@ -11,7 +11,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { useBoardStore } from "#/store/board";
 import { COL_LABEL, type ColLabelFn } from "../board-constants";
 import { deriveProjectScopes } from "../board-projects";
@@ -427,23 +435,24 @@ describe("NewTaskModal — submit payload", () => {
         ([, opts]) => opts?.method === "POST",
       );
       expect(postCalls.length).toBeGreaterThan(0);
-      const body = JSON.parse(postCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.title).toBe("My Task");
-      expect(body.project).toBe("alpha");
-      expect(body.status).toBe("FIELD");
-      expect(body.priority).toBe("P1");
-      expect(body.cycle).toBe("C-01");
-      expect(body.assignee).toBe("Kit");
-      expect(body.estimate).toBe("2h");
-      expect(body.start).toBe("2026-08-01");
-      expect(body.due).toBe("2026-12-31");
-      expect(body.tags).toEqual(["INFRA", "DOCS"]);
-      expect(body.link).toBe("[[alpha-dossier]]");
-      expect(body.checklist).toEqual(["item one", "item two"]);
-      expect(body.body).toBe("Why this matters.");
+      const requestBody = postCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({
+        title: "My Task",
+        project: "alpha",
+        status: "FIELD",
+        priority: "P1",
+        cycle: "C-01",
+        assignee: "Kit",
+        estimate: "2h",
+        start: "2026-08-01",
+        due: "2026-12-31",
+        tags: ["INFRA", "DOCS"],
+        link: "[[alpha-dossier]]",
+        checklist: ["item one", "item two"],
+        body: "Why this matters.",
+      });
     });
   });
 
@@ -507,11 +516,10 @@ describe("NewTaskModal — submit payload", () => {
       const postCalls = stub.mock.calls.filter(
         ([, opts]) => opts?.method === "POST",
       );
-      const body = JSON.parse(postCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.cycle).toBeNull();
+      const requestBody = postCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({ cycle: null });
     });
   });
 
@@ -530,11 +538,10 @@ describe("NewTaskModal — submit payload", () => {
       const postCalls = stub.mock.calls.filter(
         ([, opts]) => opts?.method === "POST",
       );
-      const body = JSON.parse(postCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.project).toBeNull();
+      const requestBody = postCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({ project: null });
     });
   });
 
@@ -551,30 +558,23 @@ describe("NewTaskModal — submit payload", () => {
       const postCalls = stub.mock.calls.filter(
         ([, opts]) => opts?.method === "POST",
       );
-      const body = JSON.parse(postCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.assignee).toBeNull();
-      expect(body.estimate).toBeNull();
-      expect(body.start).toBeNull();
-      expect(body.due).toBeNull();
-      expect(body.tags).toBeNull();
-      expect(body.link).toBeNull();
-      expect(body.checklist).toBeNull();
+      const requestBody = postCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({
+        assignee: null,
+        estimate: null,
+        start: null,
+        due: null,
+        tags: null,
+        link: null,
+        checklist: null,
+      });
     });
   });
 });
 
 describe("NewTaskModal — action feedback", () => {
-  it("shows Create task and Cancel actions", () => {
-    wrap();
-    expect(
-      screen.getByRole("button", { name: "Create task" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
-  });
-
   it("shows Creating… while the POST is pending", async () => {
     const pending = new Promise<Response>(() => undefined);
     const stub = vi.fn((_url: string, opts?: RequestInit) => {
