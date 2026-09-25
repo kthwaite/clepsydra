@@ -11,6 +11,7 @@ import {
   FLAG_ON,
 } from "#/lib/filters/model";
 import { useBoardStore } from "#/store/board";
+import { Button } from "../ui/button";
 import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
 import {
@@ -243,19 +244,19 @@ export function TaskingScreen({
 
   if (isLoading) {
     return (
-      <div className="cl-mono flex h-full items-center justify-center text-[11px] uppercase tracking-[0.18em] text-[var(--ink-mute)]">
-        LOADING
+      <div className="flex h-full items-center justify-center text-[13.5px] text-mute">
+        Loading the board…
       </div>
     );
   }
 
   if (isError || !data) {
     return (
-      <div className="cl-mono flex h-full flex-col items-center justify-center gap-[12px] text-[11px] uppercase tracking-[0.18em] text-[var(--hot)]">
-        ERROR — board unavailable
-        <button type="button" className="cl-btn" onClick={() => refetch()}>
-          RETRY
-        </button>
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-[13.5px] text-hot">
+        The board is unavailable.
+        <Button variant="secondary" onPress={() => refetch()}>
+          Retry
+        </Button>
       </div>
     );
   }

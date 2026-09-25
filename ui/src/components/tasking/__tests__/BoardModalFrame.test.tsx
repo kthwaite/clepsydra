@@ -25,7 +25,9 @@ it("renders the accessible modal shell with the requested contract", () => {
   const dialog = screen.getByRole("dialog", { name: "Test Board Dialog" });
   expect(dialog).toBeVisible();
   expect(screen.getByTestId("test-backdrop")).toBeVisible();
-  expect(screen.getByTestId("test-panel")).toHaveClass("border");
+  const panel = screen.getByTestId("test-panel");
+  expect(panel).toHaveClass("bg-raise", "rounded-2xl");
+  expect(panel.className).not.toMatch(/(^|\s)border(\s|-)/);
   expect(dialog.parentElement).toHaveClass("w-[460px]", "max-w-[94vw]");
 });
 
@@ -123,10 +125,10 @@ describe("BOARD_MODAL_WIDTHS", () => {
 });
 
 describe("ModalEscChip", () => {
-  it("renders ESC with the given test id", () => {
+  it("renders Esc in sentence case with the given test id", () => {
     render(<ModalEscChip onClose={vi.fn()} testId="esc-chip-test" />);
     const chip = screen.getByTestId("esc-chip-test");
-    expect(chip).toHaveTextContent("ESC");
+    expect(chip).toHaveTextContent(/^Esc$/);
   });
 
   it("calls onClose when clicked", async () => {

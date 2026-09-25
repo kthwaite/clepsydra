@@ -192,7 +192,7 @@ describe("TaskingScreen smoke", () => {
       vi.fn(() => new Promise(() => {})),
     );
     renderScreen();
-    expect(screen.getByText("LOADING")).toBeInTheDocument();
+    expect(screen.getByText("Loading the board…")).toBeInTheDocument();
   });
 
   it("renders the error state when the board fetch fails", async () => {
@@ -202,7 +202,7 @@ describe("TaskingScreen smoke", () => {
     );
     renderScreen();
     expect(
-      await screen.findByText(/ERROR — board unavailable/),
+      await screen.findByText("The board is unavailable."),
     ).toBeInTheDocument();
   });
 
@@ -223,10 +223,10 @@ describe("TaskingScreen smoke", () => {
     );
     renderScreen();
     expect(
-      await screen.findByText(/ERROR — board unavailable/),
+      await screen.findByText("The board is unavailable."),
     ).toBeInTheDocument();
 
-    const retryButton = screen.getByRole("button", { name: /retry/i });
+    const retryButton = screen.getByRole("button", { name: "Retry" });
     await userEvent.click(retryButton);
 
     expect(await screen.findByTestId("kb-col-INTAKE")).toBeInTheDocument();
