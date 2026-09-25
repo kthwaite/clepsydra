@@ -39,6 +39,8 @@ const FOLIO_FILES = [
   "../codex/FolioError.tsx",
   "../codex/FolioNotFound.tsx",
   "../codex/FolioLauncher.tsx",
+  "../codex/KindSelect.tsx",
+  "../codex/ProjectCombo.tsx",
   "../../editor/PageEditorHeader.tsx",
 ];
 

@@ -112,7 +112,7 @@ describe("ProjectCombo", () => {
     expect(onAssign).not.toHaveBeenCalled();
     expect(combobox()).toHaveValue("atl");
     expect(combobox()).toHaveFocus();
-    expect(await hint()).toHaveTextContent("no such project");
+    expect(await hint()).toHaveTextContent(/^No such project/);
     await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
   });
 
@@ -122,7 +122,7 @@ describe("ProjectCombo", () => {
 
     await user.clear(combobox());
     await user.type(combobox(), "ghost{Enter}");
-    expect(await hint()).toHaveTextContent("no such project");
+    expect(await hint()).toHaveTextContent(/^No such project/);
 
     await user.click(outside);
 

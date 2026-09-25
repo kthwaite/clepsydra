@@ -8,6 +8,7 @@ import {
   Popover,
 } from "react-aria-components";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 
 export interface ProjectComboProps {
   value: string | null;
@@ -20,7 +21,7 @@ export interface ProjectComboProps {
   onClear: () => void;
 }
 
-const NO_SUCH_PROJECT = "no such project";
+const NO_SUCH_PROJECT = "No such project.";
 
 /** Strict project picker: only a listed slug commits. A listbox pick, or
  *  Enter/blur on a draft spelling a listed slug (case-insensitive, trimmed),
@@ -134,24 +135,24 @@ export function ProjectCombo({
             }}
             onBlur={settleDraft}
             className={cn(
-              "cl-mono w-full border border-rule bg-transparent px-1.5 py-[2px] text-[11px] tracking-[0.04em] text-ink-2 outline-none transition-colors",
-              "placeholder:text-ink-mute",
-              "data-[hovered]:border-accent",
-              "data-[focused]:border-accent data-[focused]:text-ink",
+              "h-8 w-full rounded-lg bg-sink px-2.5 text-[13.5px] outline-none transition-colors",
+              "placeholder:text-faint",
+              "data-[focused]:bg-raise data-[focused]:text-ink data-[focused]:ring-2 data-[focused]:ring-accent",
+              "text-ink",
             )}
           />
-          <Popover className="border border-rule bg-paper outline-none">
-            <ListBox className="cl-mono max-h-[280px] overflow-auto p-0.5 outline-none">
+          <Popover className="min-w-[180px] rounded-xl bg-raise p-1 shadow-lg outline-none">
+            <ListBox className="max-h-[280px] overflow-auto outline-none">
               {options.map((p) => (
                 <ListBoxItem
                   key={p}
                   id={p}
                   textValue={p}
                   className={cn(
-                    "cursor-pointer px-2 py-1 text-[11px] tracking-[0.04em] text-ink-2 outline-none",
-                    "data-[hovered]:bg-highlight data-[hovered]:text-ink",
-                    "data-[focused]:bg-highlight data-[focused]:text-ink",
-                    "data-[selected]:font-bold data-[selected]:text-ink",
+                    "cursor-pointer rounded-lg px-2.5 py-1.5 text-[13.5px] text-ink-2 outline-none",
+                    "data-[hovered]:bg-sink data-[hovered]:text-ink",
+                    "data-[focused]:bg-sink data-[focused]:text-ink",
+                    "data-[selected]:bg-accent-tint data-[selected]:text-ink",
                   )}
                 >
                   {p}
@@ -166,9 +167,9 @@ export function ProjectCombo({
             aria-describedby={ariaDescribedBy}
             onPress={onClear}
             className={cn(
-              "cl-mono flex-shrink-0 cursor-pointer px-1 text-[11px] text-ink-mute outline-none transition-colors",
-              "data-[hovered]:text-hot",
-              "data-[focus-visible]:outline data-[focus-visible]:outline-1 data-[focus-visible]:outline-accent",
+              "flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded-full text-[15px] text-mute transition-colors",
+              "data-[hovered]:bg-sink data-[hovered]:text-hot",
+              FOCUS_RING,
             )}
           >
             ×
@@ -178,9 +179,9 @@ export function ProjectCombo({
       {/* Always mounted so assistive tech announces the hint when it lands. */}
       <div
         role="status"
-        className={cn("cl-mono text-[10px] text-hot", hint && "mt-0.5")}
+        className={cn("text-[12.5px] text-hot", hint && "mt-1")}
       >
-        {hint && `⁂ ${hint}`}
+        {hint}
       </div>
     </div>
   );

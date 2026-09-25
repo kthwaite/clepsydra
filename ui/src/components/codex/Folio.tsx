@@ -55,7 +55,10 @@ import {
   visibleFolioOutlinks,
 } from "#/components/codex/folio-utils";
 import { buildToc, type TocEntry } from "#/components/codex/folioToc";
-import { highlightMatch } from "#/components/codex/highlightMatch";
+import {
+  highlightMatch,
+  plainWikiText,
+} from "#/components/codex/highlightMatch";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { LockedFolio } from "#/components/codex/LockedFolio";
 import { MobileFolioLayout } from "#/components/codex/MobileFolioLayout";
@@ -1538,8 +1541,8 @@ export function Folio({ tabId, path }: FolioProps) {
                     data-link-snippet
                     className="text-[13.5px] leading-[1.55] text-mute"
                   >
-                    {highlightMatch(b.context, [
-                      b.target_raw,
+                    {highlightMatch(plainWikiText(b.context), [
+                      ...b.target_raw.split("|"),
                       editor.title ?? "",
                     ])}
                   </span>

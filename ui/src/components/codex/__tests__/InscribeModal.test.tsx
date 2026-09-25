@@ -206,7 +206,7 @@ describe("InscribeModal", () => {
       "ghost{Enter}",
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent("no such project");
+    expect(screen.getByRole("status")).toHaveTextContent("No such project.");
     expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(
       "ghost",
     );

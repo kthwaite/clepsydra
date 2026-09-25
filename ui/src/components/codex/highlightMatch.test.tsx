@@ -1,6 +1,9 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { highlightMatch } from "#/components/codex/highlightMatch";
+import {
+  highlightMatch,
+  plainWikiText,
+} from "#/components/codex/highlightMatch";
 
 function marks(text: string, needles: string[]) {
   const { container } = render(<p>{highlightMatch(text, needles)}</p>);
@@ -41,5 +44,23 @@ describe("highlightMatch", () => {
     const r = marks("<b>bold</b> Alpha", ["Alpha"]);
     expect(r.container.querySelector("b")).toBeNull();
     expect(r.text).toBe("<b>bold</b> Alpha");
+  });
+});
+
+describe("plainWikiText", () => {
+  it("reads wikilinks as their display text", () => {
+    expect(plainWikiText("see [[Alpha]] and [[Beta page|beta]] here")).toBe(
+      "see Alpha and beta here",
+    );
+  });
+
+  it("drops heading and block anchors from the display text", () => {
+    expect(plainWikiText("[[Alpha#Intro]] and [[Beta^b1]]")).toBe(
+      "Alpha and Beta",
+    );
+  });
+
+  it("leaves text without wikilinks unchanged", () => {
+    expect(plainWikiText("plain [text] here")).toBe("plain [text] here");
   });
 });

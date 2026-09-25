@@ -83,26 +83,25 @@ export function KindSelect({
           placeholder={placeholder}
           onBlur={() => setDraft(value !== null ? kindLabel(value) : "")}
           className={cn(
-            "cl-mono w-full border border-rule bg-transparent px-1.5 py-[2px] text-[11px] uppercase tracking-[0.08em] outline-none transition-colors",
-            "placeholder:text-ink-mute",
-            "data-[hovered]:border-accent",
-            "data-[focused]:border-accent data-[focused]:text-ink",
-            "data-[disabled]:cursor-not-allowed data-[disabled]:text-ink-mute",
-            inferred ? "text-ink-mute" : "text-ink-2",
+            "h-8 w-full rounded-lg bg-sink px-2.5 text-[13.5px] outline-none transition-colors",
+            "placeholder:text-faint",
+            "data-[focused]:bg-raise data-[focused]:text-ink data-[focused]:ring-2 data-[focused]:ring-accent",
+            "data-[disabled]:cursor-not-allowed data-[disabled]:bg-transparent data-[disabled]:px-0 data-[disabled]:text-mute",
+            inferred ? "text-mute" : "text-ink",
           )}
         />
-        <Popover className="border border-rule bg-paper outline-none">
-          <ListBox className="cl-mono max-h-[280px] overflow-auto p-0.5 outline-none">
+        <Popover className="min-w-[180px] rounded-xl bg-raise p-1 shadow-lg outline-none">
+          <ListBox className="max-h-[280px] overflow-auto outline-none">
             {OPTIONS.map((k) => (
               <ListBoxItem
                 key={k}
                 id={k}
                 textValue={kindLabel(k)}
                 className={cn(
-                  "cursor-pointer px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none",
-                  "data-[hovered]:bg-highlight data-[hovered]:text-ink",
-                  "data-[focused]:bg-highlight data-[focused]:text-ink",
-                  "data-[selected]:font-bold data-[selected]:text-ink",
+                  "cursor-pointer rounded-lg px-2.5 py-1.5 text-[13.5px] text-ink-2 outline-none",
+                  "data-[hovered]:bg-sink data-[hovered]:text-ink",
+                  "data-[focused]:bg-sink data-[focused]:text-ink",
+                  "data-[selected]:bg-accent-tint data-[selected]:text-ink",
                 )}
               >
                 {kindLabel(k)}
@@ -112,14 +111,10 @@ export function KindSelect({
         </Popover>
       </ComboBox>
       {inferred && immutableReason === undefined && (
-        <span className="cl-mono flex-shrink-0 text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-          · inferred
-        </span>
+        <span className="flex-shrink-0 text-[12px] text-mute">· inferred</span>
       )}
       {immutableReason !== undefined && (
-        <span className="cl-mono flex-shrink-0 text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-          · fixed
-        </span>
+        <span className="flex-shrink-0 text-[12px] text-mute">· fixed</span>
       )}
       {immutableReason !== undefined && (
         <span id={immutableDescriptionId} className="sr-only">

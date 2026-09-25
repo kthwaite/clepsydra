@@ -32,3 +32,12 @@ export function highlightMatch(text: string, needles: string[]): ReactNode {
     ),
   );
 }
+
+/** Reads `[[target]]` / `[[target|alias]]` as display text (the alias, else
+ *  the target without its `#heading` / `^block` anchor), so a backlink
+ *  snippet reads as prose. */
+export function plainWikiText(text: string): string {
+  return text.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, alias) =>
+    (alias ?? target.replace(/[#^].*$/, "")).trim(),
+  );
+}
