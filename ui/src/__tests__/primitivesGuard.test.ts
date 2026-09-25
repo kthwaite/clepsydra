@@ -23,7 +23,9 @@ const FORBIDDEN: Array<[string, RegExp]> = [
   ["border-rule", /\bborder-rule\b/],
   ["border-border", /\bborder-border\b/],
   ["bare border", /["'\s]border["'\s]/],
-  ["rounded-none", /\brounded-none\b/],
+  // Unprefixed only: a breakpoint variant (max-md:rounded-none for a
+  // full-screen mobile sheet) is a layout choice, not Vessel chrome.
+  ["rounded-none", /(^|["'\s])rounded-none\b/],
   ["9–11px type", /\btext-\[(9|10|11)px\]/],
   ["paper-2", /\bpaper-2\b/],
   ["ink-mute", /\bink-mute\b/],
@@ -35,6 +37,7 @@ const files = [
     .filter((f) => f.endsWith(".tsx") && !f.includes(".stories."))
     .filter((f) => !OUT_OF_SCOPE.has(f)),
   "../codex/TabPreviewCard.tsx",
+  "../codex/CodexModalShell.tsx",
   "../codex/Section.tsx",
   "../codex/Tick.tsx",
 ].filter((f) => {

@@ -99,4 +99,19 @@ describe("CodexModalShell", () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(trigger).toHaveFocus());
   });
+
+  it("frames content in a raised, rounded panel with no hard border", () => {
+    render(
+      <CodexModalShell
+        ariaLabel="Shell"
+        maxWidthClassName="max-w-[520px]"
+        onDismiss={() => {}}
+      >
+        <p>content</p>
+      </CodexModalShell>,
+    );
+    const panel = screen.getByRole("dialog", { name: "Shell" });
+    expect(panel).toHaveClass("rounded-2xl", "bg-raise", "shadow-xl");
+    expect(panel.className).not.toMatch(/border/);
+  });
 });
