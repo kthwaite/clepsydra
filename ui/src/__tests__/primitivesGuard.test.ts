@@ -26,6 +26,24 @@ const TASKING_FILES = [
   "../tasking/BoardModalFrame.tsx",
 ];
 
+/** Slate prose elements restyled in phase 4.4a. */
+const PROSE_FILES = [
+  "../../editor/schema/elements/heading.tsx",
+  "../../editor/schema/elements/blockquote.tsx",
+];
+
+/** Folio screen (phase 4.4a). */
+const FOLIO_FILES = [
+  "../codex/Folio.tsx",
+  "../codex/FolioProperties.tsx",
+  "../codex/FolioError.tsx",
+  "../codex/FolioNotFound.tsx",
+  "../codex/FolioLauncher.tsx",
+  "../codex/KindSelect.tsx",
+  "../codex/ProjectCombo.tsx",
+  "../../editor/PageEditorHeader.tsx",
+];
+
 /** Screens restyled in phase 4; guarded like the primitives. */
 const SCREEN_FILES = [
   "../codex/Atrium.tsx",
@@ -72,6 +90,8 @@ const files = [
   "../codex/Tick.tsx",
   ...SCREEN_FILES,
   ...TASKING_FILES,
+  ...PROSE_FILES,
+  ...FOLIO_FILES,
 ].filter((f) => {
   try {
     readFileSync(path.join(uiDir, f));

@@ -5,6 +5,7 @@ import {
   KIND_META,
   KINDS,
   kindColorVar,
+  kindDisplayLabel,
   kindIcon,
   kindLabel,
   parseFrontmatterKind,
@@ -230,5 +231,17 @@ describe("kind colours (Stone & Lamp)", () => {
     for (const k of KINDS) {
       expect(kindColorVar(k)).not.toMatch(/--(cool|hot|warn|accent-deep)\)/);
     }
+  });
+});
+
+describe("kindDisplayLabel", () => {
+  it("renders kind labels in sentence case", () => {
+    expect(kindDisplayLabel("NOTE")).toBe("Note");
+    expect(kindDisplayLabel("PROJECT")).toBe("Project");
+  });
+
+  it("keeps the AI initialism in capitals", () => {
+    expect(kindDisplayLabel("AI_CONVERSATION")).toBe("AI conversation");
+    expect(kindDisplayLabel("AI_JOURNAL")).toBe("AI journal");
   });
 });

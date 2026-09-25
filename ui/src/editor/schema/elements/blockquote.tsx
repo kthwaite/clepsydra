@@ -16,7 +16,9 @@ export const blockquoteDescriptor: ElementDescriptor<BlockquoteElement> = {
     <blockquote
       {...attributes}
       data-block-id={element.blockId}
-      className="my-4 border-l-2 border-accent bg-paper-2 py-2 pl-4 pr-3 text-[0.97em] italic text-ink-2"
+      // Pull quote (spec §5.6): a cobalt serif open-quote hangs at the left.
+      // A pseudo-element, not a node, so copied text never carries it.
+      className="relative my-8 pl-7 font-serif text-[25px] italic leading-[1.35] text-ink before:pointer-events-none before:absolute before:-left-1.5 before:-top-3.5 before:font-serif before:text-[64px] before:not-italic before:leading-none before:text-accent before:content-['“']"
     >
       {children}
     </blockquote>

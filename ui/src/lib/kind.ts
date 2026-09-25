@@ -91,7 +91,11 @@ export const KIND_META: Record<Kind, KindMeta> = {
   PERSON: { label: "PERSON", color: "var(--quire-madder)", icon: User },
   CAPTURE: { label: "CAPTURE", color: "var(--quire-slate)", icon: Inbox },
   NOTE: { label: "NOTE", color: "var(--ink-mute)", icon: FileText },
-  TASK: { label: "TASK", color: "var(--quire-verdigris)", icon: SquareCheckBig },
+  TASK: {
+    label: "TASK",
+    color: "var(--quire-verdigris)",
+    icon: SquareCheckBig,
+  },
   CYCLE: { label: "CYCLE", color: "var(--ink-2)", icon: Repeat },
   RECIPE: { label: "RECIPE", color: "var(--quire-sepia)", icon: CookingPot },
   // Meetings are about people, so they share PERSON's madder. A 1:1 is a
@@ -111,6 +115,13 @@ export const KIND_META: Record<Kind, KindMeta> = {
 };
 
 export const kindLabel = (kind: Kind): string => KIND_META[kind].label;
+/** The kind label in sentence case ("Note", "AI journal") for prose-like
+ *  chrome such as the Folio meta line. */
+export const kindDisplayLabel = (kind: Kind): string => {
+  const label = KIND_META[kind].label;
+  const sentence = label.charAt(0) + label.slice(1).toLowerCase();
+  return sentence.replace(/^Ai\b/, "AI");
+};
 export const kindColorVar = (kind: Kind): string => KIND_META[kind].color;
 export const kindIcon = (kind: Kind): LucideIcon => KIND_META[kind].icon;
 

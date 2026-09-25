@@ -17,6 +17,7 @@ export function Section({
   action,
   pip = "cool",
   tight = false,
+  compact = false,
   wrapHeader = false,
   className,
   children,
@@ -26,20 +27,34 @@ export function Section({
   action?: ReactNode;
   pip?: Pip;
   tight?: boolean;
+  /** Rail size: 18px muted eyebrow, tighter gaps, 17px body indent. */
+  compact?: boolean;
   wrapHeader?: boolean;
   className?: string;
   children: ReactNode;
 }) {
   return (
-    <section className={cn("flex min-w-0 flex-col gap-[22px]", className)}>
+    <section
+      className={cn(
+        "flex min-w-0 flex-col",
+        compact ? "gap-3.5" : "gap-[22px]",
+        className,
+      )}
+    >
       <div
         className={cn(
-          "flex items-center gap-3",
+          "flex items-center",
+          compact ? "gap-2.5" : "gap-3",
           wrapHeader && "min-w-0 flex-wrap",
         )}
       >
         <Tick variant={PIP_TICK[pip]} />
-        <h2 className="truncate font-serif text-[22px] italic leading-none text-ink">
+        <h2
+          className={cn(
+            "truncate font-serif italic leading-none",
+            compact ? "text-[18px] text-mute" : "text-[22px] text-ink",
+          )}
+        >
           {label}
         </h2>
         {caption ? (
@@ -65,7 +80,13 @@ export function Section({
           </div>
         ) : null}
       </div>
-      <div data-section-body className={cn("min-w-0", !tight && "pl-[19px]")}>
+      <div
+        data-section-body
+        className={cn(
+          "min-w-0",
+          !tight && (compact ? "pl-[17px]" : "pl-[19px]"),
+        )}
+      >
         {children}
       </div>
     </section>

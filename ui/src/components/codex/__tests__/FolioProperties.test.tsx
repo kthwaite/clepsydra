@@ -120,7 +120,7 @@ describe("FolioProperties", () => {
     const view = renderPanel();
 
     expect(view.container).toBeEmptyDOMElement();
-    expect(screen.queryByRole("heading", { name: "Properties" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Base properties" })).toBeNull();
   });
 
   it("shows loading before the authoritative projection is available", () => {
@@ -128,7 +128,7 @@ describe("FolioProperties", () => {
 
     renderPanel();
 
-    expect(screen.getByRole("heading", { name: "Properties" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Base properties" })).toBeVisible();
     expect(screen.getByText("Loading properties…")).toBeVisible();
   });
 

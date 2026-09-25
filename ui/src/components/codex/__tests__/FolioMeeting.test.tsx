@@ -180,8 +180,8 @@ describe("Folio meeting header band", () => {
       within(band).getByRole("combobox", { name: "add attendee" }),
     ).toBeInTheDocument();
     // The rail is expanded, so a surviving rail block would be mounted.
-    expect(screen.getByText("Vitals")).toBeInTheDocument();
-    expect(screen.queryByText("Meeting")).toBeNull();
+    const rail = screen.getByRole("complementary", { name: "Page details" });
+    expect(within(rail).queryByText("Meeting")).toBeNull();
   });
 
   it("keeps the band on the mobile layout", () => {

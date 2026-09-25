@@ -399,7 +399,12 @@ describe("Folio AI conversation presentation", () => {
     renderFolio(editor);
 
     expect(screen.getByRole("heading", { name: "Conversation" })).toBeVisible();
-    expect(screen.getByText("research")).toBeVisible();
+    // Shown read-only under the title and again in the Properties rail.
+    expect(
+      within(screen.getByRole("region", { name: "Page metadata" })).getByText(
+        "research",
+      ),
+    ).toBeVisible();
     expect(screen.getByText("thread")).toBeVisible();
     expect(screen.getByText("atlas")).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "Page title" })).toBeNull();

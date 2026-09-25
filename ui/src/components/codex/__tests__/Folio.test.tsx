@@ -18,7 +18,7 @@ import {
 import { ReactEditor } from "slate-react";
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AttachmentsApi from "#/api/attachments";
-import type { OutlinkEntry, TagCount } from "#/api/types";
+import type { BacklinkEntry, OutlinkEntry, TagCount } from "#/api/types";
 import type { CustomEditor } from "#/editor/types";
 
 // The recovery panel is the PRIMARY (declarative) invalid-tab path: usePage
@@ -29,6 +29,8 @@ const {
   blockerState,
   journalTodayState,
   outlinksState,
+  backlinksState,
+  similarState,
   attachmentRemoveMock,
   attachmentUploadMock,
   mobileLayoutState,
@@ -62,6 +64,10 @@ const {
     isLoading: false,
   },
   outlinksState: { data: undefined as OutlinkEntry[] | undefined },
+  backlinksState: { data: undefined as BacklinkEntry[] | undefined },
+  similarState: {
+    data: undefined as { items: { path: string; title: string }[] } | undefined,
+  },
   mobileLayoutState: { matches: false },
   mountedSlateEditors: [] as Editor[],
   pageActionsMock: vi.fn(),
@@ -139,9 +145,9 @@ vi.mock("#/components/codex/useScrollSpy", () => ({
   useScrollSpy: useScrollSpyMock,
 }));
 vi.mock("#/api/index", () => ({
-  useBacklinks: () => ({ data: undefined }),
+  useBacklinks: () => backlinksState,
   useOutlinks: () => outlinksState,
-  useSimilar: () => ({ data: undefined }),
+  useSimilar: () => similarState,
   useTagSuggestions: useTagSuggestionsMock,
   useTags: useTagsMock,
 }));
@@ -300,6 +306,7 @@ vi.mock("#/lib/useProjects", () => ({
 }));
 
 import { TabContent } from "#/components/TabContent";
+import { useActivateTabWithFolioHistory } from "#/hooks/useFolioHistoryNavigation";
 import { todayJournalPath } from "#/lib/journal";
 import { queryClient } from "#/lib/queryClient";
 import {
@@ -317,12 +324,20 @@ import { useWorkspaceStore } from "#/store/workspace";
 import { Folio } from "../Folio";
 
 beforeEach(() => {
+  useCollapsibleRailMock.mockImplementation(() => ({
+    collapsed: false,
+    width: 240,
+    toggle: vi.fn(),
+    onResizeStart: vi.fn(),
+  }));
   blockerState.current = { status: "idle" };
   useBlockerMock.mockClear();
   routerHistory.replace.mockClear();
   journalTodayState.data = null;
   journalTodayState.isLoading = false;
   outlinksState.data = undefined;
+  backlinksState.data = undefined;
+  similarState.data = undefined;
   clearFolioRestoration("t1");
   clearFolioHistoryState();
   folioPropertiesMock.mockClear();
@@ -598,6 +613,200 @@ describe("Folio invalid-tab recovery", () => {
     expect(screen.getByTestId("slate-editor")).toBeInTheDocument();
   });
 
+  it("opens the page with a meta line, not the Vessel FILE header", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const meta = screen.getByTestId("folio-meta");
+    expect(meta).toHaveTextContent(/^Note · edited /);
+    expect(meta).toHaveClass("text-[13px]", "text-mute");
+    expect(meta.className).not.toMatch(/uppercase|tracking-/);
+    expect(document.querySelector("hr.cl-rule-dash")).toBeNull();
+    expect(screen.queryByText(/END OF FILE/)).toBeNull();
+  });
+
+  it("sets the page title in the serif at display size", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const title = screen.getByRole("textbox", { name: "Page title" });
+    expect(title).toHaveClass("font-serif", "leading-[1.02]");
+    expect(title.className).not.toMatch(/font-bold/);
+  });
+
+  it("frames the rails at 232 and 296 with no rules and round hide buttons", async () => {
+    const user = userEvent.setup();
+    const toggle = vi.fn();
+    useCollapsibleRailMock.mockImplementation(() => ({
+      collapsed: false,
+      width: 240,
+      toggle,
+      onResizeStart: vi.fn(),
+    }));
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    expect(useCollapsibleRailMock).toHaveBeenCalledWith(
+      expect.objectContaining({ side: "left", defaultWidth: 232 }),
+    );
+    expect(useCollapsibleRailMock).toHaveBeenCalledWith(
+      expect.objectContaining({ side: "right", defaultWidth: 296 }),
+    );
+    // Gaps and padding scale down so a 1024px window keeps a usable column.
+    const grid = screen.getByRole("complementary", {
+      name: "Page details",
+    }).parentElement;
+    expect(grid).toHaveClass("gap-8", "xl:gap-16", "px-6", "xl:px-10");
+    for (const name of ["Page details", "Page links"]) {
+      const rail = screen.getByRole("complementary", { name });
+      expect(rail.className).not.toMatch(/border-(l|r)\b/);
+    }
+    const hideLeft = screen.getByRole("button", { name: "Hide left sidebar" });
+    expect(hideLeft).toHaveClass("rounded-full");
+    await user.click(hideLeft);
+    await user.click(
+      screen.getByRole("button", { name: "Hide right sidebar" }),
+    );
+    expect(toggle).toHaveBeenCalledTimes(2);
+  });
+
+  it("collapses each rail to a round sink button that shows it again", async () => {
+    const user = userEvent.setup();
+    const toggle = vi.fn();
+    useCollapsibleRailMock.mockImplementation(() => ({
+      collapsed: true,
+      width: 240,
+      toggle,
+      onResizeStart: vi.fn(),
+    }));
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const showLeft = screen.getByRole("button", { name: "Show left sidebar" });
+    expect(showLeft).toHaveClass("h-8", "w-8", "rounded-full", "bg-sink");
+    expect(
+      screen.getByRole("button", { name: "Show right sidebar" }),
+    ).toHaveClass("bg-sink");
+    await user.click(showLeft);
+    expect(toggle).toHaveBeenCalledOnce();
+  });
+
+  it("orders the left rail: On this page, Properties, Attachments, Organization", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const rail = screen.getByRole("complementary", { name: "Page details" });
+    const names = within(rail)
+      .getAllByRole("heading", { level: 2 })
+      .map((h) => h.textContent);
+    expect(names).toEqual([
+      "On this page",
+      "Properties",
+      "Attachments",
+      "Organization",
+    ]);
+    for (const old of ["Document", "Chronology", "Vitals"]) {
+      expect(within(rail).queryByText(old)).toBeNull();
+    }
+    expect(within(rail).getByText("No headings yet.")).toBeInTheDocument();
+  });
+
+  it("gathers the page facts into one Properties list", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const rail = screen.getByRole("complementary", { name: "Page details" });
+    const dl = rail.querySelector("dl");
+    assert(dl, "Properties is a definition list");
+    expect(dl).toHaveClass("grid-cols-[64px_minmax(0,1fr)]");
+    const terms = Array.from(dl.querySelectorAll("dt")).map(
+      (dt) => dt.textContent,
+    );
+    expect(terms).toEqual([
+      "Kind",
+      "Project",
+      "ID",
+      "Path",
+      "Protection",
+      "Created",
+      "Modified",
+      "Words",
+      "Tags",
+    ]);
+    const tags = Array.from(dl.querySelectorAll("dt")).find(
+      (dt) => dt.textContent === "Tags",
+    )?.nextElementSibling;
+    expect(tags).toHaveTextContent("mobile");
+    expect(
+      within(dl).getByRole("button", { name: /Plaintext · protect/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("stacks Linked from, Links out and Similar with no tabs", () => {
+    backlinksState.data = [
+      {
+        kind: "wiki",
+        source_id: "p-hero",
+        source_path: "notes/hero.md",
+        source_title: "Hero of Alexandria",
+        target_raw: "Alpha",
+        context: "builds on alpha with the siphon",
+      },
+    ];
+    similarState.data = { items: [{ path: "notes/near.md", title: "Near" }] };
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    expect(
+      within(rail)
+        .getAllByRole("heading", { level: 2 })
+        .map((h) => h.textContent),
+    ).toEqual(["Linked from", "Links out", "Similar"]);
+    expect(within(rail).queryByRole("button", { name: /^Tags/ })).toBeNull();
+
+    const title = within(rail).getByRole("link", {
+      name: /Hero of Alexandria/,
+    });
+    expect(title.querySelector("[data-link-title]")).toHaveClass(
+      "font-serif",
+      "text-[21px]",
+    );
+    const mark = rail.querySelector("mark");
+    expect(mark).toHaveTextContent("alpha");
+    expect(mark?.closest("[data-link-snippet]")).toHaveTextContent(
+      "builds on alpha with the siphon",
+    );
+  });
+
+  it("shows one Linked from entry per source page", () => {
+    const link = {
+      kind: "wiki",
+      source_id: "p-hero",
+      source_path: "notes/hero.md",
+      source_title: "Hero",
+      target_raw: "Alpha",
+    };
+    backlinksState.data = [
+      { ...link, context: "first alpha mention" },
+      { ...link, context: "second alpha mention" },
+    ];
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    expect(within(rail).getAllByRole("link", { name: /Hero/ })).toHaveLength(1);
+    const section = within(rail)
+      .getByRole("heading", { name: "Linked from" })
+      .closest("section");
+    expect(section?.querySelector("[data-section-caption]")).toHaveTextContent(
+      "1",
+    );
+  });
+
+  it("says so when nothing links here, and hides Similar when empty", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    expect(within(rail).getByText("No pages link here yet.")).toBeVisible();
+    expect(within(rail).queryByRole("heading", { name: "Similar" })).toBeNull();
+  });
+
   it("suggests indexed tags while editing folio tags", async () => {
     const user = userEvent.setup();
     usePageEditorMock.mockReturnValue(editableEditor());
@@ -697,50 +906,11 @@ describe("Folio invalid-tab recovery", () => {
     expect(screen.queryByText(/END OF FILE/)).toBeNull();
   });
 
-  it("orders recent open Folios by activation without tab pin controls", async () => {
-    const user = userEvent.setup();
+  it("drops the Open files list from the rail (the Sheaf lists open pages)", () => {
     usePageEditorMock.mockReturnValue(editableEditor());
-    useWorkspaceStore.setState({
-      tabs: [
-        {
-          id: "t1",
-          type: "page",
-          path: "notes/alpha.md",
-          label: "Alpha",
-          lastActiveAt: 1,
-        },
-        {
-          id: "t2",
-          type: "page",
-          path: "notes/beta.md",
-          label: "Beta",
-          lastActiveAt: 2,
-        },
-      ],
-      activeTabId: "t1",
-      quires: {},
-      openHistory: [],
-    });
-
     render(<Folio tabId="t1" path="notes/alpha.md" />);
-
-    const recent = screen.getByText("Recent").parentElement;
-    assert.isNotNull(recent);
-    expect(
-      within(recent).queryByRole("button", { name: /pin tab/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(recent).getAllByRole("button", { name: "Close tab" }),
-    ).toHaveLength(2);
-
-    const beta = within(recent).getByRole("button", { name: "Beta" });
-    const alpha = within(recent).getByRole("button", { name: "Alpha" });
-    expect(
-      beta.compareDocumentPosition(alpha) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).not.toBe(0);
-
-    await user.click(beta);
-    expect(useWorkspaceStore.getState().activeTabId).toBe("t2");
+    expect(screen.queryByText(/Open files/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close tab" })).toBeNull();
   });
 });
 
@@ -757,7 +927,6 @@ describe("Folio outbound links", () => {
   });
 
   it("excludes metadata edges from the Links count, badge, and list", async () => {
-    const user = userEvent.setup();
     outlinksState.data = [
       ...Array.from({ length: 5 }, (_, index) => ({
         kind: "property_ref",
@@ -777,15 +946,15 @@ describe("Folio outbound links", () => {
 
     render(<Folio tabId="t1" path="notes/alpha.md" />);
 
-    const vitals = screen.getByText("Vitals").parentElement;
-    assert.isNotNull(vitals);
-    expect(within(vitals).getByText("Links").closest("div")).toHaveTextContent(
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    const linksOut = within(rail)
+      .getByRole("heading", { name: "Links out" })
+      .closest("section");
+    assert(linksOut, "Links out section");
+    expect(linksOut.querySelector("[data-section-caption]")).toHaveTextContent(
       "1",
     );
-    const linksTab = screen.getByRole("button", { name: /^Links/ });
-    expect(linksTab).toHaveTextContent("1");
-    await user.click(linksTab);
-    expect(screen.getByText("Real")).toBeVisible();
+    expect(within(linksOut).getByText("Real")).toBeVisible();
     expect(screen.queryByText("tag-0")).toBeNull();
   });
 });
@@ -1111,7 +1280,21 @@ describe("Folio raw Markdown mode", () => {
       ],
       activeTabId: "t1",
     });
-    render(<TabContent />);
+    // The Sheaf activates tabs through this hook; stand in for it.
+    function ActivateBeta() {
+      const activateTab = useActivateTabWithFolioHistory();
+      return (
+        <button type="button" onClick={() => activateTab("t2")}>
+          Beta
+        </button>
+      );
+    }
+    render(
+      <>
+        <TabContent />
+        <ActivateBeta />
+      </>,
+    );
 
     await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
@@ -1572,7 +1755,7 @@ describe("Folio mobile presentation", () => {
     ).not.toBe(0);
     expect(screen.getAllByTestId("folio-properties")).toHaveLength(1);
     expect(
-      screen.queryByRole("button", { name: "collapse panel" }),
+      screen.queryByRole("button", { name: "Hide right sidebar" }),
     ).not.toBeInTheDocument();
     expect(useCollapsibleRailMock).not.toHaveBeenCalled();
 
@@ -1596,7 +1779,7 @@ describe("Folio mobile presentation", () => {
     expect(
       screen.getByRole("dialog", { name: "Page relationships" }),
     ).toBeVisible();
-    expect(screen.getByText("Backlinks")).toBeVisible();
+    expect(screen.getByText("Linked from")).toBeVisible();
   });
 
   it("rehydrates unsaved body state across breakpoint changes", async () => {

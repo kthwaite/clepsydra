@@ -77,6 +77,23 @@ describe("PageEditorHeader read-only title", () => {
     expect(screen.queryByRole("option", { name: "research" })).toBeNull();
   });
 
+  it("labels encryption in sentence case with a quiet Lock button", () => {
+    render(
+      <PageEditorHeader {...baseProps} encrypted onRequestLock={vi.fn()} />,
+    );
+    expect(screen.getByText("Encrypted")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Lock encrypted notes" }),
+    ).toHaveTextContent(/^Lock$/);
+  });
+
+  it("sets the read-only title as a serif display heading", () => {
+    render(<PageEditorHeader {...baseProps} readOnlyTitle="Friday" />);
+    const heading = screen.getByRole("heading", { name: "Friday" });
+    expect(heading).toHaveClass("font-serif", "leading-[1.02]");
+    expect(heading.className).not.toMatch(/font-bold/);
+  });
+
   it("awaits coordinated manual locking and reports a refused lock", async () => {
     const user = userEvent.setup();
     const onRequestLock = vi.fn().mockResolvedValue(false);
@@ -93,7 +110,7 @@ describe("PageEditorHeader read-only title", () => {
     );
     expect(onRequestLock).toHaveBeenCalledOnce();
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Unable to lock while an editor has unsaved changes",
+      /^Unable to lock while an editor has unsaved changes/,
     );
   });
 

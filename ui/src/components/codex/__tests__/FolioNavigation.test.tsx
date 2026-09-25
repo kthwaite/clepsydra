@@ -540,7 +540,7 @@ describe("mobile Folio Back", () => {
         name: "Open Alpha from source reference",
       }),
     );
-    await screen.findByText(/fetching folio notes\/alpha\.md/);
+    await screen.findByText(/^Fetching notes\/alpha\.md…$/);
     act(() => publishPageState({ isLoading: false }));
 
     await screen.findByText("Focused source block");
@@ -760,7 +760,7 @@ describe("mobile Folio Back", () => {
       blockId: "abc123DEF0",
     });
     renderNavigation("/workspace");
-    await screen.findByText(/fetching folio notes\/alpha\.md/);
+    await screen.findByText(/^Fetching notes\/alpha\.md…$/);
 
     act(() => useWorkspaceStore.getState().activateTab("other"));
     pageEditorState.isLoading = false;
