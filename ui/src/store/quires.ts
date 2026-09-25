@@ -148,3 +148,26 @@ export function sheafSegments(
   }
   return out;
 }
+
+export type SheafRun =
+  | { kind: "quire"; quire: Quire; members: TabDescriptor[] }
+  | { kind: "loose"; tabs: TabDescriptor[] };
+
+/** C3 render runs: quires as-is, consecutive ungrouped tabs merged into
+ *  loose runs in place (store order = Ctrl-Tab order). Always ends in a
+ *  loose run — it stretches to the edge and carries "+". */
+export function sheafRuns(segments: SheafSegment[]): SheafRun[] {
+  const out: SheafRun[] = [];
+  for (const seg of segments) {
+    const last = out.at(-1);
+    if (seg.kind === "quire") {
+      out.push({ kind: "quire", quire: seg.quire, members: seg.members });
+    } else if (last?.kind === "loose") {
+      last.tabs.push(seg.tab);
+    } else {
+      out.push({ kind: "loose", tabs: [seg.tab] });
+    }
+  }
+  if (out.at(-1)?.kind !== "loose") out.push({ kind: "loose", tabs: [] });
+  return out;
+}

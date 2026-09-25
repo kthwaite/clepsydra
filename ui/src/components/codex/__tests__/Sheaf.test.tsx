@@ -18,6 +18,12 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.hoisted(async () => {
+  const { installMemoryStorage } = await import("#/test/memoryStorage");
+  installMemoryStorage();
+});
+
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 import { Sheaf } from "../Sheaf";
@@ -353,23 +359,19 @@ describe("Sheaf quire rendering", () => {
     expect(screen.getByText("·2")).toBeInTheDocument();
   });
 
-  it("counts hidden members in the SHEAF total", () => {
-    seed(true);
-    render(<Sheaf activeTabId="t3" />);
-    expect(screen.getByText("3 tabs")).toBeInTheDocument();
-  });
-
-  it("an active quire member renders both the quire and active rules", () => {
+  it("draws the quire rule on its segment and the active rule on the tab", () => {
     seed(false);
     useWorkspaceStore.setState({ activeTabId: "t1" });
     render(<Sheaf activeTabId="t1" />);
-    const tabButton = screen.getByRole("button", { name: "Alpha" });
-    const wrapper = tabButton.parentElement;
-    if (!(wrapper instanceof HTMLElement)) {
-      throw new Error("Alpha tab wrapper was not rendered");
-    }
-    expect(wrapper.style.boxShadow).toContain("var(--quire-sepia)");
-    expect(wrapper.style.boxShadow).toContain("var(--accent)");
+    const segment = screen.getByRole("group", { name: "thesis" });
+    expect(segment.style.boxShadow).toContain(
+      "color-mix(in srgb, var(--quire-sepia) 55%, transparent)",
+    );
+    const wrapper = screen.getByRole("button", { name: "Alpha" }).parentElement;
+    expect(wrapper?.style.boxShadow).toContain(
+      "inset 0 -2px 0 0 var(--accent)",
+    );
+    expect(wrapper?.style.boxShadow ?? "").not.toContain("--quire-");
   });
 
   it("draws the quire and active rules across the close control too", () => {
@@ -435,7 +437,6 @@ describe("Sheaf creation action", () => {
     seed(false);
     render(<Sheaf activeTabId="t3" />);
 
-    expect(screen.getByText("3 tabs")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "New page" }),
     ).not.toHaveAttribute("aria-selected");
@@ -615,19 +616,74 @@ describe("Sheaf tab drag-and-drop wiring", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("registers empty sheaf space so a drop ungroups the tab at the end", () => {
+  it("registers the trailing segment so a drop ungroups the tab at the end", () => {
     seed(false);
-    const { container } = render(<Sheaf activeTabId="t3" />);
-    const sheaf = container.firstElementChild;
-    if (!sheaf) throw new Error("Sheaf root was not rendered");
+    render(<Sheaf activeTabId="t3" />);
+    const trailing = screen.getAllByRole("group").at(-1) as HTMLElement;
 
     const source = sourceFor(screen.getByRole("button", { name: "Alpha" }));
-    const target = dropTargetFor(sheaf);
+    const target = dropTargetFor(trailing);
+    expect(target.element).toBe(trailing);
     dispatchDrop({ source, target });
 
     const state = useWorkspaceStore.getState();
     expect(state.tabs.map((tab) => tab.id)).toEqual(["t2", "t3", "t1"]);
     expect(state.tabs.find((tab) => tab.id === "t1")?.quireId).toBeUndefined();
+  });
+
+  it("joins a quire when a tab is dropped on the quire's segment", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    const segment = screen.getByRole("group", { name: "thesis" });
+
+    const source = sourceFor(screen.getByRole("button", { name: "Gamma" }));
+    const target = dropTargetFor(segment);
+    expect(target.element).toBe(segment);
+    dispatchDrop({ source, target });
+
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).toEqual(["t1", "t2", "t3"]);
+    expect(state.tabs.find((tab) => tab.id === "t3")?.quireId).toBe("q1");
+  });
+
+  it("places a tab after an earlier loose segment's last tab, ungrouped", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t0", type: "page", path: "z.md", label: "Zero" },
+        { id: "t1", type: "page", path: "a.md", label: "Alpha", quireId: "q1" },
+        { id: "t2", type: "page", path: "b.md", label: "Beta", quireId: "q1" },
+        { id: "t3", type: "page", path: "c.md", label: "Gamma" },
+      ],
+      activeTabId: "t3",
+      quires: {
+        q1: { id: "q1", name: "thesis", color: "sepia", collapsed: false },
+      },
+      openHistory: [],
+    });
+    render(<Sheaf activeTabId="t3" />);
+    const first = screen.getAllByRole("group")[0];
+
+    const source = sourceFor(screen.getByRole("button", { name: "Beta" }));
+    dispatchDrop({ source, target: dropTargetFor(first) });
+
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).toEqual(["t0", "t2", "t1", "t3"]);
+    expect(state.tabs.find((tab) => tab.id === "t2")?.quireId).toBeUndefined();
+  });
+
+  it("does not treat the gaps between segments as a drop target", () => {
+    seed(false);
+    const { container } = render(<Sheaf activeTabId="t3" />);
+    const root = container.firstElementChild;
+    expect(dnd.dropTargets.some((t) => t.element === root)).toBe(false);
+  });
+
+  it("sits tabs flush inside a segment, so no gap falls between them", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    for (const group of screen.getAllByRole("group")) {
+      expect(group.className).not.toMatch(/(^|\s)gap-/);
+    }
   });
 
   it("keeps drag cleanup alive after the source tab closes", () => {
@@ -683,9 +739,9 @@ describe("Sheaf tab drag-and-drop wiring", () => {
 
   it("lets only the innermost tab target handle a bubbled drop", () => {
     seed(false);
-    const { container } = render(<Sheaf activeTabId="t3" />);
-    const sheaf = container.firstElementChild;
-    if (!sheaf) throw new Error("Sheaf root was not rendered");
+    render(<Sheaf activeTabId="t3" />);
+    // Gamma's own segment is the ancestor target the drop bubbles to.
+    const sheaf = screen.getAllByRole("group").at(-1) as HTMLElement;
     const source = sourceFor(screen.getByRole("button", { name: "Alpha" }));
     const tabTarget = dropTargetFor(
       screen.getByRole("button", { name: "Gamma" }),
@@ -874,5 +930,108 @@ describe("Sheaf tab preview gating", () => {
     act(() => vi.advanceTimersByTime(220));
 
     expect(screen.getByTestId("tab-preview")).toHaveTextContent("c.md");
+  });
+});
+
+describe("Sheaf C3 segments", () => {
+  it("keeps ungrouped runs in place, each on a neutral segment", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t0", type: "page", path: "z.md", label: "Zero" },
+        { id: "t1", type: "page", path: "a.md", label: "Alpha", quireId: "q1" },
+        { id: "t3", type: "page", path: "c.md", label: "Gamma" },
+      ],
+      activeTabId: "t3",
+      quires: {
+        q1: { id: "q1", name: "thesis", color: "sepia", collapsed: false },
+      },
+      openHistory: [],
+    });
+    render(<Sheaf activeTabId="t3" />);
+    const groups = screen.getAllByRole("group");
+    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual([
+      "Ungrouped",
+      "thesis",
+      "Ungrouped",
+    ]);
+    expect(within(groups[0]).getByText("Zero")).toBeInTheDocument();
+    expect(within(groups[2]).getByText("Gamma")).toBeInTheDocument();
+    expect(groups[0].style.boxShadow).toContain("var(--rule)");
+  });
+
+  it("puts + on a trailing stretching segment even when a quire is last", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "a.md", label: "Alpha", quireId: "q1" },
+      ],
+      activeTabId: "t1",
+      quires: {
+        q1: { id: "q1", name: "thesis", color: "sepia", collapsed: false },
+      },
+      openHistory: [],
+    });
+    render(<Sheaf activeTabId="t1" />);
+    const last = screen.getAllByRole("group").at(-1) as HTMLElement;
+    expect(last.getAttribute("aria-label")).toBe("Ungrouped");
+    expect(last).toHaveClass("flex-1");
+    expect(
+      within(last).getByRole("button", { name: "New page" }),
+    ).toBeInTheDocument();
+  });
+
+  it("still offers + with no tabs open", () => {
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      quires: {},
+      openHistory: [],
+    });
+    render(<Sheaf activeTabId={null} />);
+    expect(
+      screen.getByRole("button", { name: "New page" }),
+    ).toBeInTheDocument();
+  });
+
+  it("labels a quire with a dot and italic serif name, and the hidden count when collapsed", () => {
+    seed(true);
+    render(<Sheaf activeTabId="t3" />);
+    const label = screen.getByRole("button", { name: /quire thesis/i });
+    expect(within(label).getByText("thesis")).toHaveClass(
+      "font-serif",
+      "italic",
+    );
+    expect(within(label).getByText("·2")).toBeInTheDocument();
+  });
+
+  it("draws glyphs in currentColor: accent on the active tab, mute elsewhere", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    const active = screen.getByRole("button", { name: "Gamma" });
+    const idle = screen.getByRole("button", { name: "Alpha" });
+    expect(active.querySelector("svg")?.getAttribute("stroke")).toBe(
+      "currentColor",
+    );
+    expect(active.querySelector("svg")).toHaveClass("text-accent");
+    expect(idle.querySelector("svg")).not.toHaveClass("text-accent");
+  });
+
+  it("shows × on the active tab and reveals it on hover or focus elsewhere", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    const [alphaClose, , gammaClose] = screen.getAllByRole("button", {
+      name: "close folio",
+    });
+    expect(gammaClose).not.toHaveClass("opacity-0");
+    expect(alphaClose).toHaveClass(
+      "opacity-0",
+      "group-hover:opacity-100",
+      "focus-visible:opacity-100",
+    );
+  });
+
+  it("drops the Vessel tab counter", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    expect(screen.queryByText(/\d+ tabs/)).toBeNull();
   });
 });

@@ -1,6 +1,11 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.hoisted(async () => {
+  const { installMemoryStorage } = await import("#/test/memoryStorage");
+  installMemoryStorage();
+});
 import { useWorkspaceStore } from "#/store/workspace";
 import { type MenuTarget, SheafContextMenu } from "../SheafContextMenu";
 
