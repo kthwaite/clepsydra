@@ -143,6 +143,16 @@ export function useBacklinks(path: string) {
   );
 }
 
+export function useUnlinkedMentions(path: string) {
+  return $api.useQuery(
+    "get",
+    "/api/vault/index/unlinked/{path}",
+    { params: { path: { path } } },
+    // Same policy as useBacklinks: a failure is rail state, not a boundary.
+    { enabled: !!path, throwOnError: false },
+  );
+}
+
 export function useUnresolvedLinks() {
   return $api.useQuery(
     "get",

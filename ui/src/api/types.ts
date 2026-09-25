@@ -49,6 +49,8 @@ export type FolderTreeResponse = JsonResponse<
 >;
 
 export type BacklinkEntry = components["schemas"]["BacklinkEntry"];
+export type UnlinkedMentionEntry =
+  components["schemas"]["UnlinkedMentionEntry"];
 export type OutlinkEntry = components["schemas"]["OutlinkEntry"];
 export type BacklinksResponse = JsonResponse<
   operations["backlinks"]["responses"][200]

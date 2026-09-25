@@ -327,6 +327,8 @@ Find similar pages. Responses: `200` Similar pages by tag overlap; `400` Invalid
 Get stats. Responses: `200` Vault statistics; `500` Internal server error.
 ### `GET /api/vault/index/tags`
 List tags. Responses: `200` Tag counts; `500` Internal server error.
+### `GET /api/vault/index/unlinked/{path}`
+List unlinked mentions: pages whose body names this page's title or an alias, as a whole phrase and ignoring case, without linking to it. Responses: `200` Pages that mention this page's title or an alias without linking to it; `400` Invalid path; `500` Internal server error.
 ### `GET /api/vault/index/unresolved`
 List unresolved links. Responses: `200` Unresolved links; `500` Internal server error.
 ### `GET /api/vault/index/warnings`

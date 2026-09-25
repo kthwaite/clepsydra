@@ -85,6 +85,18 @@ pub struct BacklinkEntry {
     context: String,
 }
 
+/// A page that names this one (title or alias) without linking to it.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UnlinkedMentionEntry {
+    source_id: String,
+    source_path: String,
+    source_title: Option<String>,
+    /// The title or alias as written in the source body.
+    matched: String,
+    /// Plain text around the first mention.
+    context: String,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateFromLinkRequest {
     target_raw: String,
@@ -545,6 +557,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/backlinks/{*path}", get(backlinks))
         .route("/similar/{*path}", get(similar))
+        .route("/unlinked/{*path}", get(unlinked_mentions))
         .route("/outlinks/{*path}", get(outlinks))
         .route("/unresolved", get(unresolved))
         .route("/issues", get(reference_issues))
@@ -712,6 +725,40 @@ pub async fn backlinks(
         })
         .collect();
 
+    Ok(Json(entries))
+}
+
+#[utoipa::path(
+    get,
+    path = "/index/unlinked/{path}",
+    context_path = "/api/vault",
+    tag = "Index",
+    params(("path" = String, Path, description = "Vault-relative page path")),
+    responses(
+        (status = 200, description = "Pages that mention this page's title or an alias without linking to it", body = [UnlinkedMentionEntry]),
+        (status = 400, description = "Invalid path", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn unlinked_mentions(
+    State(state): State<Arc<AppState>>,
+    Path(path): Path<String>,
+) -> Result<Json<Vec<UnlinkedMentionEntry>>, ApiError> {
+    let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
+    let entries = state
+        .index
+        .unlinked_mentions(vault_path, 50)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .into_iter()
+        .map(|m| UnlinkedMentionEntry {
+            source_id: m.source_id,
+            source_path: m.source_path,
+            source_title: m.source_title,
+            matched: m.matched,
+            context: m.context,
+        })
+        .collect();
     Ok(Json(entries))
 }
 

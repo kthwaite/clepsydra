@@ -107,6 +107,7 @@ vi.mock("#/hooks/useMobileLayout", () => ({
 }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: undefined }),
+  useUnlinkedMentions: () => ({ data: [] }),
   useOutlinks: () => ({ data: undefined }),
   useSimilar: () => ({ data: undefined }),
   useTags: () => ({ data: [] }),

@@ -130,6 +130,7 @@ impl Modify for SchemaOverrides {
         crate::api::events::event_stream,
         // Index
         crate::api::index_routes::backlinks,
+        crate::api::index_routes::unlinked_mentions,
         crate::api::index_routes::outlinks,
         crate::api::index_routes::unresolved,
         crate::api::index_routes::reference_issues,
@@ -379,6 +380,7 @@ impl Modify for SchemaOverrides {
             crate::vault::mutation::FileOpKind,
             crate::vault::mutation_coordinator::MutationNotification,
             crate::api::index_routes::BacklinkEntry,
+            crate::api::index_routes::UnlinkedMentionEntry,
             crate::api::index_routes::CreateFromLinkRequest,
             crate::api::index_routes::AmbiguousName,
             crate::api::index_routes::TagCount,

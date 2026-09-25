@@ -3380,6 +3380,40 @@ Just content.
     );
 }
 
+#[tokio::test]
+async fn unlinked_mentions_endpoint_lists_unlinked_pages() {
+    let alpha = "---\nid: 00000000-0000-0000-0000-0000000000a1\ntitle: Alpha\n---\nThe page.\n";
+    let beta = "---\nid: 00000000-0000-0000-0000-0000000000a2\ntitle: Beta\n---\nWe met Alpha yesterday.\n";
+    let gamma = "---\nid: 00000000-0000-0000-0000-0000000000a3\ntitle: Gamma\n---\nSee [[Alpha]] and Alpha.\n";
+    let (server, _tmp) =
+        setup_server_with_files(&[("alpha.md", alpha), ("beta.md", beta), ("gamma.md", gamma)]);
+
+    let resp = server.get("/api/vault/index/unlinked/alpha.md").await;
+    resp.assert_status_ok();
+
+    let body: serde_json::Value = resp.json();
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1, "{body}");
+    assert_eq!(items[0]["source_path"], "beta.md");
+    assert_eq!(items[0]["source_title"], "Beta");
+    assert_eq!(items[0]["matched"], "Alpha");
+    assert!(
+        items[0]["context"]
+            .as_str()
+            .unwrap()
+            .contains("met Alpha yesterday"),
+        "{}",
+        items[0]["context"]
+    );
+}
+
+#[tokio::test]
+async fn unlinked_mentions_endpoint_rejects_invalid_path() {
+    let (server, _tmp) = setup_server_with_files(&[]);
+    let resp = server.get("/api/vault/index/unlinked/..%2Fescape.md").await;
+    resp.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
 // ---------------------------------------------------------------------------
 // Reference intelligence: create page from unresolved link
 // ---------------------------------------------------------------------------

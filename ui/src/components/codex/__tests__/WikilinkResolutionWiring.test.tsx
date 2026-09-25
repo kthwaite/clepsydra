@@ -39,6 +39,7 @@ vi.mock("#/editor/SlateEditor", () => ({
 }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: [] }),
+  useUnlinkedMentions: () => ({ data: [] }),
   useOutlinks: () => ({ data: [] }),
   useSimilar: () => ({ data: [] }),
   useTags: () => ({ data: [] }),

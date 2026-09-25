@@ -18,7 +18,12 @@ import {
 import { ReactEditor } from "slate-react";
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AttachmentsApi from "#/api/attachments";
-import type { BacklinkEntry, OutlinkEntry, TagCount } from "#/api/types";
+import type {
+  BacklinkEntry,
+  OutlinkEntry,
+  TagCount,
+  UnlinkedMentionEntry,
+} from "#/api/types";
 import type { CustomEditor } from "#/editor/types";
 
 // The recovery panel is the PRIMARY (declarative) invalid-tab path: usePage
@@ -30,6 +35,7 @@ const {
   journalTodayState,
   outlinksState,
   backlinksState,
+  unlinkedState,
   similarState,
   attachmentRemoveMock,
   attachmentUploadMock,
@@ -65,6 +71,9 @@ const {
   },
   outlinksState: { data: undefined as OutlinkEntry[] | undefined },
   backlinksState: { data: undefined as BacklinkEntry[] | undefined },
+  unlinkedState: {
+    data: undefined as UnlinkedMentionEntry[] | undefined,
+  },
   similarState: {
     data: undefined as { items: { path: string; title: string }[] } | undefined,
   },
@@ -146,6 +155,7 @@ vi.mock("#/components/codex/useScrollSpy", () => ({
 }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => backlinksState,
+  useUnlinkedMentions: () => unlinkedState,
   useOutlinks: () => outlinksState,
   useSimilar: () => similarState,
   useTagSuggestions: useTagSuggestionsMock,
@@ -337,6 +347,7 @@ beforeEach(() => {
   journalTodayState.isLoading = false;
   outlinksState.data = undefined;
   backlinksState.data = undefined;
+  unlinkedState.data = undefined;
   similarState.data = undefined;
   clearFolioRestoration("t1");
   clearFolioHistoryState();
@@ -775,6 +786,23 @@ describe("Folio invalid-tab recovery", () => {
     );
   });
 
+  it("leaves the page itself out of Linked from (its own alias property)", () => {
+    backlinksState.data = [
+      {
+        kind: "property_ref",
+        source_id: "page-alpha",
+        source_path: "notes/alpha.md",
+        source_title: "Alpha",
+        target_raw: "Alpha",
+        context: "frontmatter field: aliases",
+      },
+    ];
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    expect(within(rail).getByText("No pages link here yet.")).toBeVisible();
+  });
+
   it("shows one Linked from entry per source page", () => {
     const link = {
       kind: "wiki",
@@ -797,6 +825,55 @@ describe("Folio invalid-tab recovery", () => {
     expect(section?.querySelector("[data-section-caption]")).toHaveTextContent(
       "1",
     );
+  });
+
+  it("lists unlinked mentions under a faint tick, after Linked from", () => {
+    unlinkedState.data = [
+      {
+        source_id: "p-water",
+        source_path: "notes/water.md",
+        source_title: "Water and the city",
+        matched: "alpha",
+        context: "the alpha of all clocks",
+      },
+    ];
+    similarState.data = { items: [{ path: "notes/near.md", title: "Near" }] };
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    expect(
+      within(rail)
+        .getAllByRole("heading", { level: 2 })
+        .map((h) => h.textContent),
+    ).toEqual(["Linked from", "Unlinked mentions", "Links out", "Similar"]);
+    const section = within(rail)
+      .getByRole("heading", { name: "Unlinked mentions" })
+      .closest("section");
+    assert(section, "Unlinked mentions section");
+    expect(section.querySelector("[data-tick]")).toHaveClass("bg-faint");
+    expect(section.querySelector("[data-section-caption]")).toHaveTextContent(
+      "1",
+    );
+    const entry = within(section).getByRole("link", {
+      name: /Water and the city/,
+    });
+    expect(entry.querySelector("[data-link-title]")).toHaveClass(
+      "font-serif",
+      "text-[21px]",
+    );
+    expect(entry.querySelector("[data-link-snippet] mark")).toHaveTextContent(
+      "alpha",
+    );
+  });
+
+  it("hides Unlinked mentions when there are none", () => {
+    unlinkedState.data = [];
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    expect(
+      screen.queryByRole("heading", { name: "Unlinked mentions" }),
+    ).toBeNull();
   });
 
   it("says so when nothing links here, and hides Similar when empty", () => {
