@@ -1268,6 +1268,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/vault/index/unlinked/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["unlinked_mentions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/vault/index/unresolved": {
     parameters: {
       query?: never;
@@ -3562,6 +3578,16 @@ export interface components {
     };
     TemplateListResponse: {
       templates: string[];
+    };
+    /** @description A page that names this one (title or alias) without linking to it. */
+    UnlinkedMentionEntry: {
+      /** @description Plain text around the first mention. */
+      context: string;
+      /** @description The title or alias as written in the source body. */
+      matched: string;
+      source_id: string;
+      source_path: string;
+      source_title?: string | null;
     };
     UnprotectPageRequest: {
       body: string;
@@ -7931,6 +7957,47 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TagCount"][];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  unlinked_mentions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Vault-relative page path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pages that mention this page's title or an alias without linking to it */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UnlinkedMentionEntry"][];
+        };
+      };
+      /** @description Invalid path */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
         };
       };
       /** @description Internal server error */
