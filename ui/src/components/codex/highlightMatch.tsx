@@ -14,7 +14,11 @@ export function highlightMatch(text: string, needles: string[]): ReactNode {
     .sort((a, b) => b.length - a.length)
     .map(escapeRegExp);
   if (terms.length === 0) return text;
-  const pattern = new RegExp(`(${terms.join("|")})`, "gi");
+  // Whole words only: no letter or digit may touch either end of a match.
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])(${terms.join("|")})(?![\\p{L}\\p{N}])`,
+    "giu",
+  );
   const parts = text.split(pattern);
   if (parts.length === 1) return text;
   return parts.map((part, index) =>

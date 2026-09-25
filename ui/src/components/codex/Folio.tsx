@@ -1510,20 +1510,20 @@ export function Folio({ tabId, path }: FolioProps) {
   );
 
   const similarItems = similar?.items ?? [];
+  // The index returns one row per link; the rail shows one card per source.
+  const linkedFrom = (backlinks ?? []).filter(
+    (b, i, all) => all.findIndex((o) => o.source_path === b.source_path) === i,
+  );
   const relationships = (
     <>
-      <Section
-        compact
-        label="Linked from"
-        caption={String(backlinks?.length ?? 0)}
-      >
-        {(backlinks ?? []).length === 0 ? (
+      <Section compact label="Linked from" caption={String(linkedFrom.length)}>
+        {linkedFrom.length === 0 ? (
           <p className="m-0 text-[13px] text-mute">No pages link here yet.</p>
         ) : (
           <div className="flex flex-col gap-6">
-            {(backlinks ?? []).map((b) => (
+            {linkedFrom.map((b) => (
               <CLink
-                key={`${b.source_path}:${b.target_raw}`}
+                key={b.source_path}
                 path={b.source_path}
                 className={cn(
                   "cl-link-plain flex flex-col gap-1.5 rounded",
@@ -1707,7 +1707,7 @@ function DesktopFolioLayout({
 
   return (
     <div
-      className="grid h-full min-h-0 gap-16 px-10"
+      className="grid h-full min-h-0 gap-8 px-6 xl:gap-16 xl:px-10"
       style={{ gridTemplateColumns: `${lw}px 1fr ${rw}px` }}
     >
       {left.collapsed ? (

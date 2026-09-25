@@ -55,9 +55,9 @@ describe("Stone & Lamp prose", () => {
     const quote = container.querySelector("blockquote");
     expect(quote).toHaveClass("font-serif", "italic", "text-[25px]");
     expect(quote?.className).not.toMatch(/border-l|bg-/);
-    const mark = quote?.querySelector("[data-quote-mark]");
-    expect(mark).toHaveTextContent("“");
-    expect(mark).toHaveClass("text-accent");
-    expect(mark).toHaveAttribute("contenteditable", "false");
+    // Drawn by CSS, so copying the quote never carries a stray “.
+    expect(quote?.querySelector("[data-quote-mark]")).toBeNull();
+    expect(quote?.textContent).toBe("The water flows evenly.");
+    expect(quote).toHaveClass("before:text-accent", "before:content-['“']");
   });
 });

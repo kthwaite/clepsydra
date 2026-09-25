@@ -650,6 +650,11 @@ describe("Folio invalid-tab recovery", () => {
     expect(useCollapsibleRailMock).toHaveBeenCalledWith(
       expect.objectContaining({ side: "right", defaultWidth: 296 }),
     );
+    // Gaps and padding scale down so a 1024px window keeps a usable column.
+    const grid = screen.getByRole("complementary", {
+      name: "Page details",
+    }).parentElement;
+    expect(grid).toHaveClass("gap-8", "xl:gap-16", "px-6", "xl:px-10");
     for (const name of ["Page details", "Page links"]) {
       const rail = screen.getByRole("complementary", { name });
       expect(rail.className).not.toMatch(/border-(l|r)\b/);
@@ -767,6 +772,30 @@ describe("Folio invalid-tab recovery", () => {
     expect(mark).toHaveTextContent("alpha");
     expect(mark?.closest("[data-link-snippet]")).toHaveTextContent(
       "builds on alpha with the siphon",
+    );
+  });
+
+  it("shows one Linked from entry per source page", () => {
+    const link = {
+      kind: "wiki",
+      source_id: "p-hero",
+      source_path: "notes/hero.md",
+      source_title: "Hero",
+      target_raw: "Alpha",
+    };
+    backlinksState.data = [
+      { ...link, context: "first alpha mention" },
+      { ...link, context: "second alpha mention" },
+    ];
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    expect(within(rail).getAllByRole("link", { name: /Hero/ })).toHaveLength(1);
+    const section = within(rail)
+      .getByRole("heading", { name: "Linked from" })
+      .closest("section");
+    expect(section?.querySelector("[data-section-caption]")).toHaveTextContent(
+      "1",
     );
   });
 

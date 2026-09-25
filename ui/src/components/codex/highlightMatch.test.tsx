@@ -47,6 +47,19 @@ describe("highlightMatch", () => {
   });
 });
 
+describe("highlightMatch word boundaries", () => {
+  it("never highlights inside a longer word", () => {
+    expect(marks("she said AI helps", ["AI"]).marks).toEqual(["AI"]);
+    expect(marks("going, then Go.", ["Go"]).marks).toEqual(["Go"]);
+    expect(marks("Alphabet soup", ["Alpha"]).marks).toEqual([]);
+  });
+
+  it("matches beside punctuation and accented letters", () => {
+    expect(marks("(Café), café!", ["café"]).marks).toEqual(["Café", "café"]);
+    expect(marks("cafés", ["café"]).marks).toEqual([]);
+  });
+});
+
 describe("plainWikiText", () => {
   it("reads wikilinks as their display text", () => {
     expect(plainWikiText("see [[Alpha]] and [[Beta page|beta]] here")).toBe(
