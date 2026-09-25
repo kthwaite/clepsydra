@@ -18,6 +18,11 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.hoisted(async () => {
+  const { installMemoryStorage } = await import("#/test/memoryStorage");
+  installMemoryStorage();
+});
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 import { Sheaf } from "../Sheaf";
