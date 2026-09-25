@@ -51,8 +51,6 @@ interface ViewDescriptor {
   description: string;
   /** Registered shortcut shown as a hint in Contents. */
   shortcut: ShortcutId | null;
-  /** Footer FILE code; null = derive from the active folio's path. */
-  folioCode: string | null;
   showsSheaf: boolean;
   feature: FeatureName | null;
   /** Route owns the entire content window; suppress both responsive shells. */
@@ -72,7 +70,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: null,
     description: "Today at a glance.",
     shortcut: "nav.atrium",
-    folioCode: "ATRIUM",
     showsSheaf: false,
     feature: null,
     navRoot: "atrium",
@@ -84,7 +81,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Write",
     description: "Pages, notes and journals, open as tabs.",
     shortcut: null,
-    folioCode: null,
     showsSheaf: true,
     feature: null,
     navRoot: "folio",
@@ -107,7 +103,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: null,
     description: "Open a page to start.",
     shortcut: null,
-    folioCode: "—",
     showsSheaf: true,
     feature: null,
     navRoot: "folio",
@@ -119,7 +114,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Organise",
     description: "The link graph.",
     shortcut: "nav.constellation",
-    folioCode: "GRAPH",
     showsSheaf: false,
     feature: null,
     navRoot: "constellation",
@@ -131,7 +125,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Organise",
     description: "Every page, filtered and sorted.",
     shortcut: "nav.gazetteer",
-    folioCode: "INDEX",
     showsSheaf: true,
     feature: null,
     navRoot: "gazetteer",
@@ -143,7 +136,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Maintain",
     description: "Activity over time.",
     shortcut: null,
-    folioCode: "STATS",
     showsSheaf: false,
     feature: null,
     navRoot: "stats",
@@ -155,7 +147,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Organise",
     description: "Board, backlog, cycles and timeline.",
     shortcut: "nav.tasking",
-    folioCode: "TASKING",
     showsSheaf: false,
     feature: null,
     navRoot: "tasking",
@@ -167,7 +158,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Gather",
     description: "DOI, ISBN and Zotero imports.",
     shortcut: null,
-    folioCode: "ACADEMIC",
     showsSheaf: false,
     feature: "academic",
     navRoot: "academic",
@@ -179,7 +169,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Organise",
     description: "Saved queries as tables and boards.",
     shortcut: null,
-    folioCode: "BASES",
     showsSheaf: false,
     feature: null,
     navRoot: "bases",
@@ -191,7 +180,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Gather",
     description: "Subscriptions and the river.",
     shortcut: null,
-    folioCode: "FEEDS",
     showsSheaf: false,
     feature: "feeds",
     navRoot: "feeds",
@@ -203,7 +191,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Reference",
     description: "How Clepsydra works.",
     shortcut: null,
-    folioCode: "DOC-001",
     showsSheaf: false,
     feature: null,
     navRoot: "docs",
@@ -216,7 +203,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: null,
     description: "Web pages captured whole.",
     shortcut: null,
-    folioCode: "ARCHIVE",
     showsSheaf: false,
     feature: null,
     fullPage: true,
@@ -229,7 +215,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Maintain",
     description: "Binned pages, restorable.",
     shortcut: null,
-    folioCode: "RUBBISH",
     showsSheaf: false,
     feature: null,
     navRoot: "rubbish",
@@ -241,7 +226,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Maintain",
     description: "Broken links, labels and codes.",
     shortcut: null,
-    folioCode: "REPAIRS",
     showsSheaf: false,
     feature: null,
     navRoot: null,
@@ -253,7 +237,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Write",
     description: "Every open todo, across every page.",
     shortcut: null,
-    folioCode: "AGENDA",
     showsSheaf: false,
     feature: null,
     navRoot: null,
@@ -265,7 +248,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     group: "Maintain",
     description: "Sync copies waiting to be resolved.",
     shortcut: null,
-    folioCode: "CONFLICTS",
     showsSheaf: false,
     feature: null,
     navRoot: null,
@@ -273,20 +255,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ navigate }) => void navigate({ to: "/conflicts" }),
   },
 };
-
-/** Header rail order with diegetic index = position (pad2). */
-export const DESKTOP_NAV: readonly CodexView[] = [
-  "folio",
-  "gazetteer",
-  "stats",
-  "constellation",
-  "tasking",
-  "academic",
-  "bases",
-  "feeds",
-  "docs",
-  "rubbish",
-];
 
 /** Header nav: the core three. Everything else lives in Contents. */
 export const CORE_NAV: readonly CodexView[] = ["folio", "tasking", "gazetteer"];

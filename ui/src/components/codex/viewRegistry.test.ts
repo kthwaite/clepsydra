@@ -90,14 +90,6 @@ describe("VIEW_REGISTRY", () => {
       .sort();
     expect(withSheaf).toEqual(["folio", "gazetteer", "launcher"]);
   });
-  it("keeps today's folio codes", () => {
-    expect(VIEW_REGISTRY.constellation.folioCode).toBe("GRAPH");
-    expect(VIEW_REGISTRY.gazetteer.folioCode).toBe("INDEX");
-    expect(VIEW_REGISTRY.docs.folioCode).toBe("DOC-001");
-    expect(VIEW_REGISTRY.folio.folioCode).toBeNull();
-    expect(VIEW_REGISTRY.launcher.folioCode).toBe("—");
-    expect(VIEW_REGISTRY.rubbish.folioCode).toBe("RUBBISH");
-  });
   it("highlights FOLIO for launcher, nothing for repairs/agenda", () => {
     expect(VIEW_REGISTRY.launcher.navRoot).toBe("folio");
     expect(VIEW_REGISTRY.repairs.navRoot).toBeNull();
@@ -137,7 +129,10 @@ describe("Stone & Lamp registry", () => {
         views: ["constellation", "gazetteer", "tasking", "bases"],
       },
       { group: "Gather", views: ["academic", "feeds"] },
-      { group: "Maintain", views: ["stats", "rubbish", "repairs", "conflicts"] },
+      {
+        group: "Maintain",
+        views: ["stats", "rubbish", "repairs", "conflicts"],
+      },
       { group: "Reference", views: ["docs"] },
     ]);
   });

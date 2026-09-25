@@ -228,7 +228,6 @@ vi.mock("#/components/page-tree/FolderActionsMenu", () => ({
 vi.mock("#/hooks/useVaultEvents", () => ({
   useVaultEvents: () => "connected",
 }));
-vi.mock("#/hooks/useUptime", () => ({ useUptime: () => "00:00" }));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 vi.mock("#/components/ForceGraph", () => ({
   ForceGraph: () => <div role="img" aria-label="Constellation graph" />,

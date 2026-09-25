@@ -3,6 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { useEffect, useRef, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.hoisted(async () => {
+  const { installMemoryStorage } = await import("#/test/memoryStorage");
+  installMemoryStorage();
+});
+
 const {
   locationState,
   featureFlagsState,
@@ -40,7 +45,11 @@ const {
 
 vi.mock("@tanstack/react-query", () => ({
   useIsMutating: () => 0,
+  useQueryClient: () => ({
+    getMutationCache: () => ({ subscribe: () => () => {} }),
+  }),
 }));
+vi.mock("#/api/feeds", () => ({ useFeeds: () => ({ data: undefined }) }));
 vi.mock("#/components/FeatureFlagsProvider", () => ({
   useFeatureFlags: () => featureFlagsState,
 }));
@@ -99,6 +108,7 @@ vi.mock("#/api/index", () => ({
     isError: false,
   }),
   useTags: () => ({ data: [] }),
+  useSyncConflicts: () => ({ data: undefined }),
 }));
 vi.mock("#/api/bcl", () => ({
   useBcl: () => ({ data: undefined }),
@@ -148,9 +158,6 @@ vi.mock("#/components/ThemeProvider", () => ({
     diegetic: false,
   }),
 }));
-vi.mock("#/hooks/useUptime", () => ({
-  useUptime: () => "00:01",
-}));
 vi.mock("#/hooks/useVaultEvents", () => ({
   useVaultEvents: () => "connected",
 }));
@@ -165,6 +172,9 @@ vi.mock("#/store/ui", () => ({
       openSearch: () => void;
       openSettings: () => void;
       isSettingsOpen: boolean;
+      isContentsOpen: boolean;
+      setContentsOpen: () => void;
+      toggleContents: () => void;
     }) => unknown,
   ) =>
     selector({
@@ -173,6 +183,9 @@ vi.mock("#/store/ui", () => ({
       openSearch: openSearchMock,
       openSettings: openSettingsMock,
       isSettingsOpen: false,
+      isContentsOpen: false,
+      setContentsOpen: vi.fn(),
+      toggleContents: vi.fn(),
     }),
 }));
 vi.mock("#/store/workspace", () => {
@@ -200,7 +213,7 @@ vi.mock("#/store/workspace", () => {
 });
 
 import { CodexFrame } from "#/components/codex/CodexFrame";
-import { DEFAULT_DOC_SLUG } from "#/docs/registry";
+import { useConnectionStore } from "#/offline/connectionStore";
 
 function renderFrame(forceView?: "folio" | "archive") {
   return render(
@@ -260,229 +273,82 @@ describe("CodexFrame destination integration", () => {
     featureFlagsState.feeds = true;
     workspaceState.tabs = [];
     workspaceState.activeTabId = null;
+    useConnectionStore.setState({ status: "connected" });
   });
 
-  it.each(["/docs", "/docs/getting-started"])(
-    "renders Docs as the active shell view for %s",
-    (pathname) => {
-      locationState.pathname = pathname;
-      renderFrame();
+  const primary = () =>
+    within(screen.getByRole("navigation", { name: "Primary navigation" }));
 
-      const docsButton = within(
-        screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /08.*DOCS/i });
-      expect(docsButton).toHaveAttribute("aria-current", "page");
-      expect(
-        screen.queryByRole("button", { name: /09.*STATUS/i }),
-      ).not.toBeInTheDocument();
-      expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
-      expect(screen.getByText(/FILE DOC-001.*VIEW DOCS/)).toBeInTheDocument();
-    },
-  );
+  it("shows exactly the core three plus Contents in the header", () => {
+    locationState.pathname = "/";
+    renderFrame();
+    expect(
+      primary()
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Folio", "Tasking", "Gazetteer", "Contents"]);
+  });
 
-  it.each(["/docs-old", "/docsfoo"])(
-    "keeps near-prefix Docs path %s in Atrium",
-    (pathname) => {
-      locationState.pathname = pathname;
-      renderFrame();
-
-      const nav = within(
-        screen.getByRole("navigation", { name: "Primary navigation" }),
-      );
-      expect(
-        nav.queryByRole("button", { name: /ATRIUM/i }),
-      ).not.toBeInTheDocument();
-      for (const button of nav.getAllByRole("button")) {
-        expect(button).not.toHaveAttribute("aria-current", "page");
-      }
-      expect(
-        nav.getByRole("button", { name: /08.*DOCS/i }),
-      ).not.toHaveAttribute("aria-current");
-      expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeVisible();
-    },
-  );
-
-  it("navigates Docs to the typed default guide route", async () => {
+  it("goes home from the wordmark, which carries the dot on the Atrium", async () => {
     const user = userEvent.setup();
     locationState.pathname = "/";
     renderFrame();
-
-    await user.click(
-      within(
-        screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /08.*DOCS/i }),
-    );
-
-    expect(navigateMock).toHaveBeenCalledWith({
-      to: "/docs/$slug",
-      params: { slug: DEFAULT_DOC_SLUG },
+    const mark = screen.getByRole("button", {
+      name: "Clepsydra — Atrium (home)",
     });
-  });
-
-  it("renders Stats as the active desktop destination after Gazetteer", () => {
-    locationState.pathname = "/stats";
-    renderFrame();
-
-    const nav = within(
-      screen.getByRole("navigation", { name: "Primary navigation" }),
-    );
-    const folioButton = nav.getByRole("button", { name: /00.*FOLIO/i });
-    const gazetteerButton = nav.getByRole("button", {
-      name: /01.*GAZETTEER/i,
-    });
-    const statsButton = nav.getByRole("button", { name: /02.*STATS/i });
-
-    expect(folioButton).toBeVisible();
-    expect(statsButton).toBeVisible();
-    expect(statsButton).toHaveAttribute("aria-current", "page");
-    expect(
-      gazetteerButton.compareDocumentPosition(statsButton) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
-    expect(screen.getByText(/FILE STATS.*VIEW STATS/)).toBeInTheDocument();
-  });
-
-  it("navigates to Stats from the desktop rail", async () => {
-    const user = userEvent.setup();
-    locationState.pathname = "/";
-    renderFrame();
-
-    await user.click(
-      within(
-        screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /02.*STATS/i }),
-    );
-
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/stats" });
-  });
-
-  it("renders Feeds as a full-surface desktop destination before Docs", () => {
-    locationState.pathname = "/feeds";
-    renderFrame();
-
-    const nav = within(
-      screen.getByRole("navigation", { name: "Primary navigation" }),
-    );
-    const feedsButton = nav.getByRole("button", { name: /07.*FEEDS/i });
-    const docsButton = nav.getByRole("button", { name: /08.*DOCS/i });
-
-    expect(feedsButton).toHaveAttribute("aria-current", "page");
-    expect(
-      feedsButton.compareDocumentPosition(docsButton) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: /09.*STATUS/i }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
-    expect(screen.getByText(/FILE FEEDS.*VIEW FEEDS/)).toBeInTheDocument();
-  });
-
-  it("navigates to the Feeds index from the desktop rail", async () => {
-    const user = userEvent.setup();
-    locationState.pathname = "/";
-    renderFrame();
-
-    await user.click(
-      within(
-        screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /07.*FEEDS/i }),
-    );
-
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/feeds" });
+    expect(mark).toHaveAttribute("aria-current", "page");
+    await user.click(mark);
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/" });
   });
 
   it.each([
-    "/bases",
-    "/bases/",
-    "/bases/reading-log",
-    "/bases/reading-log/edit",
-  ])("keeps Bases active for deep link %s", (pathname) => {
+    ["/gazetteer", "Gazetteer"],
+    ["/tasking", "Tasking"],
+    ["/workspace", "Folio"],
+  ])("marks %s's core item current", (pathname, name) => {
     locationState.pathname = pathname;
     renderFrame();
-
-    const basesButton = within(
-      screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).getByRole("button", { name: /06.*BASES/i });
-    expect(basesButton).toHaveAttribute("aria-current", "page");
-    expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
-    expect(screen.getByText(/FILE BASES.*VIEW BASES/)).toBeInTheDocument();
+    expect(primary().getByRole("button", { name })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(
+      primary().getByRole("button", { name: "Contents" }),
+    ).not.toHaveAttribute("aria-current");
   });
 
-  it.each(["/bases-old", "/basesfoo"])(
-    "does not treat near-prefix path %s as Bases",
-    (pathname) => {
-      locationState.pathname = pathname;
-      renderFrame();
+  it.each([
+    "/bases/reading-log",
+    "/feeds",
+    "/docs/getting-started",
+    "/repairs",
+  ])("gives Contents the active dot on non-core %s", (pathname) => {
+    locationState.pathname = pathname;
+    renderFrame();
+    expect(primary().getByRole("button", { name: "Contents" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
 
-      const nav = within(
-        screen.getByRole("navigation", { name: "Primary navigation" }),
-      );
-      expect(
-        nav.getByRole("button", { name: /06.*BASES/i }),
-      ).not.toHaveAttribute("aria-current");
-      expect(
-        nav.queryByRole("button", { name: /ATRIUM/i }),
-      ).not.toBeInTheDocument();
-      for (const button of nav.getAllByRole("button")) {
-        expect(button).not.toHaveAttribute("aria-current", "page");
-      }
-      expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeVisible();
-    },
-  );
-
-  it("navigates to the Bases index", async () => {
+  it("keeps Settings on the right and drops search and theme buttons", async () => {
     const user = userEvent.setup();
     locationState.pathname = "/";
     renderFrame();
-
-    await user.click(
-      within(
-        screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /06.*BASES/i }),
-    );
-
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/bases" });
-    expect(screen.getAllByRole("main")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(openSettingsMock).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /⌘K/ })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /dark mode|paper mode/i }),
+    ).toBeNull();
   });
 
-  it("marks Academic active and navigates to its library", async () => {
-    const user = userEvent.setup();
-    locationState.pathname = "/academic";
+  it("renders the simplified footer", () => {
+    locationState.pathname = "/";
     renderFrame();
-
-    const academic = within(
-      screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).getByRole("button", { name: /05.*ACADEMIC/i });
-    expect(academic).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText(/FILE ACADEMIC.*VIEW ACADEMIC/)).toBeVisible();
-    expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
-
-    await user.click(academic);
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/academic" });
-  });
-
-  it("shows the launcher state on /workspace with no active tab", () => {
-    locationState.pathname = "/workspace";
-    workspaceState.tabs = [];
-    workspaceState.activeTabId = null;
-    renderFrame();
-
-    expect(screen.getByText(/FILE —.*VIEW LAUNCHER/)).toBeInTheDocument();
-    expect(screen.getByTestId("sheaf")).toBeInTheDocument();
-
-    const folioButton = within(
-      screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).getByRole("button", { name: /00.*FOLIO/i });
-    expect(folioButton).toHaveAttribute("aria-current", "page");
-  });
-
-  it("retains the reading percentage for Folio", () => {
-    renderFrame("folio");
-
-    expect(screen.getByText("42%")).toBeInTheDocument();
-    expect(screen.getByTestId("sheaf")).toBeInTheDocument();
+    const footer = screen.getByRole("contentinfo");
+    expect(footer).toHaveTextContent("Synced");
+    expect(footer).not.toHaveTextContent(/VESSEL|FILE|CORPUS|UTC/);
   });
 
   it("marks the active tab as displayed only on Folio", () => {
@@ -528,47 +394,6 @@ describe("CodexFrame responsive shell", () => {
     workspaceState.activeTabId = null;
   });
 
-  it("retains the desktop header and footer", () => {
-    renderFrame();
-
-    expect(
-      screen.getByRole("button", { name: "CLEPSYDRA — return to Atrium" }),
-    ).toBeVisible();
-    expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeVisible();
-    expect(
-      screen.queryByRole("navigation", { name: "Mobile roots" }),
-    ).not.toBeInTheDocument();
-  });
-  it("hides disabled destinations and keeps desktop ordinals contiguous", () => {
-    featureFlagsState.academic = false;
-    featureFlagsState.feeds = false;
-    renderFrame();
-
-    const navigation = screen.getByRole("navigation", {
-      name: "Primary navigation",
-    });
-    expect(
-      within(navigation)
-        .getAllByRole("button")
-        .map((button) => button.textContent?.replace(/\s/g, "")),
-    ).toEqual([
-      "00FOLIO",
-      "01GAZETTEER",
-      "02STATS",
-      "03CONSTELLATION",
-      "04TASKING",
-      "05BASES",
-      "06DOCS",
-      "07RUBBISHBIN",
-    ]);
-    expect(
-      within(navigation).queryByRole("button", { name: /ACADEMIC/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(navigation).queryByRole("button", { name: /FEEDS/i }),
-    ).not.toBeInTheDocument();
-  });
-
   it("hides disabled destinations from mobile roots", () => {
     featureFlagsState.academic = false;
     featureFlagsState.feeds = false;
@@ -591,7 +416,7 @@ describe("CodexFrame responsive shell", () => {
 
     expect(screen.getByText("Frame content")).toBeVisible();
     expect(
-      screen.queryByRole("button", { name: "CLEPSYDRA — return to Atrium" }),
+      screen.queryByRole("button", { name: "Clepsydra — Atrium (home)" }),
     ).not.toBeInTheDocument();
     expect(document.querySelector("footer")).not.toBeInTheDocument();
     expect(document.querySelector("main")).toHaveClass("h-full");
@@ -636,7 +461,9 @@ describe("CodexFrame responsive shell", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Search" })).toBeVisible();
     expect(screen.getByRole("button", { name: "New note" })).toBeVisible();
-    expect(screen.queryByText("TASKING")).not.toBeInTheDocument();
+    expect(
+      within(roots).queryByRole("button", { name: "Tasking" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Frame content")).toBeInTheDocument();
   });
 
@@ -711,29 +538,6 @@ describe("CodexFrame responsive shell", () => {
     await user.click(feeds);
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/feeds" });
-  });
-
-  it("keeps the desktop rail at tablet widths by scoping overflow to primary navigation", () => {
-    mobileLayoutState.matches = false;
-    locationState.pathname = "/feeds";
-    renderFrame();
-
-    const header = screen.getByRole("banner");
-    const primary = screen.getByRole("navigation", {
-      name: "Primary navigation",
-    });
-    const feeds = within(primary).getByRole("button", {
-      name: /07.*feeds/i,
-    });
-
-    expect(header).toHaveClass("min-w-0");
-    expect(primary).toHaveClass("min-w-0", "overflow-x-auto");
-    expect(feeds).toHaveClass("shrink-0");
-    expect(feeds).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: /⌘K/ })).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Switch to dark mode" }),
-    ).toBeVisible();
   });
 
   it("fits seven 44px mobile targets at 320px with short labels and full accessible names", () => {
@@ -823,7 +627,7 @@ describe("CodexFrame responsive shell", () => {
     rerender(<CodexFrame>{child}</CodexFrame>);
 
     expect(
-      screen.getByRole("button", { name: "CLEPSYDRA — return to Atrium" }),
+      screen.getByRole("button", { name: "Clepsydra — Atrium (home)" }),
     ).toBeVisible();
     expect(screen.getByRole("textbox", { name: "Routed draft" })).toHaveValue(
       "unsaved",

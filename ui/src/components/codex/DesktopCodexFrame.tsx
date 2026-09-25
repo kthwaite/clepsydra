@@ -1,175 +1,129 @@
-import { useIsMutating } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { Settings } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useStats } from "#/api/index";
 import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
-import { shortFolio } from "#/components/codex/folio-utils";
-import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
+import { ContentsMenu } from "#/components/codex/ContentsMenu";
 import { Sheaf } from "#/components/codex/Sheaf";
-import { useCodexView } from "#/components/codex/useCodexView";
+import { ShellFooter } from "#/components/codex/ShellFooter";
+import { type CodexView, useCodexView } from "#/components/codex/useCodexView";
 import {
-  DESKTOP_NAV,
-  enabledNavItems,
+  CORE_NAV,
   goToView,
   VIEW_REGISTRY,
 } from "#/components/codex/viewRegistry";
-import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
-import { offlineLabel } from "#/components/SyncIndicator";
-import { useTheme } from "#/components/ThemeProvider";
-import { useClock } from "#/hooks/useClock";
 import {
   useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
-import { useOnlineStatus } from "#/hooks/useOnlineStatus";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import { useUptime } from "#/hooks/useUptime";
 import { cn } from "#/lib/cn";
-import { formatClock, formatRelativeTime, pad2 } from "#/lib/time";
-import { useConnectionStore } from "#/offline/connectionStore";
-import { useOfflineStore } from "#/offline/offlineStore";
 import { useUiStore } from "#/store/ui";
-import { selectActiveTab, useWorkspaceStore } from "#/store/workspace";
+import { useViewHistory } from "#/store/viewHistory";
+import { useWorkspaceStore } from "#/store/workspace";
 
-function UptimeText() {
-  const uptime = useUptime();
+function ActiveDot() {
   return (
-    <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums opacity-70">
-      up {uptime}
-    </span>
+    <span
+      aria-hidden
+      className="absolute -bottom-2.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-accent"
+    />
   );
 }
 
-function UtcClockText() {
-  const clock = formatClock(useClock(), true);
-  return (
-    <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums">
-      {clock} UTC
-    </span>
-  );
-}
-
+/** Desktop shell (spec §5.1): wordmark home, the core three, Contents,
+ *  Settings; the Sheaf where a view shows it; the simplified footer. */
 export function DesktopCodexFrame({
   bottomSlot,
   forceView,
 }: CodexFrameChromeProps) {
-  const { progress } = useReadingProgress();
-  const features = useFeatureFlags();
   const navigate = useNavigate();
-  const openSearch = useUiStore((s) => s.openSearch);
-  const { toggle, resolvedTheme, diegetic } = useTheme();
-  const dark = resolvedTheme === "dark";
+  const openSettings = useUiStore((s) => s.openSettings);
+  const contentsOpen = useUiStore((s) => s.isContentsOpen);
   const activeTabId = useWorkspaceStore((s) => s.activeTabId);
-  const activePath = useWorkspaceStore((s) => selectActiveTab(s)?.path);
   const openTab = useOpenTab();
   const activateTab = useActivateTabWithFolioHistory();
   const leaveWorkspace = useLeaveFolioWorkspace();
-  const { data: stats, isError: statsError } = useStats();
-  const syncStatus = useConnectionStore((s) => s.status);
-  const online = useOnlineStatus();
-  const lastFullSync = useOfflineStore((s) => s.lastFullSync);
+  const record = useViewHistory((s) => s.record);
+  const headerRef = useRef<HTMLElement>(null);
 
   const resolved = useCodexView();
   const view = forceView ?? resolved;
   const descriptor = VIEW_REGISTRY[view];
-  const navItems = enabledNavItems(DESKTOP_NAV, features);
-  const folioCode =
-    descriptor.folioCode ?? (activePath ? shortFolio(activePath) : "—");
+  const home = descriptor.navRoot === "atrium";
+  const go = (target: CodexView) =>
+    goToView(target, { navigate, openTab, activateTab, leaveWorkspace });
 
-  const writing = useIsMutating() > 0;
-
-  const pages = stats?.pages ?? 0;
-  const links = stats?.links_total ?? 0;
-  const sync = online && syncStatus === "connected";
-  const syncColor = !online
-    ? "var(--warn)"
-    : sync
-      ? "var(--cool)"
-      : syncStatus === "connecting"
-        ? "var(--warn)"
-        : "var(--hot)";
-  const syncLabel = online ? undefined : offlineLabel(lastFullSync);
+  useEffect(() => record(view), [record, view]);
 
   return (
     <>
-      {/* ── HEADER RAIL ─────────────────────────────────────────────── */}
-      <header className="order-0 flex h-8 min-w-0 flex-shrink-0 items-stretch border-b border-rule text-[11px]">
+      <header
+        ref={headerRef}
+        className="order-0 flex h-[72px] min-w-0 flex-shrink-0 items-center gap-10 px-10"
+      >
         <button
           type="button"
-          onClick={() =>
-            goToView("atrium", {
-              navigate,
-              openTab,
-              activateTab,
-              leaveWorkspace,
-            })
-          }
-          className="flex flex-shrink-0 cursor-pointer items-center border-r border-rule px-3 font-sans text-[15px] font-black uppercase tracking-[0.08em] text-ink"
-          aria-label="CLEPSYDRA — return to Atrium"
+          onClick={() => go("atrium")}
+          aria-label="Clepsydra — Atrium (home)"
+          aria-current={home ? "page" : undefined}
+          className="relative flex flex-shrink-0 cursor-pointer items-center gap-2.5"
         >
-          <span className="text-accent">C</span>LEPSYDRA
+          <img
+            src={`${import.meta.env.BASE_URL}favicon.svg`}
+            alt=""
+            className="h-7 w-7 rounded-[7px]"
+          />
+          <span className="font-serif text-[24px] leading-none text-ink">
+            Clepsydra
+          </span>
+          {home && <ActiveDot />}
         </button>
 
         <nav
           aria-label="Primary navigation"
-          className="flex min-w-0 items-stretch overflow-x-auto"
+          className="flex min-w-0 items-center gap-7"
         >
-          {navItems.map((key, i) => {
-            const active = VIEW_REGISTRY[view].navRoot === key;
+          {CORE_NAV.map((key) => {
+            const active = descriptor.navRoot === key;
             return (
               <button
                 key={key}
                 type="button"
                 aria-current={active ? "page" : undefined}
-                onClick={() =>
-                  goToView(key, {
-                    navigate,
-                    openTab,
-                    activateTab,
-                    leaveWorkspace,
-                  })
-                }
+                onClick={() => go(key)}
                 className={cn(
-                  "cl-serif flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em]",
-                  active
-                    ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
-                    : "text-ink-mute hover:text-ink",
+                  "relative shrink-0 cursor-pointer text-[14px]",
+                  active ? "font-medium text-ink" : "text-mute hover:text-ink",
                 )}
               >
-                <span className="text-[9px] text-ink-mute">{pad2(i)}</span>
-                <span className="text-[10px]">{VIEW_REGISTRY[key].label}</span>
+                {VIEW_REGISTRY[key].label}
+                {active && <ActiveDot />}
               </button>
             );
           })}
+          <ContentsMenu view={view} onGo={go} anchorRef={headerRef} />
         </nav>
 
         <div className="flex-1" />
 
-        {/* HEADER META — minimal status that survives diegetic-off */}
-        <div className="cl-serif flex shrink-0 items-stretch text-[10px]">
-          <button
-            type="button"
-            onClick={openSearch}
-            className="flex cursor-pointer items-center gap-1.5 border-l border-rule-soft px-3 text-ink-mute hover:text-ink"
-          >
-            <span className="text-accent">⌘K</span>
-            <span className="hidden md:inline uppercase tracking-[0.16em]">
-              query
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={toggle}
-            className="flex cursor-pointer items-center border-l border-rule-soft px-3 text-ink-mute hover:text-ink"
-            aria-label={dark ? "Switch to paper mode" : "Switch to dark mode"}
-            title={dark ? "Switch to paper mode" : "Switch to dark mode"}
-          >
-            [{dark ? "DARK" : "PAPER"}]
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => openSettings()}
+          aria-label="Settings"
+          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-mute hover:bg-sink hover:text-ink"
+        >
+          <Settings aria-hidden className="h-[18px] w-[18px]" />
+        </button>
       </header>
 
-      {/* ── SHEAF — hidden on full-surface destinations ─────────────── */}
+      {contentsOpen && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-x-0 bottom-0 top-[72px] z-40 bg-ink/26"
+        />
+      )}
+
       {descriptor.showsSheaf && (
         <Sheaf
           activeTabId={activeTabId}
@@ -178,54 +132,8 @@ export function DesktopCodexFrame({
         />
       )}
 
-      {/* ── FOOTER RAIL ─────────────────────────────────────────────── */}
       {bottomSlot
-        ? createPortal(
-            <footer className="cl-mono order-3 flex flex-shrink-0 items-center border-t border-rule bg-bar-bg text-[10px] text-bar-fg">
-              {diegetic && (
-                <span
-                  className="flex items-center gap-1.5 border-r border-bar-rule px-3 py-[2px]"
-                  title={syncLabel}
-                >
-                  <span
-                    className="inline-block h-[6px] w-[6px]"
-                    style={{ background: syncColor }}
-                    aria-hidden
-                  />
-                  <span className="font-medium tracking-[0.16em]">VESSEL</span>
-                  <span
-                    className={cn(
-                      "inline-block h-[6px] w-[6px]",
-                      writing ? "animate-pulse bg-accent" : "bg-ink-mute/30",
-                    )}
-                    aria-hidden
-                    title={writing ? "Sending…" : undefined}
-                  />
-                  {writing ? (
-                    <span className="sr-only">Sending data to server</span>
-                  ) : null}
-                </span>
-              )}
-              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap px-3 py-[2px] opacity-80">
-                FILE {folioCode} · VIEW {descriptor.label} · CORPUS {pages}/
-                {links}
-              </span>
-              {view === "folio" && (
-                <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] opacity-70">
-                  {Math.round(Math.max(0, Math.min(1, progress)) * 100)}%
-                </span>
-              )}
-              {diegetic && (
-                <span className="hidden flex-shrink-0 border-l border-bar-rule px-3 py-[2px] opacity-70 md:inline">
-                  idx {statsError ? "✗" : stats ? "✓" : "…"} · collated{" "}
-                  {formatRelativeTime(stats?.last_indexed_at)}
-                </span>
-              )}
-              <UptimeText />
-              <UtcClockText />
-            </footer>,
-            bottomSlot,
-          )
+        ? createPortal(<ShellFooter view={view} />, bottomSlot)
         : null}
     </>
   );

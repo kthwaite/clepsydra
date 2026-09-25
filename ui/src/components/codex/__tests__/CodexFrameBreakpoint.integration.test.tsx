@@ -193,7 +193,6 @@ vi.mock("#/editor/wikilinkResolution", () => ({
 }));
 vi.mock("#/hooks/useClock", () => ({ useClock: () => new Date(0) }));
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
-vi.mock("#/hooks/useUptime", () => ({ useUptime: () => "00:01" }));
 vi.mock("#/hooks/useVaultEvents", () => ({
   useVaultEvents: () => "connected",
 }));
