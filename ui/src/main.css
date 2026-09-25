@@ -6,10 +6,10 @@
 @import "@fontsource-variable/inter/opsz.css";
 
 /* =============================================================================
-   CLEPSYDRA — VESSEL tokens
-   Classified technical modernism: warm-grey achromatic field, barbican accent,
-   mono chrome (JetBrains Mono) + sans prose/display (Inter). Dark is the base;
-   "paper" is the light override. Radius zero; hard offset shadows.
+   CLEPSYDRA — Stone & Lamp tokens (spec: docs/superpowers/specs/
+   2026-09-25-stone-and-lamp-redesign-design.md). Charcoal is :root; bone is
+   `.paper`. Cobalt is the only accent. Sans (Geist) for UI and prose, serif
+   (Instrument Serif) as accent, mono (JetBrains Mono) for code only.
    ============================================================================= */
 
 @theme {
@@ -27,57 +27,63 @@
     --font-slab: var(--font-sans);
     --font-heading: var(--font-sans);
 
-    /* Vessel dark palette (DEFAULT / base) --------------------------------- */
-    --color-paper: #0a0a0a;
-    --color-paper-2: #111111;
-    --color-paper-edge: #161616;
-    --color-ink: #e8e6df;
-    --color-ink-2: #b8b5a8;
-    --color-ink-mute: #918d80;
-    --color-ink-faint: #3a3833;
-    --color-accent: #ee7733;
-    /* barbican (primary / "hot" in the prototype sense) */
-    --color-accent-deep: #c75f24;
-    --color-cool: #4cd9ff;
-    /* secondary signal */
-    --color-warn: #ffb84a;
-    --color-hot: #ff3b1f;
-    /* destructive / alert — kept red */
-    --color-rule: #2a2825;
-    --color-rule-soft: #1c1b18;
-    --color-highlight: rgba(238, 119, 51, 0.12);
-    --color-bar-bg: #050505;
-    --color-bar-fg: #e8e6df;
-    --color-bar-rule: rgba(232, 230, 223, 0.18);
+    /* Colours: every Tailwind colour points at a bare property defined per
+       theme on :root (charcoal) / .paper (bone). One source of truth. */
+    --color-paper: var(--paper);
+    --color-paper-2: var(--paper-2);
+    --color-paper-edge: var(--paper-edge);
+    --color-ink: var(--ink);
+    --color-ink-2: var(--ink-2);
+    --color-ink-mute: var(--ink-mute);
+    --color-ink-faint: var(--ink-faint);
+    --color-accent: var(--accent);
+    --color-accent-deep: var(--accent-deep);
+    --color-cool: var(--cool);
+    --color-warn: var(--warn);
+    --color-hot: var(--hot);
+    --color-rule: var(--rule);
+    --color-rule-soft: var(--rule-soft);
+    --color-highlight: var(--highlight);
+    --color-bar-bg: var(--bar-bg);
+    --color-bar-fg: var(--bar-fg);
+    --color-bar-rule: var(--bar-rule);
 
-    /* Tailwind semantic aliases — mapped to Vessel dark */
-    --color-background: #0a0a0a;
-    --color-foreground: #e8e6df;
-    --color-card: #111111;
-    --color-card-foreground: #e8e6df;
-    --color-popover: #111111;
-    --color-popover-foreground: #e8e6df;
-    --color-primary: #ee7733;
-    --color-primary-foreground: #0a0a0a;
-    --color-secondary: #161616;
-    --color-secondary-foreground: #e8e6df;
-    --color-muted: #161616;
-    --color-muted-foreground: #918d80;
-    --color-accent-foreground: #0a0a0a;
-    --color-destructive: #ff3b1f;
-    --color-destructive-foreground: #0a0a0a;
-    --color-border: #2a2825;
-    --color-input: #2a2825;
-    --color-ring: #ee7733;
+    /* Stone & Lamp role names (spec §3.1) */
+    --color-ground: var(--paper);
+    --color-raise: var(--paper-2);
+    --color-sink: var(--paper-edge);
+    --color-mute: var(--ink-mute);
+    --color-faint: var(--ink-faint);
+    --color-accent-tint: var(--highlight);
 
-    /* Radius: zero, always */
-    --radius: 0;
+    /* Tailwind / shadcn semantic aliases */
+    --color-background: var(--paper);
+    --color-foreground: var(--ink);
+    --color-card: var(--paper-2);
+    --color-card-foreground: var(--ink);
+    --color-popover: var(--paper-2);
+    --color-popover-foreground: var(--ink);
+    --color-primary: var(--accent);
+    --color-primary-foreground: var(--paper-2);
+    --color-secondary: var(--paper-edge);
+    --color-secondary-foreground: var(--ink);
+    --color-muted: var(--paper-edge);
+    --color-muted-foreground: var(--ink-mute);
+    --color-accent-foreground: var(--paper-2);
+    --color-destructive: var(--hot);
+    --color-destructive-foreground: var(--paper-2);
+    --color-border: var(--rule);
+    --color-input: var(--rule);
+    --color-ring: var(--accent);
 
-    /* Shadows: hard-edged, bottom-right offset, no blur (dark = black) */
-    --shadow-sm: 2px 2px 0 0 rgba(0, 0, 0, 0.55);
-    --shadow-md: 4px 4px 0 0 rgba(0, 0, 0, 0.6);
-    --shadow-lg: 6px 6px 0 0 rgba(0, 0, 0, 0.7);
-    --shadow-xl: 8px 8px 0 0 rgba(0, 0, 0, 0.8);
+    /* Radius: surfaces 12px (spec decision 13) */
+    --radius: 12px;
+
+    /* Elevation: overlays only (spec decision 14); values per theme */
+    --shadow-sm: var(--elev-1);
+    --shadow-md: var(--elev-2);
+    --shadow-lg: var(--elev-3);
+    --shadow-xl: var(--elev-4);
 
     /* Density scale (overridable via [data-density]) */
     --space-row: 22px;
@@ -93,32 +99,45 @@
    the base — defined on :root so dark renders with no class (no FOUC). */
 :root {
     color-scheme: dark;
-    --paper: #0a0a0a;
-    --paper-2: #111111;
-    --paper-edge: #161616;
-    --ink: #e8e6df;
-    --ink-2: #b8b5a8;
-    --ink-mute: #918d80;
-    --ink-faint: #3a3833;
-    --accent: #ee7733;
-    --accent-deep: #c75f24;
-    --cool: #4cd9ff;
-    --warn: #ffb84a;
-    --hot: #ff3b1f;
-    /* Quire (tab-group) ledger hues — desaturated ink-stamp palette */
-    --quire-sepia: #a98e63;
-    --quire-verdigris: #5fa68c;
-    --quire-slate: #7d93a8;
-    --quire-madder: #b06a66;
-    --quire-ochre: #c2a14a;
-    --quire-indigo: #8a82b8;
-    --rule: #2a2825;
-    --rule-soft: #1c1b18;
-    --grid: rgba(232, 230, 223, 0.05);
-    --highlight: rgba(238, 119, 51, 0.12);
-    --bar-bg: #050505;
-    --bar-fg: #e8e6df;
-    --bar-rule: rgba(232, 230, 223, 0.18);
+    /* Charcoal */
+    --paper: #151412;
+    --paper-2: #262420;
+    --paper-edge: #1f1d1a;
+    --ink: #eee8db;
+    --ink-2: #cbc5b8;
+    --ink-mute: #9a948a;
+    --ink-faint: #57524a;
+    --accent: #809cff;
+    --accent-deep: #6680f0;
+    --cool: #809cff;
+    --warn: #e08a6a;
+    --hot: #e08a6a;
+    /* Quire (tab-group) hues; ids unchanged, indigo carries plum */
+    --quire-sepia: #c19e82;
+    --quire-verdigris: #7fc0a8;
+    --quire-slate: #93afc6;
+    --quire-madder: #e08a80;
+    --quire-ochre: #d2a95a;
+    --quire-indigo: #b996cc;
+    --rule: #34312c;
+    --rule-soft: #2b2925;
+    --grid: rgba(238, 232, 219, 0.05);
+    --highlight: rgba(128, 156, 255, 0.15);
+    --bar-bg: #1f1d1a;
+    --bar-fg: #cbc5b8;
+    --bar-rule: rgba(238, 232, 219, 0.12);
+    --elev-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --elev-2: 0 8px 24px rgba(0, 0, 0, 0.35);
+    --elev-3: 0 24px 60px rgba(0, 0, 0, 0.45);
+    --elev-4: 0 40px 100px rgba(0, 0, 0, 0.55);
+
+    /* Stone & Lamp role names (spec §3.1); resolve per theme via the above */
+    --ground: var(--paper);
+    --raise: var(--paper-2);
+    --sink: var(--paper-edge);
+    --mute: var(--ink-mute);
+    --faint: var(--ink-faint);
+    --accent-tint: var(--highlight);
 
     /* Density (default) */
     --row-h: 22px;
@@ -141,69 +160,39 @@
     --ink-4: var(--ink-faint);
 }
 
-/* "Paper" light mode — printed-dossier inversion. Toggled by adding `.paper`
-   to <html>. Unlayered, so it overrides the @theme/:root defaults. ---------- */
+/* Bone (light). Toggled by `.paper` on <html>. Re-binds bare properties only;
+   the @theme --color-* aliases follow automatically. */
 .paper {
     color-scheme: light;
-    --paper: #efece2;
-    --paper-2: #e7e3d6;
-    --paper-edge: #ddd8c9;
-    --ink: #15140f;
-    --ink-2: #3a3833;
-    --ink-mute: #6a675c;
-    --ink-faint: #9a978a;
-    --quire-sepia: #7a6033;
-    --quire-verdigris: #2f6f56;
-    --quire-slate: #44607a;
-    --quire-madder: #8c3f3a;
-    --quire-ochre: #8a6a14;
-    --quire-indigo: #4f4787;
-    --rule: #15140f;
-    --rule-soft: #6a675c;
-    --grid: rgba(21, 20, 15, 0.06);
-    --highlight: rgba(238, 119, 51, 0.16);
-    --bar-bg: #ddd8c9;
-    --bar-fg: #15140f;
-    --bar-rule: rgba(21, 20, 15, 0.18);
-
-    /* Re-bind Tailwind semantic aliases for paper mode (accents unchanged) */
-    --color-paper: #efece2;
-    --color-paper-2: #e7e3d6;
-    --color-paper-edge: #ddd8c9;
-    --color-ink: #15140f;
-    --color-ink-2: #3a3833;
-    --color-ink-mute: #6a675c;
-    --color-ink-faint: #9a978a;
-    --color-rule: #15140f;
-    --color-rule-soft: #6a675c;
-    --color-highlight: rgba(238, 119, 51, 0.16);
-    --color-bar-bg: #ddd8c9;
-    --color-bar-fg: #15140f;
-    --color-bar-rule: rgba(21, 20, 15, 0.18);
-
-    --color-background: #efece2;
-    --color-foreground: #15140f;
-    --color-card: #e7e3d6;
-    --color-card-foreground: #15140f;
-    --color-popover: #e7e3d6;
-    --color-popover-foreground: #15140f;
-    --color-primary: #ee7733;
-    --color-primary-foreground: #efece2;
-    --color-secondary: #ddd8c9;
-    --color-secondary-foreground: #15140f;
-    --color-muted: #ddd8c9;
-    --color-muted-foreground: #6a675c;
-    --color-accent-foreground: #efece2;
-    --color-destructive: #ff3b1f;
-    --color-destructive-foreground: #efece2;
-    --color-border: #15140f;
-    --color-input: #15140f;
-    --color-ring: #ee7733;
-
-    --shadow-sm: 2px 2px 0 0 rgba(21, 20, 15, 0.18);
-    --shadow-md: 4px 4px 0 0 rgba(21, 20, 15, 0.25);
-    --shadow-lg: 6px 6px 0 0 rgba(21, 20, 15, 0.35);
-    --shadow-xl: 8px 8px 0 0 rgba(21, 20, 15, 0.5);
+    --paper: #f4efe4;
+    --paper-2: #fbf8f2;
+    --paper-edge: #eae3d3;
+    --ink: #0e1a3a;
+    --ink-2: #343b50;
+    --ink-mute: #5f6372;
+    --ink-faint: #a9a89f;
+    --accent: #1747e6;
+    --accent-deep: #0f36b8;
+    --cool: #1747e6;
+    --warn: #b3401f;
+    --hot: #b3401f;
+    --quire-sepia: #7a5c45;
+    --quire-verdigris: #3f7f6a;
+    --quire-slate: #4e6a80;
+    --quire-madder: #a2463f;
+    --quire-ochre: #8a6424;
+    --quire-indigo: #7a4f8c;
+    --rule: #ddd5c3;
+    --rule-soft: #e6dfd0;
+    --grid: rgba(14, 26, 58, 0.05);
+    --highlight: rgba(23, 71, 230, 0.09);
+    --bar-bg: #eae3d3;
+    --bar-fg: #343b50;
+    --bar-rule: rgba(14, 26, 58, 0.12);
+    --elev-1: 0 1px 2px rgba(14, 26, 58, 0.08);
+    --elev-2: 0 8px 24px rgba(14, 26, 58, 0.12);
+    --elev-3: 0 24px 60px rgba(14, 26, 58, 0.18);
+    --elev-4: 0 40px 100px rgba(14, 26, 58, 0.24);
 }
 
 /* Accent presets — swap primary (--accent/--accent-deep) and secondary (--cool).
