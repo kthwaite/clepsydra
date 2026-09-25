@@ -934,6 +934,16 @@ describe("Sheaf tab preview gating", () => {
 });
 
 describe("Sheaf C3 segments", () => {
+  it("gives the + and tab buttons a visible keyboard focus ring", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    for (const name of ["New page", "Alpha"]) {
+      expect(screen.getByRole("button", { name })).toHaveClass(
+        "focus-visible:ring-2",
+      );
+    }
+  });
+
   it("keeps ungrouped runs in place, each on a neutral segment", () => {
     useWorkspaceStore.setState({
       tabs: [

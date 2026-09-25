@@ -17,6 +17,7 @@ import { shouldPreviewTab } from "#/components/codex/tab-preview";
 import { KindIcon } from "#/components/KindIcon";
 import { useActivateTabWithFolioHistory } from "#/hooks/useFolioHistoryNavigation";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { resolveKindFromPath } from "#/lib/kind";
 import {
   type Quire,
@@ -212,7 +213,10 @@ export function Sheaf({
                 aria-label="New page"
                 title="New page"
                 onClick={openInscribe}
-                className="flex flex-shrink-0 cursor-pointer items-center px-2.5 text-faint hover:text-accent focus-visible:text-accent focus-visible:outline-none"
+                className={cn(
+                  "flex flex-shrink-0 cursor-pointer items-center rounded-full px-2.5 text-faint hover:text-accent focus-visible:text-accent",
+                  FOCUS_RING_NATIVE,
+                )}
               >
                 <Plus aria-hidden="true" size={16} />
               </button>
@@ -478,7 +482,8 @@ function FolioTab({
           title={t.path ? undefined : t.label}
           aria-label={t.label || t.path || "untitled folio"}
           className={cn(
-            "flex min-w-0 cursor-pointer items-center gap-2 pl-2.5",
+            "flex min-w-0 cursor-pointer items-center gap-2 rounded-md pl-2.5",
+            FOCUS_RING_NATIVE,
             dragged && "opacity-50",
           )}
         >
@@ -498,7 +503,8 @@ function FolioTab({
         onClick={onClose}
         aria-label="close folio"
         className={cn(
-          "flex-shrink-0 cursor-pointer pr-2.5 pl-1 leading-none text-faint transition-opacity hover:text-ink focus-visible:opacity-100",
+          "flex-shrink-0 cursor-pointer rounded-md pr-2.5 pl-1 leading-none text-faint transition-opacity hover:text-ink focus-visible:opacity-100",
+          FOCUS_RING_NATIVE,
           active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
         )}
       >
