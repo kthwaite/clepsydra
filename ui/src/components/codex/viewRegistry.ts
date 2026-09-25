@@ -6,6 +6,7 @@ import type {
   ActivateTabWithFolioHistory,
   LeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
+import type { ShortcutId } from "#/lib/shortcuts";
 import {
   type OpenTabTarget,
   type TabType,
@@ -26,11 +27,30 @@ export interface ViewNavDeps {
   leaveWorkspace: LeaveFolioWorkspace;
 }
 
+export type ContentsGroup =
+  | "Write"
+  | "Organise"
+  | "Gather"
+  | "Maintain"
+  | "Reference";
+
+export const CONTENTS_GROUPS: readonly ContentsGroup[] = [
+  "Write",
+  "Organise",
+  "Gather",
+  "Maintain",
+  "Reference",
+];
+
 interface ViewDescriptor {
-  /** Rail entry text and the footer's VIEW label. */
+  /** Header/Contents text and screen name. */
   label: string;
-  /** Footer FILE code; null = derive from the active folio's path. */
-  folioCode: string | null;
+  /** Contents sheet group; null = not listed (home, transient states). */
+  group: ContentsGroup | null;
+  /** One line under the name in Contents. */
+  description: string;
+  /** Registered shortcut shown as a hint in Contents. */
+  shortcut: ShortcutId | null;
   showsSheaf: boolean;
   feature: FeatureName | null;
   /** Route owns the entire content window; suppress both responsive shells. */
@@ -46,8 +66,10 @@ interface ViewDescriptor {
 
 export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
   atrium: {
-    label: "ATRIUM",
-    folioCode: "ATRIUM",
+    label: "Atrium",
+    group: null,
+    description: "Today at a glance.",
+    shortcut: "nav.atrium",
     showsSheaf: false,
     feature: null,
     navRoot: "atrium",
@@ -55,8 +77,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ navigate }) => void navigate({ to: "/" }),
   },
   folio: {
-    label: "FOLIO",
-    folioCode: null,
+    label: "Folio",
+    group: "Write",
+    description: "Pages, notes and journals, open as tabs.",
+    shortcut: null,
     showsSheaf: true,
     feature: null,
     navRoot: "folio",
@@ -75,8 +99,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     },
   },
   launcher: {
-    label: "LAUNCHER",
-    folioCode: "—",
+    label: "Launcher",
+    group: null,
+    description: "Open a page to start.",
+    shortcut: null,
     showsSheaf: true,
     feature: null,
     navRoot: "folio",
@@ -84,8 +110,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: null,
   },
   constellation: {
-    label: "CONSTELLATION",
-    folioCode: "GRAPH",
+    label: "Constellation",
+    group: "Organise",
+    description: "The link graph.",
+    shortcut: "nav.constellation",
     showsSheaf: false,
     feature: null,
     navRoot: "constellation",
@@ -93,8 +121,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ openTab }) => openTab("graph"),
   },
   gazetteer: {
-    label: "GAZETTEER",
-    folioCode: "INDEX",
+    label: "Gazetteer",
+    group: "Organise",
+    description: "Every page, filtered and sorted.",
+    shortcut: "nav.gazetteer",
     showsSheaf: true,
     feature: null,
     navRoot: "gazetteer",
@@ -102,8 +132,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ navigate }) => void navigate({ to: "/gazetteer" }),
   },
   stats: {
-    label: "STATS",
-    folioCode: "STATS",
+    label: "Stats",
+    group: "Maintain",
+    description: "Activity over time.",
+    shortcut: null,
     showsSheaf: false,
     feature: null,
     navRoot: "stats",
@@ -111,8 +143,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ navigate }) => void navigate({ to: "/stats" }),
   },
   tasking: {
-    label: "TASKING",
-    folioCode: "TASKING",
+    label: "Tasking",
+    group: "Organise",
+    description: "Board, backlog, cycles and timeline.",
+    shortcut: "nav.tasking",
     showsSheaf: false,
     feature: null,
     navRoot: "tasking",
@@ -120,8 +154,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ navigate }) => void navigate({ to: "/tasking" }),
   },
   academic: {
-    label: "ACADEMIC",
-    folioCode: "ACADEMIC",
+    label: "Academic",
+    group: "Gather",
+    description: "DOI, ISBN and Zotero imports.",
+    shortcut: null,
     showsSheaf: false,
     feature: "academic",
     navRoot: "academic",
@@ -129,8 +165,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ navigate }) => void navigate({ to: "/academic" }),
   },
   bases: {
-    label: "BASES",
-    folioCode: "BASES",
+    label: "Bases",
+    group: "Organise",
+    description: "Saved queries as tables and boards.",
+    shortcut: null,
     showsSheaf: false,
     feature: null,
     navRoot: "bases",
@@ -138,8 +176,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ navigate }) => void navigate({ to: "/bases" }),
   },
   feeds: {
-    label: "FEEDS",
-    folioCode: "FEEDS",
+    label: "Feeds",
+    group: "Gather",
+    description: "Subscriptions and the river.",
+    shortcut: null,
     showsSheaf: false,
     feature: "feeds",
     navRoot: "feeds",
@@ -147,8 +187,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ navigate }) => void navigate({ to: "/feeds" }),
   },
   docs: {
-    label: "DOCS",
-    folioCode: "DOC-001",
+    label: "Docs",
+    group: "Reference",
+    description: "How Clepsydra works.",
+    shortcut: null,
     showsSheaf: false,
     feature: null,
     navRoot: "docs",
@@ -157,8 +199,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
       void navigate({ to: "/docs/$slug", params: { slug: DEFAULT_DOC_SLUG } }),
   },
   archive: {
-    label: "ARCHIVE",
-    folioCode: "ARCHIVE",
+    label: "Archive",
+    group: null,
+    description: "Web pages captured whole.",
+    shortcut: null,
     showsSheaf: false,
     feature: null,
     fullPage: true,
@@ -167,8 +211,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: null,
   },
   rubbish: {
-    label: "RUBBISH BIN",
-    folioCode: "RUBBISH",
+    label: "Rubbish",
+    group: "Maintain",
+    description: "Binned pages, restorable.",
+    shortcut: null,
     showsSheaf: false,
     feature: null,
     navRoot: "rubbish",
@@ -176,8 +222,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ navigate }) => void navigate({ to: "/rubbish" }),
   },
   repairs: {
-    label: "REPAIRS",
-    folioCode: "REPAIRS",
+    label: "Repairs",
+    group: "Maintain",
+    description: "Broken links, labels and codes.",
+    shortcut: null,
     showsSheaf: false,
     feature: null,
     navRoot: null,
@@ -185,8 +233,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ navigate }) => void navigate({ to: "/repairs" }),
   },
   agenda: {
-    label: "AGENDA",
-    folioCode: "AGENDA",
+    label: "Agenda",
+    group: "Write",
+    description: "Every open todo, across every page.",
+    shortcut: null,
     showsSheaf: false,
     feature: null,
     navRoot: null,
@@ -194,8 +244,10 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     go: ({ navigate }) => void navigate({ to: "/agenda" }),
   },
   conflicts: {
-    label: "CONFLICTS",
-    folioCode: "CONFLICTS",
+    label: "Conflicts",
+    group: "Maintain",
+    description: "Sync copies waiting to be resolved.",
+    shortcut: null,
     showsSheaf: false,
     feature: null,
     navRoot: null,
@@ -204,19 +256,28 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
   },
 };
 
-/** Header rail order with diegetic index = position (pad2). */
-export const DESKTOP_NAV: readonly CodexView[] = [
-  "folio",
-  "gazetteer",
-  "stats",
-  "constellation",
-  "tasking",
-  "academic",
-  "bases",
-  "feeds",
-  "docs",
-  "rubbish",
-];
+/** Header nav: the core three. Everything else lives in Contents. */
+export const CORE_NAV: readonly CodexView[] = ["folio", "tasking", "gazetteer"];
+
+export function isCoreView(view: CodexView): boolean {
+  const root = VIEW_REGISTRY[view].navRoot;
+  return root !== null && CORE_NAV.includes(root);
+}
+
+export function contentsGroups(
+  features: FeatureFlags,
+): Array<{ group: ContentsGroup; views: CodexView[] }> {
+  const views = enabledNavItems(
+    (Object.keys(VIEW_REGISTRY) as CodexView[]).filter(
+      (v) => VIEW_REGISTRY[v].group !== null && VIEW_REGISTRY[v].go !== null,
+    ),
+    features,
+  );
+  return CONTENTS_GROUPS.map((group) => ({
+    group,
+    views: views.filter((v) => VIEW_REGISTRY[v].group === group),
+  })).filter((g) => g.views.length > 0);
+}
 
 export const MOBILE_NAV: readonly CodexView[] = [
   "atrium",

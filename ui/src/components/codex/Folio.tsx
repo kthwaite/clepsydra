@@ -102,6 +102,7 @@ import {
   type RecipeParseResult,
   serializeRecipeMarkdown,
 } from "#/recipe/recipeCodec";
+import { FOLIO_LEFT_RAIL, FOLIO_RIGHT_RAIL } from "#/store/folioRails";
 import {
   clearFolioRestoration,
   consumeFolioHistoryRestorationRequest,
@@ -115,6 +116,7 @@ import {
   subscribeFolioHistoryRestorationRequests,
   validateTextPointSnapshot,
 } from "#/store/folioRestoration";
+import { useFooterContext } from "#/store/footerContext";
 import {
   registerWorkspaceTransitionGuard,
   runWorkspaceTransition,
@@ -947,6 +949,15 @@ export function Folio({ tabId, path }: FolioProps) {
     () => countWordsFromSlate(visibleEditorValue),
     [visibleEditorValue],
   );
+  const isActiveTab = useWorkspaceStore((s) => s.activeTabId === tabId);
+  useFooterContext(
+    isActiveTab
+      ? [
+          path,
+          ...(wordCount > 0 ? [`${wordCount.toLocaleString()} words`] : []),
+        ]
+      : null,
+  );
   const toc = useMemo(() => buildToc(visibleEditorValue), [visibleEditorValue]);
   const conversationDiagnostics = useMemo(
     () =>
@@ -1687,14 +1698,14 @@ function DesktopFolioLayout({
   protection: React.ReactNode;
 }) {
   const left = useCollapsibleRail({
-    storageKey: "clp.folio.l",
+    storageKey: FOLIO_LEFT_RAIL,
     side: "left",
     defaultWidth: 240,
     min: 180,
     max: 480,
   });
   const right = useCollapsibleRail({
-    storageKey: "clp.folio.r",
+    storageKey: FOLIO_RIGHT_RAIL,
     side: "right",
     defaultWidth: 280,
     min: 220,

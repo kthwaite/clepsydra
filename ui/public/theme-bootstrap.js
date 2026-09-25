@@ -20,7 +20,5 @@
     if (meta) meta.setAttribute("content", resolved === "light" ? "#F4EFE4" : "#151412");
     var density = ls.getItem("clepsydra.density");
     if (density && density !== "default") root.setAttribute("data-density", density);
-    if (ls.getItem("clepsydra.diegetic") === "off")
-      root.setAttribute("data-diegetic", "off");
   } catch (e) {}
 })();

@@ -1,9 +1,12 @@
 import type { useNavigate } from "@tanstack/react-router";
 import { describe, expect, it, vi } from "vitest";
 import {
-  DESKTOP_NAV,
+  CONTENTS_GROUPS,
+  CORE_NAV,
+  contentsGroups,
   enabledNavItems,
   goToView,
+  isCoreView,
   MOBILE_NAV,
   VIEW_REGISTRY,
   type ViewNavDeps,
@@ -29,32 +32,6 @@ const deps = (): ViewNavDeps & {
   };
 
 describe("VIEW_REGISTRY", () => {
-  it("preserves today's nav rail order and labels", () => {
-    expect(DESKTOP_NAV).toEqual([
-      "folio",
-      "gazetteer",
-      "stats",
-      "constellation",
-      "tasking",
-      "academic",
-      "bases",
-      "feeds",
-      "docs",
-      "rubbish",
-    ]);
-    expect(DESKTOP_NAV.map((v) => VIEW_REGISTRY[v].label)).toEqual([
-      "FOLIO",
-      "GAZETTEER",
-      "STATS",
-      "CONSTELLATION",
-      "TASKING",
-      "ACADEMIC",
-      "BASES",
-      "FEEDS",
-      "DOCS",
-      "RUBBISH BIN",
-    ]);
-  });
   it("preserves today's mobile roots order and labels", () => {
     expect(MOBILE_NAV).toEqual([
       "atrium",
@@ -78,17 +55,9 @@ describe("VIEW_REGISTRY", () => {
   it("removes Academic independently from desktop and mobile navigation", () => {
     const flags = { academic: false, feeds: true };
 
-    expect(enabledNavItems(DESKTOP_NAV, flags)).toEqual([
-      "folio",
-      "gazetteer",
-      "stats",
-      "constellation",
-      "tasking",
-      "bases",
-      "feeds",
-      "docs",
-      "rubbish",
-    ]);
+    expect(contentsGroups(flags).flatMap((g) => g.views)).not.toContain(
+      "academic",
+    );
     expect(enabledNavItems(MOBILE_NAV, flags)).toEqual([
       "atrium",
       "gazetteer",
@@ -101,17 +70,9 @@ describe("VIEW_REGISTRY", () => {
   it("removes Feeds independently from desktop and mobile navigation", () => {
     const flags = { academic: true, feeds: false };
 
-    expect(enabledNavItems(DESKTOP_NAV, flags)).toEqual([
-      "folio",
-      "gazetteer",
-      "stats",
-      "constellation",
-      "tasking",
-      "academic",
-      "bases",
-      "docs",
-      "rubbish",
-    ]);
+    expect(contentsGroups(flags).flatMap((g) => g.views)).not.toContain(
+      "feeds",
+    );
     expect(enabledNavItems(MOBILE_NAV, flags)).toEqual([
       "atrium",
       "gazetteer",
@@ -129,18 +90,76 @@ describe("VIEW_REGISTRY", () => {
       .sort();
     expect(withSheaf).toEqual(["folio", "gazetteer", "launcher"]);
   });
-  it("keeps today's folio codes", () => {
-    expect(VIEW_REGISTRY.constellation.folioCode).toBe("GRAPH");
-    expect(VIEW_REGISTRY.gazetteer.folioCode).toBe("INDEX");
-    expect(VIEW_REGISTRY.docs.folioCode).toBe("DOC-001");
-    expect(VIEW_REGISTRY.folio.folioCode).toBeNull();
-    expect(VIEW_REGISTRY.launcher.folioCode).toBe("—");
-    expect(VIEW_REGISTRY.rubbish.folioCode).toBe("RUBBISH");
-  });
   it("highlights FOLIO for launcher, nothing for repairs/agenda", () => {
     expect(VIEW_REGISTRY.launcher.navRoot).toBe("folio");
     expect(VIEW_REGISTRY.repairs.navRoot).toBeNull();
     expect(VIEW_REGISTRY.agenda.navRoot).toBeNull();
+  });
+});
+
+describe("Stone & Lamp registry", () => {
+  it("uses title-case labels", () => {
+    expect(VIEW_REGISTRY.gazetteer.label).toBe("Gazetteer");
+    expect(VIEW_REGISTRY.rubbish.label).toBe("Rubbish");
+    for (const d of Object.values(VIEW_REGISTRY)) {
+      expect(d.label).not.toMatch(/^[A-Z ]{2,}$/);
+    }
+  });
+
+  it("puts exactly the core three in the header, in order", () => {
+    expect(CORE_NAV).toEqual(["folio", "tasking", "gazetteer"]);
+    expect(isCoreView("launcher")).toBe(true);
+    expect(isCoreView("bases")).toBe(false);
+    expect(isCoreView("repairs")).toBe(false);
+  });
+
+  it("groups every navigable non-home view for Contents", () => {
+    const all = { academic: true, feeds: true };
+    expect(CONTENTS_GROUPS).toEqual([
+      "Write",
+      "Organise",
+      "Gather",
+      "Maintain",
+      "Reference",
+    ]);
+    expect(contentsGroups(all)).toEqual([
+      { group: "Write", views: ["folio", "agenda"] },
+      {
+        group: "Organise",
+        views: ["constellation", "gazetteer", "tasking", "bases"],
+      },
+      { group: "Gather", views: ["academic", "feeds"] },
+      {
+        group: "Maintain",
+        views: ["stats", "rubbish", "repairs", "conflicts"],
+      },
+      { group: "Reference", views: ["docs"] },
+    ]);
+  });
+
+  it("never lists home or non-navigable states in Contents", () => {
+    const listed = contentsGroups({ academic: true, feeds: true }).flatMap(
+      (g) => g.views,
+    );
+    expect(listed).not.toContain("atrium");
+    expect(listed).not.toContain("launcher");
+    expect(listed).not.toContain("archive");
+  });
+
+  it("gives every listed view a one-line description", () => {
+    for (const { views } of contentsGroups({ academic: true, feeds: true })) {
+      for (const v of views) {
+        expect(VIEW_REGISTRY[v].description.length).toBeGreaterThan(0);
+        expect(VIEW_REGISTRY[v].description).not.toContain("\n");
+      }
+    }
+  });
+
+  it("links registered shortcuts for hints", () => {
+    expect(VIEW_REGISTRY.gazetteer.shortcut).toBe("nav.gazetteer");
+    expect(VIEW_REGISTRY.tasking.shortcut).toBe("nav.tasking");
+    expect(VIEW_REGISTRY.constellation.shortcut).toBe("nav.constellation");
+    expect(VIEW_REGISTRY.bases.shortcut).toBeNull();
   });
 });
 

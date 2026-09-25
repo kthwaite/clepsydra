@@ -9,6 +9,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { NO_SAVE } from "#/api/mutationMeta";
 import type { components, operations } from "#/api/schema";
 import { $api, fetchClient } from "./client";
 import { invalidateByPath, queryKeys } from "./keys";
@@ -860,6 +861,7 @@ export function useDeleteFeed() {
 export function useRefreshFeeds() {
   const queryClient = useQueryClient();
   return $api.useMutation("post", "/api/vault/feeds/refresh", {
+    meta: NO_SAVE,
     onSettled: () => invalidateFeedQueries(queryClient),
   });
 }

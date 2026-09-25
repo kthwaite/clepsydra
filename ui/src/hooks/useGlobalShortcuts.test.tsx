@@ -7,6 +7,30 @@ const { navigateMock, openTabMock, toggleThemeMock } = vi.hoisted(() => ({
   toggleThemeMock: vi.fn(),
 }));
 
+// Node 26 exposes no usable localStorage under jsdom, and the persisted
+// board store binds its storage at import, so install an in-memory Storage
+// before any module loads.
+vi.hoisted(() => {
+  const map = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      get length() {
+        return map.size;
+      },
+      clear: () => map.clear(),
+      getItem: (k: string) => map.get(k) ?? null,
+      key: (i: number) => [...map.keys()][i] ?? null,
+      removeItem: (k: string) => {
+        map.delete(k);
+      },
+      setItem: (k: string, v: string) => {
+        map.set(k, String(v));
+      },
+    },
+  });
+});
+
 // IS_MAC is computed when #/lib/shortcuts first loads, so the platform must
 // be stubbed before any import. This file exercises the Mac chords (⌘K etc.).
 vi.hoisted(() => {
@@ -73,6 +97,11 @@ vi.mock("#/api/journal", () => ({
 import { useGlobalShortcuts } from "#/hooks/useGlobalShortcuts";
 import { todayJournalPath } from "#/lib/journal";
 import { useBoardStore } from "#/store/board";
+import {
+  FOLIO_LEFT_RAIL,
+  FOLIO_RIGHT_RAIL,
+  useFolioRails,
+} from "#/store/folioRails";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
@@ -84,10 +113,11 @@ function press(
     shiftKey: boolean;
     altKey: boolean;
   }> = {},
-  { prevented = false } = {},
+  { prevented = false, code }: { prevented?: boolean; code?: string } = {},
 ) {
   const e = new KeyboardEvent("keydown", {
     key,
+    code,
     cancelable: true,
     bubbles: true,
     ...mods,
@@ -172,7 +202,7 @@ describe("useGlobalShortcuts", () => {
     expect(navigateMock).toHaveBeenCalledWith({ to: "/gazetteer" });
     press("g", { metaKey: true });
     expect(openTabMock).toHaveBeenCalledWith("graph");
-    press("\\", { metaKey: true });
+    press("|", { metaKey: true, shiftKey: true }, { code: "Backslash" });
     expect(toggleThemeMock).toHaveBeenCalled();
   });
 
@@ -351,5 +381,107 @@ describe("useGlobalShortcuts", () => {
         document.body.removeChild(dialog);
       }
     });
+  });
+});
+
+describe("Folio sidebar shortcuts", () => {
+  beforeEach(() => {
+    window.history.pushState({}, "", "/workspace");
+    useWorkspaceStore.setState({
+      tabs: [{ id: "p", type: "page", label: "P", path: "notes/p.md" }],
+      activeTabId: "p",
+    });
+    useFolioRails.setState({
+      collapsed: { [FOLIO_LEFT_RAIL]: false, [FOLIO_RIGHT_RAIL]: false },
+    });
+  });
+
+  it.each([
+    ["the launcher", { tabs: [], activeTabId: null }],
+    [
+      "Constellation",
+      { tabs: [{ id: "g", type: "graph", label: "Graph" }], activeTabId: "g" },
+    ],
+  ])("leaves the hidden sidebars alone in %s", (_name, state) => {
+    useWorkspaceStore.setState(
+      state as Parameters<typeof useWorkspaceStore.setState>[0],
+    );
+    renderHook(() => useGlobalShortcuts());
+    const e = press("]", {}, { code: "BracketRight" });
+    press("\\", { metaKey: true }, { code: "Backslash" });
+    expect(e.defaultPrevented).toBe(false);
+    expect(useFolioRails.getState().isCollapsed(FOLIO_LEFT_RAIL)).toBe(false);
+    expect(useFolioRails.getState().isCollapsed(FOLIO_RIGHT_RAIL)).toBe(false);
+  });
+
+  it("⌘⌥[ toggles the left sidebar in the workspace", () => {
+    renderHook(() => useGlobalShortcuts());
+    press("“", { metaKey: true, altKey: true }, { code: "BracketLeft" });
+    expect(useFolioRails.getState().isCollapsed(FOLIO_LEFT_RAIL)).toBe(true);
+    expect(useFolioRails.getState().isCollapsed(FOLIO_RIGHT_RAIL)).toBe(false);
+  });
+
+  it("⌘\\ collapses both", () => {
+    renderHook(() => useGlobalShortcuts());
+    press("\\", { metaKey: true }, { code: "Backslash" });
+    expect(useFolioRails.getState().isCollapsed(FOLIO_LEFT_RAIL)).toBe(true);
+    expect(useFolioRails.getState().isCollapsed(FOLIO_RIGHT_RAIL)).toBe(true);
+  });
+
+  it("bare ] toggles the right sidebar outside the editor", () => {
+    renderHook(() => useGlobalShortcuts());
+    press("]", {}, { code: "BracketRight" });
+    expect(useFolioRails.getState().isCollapsed(FOLIO_RIGHT_RAIL)).toBe(true);
+  });
+
+  it("bare [ types a bracket inside an editable target", () => {
+    renderHook(() => useGlobalShortcuts());
+    // jsdom has no isContentEditable, so an input stands in for the editor.
+    const editable = document.createElement("input");
+    document.body.append(editable);
+    const e = new KeyboardEvent("keydown", {
+      key: "[",
+      code: "BracketLeft",
+      bubbles: true,
+      cancelable: true,
+    });
+    editable.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+    expect(useFolioRails.getState().isCollapsed(FOLIO_LEFT_RAIL)).toBe(false);
+    editable.remove();
+  });
+
+  it("bare [ on Tasking toggles the Tasking rail, not the Folio sidebar", () => {
+    window.history.pushState({}, "", "/tasking");
+    useBoardStore.setState({ railOpen: true });
+    renderHook(() => useGlobalShortcuts());
+    press("[", {}, { code: "BracketLeft" });
+    expect(useBoardStore.getState().railOpen).toBe(false);
+    expect(useFolioRails.getState().isCollapsed(FOLIO_LEFT_RAIL)).toBe(false);
+  });
+});
+
+describe("theme and Contents shortcuts", () => {
+  it("⌘⇧\\ toggles the theme; ⌘\\ no longer does", () => {
+    toggleThemeMock.mockClear();
+    window.history.pushState({}, "", "/workspace");
+    renderHook(() => useGlobalShortcuts());
+    press("\\", { metaKey: true }, { code: "Backslash" });
+    expect(toggleThemeMock).not.toHaveBeenCalled();
+    press("|", { metaKey: true, shiftKey: true }, { code: "Backslash" });
+    expect(toggleThemeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("⌘⇧O toggles Contents, including while its dialog is open", () => {
+    useUiStore.setState({ isContentsOpen: false });
+    renderHook(() => useGlobalShortcuts());
+    press("O", { metaKey: true, shiftKey: true }, { code: "KeyO" });
+    expect(useUiStore.getState().isContentsOpen).toBe(true);
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.append(dialog);
+    press("O", { metaKey: true, shiftKey: true }, { code: "KeyO" });
+    expect(useUiStore.getState().isContentsOpen).toBe(false);
+    dialog.remove();
   });
 });

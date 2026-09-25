@@ -55,6 +55,11 @@ describe("theme-bootstrap.js (pre-paint) agrees with lib/theme", () => {
     expect(meta()?.content).toBe(THEME_COLOR.light);
   });
 
+  it("no longer hides chrome for a stored diegetic-off preference", () => {
+    run({ "clepsydra.diegetic": "off" });
+    expect(document.documentElement.hasAttribute("data-diegetic")).toBe(false);
+  });
+
   it("paints charcoal for a stored dark preference", () => {
     run({ "clepsydra.theme": "dark" });
     expect(document.documentElement.classList.contains("paper")).toBe(false);

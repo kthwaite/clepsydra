@@ -18,9 +18,14 @@ import {
   SHORTCUTS,
 } from "#/lib/shortcuts";
 import { useBoardStore } from "#/store/board";
+import {
+  FOLIO_LEFT_RAIL,
+  FOLIO_RIGHT_RAIL,
+  useFolioRails,
+} from "#/store/folioRails";
 import { cycleTargetId } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
-import { useWorkspaceStore } from "#/store/workspace";
+import { selectWorkspaceMode, useWorkspaceStore } from "#/store/workspace";
 
 /** Bare-key chords (no mod/ctrl/alt) must not fire while the user is typing
  *  — buttons and other non-form elements are not "editable" and stay live. */
@@ -48,6 +53,7 @@ type Binding = {
  *  suppressed underneath a dialog. */
 const DIALOG_EXEMPT_IDS: ReadonlySet<GlobalShortcutId> = new Set([
   "palette.toggle",
+  "app.contents",
 ]);
 
 function cycleTab(dir: 1 | -1, activateTab: ActivateTabWithFolioHistory) {
@@ -67,6 +73,7 @@ export function useGlobalShortcuts() {
   const navigate = useNavigate();
   const router = useRouter();
   const toggleSearch = useUiStore((s) => s.toggleSearch);
+  const toggleContents = useUiStore((s) => s.toggleContents);
   const openInscribe = useUiStore((s) => s.openInscribe);
   const openCaptureAside = useUiStore((s) => s.openCaptureAside);
   const openSettings = useUiStore((s) => s.openSettings);
@@ -82,6 +89,11 @@ export function useGlobalShortcuts() {
   const bindings = useMemo<Record<GlobalShortcutId, Binding>>(() => {
     const inWorkspace = () =>
       routeViewFromMatches(router.state.matches) === "workspace";
+    // Folio's sidebars exist only in folio mode; the launcher and the
+    // Constellation tab share the workspace route but hide them.
+    const inFolio = () =>
+      inWorkspace() &&
+      selectWorkspaceMode(useWorkspaceStore.getState()) === "folio";
     const inTasking = () =>
       routeViewFromMatches(router.state.matches) === "tasking";
     return {
@@ -123,11 +135,32 @@ export function useGlobalShortcuts() {
             leaveWorkspace,
           }),
       },
+      "app.contents": { run: toggleContents },
       "app.inscribe": { run: openInscribe },
       "journal.capture": { run: openCaptureAside },
       "app.settings": { run: () => openSettings("appearance") },
       "app.themeToggle": { run: toggleTheme },
       "app.shortcutHelp": { run: openShortcutHelp },
+      "folio.toggleLeft": {
+        when: inFolio,
+        run: () => useFolioRails.getState().toggle(FOLIO_LEFT_RAIL),
+      },
+      "folio.toggleRight": {
+        when: inFolio,
+        run: () => useFolioRails.getState().toggle(FOLIO_RIGHT_RAIL),
+      },
+      "folio.toggleBoth": {
+        when: inFolio,
+        run: () => useFolioRails.getState().toggleBoth(),
+      },
+      "folio.toggleLeftBare": {
+        when: inFolio,
+        run: () => useFolioRails.getState().toggle(FOLIO_LEFT_RAIL),
+      },
+      "folio.toggleRightBare": {
+        when: inFolio,
+        run: () => useFolioRails.getState().toggle(FOLIO_RIGHT_RAIL),
+      },
       "tabs.close": {
         when: inWorkspace,
         run: () => {
@@ -181,6 +214,7 @@ export function useGlobalShortcuts() {
     navigate,
     router,
     toggleSearch,
+    toggleContents,
     openInscribe,
     openCaptureAside,
     openSettings,

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { NO_SAVE } from "#/api/mutationMeta";
 import { queryKeys } from "./keys";
 
 export interface LocationResponse {
@@ -68,6 +69,7 @@ interface GeocodeResponse {
  */
 export function useGeocode(limit = 5) {
   return useMutation<GeocodeCandidate[], Error, string>({
+    meta: NO_SAVE,
     mutationFn: async (q) => {
       const params = new URLSearchParams({ q, limit: String(limit) });
       const res = await fetch(`/api/vault/geocode?${params.toString()}`);

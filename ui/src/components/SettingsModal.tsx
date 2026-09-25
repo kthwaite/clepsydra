@@ -213,14 +213,7 @@ function EncryptionSettings() {
 }
 
 function OperatorPreferences() {
-  const {
-    resolvedTheme,
-    setMode,
-    density,
-    setDensity,
-    diegetic,
-    setDiegetic,
-  } = useTheme();
+  const { resolvedTheme, setMode, density, setDensity } = useTheme();
 
   return (
     <div className="space-y-5">
@@ -238,7 +231,6 @@ function OperatorPreferences() {
         />
       </Row>
 
-
       <Row label="Density">
         <SegmentedControl
           label="Density"
@@ -251,21 +243,6 @@ function OperatorPreferences() {
           className="w-fit gap-0 border border-border"
           itemClassName="cl-mono ml-0 border-0 border-r border-border px-3 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground last:border-r-0 data-[hovered]:bg-transparent data-[hovered]:text-foreground data-[selected]:border-border data-[selected]:bg-accent data-[selected]:font-normal data-[selected]:text-black [&[data-hovered][data-selected]]:text-black"
         />
-      </Row>
-
-      <Row label="Diegetic chrome">
-        <button
-          type="button"
-          onClick={() => setDiegetic(!diegetic)}
-          className={cn(
-            "cl-mono border px-3 py-1 text-[10px] uppercase tracking-[0.14em]",
-            diegetic
-              ? "border-accent bg-accent text-black"
-              : "border-border text-muted-foreground",
-          )}
-        >
-          {diegetic ? "on" : "off"}
-        </button>
       </Row>
     </div>
   );

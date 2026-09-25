@@ -9,16 +9,14 @@ import {
 } from "react";
 import {
   applyDensity,
-  applyDiegetic,
   applyThemeClass,
   clearLegacyAccent,
+  clearLegacyDiegetic,
   type Density,
   readStoredDensity,
-  readStoredDiegetic,
   readStoredTheme,
   resolveTheme,
   storeDensity,
-  storeDiegetic,
   storeTheme,
   type ThemeMode,
 } from "#/lib/theme";
@@ -30,8 +28,6 @@ type ThemeContextValue = {
   toggle: () => void;
   density: Density;
   setDensity: (density: Density) => void;
-  diegetic: boolean;
-  setDiegetic: (on: boolean) => void;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -43,9 +39,6 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   );
   const [density, setDensityState] = useState<Density>(() =>
     readStoredDensity(),
-  );
-  const [diegetic, setDiegeticState] = useState<boolean>(() =>
-    readStoredDiegetic(),
   );
 
   const setMode = useCallback((next: ThemeMode) => {
@@ -62,20 +55,17 @@ export function ThemeProvider({ children }: PropsWithChildren) {
     storeDensity(next);
   }, []);
 
-  const setDiegetic = useCallback((on: boolean) => {
-    setDiegeticState(on);
-    storeDiegetic(on);
-  }, []);
-
   useEffect(() => {
     const resolved = resolveTheme(mode);
     setResolvedTheme(resolved);
     applyThemeClass(resolved);
   }, [mode]);
 
-  useEffect(() => clearLegacyAccent(), []);
+  useEffect(() => {
+    clearLegacyAccent();
+    clearLegacyDiegetic();
+  }, []);
   useEffect(() => applyDensity(density), [density]);
-  useEffect(() => applyDiegetic(diegetic), [diegetic]);
 
   useEffect(() => {
     if (mode !== "system") return;
@@ -109,19 +99,8 @@ export function ThemeProvider({ children }: PropsWithChildren) {
       toggle,
       density,
       setDensity,
-      diegetic,
-      setDiegetic,
     }),
-    [
-      mode,
-      resolvedTheme,
-      setMode,
-      toggle,
-      density,
-      setDensity,
-      diegetic,
-      setDiegetic,
-    ],
+    [mode, resolvedTheme, setMode, toggle, density, setDensity],
   );
 
   return (

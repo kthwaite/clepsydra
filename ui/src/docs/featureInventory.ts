@@ -250,12 +250,6 @@ export const FEATURE_INVENTORY = [
     disposition: { kind: "guide", slug: "getting-started" },
   },
   {
-    id: "sys.chrome",
-    label: "Toggle diegetic chrome",
-    surface: "command",
-    disposition: { kind: "reference", slug: "configuration" },
-  },
-  {
     id: "sys.boot",
     label: "Re-run boot sequence",
     surface: "command",

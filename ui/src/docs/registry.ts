@@ -142,7 +142,6 @@ const configurationMeta = {
     "theme",
     "dark mode",
     "paper mode",
-    "diegetic chrome",
   ],
 } satisfies DocMeta;
 const syncMeta = {

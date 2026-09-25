@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
+import { NO_SAVE } from "#/api/mutationMeta";
 import type { components } from "#/api/schema";
 import {
   type BaseEmbedConfig,
@@ -284,7 +285,7 @@ export function useDeleteBase() {
 }
 
 export const usePreviewBase = () =>
-  $api.useMutation("post", "/api/vault/bases/preview");
+  $api.useMutation("post", "/api/vault/bases/preview", { meta: NO_SAVE });
 
 export function useBase(slug: string) {
   return $api.useQuery(

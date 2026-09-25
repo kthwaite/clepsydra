@@ -2,7 +2,7 @@
 //
 // Charcoal (dark) is the base palette on :root; bone (light) is `.paper` on
 // <html>. Bone is the default for new installs; a stored preference wins.
-// Density / diegetic-chrome are data-attributes on <html> consumed by main.css.
+// Density is a data-attribute on <html> consumed by main.css.
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -13,12 +13,10 @@ export const DENSITIES: Density[] = ["compact", "default", "spacious"];
 export const THEME_STORAGE_KEY = "clepsydra.theme";
 export const ACCENT_STORAGE_KEY = "clepsydra.accent";
 export const DENSITY_STORAGE_KEY = "clepsydra.density";
-export const DIEGETIC_STORAGE_KEY = "clepsydra.diegetic";
 
 // Bone is the resting default (Stone & Lamp spec §9 Q1).
 const DEFAULT_THEME: ThemeMode = "light";
 const DEFAULT_DENSITY: Density = "default";
-const DEFAULT_DIEGETIC = true;
 
 export function getSystemTheme(): Exclude<ThemeMode, "system"> {
   if (typeof window === "undefined") return "light";
@@ -54,18 +52,6 @@ export function readStoredDensity(): Density {
   return read(DENSITY_STORAGE_KEY, DENSITIES, DEFAULT_DENSITY);
 }
 
-export function readStoredDiegetic(): boolean {
-  if (typeof window === "undefined") return DEFAULT_DIEGETIC;
-  try {
-    const raw = window.localStorage.getItem(DIEGETIC_STORAGE_KEY);
-    if (raw === "on") return true;
-    if (raw === "off") return false;
-  } catch {
-    // ignore
-  }
-  return DEFAULT_DIEGETIC;
-}
-
 function store(key: string, value: string) {
   try {
     window.localStorage.setItem(key, value);
@@ -76,8 +62,6 @@ function store(key: string, value: string) {
 
 export const storeTheme = (mode: ThemeMode) => store(THEME_STORAGE_KEY, mode);
 export const storeDensity = (d: Density) => store(DENSITY_STORAGE_KEY, d);
-export const storeDiegetic = (on: boolean) =>
-  store(DIEGETIC_STORAGE_KEY, on ? "on" : "off");
 
 /** Browser-chrome colour per resolved theme — the `ground` token. Keep in
  *  sync with public/theme-bootstrap.js (a test enforces it). */
@@ -112,15 +96,21 @@ export function clearLegacyAccent() {
   }
 }
 
+/** Vessel's diegetic-chrome switch is gone (spec §4); drop any stored
+ *  "off" so no stale attribute outlives the upgrade. */
+export function clearLegacyDiegetic() {
+  if (typeof document !== "undefined") {
+    document.documentElement.removeAttribute("data-diegetic");
+  }
+  try {
+    window.localStorage.removeItem("clepsydra.diegetic");
+  } catch {
+    // storage unavailable (private mode, tests) — nothing to clear
+  }
+}
+
 export function applyDensity(density: Density) {
   const root = document.documentElement;
   if (density === DEFAULT_DENSITY) root.removeAttribute("data-density");
   else root.setAttribute("data-density", density);
-}
-
-export function applyDiegetic(on: boolean) {
-  const root = document.documentElement;
-  // Default (on) carries no attribute; `off` hides diegetic chrome via CSS.
-  if (on) root.removeAttribute("data-diegetic");
-  else root.setAttribute("data-diegetic", "off");
 }

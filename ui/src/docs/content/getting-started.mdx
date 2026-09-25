@@ -298,6 +298,21 @@ Bases are excluded from this control: a Base's table views define their own
 membership and view filters in the Base's TOML definition rather than through
 the shared bar. See [Bases](/docs/bases).
 
+## Header and Contents
+
+The header holds the Clepsydra mark, which returns to the Atrium, the three
+core screens — **Folio**, **Tasking** and **Gazetteer** — and **Contents**,
+which lists every other screen by group (Write, Organise, Gather, Maintain,
+Reference) with a filter and the screens you visited recently. Open it with
+<kbd>Command</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> on macOS or
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> elsewhere. Settings sits on the
+right.
+
+In Folio, <kbd>Command</kbd>+<kbd>Option</kbd>+<kbd>[</kbd> and
+<kbd>Command</kbd>+<kbd>Option</kbd>+<kbd>]</kbd> toggle the left and right
+sidebars, <kbd>Command</kbd>+<kbd>\\</kbd> toggles both, and plain
+<kbd>[</kbd> and <kbd>]</kbd> do the same outside the editor.
+
 ## Keyboard shortcut help
 
 Press <kbd>Command</kbd>+<kbd>/</kbd> on macOS or
@@ -361,12 +376,14 @@ Card headers carry a pip: pulsing cyan = live and healthy, pulsing orange =
 needs attention (for example the Feed river after fetch diagnostics),
 static grey = inactive.
 
-### Footer telemetry pips
+### Footer status
 
-The VESSEL footer strip shows two pips: the connection pip (cyan =
-connected, amber = connecting, red = disconnected from the event stream)
-and the write pip, which pulses orange while changes are being sent to the
-server.
+The footer shows sync state on the left as a dot and a word — **Synced**,
+**Connecting…**, **Disconnected**, or **Offline since** the time of the last
+offline copy — followed by save state: a pulsing **Saving…** while changes
+are sent, then **Saved** with how long ago. The right side describes the
+current screen: in Folio, the page path, word count, reading progress and
+when the index last ran; elsewhere, when the index last ran.
 
 ## Wikilinks
 

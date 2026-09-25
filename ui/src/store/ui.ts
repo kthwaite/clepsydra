@@ -18,6 +18,9 @@ interface UiState {
   isLocationOpen: boolean;
   isShortcutHelpOpen: boolean;
   isBooting: boolean;
+  isContentsOpen: boolean;
+  setContentsOpen: (open: boolean) => void;
+  toggleContents: () => void;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
   setActiveSettingsSection: (section: SettingsSection) => void;
@@ -49,6 +52,10 @@ export const useUiStore = create<UiState>((set) => ({
   isLocationOpen: false,
   isShortcutHelpOpen: false,
   isBooting: false,
+  isContentsOpen: false,
+  setContentsOpen: (open) => set({ isContentsOpen: open }),
+  toggleContents: () =>
+    set((state) => ({ isContentsOpen: !state.isContentsOpen })),
   openSettings: (section = "general") =>
     set({ isSettingsOpen: true, activeSettingsSection: section }),
   closeSettings: () => set({ isSettingsOpen: false }),

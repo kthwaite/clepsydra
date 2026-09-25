@@ -19,6 +19,10 @@ export type Chord = {
   ctrl?: boolean;
   shift?: boolean;
   alt?: boolean;
+  /** KeyboardEvent.code; when set it is matched instead of `key`, because
+   *  ⌥ and ⇧ rewrite `key` on macOS (⌥[ → “, ⇧\ → |). `key` stays for
+   *  display. */
+  code?: string;
 };
 
 export type ShortcutGroup = "Navigate" | "Workspace" | "Editor" | "Tasking";
@@ -75,6 +79,12 @@ export const SHORTCUTS = {
     group: "Navigate",
     scope: "global",
   },
+  "app.contents": {
+    chord: { key: "o", mod: true, shift: true },
+    label: "Contents",
+    group: "Navigate",
+    scope: "global",
+  },
   "app.inscribe": {
     chord: { key: "n", mod: true },
     label: "Inscribe new folio",
@@ -96,8 +106,8 @@ export const SHORTCUTS = {
     note: "outside the editor",
   },
   "app.themeToggle": {
-    chord: { key: "\\", mod: true },
-    label: "Toggle dark / paper mode",
+    chord: { key: "\\", code: "Backslash", mod: true, shift: true },
+    label: "Toggle dark / bone mode",
     group: "Workspace",
     scope: "global",
   },
@@ -127,6 +137,41 @@ export const SHORTCUTS = {
     group: "Workspace",
     scope: "global",
     note: "workspace view",
+  },
+  "folio.toggleLeft": {
+    chord: { key: "[", code: "BracketLeft", mod: true, alt: true },
+    label: "Toggle left sidebar",
+    group: "Workspace",
+    scope: "global",
+    note: "folio",
+  },
+  "folio.toggleRight": {
+    chord: { key: "]", code: "BracketRight", mod: true, alt: true },
+    label: "Toggle right sidebar",
+    group: "Workspace",
+    scope: "global",
+    note: "folio",
+  },
+  "folio.toggleBoth": {
+    chord: { key: "\\", code: "Backslash", mod: true },
+    label: "Toggle both sidebars (focus)",
+    group: "Workspace",
+    scope: "global",
+    note: "folio",
+  },
+  "folio.toggleLeftBare": {
+    chord: { key: "[" },
+    label: "Toggle left sidebar",
+    group: "Workspace",
+    scope: "global",
+    note: "folio, outside the editor",
+  },
+  "folio.toggleRightBare": {
+    chord: { key: "]" },
+    label: "Toggle right sidebar",
+    group: "Workspace",
+    scope: "global",
+    note: "folio, outside the editor",
   },
   "folio.save": {
     chord: { key: "s", mod: true },
@@ -301,7 +346,11 @@ export const GLOBAL_SHORTCUT_IDS = (
 type KeyLike = Pick<
   KeyboardEvent,
   "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey"
->;
+> & {
+  code?: string;
+  // Method syntax: React narrows the key to its ModifierKey union.
+  getModifierState?(key: "AltGraph"): boolean;
+};
 
 /** The one chord-matching predicate. Letters compare case-insensitively and
  *  shift is only enforced on letters when the chord declares it (so ⌘⇧B
@@ -312,9 +361,16 @@ export function matchesChord(
   chord: Chord,
   isMac: boolean = IS_MAC,
 ): boolean {
+  // AltGr reports as Ctrl+Alt; on many layouts it types characters such as
+  // [ and ], which must reach the editor rather than fire a chord.
+  if (e.getModifierState?.("AltGraph")) return false;
   const want = chord.key.length === 1 ? chord.key.toLowerCase() : chord.key;
-  const got = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  if (got !== want) return false;
+  if (chord.code !== undefined) {
+    if (e.code !== chord.code) return false;
+  } else {
+    const got = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (got !== want) return false;
+  }
 
   if (chord.ctrl) {
     if (!e.ctrlKey || e.metaKey) return false;
@@ -327,7 +383,7 @@ export function matchesChord(
   if ((chord.alt ?? false) !== e.altKey) return false;
 
   const isLetter = /^[a-z]$/.test(want);
-  if (!isLetter || chord.shift !== undefined) {
+  if (chord.code !== undefined || !isLetter || chord.shift !== undefined) {
     if ((chord.shift ?? false) !== e.shiftKey) return false;
   }
   return true;
