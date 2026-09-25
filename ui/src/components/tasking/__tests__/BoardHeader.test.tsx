@@ -192,7 +192,7 @@ describe("BoardHeader", () => {
     renderHeader({ activeOp: noneOp });
     const healthEl = screen.getByText("NONE") as HTMLElement;
     expect(healthEl.tagName).toBe("B");
-    expect(healthEl.style.color).toBe("var(--ink-mute)");
+    expect(healthEl.style.color).toBe("var(--mute)");
   });
 
   // ── filter strip: shared FilterBar wiring ─────────────────────────────────

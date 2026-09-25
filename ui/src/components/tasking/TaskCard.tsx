@@ -1,13 +1,15 @@
 /**
  * TaskCard — individual kanban card with Pragmatic drag-and-drop.
  *
- * Mirrors the kc-* / kb-card anatomy from styles-board.css exactly,
- * translated to Tailwind + Vessel design tokens.
+ * Stone & Lamp card: `raise` fill, 14px radius, no border; Done cards drop
+ * the fill and mute their title.
  */
 
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { useEffect, useRef, useState } from "react";
 import type { BoardTask } from "#/api/board";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { type ColLabelFn, priColor, StatePip } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
@@ -61,57 +63,48 @@ export function TaskCard({
     isComplete: checksDone,
   } = checklistProgress(t.checks);
 
-  const { bar: barColor, text: priTextColor } = priColor(t.priority);
+  const { text: priTextColor } = priColor(t.priority);
   const link = t.link;
+  const sealed = t.status === "SEALED";
 
   return (
     <div
       ref={cardRef}
-      className="group pointer-events-none relative cursor-grab border border-[var(--rule)] bg-[var(--bg)] p-[9px_11px_9px_14px] transition-[border-color,background,transform] duration-[80ms,120ms,80ms] hover:border-[var(--hot)] hover:bg-[var(--bg-3)] active:cursor-grabbing"
-      style={isDragging ? { opacity: 0.35, borderStyle: "dashed" } : undefined}
+      className={cn(
+        "group pointer-events-none relative cursor-grab rounded-[14px] px-[18px] pb-[15px] pt-4 transition-[background,box-shadow] duration-[120ms] active:cursor-grabbing",
+        sealed
+          ? "bg-transparent hover:bg-sink"
+          : "bg-raise hover:shadow-[0_1px_4px_rgb(0_0_0/0.08)]",
+      )}
+      style={
+        isDragging
+          ? { opacity: 0.35, outline: "1px dashed var(--faint)" }
+          : undefined
+      }
       data-testid={`task-card-${t.id}`}
     >
       <button
         ref={actionRef}
         type="button"
         aria-label={`Edit ${t.code}: ${t.title}`}
-        className="pointer-events-auto absolute inset-0 z-0 cursor-grab border-0 bg-transparent p-0 text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--hot)] focus-visible:outline-offset-[-1px] active:cursor-grabbing"
+        className={cn(
+          "pointer-events-auto absolute inset-0 z-0 cursor-grab rounded-[14px] bg-transparent p-0 text-left active:cursor-grabbing",
+          FOCUS_RING_NATIVE,
+        )}
         onClick={onClick}
         data-testid={`task-action-${t.id}`}
       />
-      {/* Left priority bar */}
-      <span
-        className="absolute bottom-0 left-0 top-0 w-[3px]"
-        style={{ background: barColor }}
-        aria-hidden
-      />
 
-      {/* HOLD stamp — absolute top-right */}
-      {t.hold && (
-        <span
-          className="cl-display pointer-events-none absolute right-[8px] top-[6px] border-[1.5px] border-[var(--hot)] bg-[color-mix(in_oklab,var(--hot)_12%,var(--bg))] px-[5px] py-[1px] text-[9px] font-extrabold tracking-[0.18em] text-[var(--hot)]"
-          style={{ transform: "rotate(-7deg)" }}
-          data-testid={`hold-stamp-${t.id}`}
-        >
-          Blocked
-        </span>
-      )}
-
-      {/* Top row: id · priority badge · op code */}
-      <div className="mb-[6px] flex items-center gap-[8px]">
-        <span className="cl-mono truncate max-w-full font-variant-numeric text-[var(--fs-xs)] tracking-[0.06em] text-[var(--ink-2)]">
-          {t.code}
-        </span>
+      {/* Top row: code · priority · status · project */}
+      <div className="mb-2 flex items-center gap-2 text-[12.5px] text-mute">
+        <span className="max-w-full truncate tabular-nums">{t.code}</span>
         <InlineEditPopover
           task={t}
           field="priority"
           testIdPrefix="kb"
           colLabel={colLabel}
         >
-          <span
-            className="cl-mono border px-[4px] py-0 text-[var(--fs-xs)] tracking-[0.08em]"
-            style={{ color: priTextColor, borderColor: priTextColor }}
-          >
+          <span className="tabular-nums" style={{ color: priTextColor }}>
             {t.priority}
           </span>
         </InlineEditPopover>
@@ -123,21 +116,33 @@ export function TaskCard({
         >
           <StatePip col={t.status} />
         </InlineEditPopover>
-        {showOp && t.project && (
-          <span className="cl-mono ml-auto border border-[var(--rule)] px-[4px] text-[var(--fs-xs)] tracking-[0.1em] text-[var(--ink-3)]">
-            {t.project}
+        {t.hold && (
+          <span
+            className="pointer-events-none rounded-full bg-[color-mix(in_oklab,var(--hot)_12%,transparent)] px-2 leading-5 text-hot"
+            data-testid={`hold-stamp-${t.id}`}
+          >
+            Blocked
           </span>
+        )}
+        {showOp && t.project && (
+          <span className="ml-auto truncate">{t.project}</span>
         )}
       </div>
 
       {/* Title */}
-      <div className="cl-display mb-[8px] text-[12.5px] font-semibold uppercase leading-[1.22] tracking-[0.02em] text-[var(--ink)] [text-wrap:pretty]">
+      <div
+        data-card-title
+        className={cn(
+          "text-[14.5px] leading-[1.45] [text-wrap:pretty]",
+          sealed ? "text-mute" : "text-ink",
+        )}
+      >
         {t.title}
       </div>
 
       {t.body_excerpt && (
         <p
-          className="line-clamp-3 mb-[8px] -mt-[4px] text-[var(--fs-sm)] leading-[1.35] text-[var(--ink-2)]"
+          className="mt-1.5 line-clamp-3 text-[13px] leading-[1.45] text-mute"
           data-testid={`task-excerpt-${t.id}`}
         >
           {t.body_excerpt}
@@ -147,7 +152,7 @@ export function TaskCard({
       {/* Hold reason line */}
       {t.hold && (
         <div
-          className="cl-mono mb-[7px] -mt-[2px] flex items-center gap-[6px] text-[var(--fs-xs)] uppercase tracking-[0.06em] text-[var(--hot)] before:content-['▲']"
+          className="mt-2 text-[12.5px] text-hot"
           data-testid={`hold-line-${t.id}`}
         >
           {t.hold}
@@ -156,13 +161,13 @@ export function TaskCard({
 
       {/* Checklist progress bar */}
       {total > 0 && (
-        <div className="mb-[7px] flex items-center gap-[7px]">
+        <div className="mt-2.5 flex items-center gap-2">
           <ChecklistBar
             percent={pct}
             isComplete={checksDone}
-            className="h-[4px] flex-1"
+            className="h-1 flex-1"
           />
-          <span className="cl-mono font-variant-numeric text-[var(--fs-xs)] tracking-[0.06em] text-[var(--ink-3)]">
+          <span className="text-[12.5px] tabular-nums text-mute">
             {done}/{total}
           </span>
         </div>
@@ -170,11 +175,11 @@ export function TaskCard({
 
       {/* Tags — up to 3, with a +N overflow chip */}
       {t.tags.length > 0 && (
-        <div className="mb-[7px] flex flex-wrap gap-[3px]">
+        <div className="mt-2.5 flex flex-wrap gap-1">
           {t.tags.slice(0, 3).map((tag) => (
             <span
               key={tag}
-              className="cl-mono border border-[var(--rule)] px-[4px] py-0 text-[var(--fs-xs)] tracking-[0.06em] text-[var(--ink-3)]"
+              className="rounded-full bg-sink px-2 text-[12px] leading-5 text-ink-2"
             >
               {tag}
             </span>
@@ -182,7 +187,7 @@ export function TaskCard({
           {t.tags.length > 3 && (
             <span
               data-testid={`task-tags-more-${t.id}`}
-              className="cl-mono border border-[var(--rule)] px-[4px] text-[var(--fs-xs)] text-[var(--ink-3)]"
+              className="rounded-full bg-sink px-2 text-[12px] leading-5 text-mute"
             >
               +{t.tags.length - 3}
             </span>
@@ -190,18 +195,17 @@ export function TaskCard({
         </div>
       )}
 
-      {/* Footer */}
-      <div className="cl-mono flex items-center gap-[10px] border-t border-dotted border-[var(--rule)] pt-[6px] text-[var(--fs-xs)] uppercase tracking-[0.08em] text-[var(--ink-3)]">
-        {t.assignee && (
-          <span className="text-[var(--ink-2)]">{t.assignee}</span>
-        )}
-        {t.estimate && (
-          <span className="font-variant-numeric">{t.estimate}</span>
-        )}
+      {/* Meta row */}
+      <div className="mt-3 flex items-center gap-2.5 text-[12.5px] text-mute">
+        {t.assignee && <span className="text-ink-2">{t.assignee}</span>}
+        {t.estimate && <span className="tabular-nums">{t.estimate}</span>}
         {link && (
           <button
             type="button"
-            className="pointer-events-auto relative z-[1] cursor-pointer border-b border-dotted border-[var(--cool)] text-[var(--cool)] hover:bg-[var(--cool)] hover:text-[var(--bg)]"
+            className={cn(
+              "pointer-events-auto relative z-[1] cursor-pointer truncate rounded text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent",
+              FOCUS_RING_NATIVE,
+            )}
             onClick={(e) => {
               e.stopPropagation();
               onOpenDossier?.(link);
@@ -211,7 +215,7 @@ export function TaskCard({
           </button>
         )}
         <span
-          className="ml-auto font-variant-numeric"
+          className="ml-auto whitespace-nowrap tabular-nums"
           style={t.due ? { color: "var(--ink-2)" } : undefined}
         >
           Due {t.due ?? "—"}

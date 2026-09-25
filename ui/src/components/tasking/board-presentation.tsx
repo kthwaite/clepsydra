@@ -10,12 +10,10 @@ export interface CycleMetricProps {
 
 export function CycleMetric({ label, value, testId, color }: CycleMetricProps) {
   return (
-    <div className="flex min-w-[78px] flex-col gap-[3px]">
-      <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-        {label}
-      </span>
+    <div className="flex min-w-[78px] flex-col gap-1">
+      <span className="text-[12.5px] text-mute">{label}</span>
       <b
-        className="cl-display text-[20px] font-black leading-none [font-variant-numeric:tabular-nums]"
+        className="font-serif text-[26px] font-normal leading-none tabular-nums"
         style={color ? { color } : undefined}
         data-testid={testId}
       >
@@ -40,16 +38,13 @@ export function ChecklistBar({
 }: ChecklistBarProps) {
   return (
     <span
-      className={cn(
-        "block border border-[var(--rule)] bg-[var(--bg-3)]",
-        className,
-      )}
+      className={cn("block overflow-hidden rounded-full bg-sink", className)}
     >
       <i
-        className="block h-full"
+        className="block h-full rounded-full"
         style={{
           width: `${percent}%`,
-          background: isComplete ? "var(--cool)" : "var(--ink-2)",
+          background: isComplete ? "var(--accent)" : "var(--mute)",
         }}
         data-testid={indicatorTestId}
       />

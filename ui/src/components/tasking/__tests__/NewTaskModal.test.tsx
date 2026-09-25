@@ -241,8 +241,8 @@ describe("NewTaskModal — render", () => {
     const p2 = within(priority).getByRole("radio", { name: "P2 Medium" });
     expect(p2).toBeChecked();
     const p2Label = p2.closest("label");
-    // Active state: has cool background
-    expect(p2Label).toHaveStyle({ background: "var(--cool)" });
+    // Active state: filled with the Medium priority tone
+    expect(p2Label).toHaveStyle({ background: "var(--mute)" });
     expect(p2Label).toHaveClass(
       "ml-0",
       "data-[hovered]:bg-transparent",

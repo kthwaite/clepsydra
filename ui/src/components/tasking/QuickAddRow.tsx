@@ -13,6 +13,7 @@
 import { useState } from "react";
 import { useCreateTask } from "#/api/board";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 export interface QuickAddRowProps {
   /** Preset fields: status, project, cycle (all optional) */
@@ -54,7 +55,8 @@ export function QuickAddRow({ preset, testId, className }: QuickAddRowProps) {
       type="text"
       data-testid={testId}
       className={cn(
-        "cl-mono w-full border border-dashed border-[var(--rule)] bg-transparent px-[8px] py-[6px] text-[var(--fs-xs)] uppercase tracking-[0.08em] text-[var(--ink)] outline-none placeholder:text-[var(--ink-4)] focus:border-[var(--hot)] focus:border-solid",
+        "h-9 w-full rounded-[14px] bg-transparent px-[18px] text-[13.5px] text-ink placeholder:text-mute hover:bg-sink focus:bg-sink",
+        FOCUS_RING_NATIVE,
         className,
       )}
       aria-label="New task"

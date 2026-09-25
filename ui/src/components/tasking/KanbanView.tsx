@@ -21,12 +21,15 @@ import {
 } from "react";
 import type { BoardColumn, BoardCycle, BoardTask } from "#/api/board";
 import { usePatchTask } from "#/api/board";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import {
   KANBAN_COL_DEFAULT,
   KANBAN_COL_MAX,
   KANBAN_COL_MIN,
   useBoardStore,
 } from "#/store/board";
+import { Tick } from "../codex/Tick";
 import { type ColLabelFn, PRI_ORDER } from "./board-constants";
 import { QuickAddRow } from "./QuickAddRow";
 import { TaskCard } from "./TaskCard";
@@ -81,6 +84,9 @@ function getTaskCardDragData(
     status: data.status,
   };
 }
+
+/** Inbox and Done are the board's quiet ends: their ticks are faint. */
+const FAINT_COLUMNS = new Set(["INTAKE", "SEALED"]);
 
 // ── column resize handle ─────────────────────────────────────────────────────
 
@@ -140,7 +146,7 @@ function ColumnResizeHandle({
           setColumnWidth(status, current - 16);
         }
       }}
-      className="absolute right-0 top-0 z-[3] h-full w-[5px] cursor-col-resize outline-none hover:bg-[color-mix(in_oklab,var(--accent)_35%,transparent)] focus-visible:bg-[color-mix(in_oklab,var(--accent)_35%,transparent)]"
+      className="absolute right-0 top-0 z-[3] h-full w-[5px] cursor-col-resize rounded-full outline-none hover:bg-[color-mix(in_oklab,var(--accent)_35%,transparent)] focus-visible:bg-[color-mix(in_oklab,var(--accent)_35%,transparent)]"
     />
   );
 }
@@ -191,7 +197,7 @@ function KanbanDropColumn({
   return (
     <div
       ref={ref}
-      className="relative flex min-h-0 flex-[1_0_282px] flex-col border-r border-[var(--rule)] last:border-r-0"
+      className="relative flex min-h-0 flex-[1_0_282px] flex-col rounded-xl"
       style={{
         ...(isDropTarget
           ? {
@@ -256,7 +262,7 @@ export function KanbanView({
   );
 
   return (
-    <div className="flex h-full min-h-0 overflow-x-auto overflow-y-hidden">
+    <div className="flex h-full min-h-0 gap-3 overflow-x-auto overflow-y-hidden px-3">
       {columns.map((col) => {
         const items = visible
           .filter((t) => t.status === col.id)
@@ -281,20 +287,24 @@ export function KanbanView({
           >
             {/* Column header — one fixed-height row; only the sub-label may truncate */}
             <div
-              className="sticky top-0 z-[2] flex h-[36px] items-center gap-[8px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)]"
+              className="sticky top-0 z-[2] flex h-11 items-center gap-2 bg-ground px-3"
               data-testid={`kb-head-${col.id}`}
             >
-              <span className="cl-display whitespace-nowrap text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--ink)]">
+              <Tick variant={FAINT_COLUMNS.has(col.id) ? "faint" : "live"} />
+              <span className="whitespace-nowrap font-serif text-[19px] italic text-ink">
                 {displayLabel}
               </span>
               {col.sub && (
-                <span className="cl-mono min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
+                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] text-mute">
                   {col.sub}
                 </span>
               )}
               <button
                 type="button"
-                className="inline-flex h-[16px] w-[16px] items-center justify-center border border-[var(--rule)] text-[13px] leading-[1] text-[var(--ink-3)] transition-[color,border-color] duration-[120ms] hover:border-[var(--hot)] hover:text-[var(--hot)]"
+                className={cn(
+                  "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[15px] leading-none text-mute transition-colors hover:bg-sink hover:text-accent",
+                  FOCUS_RING_NATIVE,
+                )}
                 title={`New task in ${displayLabel}`}
                 onClick={() =>
                   openTaskModal(
@@ -308,7 +318,7 @@ export function KanbanView({
                 +
               </button>
               <span
-                className="cl-mono ml-auto min-w-[22px] shrink-0 whitespace-nowrap border border-[var(--rule)] px-[5px] text-center text-[var(--fs-xs)] tracking-[0.1em] text-[var(--ink-2)] font-variant-numeric"
+                className="ml-auto shrink-0 whitespace-nowrap text-[12.5px] tabular-nums text-mute"
                 data-testid={`kb-cnt-${col.id}`}
               >
                 {taskCount}
@@ -317,12 +327,12 @@ export function KanbanView({
 
             {/* Column body */}
             <div
-              className="flex flex-1 flex-col gap-[9px] overflow-y-auto p-[var(--pad)] min-h-0"
+              className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-1.5 pb-4 pt-1"
               data-testid={`kb-body-${col.id}`}
             >
               {items.length === 0 ? (
                 <div
-                  className="cl-mono border border-dashed border-[var(--rule)] px-[8px] py-[16px] text-center text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-4)]"
+                  className="rounded-[14px] bg-sink px-4 py-5 text-center text-[13px] text-mute"
                   data-testid={`kb-empty-${col.id}`}
                 >
                   No tasks

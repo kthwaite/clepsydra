@@ -66,7 +66,9 @@ export const PRI_ON_STYLE: Record<string, React.CSSProperties> =
   Object.fromEntries(
     PRI_ORDER.map((p) => {
       const { bar } = priColor(p);
-      return [p, { background: bar, borderColor: bar, color: "#000" }];
+      // Dark fills (Critical, High) take ground text; light ones take ink.
+      const color = p === "P0" || p === "P1" ? "var(--ground)" : "var(--ink)";
+      return [p, { background: bar, borderColor: bar, color }];
     }),
   );
 
