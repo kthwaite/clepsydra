@@ -36,6 +36,7 @@ import {
   useOutlinks,
   useSimilar,
   useTagSuggestions,
+  useUnlinkedMentions,
 } from "#/api/index";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { type ArchivedPage, useAssignPage } from "#/api/pages";
@@ -282,6 +283,7 @@ export function Folio({ tabId, path }: FolioProps) {
     useAiJournalToday(isTodayAiDraftPath);
   const editor = usePageEditor(path, useJournalEditorOptions(path));
   const { data: backlinks } = useBacklinks(path);
+  const { data: unlinkedMentions } = useUnlinkedMentions(path);
   const { data: outlinks } = useOutlinks(path);
   const visibleOutlinks = useMemo(
     () => visibleFolioOutlinks(outlinks),
@@ -1510,6 +1512,7 @@ export function Folio({ tabId, path }: FolioProps) {
   );
 
   const similarItems = similar?.items ?? [];
+  const unlinked = unlinkedMentions ?? [];
   // The index returns one row per link; the rail shows one card per source.
   const linkedFrom = (backlinks ?? []).filter(
     (b, i, all) => all.findIndex((o) => o.source_path === b.source_path) === i,
@@ -1522,36 +1525,38 @@ export function Folio({ tabId, path }: FolioProps) {
         ) : (
           <div className="flex flex-col gap-6">
             {linkedFrom.map((b) => (
-              <CLink
+              <RailLinkEntry
                 key={b.source_path}
                 path={b.source_path}
-                className={cn(
-                  "cl-link-plain flex flex-col gap-1.5 rounded",
-                  FOCUS_RING_NATIVE,
-                )}
-              >
-                <span
-                  data-link-title
-                  className="font-serif text-[21px] leading-[1.2] text-ink"
-                >
-                  {b.source_title || b.source_path}
-                </span>
-                {b.context ? (
-                  <span
-                    data-link-snippet
-                    className="text-[13.5px] leading-[1.55] text-mute"
-                  >
-                    {highlightMatch(plainWikiText(b.context), [
-                      ...b.target_raw.split("|"),
-                      editor.title ?? "",
-                    ])}
-                  </span>
-                ) : null}
-              </CLink>
+                title={b.source_title || b.source_path}
+                context={b.context}
+                needles={[...b.target_raw.split("|"), editor.title ?? ""]}
+              />
             ))}
           </div>
         )}
       </Section>
+
+      {unlinked.length > 0 ? (
+        <Section
+          compact
+          pip="dim"
+          label="Unlinked mentions"
+          caption={String(unlinked.length)}
+        >
+          <div className="flex flex-col gap-6">
+            {unlinked.map((m) => (
+              <RailLinkEntry
+                key={m.source_path}
+                path={m.source_path}
+                title={m.source_title || m.source_path}
+                context={m.context}
+                needles={[m.matched]}
+              />
+            ))}
+          </div>
+        </Section>
+      ) : null}
 
       <Section
         compact
@@ -2078,6 +2083,45 @@ function Prop({ k, children }: { k: string; children: React.ReactNode }) {
       <dt className="text-mute">{k}</dt>
       <dd className="m-0 flex min-w-0 items-center text-ink">{children}</dd>
     </>
+  );
+}
+
+/** A rail entry for a page that refers to this one: serif title, then the
+ *  surrounding text with the reference highlighted. */
+function RailLinkEntry({
+  path,
+  title,
+  context,
+  needles,
+}: {
+  path: string;
+  title: string;
+  context: string | null | undefined;
+  needles: string[];
+}) {
+  return (
+    <CLink
+      path={path}
+      className={cn(
+        "cl-link-plain flex flex-col gap-1.5 rounded",
+        FOCUS_RING_NATIVE,
+      )}
+    >
+      <span
+        data-link-title
+        className="font-serif text-[21px] leading-[1.2] text-ink"
+      >
+        {title}
+      </span>
+      {context ? (
+        <span
+          data-link-snippet
+          className="text-[13.5px] leading-[1.55] text-mute"
+        >
+          {highlightMatch(plainWikiText(context), needles)}
+        </span>
+      ) : null}
+    </CLink>
   );
 }
 

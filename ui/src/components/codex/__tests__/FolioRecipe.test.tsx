@@ -57,6 +57,7 @@ vi.mock("#/components/codex/useScrollSpy", () => ({
 }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: [] }),
+  useUnlinkedMentions: () => ({ data: [] }),
   useOutlinks: () => ({ data: [] }),
   useSimilar: () => ({ data: [] }),
   useTags: () => ({ data: [] }),

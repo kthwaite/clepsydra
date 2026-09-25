@@ -52,6 +52,7 @@ vi.mock("#/editor/SaveIndicator", () => ({ SaveIndicator: () => null }));
 vi.mock("#/editor/SlateEditor", () => ({ SlateEditor: () => null }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: [] }),
+  useUnlinkedMentions: () => ({ data: [] }),
   useOutlinks: () => ({ data: [] }),
   useSimilar: () => ({ data: [] }),
   useTags: () => ({ data: [] }),

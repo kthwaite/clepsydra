@@ -106,6 +106,7 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: [] }),
+  useUnlinkedMentions: () => ({ data: [] }),
   useGraph: () => ({ data: graph, isLoading: false }),
   useOutlinks: () => ({ data: [] }),
   useSimilar: () => ({ data: [] }),
