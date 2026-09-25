@@ -102,6 +102,7 @@ import {
   type RecipeParseResult,
   serializeRecipeMarkdown,
 } from "#/recipe/recipeCodec";
+import { FOLIO_LEFT_RAIL, FOLIO_RIGHT_RAIL } from "#/store/folioRails";
 import {
   clearFolioRestoration,
   consumeFolioHistoryRestorationRequest,
@@ -1687,14 +1688,14 @@ function DesktopFolioLayout({
   protection: React.ReactNode;
 }) {
   const left = useCollapsibleRail({
-    storageKey: "clp.folio.l",
+    storageKey: FOLIO_LEFT_RAIL,
     side: "left",
     defaultWidth: 240,
     min: 180,
     max: 480,
   });
   const right = useCollapsibleRail({
-    storageKey: "clp.folio.r",
+    storageKey: FOLIO_RIGHT_RAIL,
     side: "right",
     defaultWidth: 280,
     min: 220,

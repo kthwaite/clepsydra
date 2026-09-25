@@ -14,9 +14,10 @@ type Mods = Partial<{
   altKey: boolean;
 }>;
 
-function ev(key: string, mods: Mods = {}) {
+function ev(key: string, mods: Mods = {}, code?: string) {
   return {
     key,
+    code: code ?? "",
     metaKey: false,
     ctrlKey: false,
     shiftKey: false,
@@ -200,5 +201,42 @@ describe("editor.dateTimeHeading", () => {
     expect(
       matchesChord(dated, SHORTCUTS["editor.timeHeading"].chord, true),
     ).toBe(false);
+  });
+});
+
+describe("code-matched chords (layout-shifted keys)", () => {
+  it("matches ⌘⌥[ on a Mac, where ⌥ turns [ into “", () => {
+    const chord = SHORTCUTS["folio.toggleLeft"].chord;
+    const e = ev("“", { metaKey: true, altKey: true }, "BracketLeft");
+    expect(matchesChord(e, chord, true)).toBe(true);
+  });
+
+  it("matches ⌘⇧\\ on a Mac, where ⇧ turns \\ into |", () => {
+    const chord = SHORTCUTS["app.themeToggle"].chord;
+    const e = ev("|", { metaKey: true, shiftKey: true }, "Backslash");
+    expect(matchesChord(e, chord, true)).toBe(true);
+  });
+
+  it("keeps ⌘\\ (both sidebars) distinct from ⌘⇧\\ (theme)", () => {
+    const both = SHORTCUTS["folio.toggleBoth"].chord;
+    const theme = SHORTCUTS["app.themeToggle"].chord;
+    const plain = ev("\\", { metaKey: true }, "Backslash");
+    const shifted = ev("|", { metaKey: true, shiftKey: true }, "Backslash");
+    expect(matchesChord(plain, both, true)).toBe(true);
+    expect(matchesChord(plain, theme, true)).toBe(false);
+    expect(matchesChord(shifted, both, true)).toBe(false);
+  });
+
+  it("formats code chords from their key", () => {
+    expect(formatChord(SHORTCUTS["folio.toggleLeft"].chord, true)).toBe("⌥⌘[");
+    expect(formatChord(SHORTCUTS["app.themeToggle"].chord, true)).toBe("⇧⌘\\");
+  });
+
+  it("registers ⌘⇧O for Contents without colliding with superscript", () => {
+    const contents = SHORTCUTS["app.contents"].chord;
+    expect(contents).toEqual({ key: "o", mod: true, shift: true });
+    expect(matchesChord(ev(".", { metaKey: true }), contents, true)).toBe(
+      false,
+    );
   });
 });

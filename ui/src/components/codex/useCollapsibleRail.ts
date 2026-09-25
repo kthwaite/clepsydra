@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useFolioRails } from "#/store/folioRails";
 
 type RailSide = "left" | "right";
 
@@ -33,14 +34,6 @@ function readNum(key: string, fallback: number): number {
   return fallback;
 }
 
-function readBool(key: string): boolean {
-  try {
-    return window.localStorage.getItem(key) === "1";
-  } catch {
-    return false;
-  }
-}
-
 function write(key: string, value: string) {
   try {
     window.localStorage.setItem(key, value);
@@ -61,26 +54,22 @@ export function useCollapsibleRail({
   max,
 }: Options): Rail {
   const wKey = `${storageKey}.w`;
-  const cKey = `${storageKey}.collapsed`;
 
   const [width, setWidth] = useState<number>(() => readNum(wKey, defaultWidth));
-  const [collapsed, setCollapsedState] = useState<boolean>(() =>
-    readBool(cKey),
+  const collapsed = useFolioRails(
+    (s) => s.collapsed[storageKey] ?? s.isCollapsed(storageKey),
   );
   const [resizing, setResizing] = useState(false);
   const drag = useRef<{ startX: number; startW: number } | null>(null);
 
   const setCollapsed = useCallback(
-    (v: boolean) => {
-      setCollapsedState(v);
-      write(cKey, v ? "1" : "0");
-    },
-    [cKey],
+    (v: boolean) => useFolioRails.getState().setCollapsed(storageKey, v),
+    [storageKey],
   );
 
   const toggle = useCallback(
-    () => setCollapsed(!collapsed),
-    [collapsed, setCollapsed],
+    () => useFolioRails.getState().toggle(storageKey),
+    [storageKey],
   );
 
   const onResizeStart = useCallback(
