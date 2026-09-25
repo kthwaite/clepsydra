@@ -29,13 +29,14 @@ Slate.js editor with a registry-driven schema. Plugin chain: `withReact(withHist
 
 ## Design Aesthetic
 
-The UI is mid-migration from **Vessel** to **Stone & Lamp** (spec: `docs/superpowers/specs/2026-09-25-stone-and-lamp-redesign-design.md`; phases in its §6). Phase 1 (tokens + fonts) is done; layouts are still Vessel until phases 2–5 land.
+The UI is mid-migration from **Vessel** to **Stone & Lamp** (spec: `docs/superpowers/specs/2026-09-25-stone-and-lamp-redesign-design.md`; phases in its §6). Phase 1 (tokens + fonts) and phase 2a (header, Contents, footer) are done; the Sheaf (2b) and screen layouts are still Vessel until phases 2b–5 land.
 
 - Palette: bone (light, `.paper` on `<html>`, the **default**) and charcoal (dark, base `:root`); **cobalt** is the only accent (`#1747E6` bone / `#809CFF` charcoal). No accent presets.
 - Every colour is a bare property on `:root`/`.paper`; the `@theme` `--color-*` tokens are `var()` aliases. Role names for new code: `ground`, `raise`, `sink`, `mute`, `faint`, `accent-tint` (legacy `paper`, `paper-2`, `paper-edge`, `ink-mute`, `ink-faint`, `highlight` still resolve).
 - Type: **Geist** (sans) for UI and prose, **Instrument Serif** (regular + italic only — never bold) as accent, **JetBrains Mono** for code only. `.cl-mono` is a temporary sans alias; don't add new `cl-mono`/`font-mono` outside code.
 - Radius 12px on surfaces, pills for buttons; soft shadows on overlays only. No new hairline borders — separate with space and tone.
-- `data-density` and `data-diegetic` remain on `<html>` (diegetic goes in phase 2).
+- `data-density` remains on `<html>`; the diegetic-chrome setting is gone.
+- Shell: header = wordmark (home) + `CORE_NAV` + `ContentsMenu`; new screens get a `group`/`description` in `VIEW_REGISTRY` and appear in Contents, never in the header. The footer (`ShellFooter`) reads `useSaveStatus` and the `footerContext` store — a screen adds right-hand context with `useFooterContext(parts)`.
 
 All semantic colour tokens live in `ui/src/main.css`; `ui/src/__tests__/themeTokens.test.ts` and `themeFonts.test.ts` pin them.
 
