@@ -12,3 +12,4 @@ pub mod reference_issues;
 mod search;
 pub mod sync;
 pub mod tree;
+mod unlinked;

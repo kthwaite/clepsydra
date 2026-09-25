@@ -1,7 +1,8 @@
 use std::sync::mpsc;
 
 use crate::index::{
-    BacklinkWithContext, BuildStats, IndexError, SearchResult, SimilarRow, VaultIndex,
+    BacklinkWithContext, BuildStats, IndexError, SearchResult, SimilarRow, UnlinkedMention,
+    VaultIndex,
 };
 use crate::index_policy::{self, IndexMutation, IndexPolicyError};
 use crate::sync::{ChangeEvent, SyncEngine, SyncStats};
@@ -157,6 +158,16 @@ impl IndexHandle {
         limit: usize,
     ) -> Result<Vec<SearchResult>, IndexError> {
         self.with_index(move |index, _vault| index.search(&query, limit))
+            .await?
+    }
+
+    /// Pages that mention the target's title or an alias without linking to it.
+    pub async fn unlinked_mentions(
+        &self,
+        vp: VaultPath,
+        limit: usize,
+    ) -> Result<Vec<UnlinkedMention>, IndexError> {
+        self.with_index(move |index, _vault| index.unlinked_mentions(&vp, limit))
             .await?
     }
 

@@ -18,6 +18,7 @@ use crate::derivers::tags::TagDeriver;
 use crate::reference_issues::{ReferenceIssueFilter, ReferenceIssuePage};
 pub use crate::search::query::SearchQueryError;
 use crate::search::{self, SearchExecutionError};
+pub use crate::unlinked::UnlinkedMention;
 use clep_vault::Vault;
 use clep_vault::canonical::CanonicalName;
 use clep_vault::config::DisambiguationStrategy;
