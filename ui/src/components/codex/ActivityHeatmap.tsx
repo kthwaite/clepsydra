@@ -244,7 +244,7 @@ export function ActivityHeatmap({
           </div>
         </div>
 
-        <dl className="m-0 flex gap-16 pb-1">
+        <dl className="m-0 flex flex-wrap gap-x-16 gap-y-6 pb-1">
           <SummaryFigure
             value={total.toLocaleString("en-US")}
             label="captures"

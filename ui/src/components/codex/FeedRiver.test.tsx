@@ -1388,4 +1388,16 @@ describe("FeedRiver", () => {
     expect(row.parentElement).toHaveClass("md:grid-cols-2");
     expect(row.textContent ?? "").not.toMatch(/[A-Z]{4,}/);
   });
+
+  it("matches the sticky day bar to its surface in each mode", () => {
+    const { unmount } = renderRiver({ view: "all" }, false);
+    const fullBar = screen.getAllByRole("heading", { level: 2 })[0]
+      .parentElement as HTMLElement;
+    expect(fullBar).toHaveClass("bg-raise");
+    unmount();
+    renderRiver({ view: "all" }, true);
+    const compactBar = screen.getAllByRole("heading", { level: 2 })[0]
+      .parentElement as HTMLElement;
+    expect(compactBar).toHaveClass("bg-ground");
+  });
 });

@@ -264,9 +264,9 @@ describe("Atrium composition", () => {
     const header = actionCluster?.parentElement;
     expect(header).toHaveClass("min-w-0", "flex-wrap");
     expect(actionCluster).toHaveClass("min-w-0", "flex-wrap");
-    expect(screen.getByText("Rolling 26 weeks · captures per day")).toHaveClass(
-      "whitespace-normal",
-    );
+    expect(
+      screen.getByText("Rolling 26 weeks · captures per day · UTC"),
+    ).toHaveClass("whitespace-normal");
   });
 
   it("keeps daystart compact and action-oriented without Julian time", async () => {
@@ -353,5 +353,21 @@ describe("Atrium composition", () => {
     render(<Atrium />);
     const figure = screen.getByTestId("bcl-figure");
     expect(figure).toHaveClass("font-serif", "text-accent", "tabular-nums");
+  });
+
+  it("scales the column gap with the viewport so narrow screens never overflow", () => {
+    render(<Atrium />);
+    const page = screen
+      .getByRole("heading", { level: 1 })
+      .closest("div.grid-cols-12") as HTMLElement;
+    expect(page.className).not.toMatch(/(^|\s)gap-x-24\b/);
+    expect(page).toHaveClass("gap-x-6", "2xl:gap-x-24");
+  });
+
+  it("keeps UTC in the Activity caption, since days are bucketed in UTC", () => {
+    render(<Atrium />);
+    expect(
+      screen.getByText("Rolling 26 weeks · captures per day · UTC"),
+    ).toBeInTheDocument();
   });
 });

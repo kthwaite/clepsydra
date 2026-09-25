@@ -103,7 +103,7 @@ export function Atrium() {
   const located = hasCoords(location);
 
   return (
-    <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-x-24 gap-y-[112px] px-6 pt-12 pb-24 md:px-10 xl:px-[120px] xl:pt-[88px] xl:pb-[120px]">
+    <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-x-6 gap-y-16 md:gap-x-12 md:gap-y-24 2xl:gap-x-24 2xl:gap-y-[112px] px-6 pt-12 pb-24 md:px-10 xl:px-[120px] xl:pt-[88px] xl:pb-[120px]">
       {/* HERO — col-12 */}
       <section className="col-span-12 grid items-end gap-12 md:grid-cols-[minmax(0,1fr)_340px] xl:gap-24">
         <div>
@@ -296,7 +296,7 @@ export function Atrium() {
         className="col-span-12"
         label="Activity"
         pip="cool"
-        caption="Rolling 26 weeks · captures per day"
+        caption="Rolling 26 weeks · captures per day · UTC"
         wrapHeader
         action={
           <button

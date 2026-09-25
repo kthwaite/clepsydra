@@ -391,4 +391,9 @@ describe("ActivityHeatmap", () => {
     expect(screen.getByText("captures")).toHaveClass("text-mute");
     expect(document.body.textContent).not.toMatch(/LESS|MORE|TOTAL|LONGEST/);
   });
+
+  it("wraps the summary figures on narrow screens", () => {
+    render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);
+    expect(screen.getByText("1,234").closest("dl")).toHaveClass("flex-wrap");
+  });
 });

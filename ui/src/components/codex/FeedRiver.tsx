@@ -301,7 +301,14 @@ export function FeedRiver({
       <div className="space-y-6">
         {days.map(({ key, label, entries: dayEntries }) => (
           <section key={key} aria-labelledby={`feed-day-${key}`}>
-            <div className="sticky top-0 z-10 mb-3.5 bg-ground py-1">
+            <div
+              className={cn(
+                "sticky top-0 z-10 mb-3.5 py-1",
+                // Opaque in the surface the river scrolls over: the Atrium
+                // ground, or the reader's raised list pane.
+                compact ? "bg-ground" : "bg-raise",
+              )}
+            >
               <h2
                 id={`feed-day-${key}`}
                 className="font-serif text-[17px] italic text-mute"
