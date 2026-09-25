@@ -168,7 +168,7 @@ describe("Atrium composition", () => {
     const bcl = closestSection(screen.getByText("Brimley-Cocoon Line"));
     const sky = screen.getByRole("region", { name: "Sky" });
     const activity = closestSection(
-      screen.getByText("Activity · Rolling 26 weeks"),
+      screen.getByRole("heading", { name: "Activity" }),
     );
     const reading = screen.getByRole("region", {
       name: "Reading Continues",
@@ -218,7 +218,7 @@ describe("Atrium composition", () => {
     const feed = screen.getByRole("region", { name: "Feed river panel" });
     const sky = screen.getByRole("region", { name: "Sky" });
     const activity = closestSection(
-      screen.getByText("Activity · Rolling 26 weeks"),
+      screen.getByRole("heading", { name: "Activity" }),
     );
 
     expect(screen.queryByText("Brimley-Cocoon Line")).not.toBeInTheDocument();
@@ -239,7 +239,7 @@ describe("Atrium composition", () => {
     rerender(<Atrium />);
 
     const activity = closestSection(
-      screen.getByText("Activity · Rolling 26 weeks"),
+      screen.getByRole("heading", { name: "Activity" }),
     );
     const reading = screen.getByRole("region", {
       name: "Reading Continues",
@@ -264,7 +264,7 @@ describe("Atrium composition", () => {
     const header = actionCluster?.parentElement;
     expect(header).toHaveClass("min-w-0", "flex-wrap");
     expect(actionCluster).toHaveClass("min-w-0", "flex-wrap");
-    expect(screen.getByText("Captures per day · UTC")).toHaveClass(
+    expect(screen.getByText("Rolling 26 weeks · captures per day")).toHaveClass(
       "whitespace-normal",
     );
   });

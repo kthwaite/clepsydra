@@ -10,11 +10,7 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([
-  "../codex/Atrium.tsx",
-  "../codex/ActivityHeatmap.tsx",
-  "../codex/ReadingContinues.tsx",
-]);
+const PENDING = new Set<string>([]);
 
 /** Screens restyled in phase 4; guarded like the primitives. */
 const SCREEN_FILES = [
@@ -31,7 +27,9 @@ const SCREEN_FILES = [
 
 const FORBIDDEN: Array<[string, RegExp]> = [
   ["uppercase", /\buppercase\b/],
-  ["tracking", /\btracking-/],
+  // Negative tracking tightens large serif display type (mockup); Vessel's
+  // chrome was positive tracking on caps.
+  ["tracking", /\btracking-(?!\[-)/],
   ["cl-mono", /\bcl-mono\b/],
   ["cl-serif", /\bcl-serif\b/],
   ["font-mono", /\bfont-mono\b/],

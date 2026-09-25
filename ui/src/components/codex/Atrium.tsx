@@ -293,16 +293,19 @@ export function Atrium() {
 
       {/* HEATMAP */}
       <Section
-        className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5"
-        label="Activity · Rolling 26 weeks"
+        className="col-span-12"
+        label="Activity"
         pip="cool"
-        caption="Captures per day · UTC"
+        caption="Rolling 26 weeks · captures per day"
         wrapHeader
         action={
           <button
             type="button"
             onClick={() => navigate({ to: "/stats" })}
-            className="cl-mono border-l border-rule pl-2.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+            className={cn(
+              "cursor-pointer rounded-sm text-[14px] text-accent hover:underline",
+              FOCUS_RING_NATIVE,
+            )}
           >
             Stats →
           </button>

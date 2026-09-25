@@ -217,7 +217,7 @@ function renderAtrium(client: QueryClient) {
 }
 
 function expectAtriumSurfaces() {
-  expect(screen.getByText("Activity · Rolling 26 weeks")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Activity" })).toBeInTheDocument();
   expect(screen.getByText(/^Week \d+$/)).toBeInTheDocument();
   expect(screen.getByText(/^\d+ of [\d,]+$/)).toBeInTheDocument();
 }
