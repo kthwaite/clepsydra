@@ -120,7 +120,7 @@ export function DesktopCodexFrame({
       {contentsOpen && (
         <div
           aria-hidden
-          className="pointer-events-none fixed inset-x-0 bottom-0 top-[72px] z-40 bg-ink/26"
+          className="pointer-events-none fixed inset-x-0 bottom-0 top-[72px] z-40 bg-scrim"
         />
       )}
 

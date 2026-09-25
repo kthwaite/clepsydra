@@ -53,6 +53,7 @@
     --color-mute: var(--ink-mute);
     --color-faint: var(--ink-faint);
     --color-accent-tint: var(--highlight);
+    --color-scrim: var(--scrim);
 
     /* Tailwind / shadcn semantic aliases */
     --color-background: var(--paper);
@@ -136,6 +137,9 @@
     --mute: var(--ink-mute);
     --faint: var(--ink-faint);
     --accent-tint: var(--highlight);
+    /* Modal/sheet backdrop. Not ink-based: ink is light in charcoal, which
+       would fog the page instead of dimming it. */
+    --scrim: rgb(0 0 0 / 0.45);
 
     /* Density (default) */
     --row-h: 22px;
@@ -161,6 +165,7 @@
 /* Bone (light). Toggled by `.paper` on <html>. Re-binds bare properties only;
    the @theme --color-* aliases follow automatically. */
 .paper {
+    --scrim: rgb(14 26 58 / 0.26);
     color-scheme: light;
     --paper: #f4efe4;
     --paper-2: #fbf8f2;

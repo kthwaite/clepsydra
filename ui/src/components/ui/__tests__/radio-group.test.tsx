@@ -49,4 +49,19 @@ describe("RadioGroup", () => {
     );
     expect(screen.getByText("Pick one")).toBeDefined();
   });
+
+  it("stays a plain row unless segmented, so callers' chips can fill it", () => {
+    render(
+      <RadioGroup aria-label="Priority" optionsClassName="gap-1">
+        <Radio value="a" className="flex-1">
+          Alpha
+        </Radio>
+      </RadioGroup>,
+    );
+    const group = screen.getByRole("radiogroup", { name: "Priority" });
+    expect(group.querySelector("[data-slot=segment-track]")).toBeNull();
+    const row = screen.getByRole("radio", { name: "Alpha" }).closest("label")
+      ?.parentElement as HTMLElement;
+    expect(row.className).not.toMatch(/w-fit|bg-sink|rounded-full/);
+  });
 });

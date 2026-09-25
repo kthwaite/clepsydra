@@ -40,12 +40,20 @@ const sizeClasses: Record<ButtonSize, string> = {
 };
 
 /** Shared visual contract for buttons and router links presented as buttons. */
+/** 44px is the primary/danger height (spec §5.5); quiet and ghost buttons
+ *  at md stay 36px so dense rows and banners do not bloat. */
+const QUIET_MD = "h-9 px-4 text-[14px]";
+
 export function buttonStyles(
   variant: ButtonVariant = "secondary",
   size: ButtonSize = "md",
   className?: string,
 ) {
-  return cn(base, variantClasses[variant], sizeClasses[size], className);
+  const sizeClass =
+    size === "md" && (variant === "secondary" || variant === "ghost")
+      ? QUIET_MD
+      : sizeClasses[size];
+  return cn(base, variantClasses[variant], sizeClass, className);
 }
 
 export function Button({

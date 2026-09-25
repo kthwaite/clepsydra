@@ -53,7 +53,7 @@ export function Dialog({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       isDismissable={isDismissable}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
     >
       <Modal
         className={cn(

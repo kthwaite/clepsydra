@@ -32,7 +32,7 @@ export function CodexModalShell({
       onOpenChange={(open) => {
         if (!open) onDismiss();
       }}
-      className="fixed inset-0 z-50 flex items-start justify-center bg-ink/30 pt-0 md:pt-20"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-0 md:pt-20"
     >
       <Modal
         className={cn(

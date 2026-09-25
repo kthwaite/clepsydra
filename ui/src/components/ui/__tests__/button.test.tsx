@@ -38,7 +38,7 @@ describe("Button", () => {
   });
 
   it("sizes md at 44px, sm at 32px and icon as a 32px circle", () => {
-    const { rerender } = render(<Button>Md</Button>);
+    const { rerender } = render(<Button variant="primary">Md</Button>);
     expect(screen.getByRole("button")).toHaveClass("h-11");
     rerender(<Button size="sm">Sm</Button>);
     expect(screen.getByRole("button")).toHaveClass("h-8");
@@ -96,5 +96,16 @@ describe("Button", () => {
   it("supports type=submit", () => {
     render(<Button type="submit">Submit</Button>);
     expect(screen.getByRole("button").getAttribute("type")).toBe("submit");
+  });
+
+  it("keeps the 44px height for primary and danger only; quiet and ghost md are 36px", () => {
+    const { rerender } = render(<Button variant="primary">P</Button>);
+    expect(screen.getByRole("button")).toHaveClass("h-11");
+    rerender(<Button variant="danger">D</Button>);
+    expect(screen.getByRole("button")).toHaveClass("h-11");
+    rerender(<Button variant="secondary">S</Button>);
+    expect(screen.getByRole("button")).toHaveClass("h-9");
+    rerender(<Button variant="ghost">G</Button>);
+    expect(screen.getByRole("button")).toHaveClass("h-9");
   });
 });

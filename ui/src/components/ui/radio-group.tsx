@@ -12,6 +12,10 @@ import { FOCUS_RING } from "#/lib/focusRing";
 export interface RadioGroupProps extends RACRadioGroupProps {
   label?: string;
   optionsClassName?: string;
+  /** Draw the options as a segmented control: a sink pill track with the
+   *  selected option raised. Off by default so callers with their own chip
+   *  rows (Tasking fields) keep full-width layouts. */
+  segmented?: boolean;
   description?: string;
   children?: ReactNode;
 }
@@ -21,6 +25,7 @@ export function RadioGroup({
   description,
   className,
   optionsClassName,
+  segmented = false,
   children,
   ...props
 }: RadioGroupProps) {
@@ -31,9 +36,9 @@ export function RadioGroup({
     >
       {label && <span className="text-[12.5px] text-mute">{label}</span>}
       <div
-        data-slot="segment-track"
+        data-slot={segmented ? "segment-track" : undefined}
         className={cn(
-          "flex w-fit gap-0.5 rounded-full bg-sink p-1",
+          segmented ? "flex w-fit gap-0.5 rounded-full bg-sink p-1" : "flex",
           optionsClassName,
         )}
       >
