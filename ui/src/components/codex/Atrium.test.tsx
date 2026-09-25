@@ -159,8 +159,10 @@ describe("Atrium composition", () => {
 
     render(<Atrium />);
 
-    const daystart = closestSection(screen.getByText(/DAYSTART \//));
-    const recents = closestSection(screen.getByText(/^\d+ OF \d+$/));
+    const daystart = closestSection(
+      screen.getByText(/^Week \d+$/),
+    );
+    const recents = closestSection(screen.getByText(/^\d+ of [\d,]+$/));
     const agenda = screen.getByRole("region", { name: "Outstanding agenda" });
     const feed = screen.getByRole("region", { name: "Feed river panel" });
     const bcl = closestSection(screen.getByText("Brimley-Cocoon Line"));
@@ -271,11 +273,13 @@ describe("Atrium composition", () => {
     const user = userEvent.setup();
     render(<Atrium />);
 
-    const daystart = closestSection(screen.getByText(/DAYSTART \//));
-    expect(daystart).toHaveTextContent("2026.08.09 (SUN)");
-    expect(daystart).toHaveTextContent("WEEK 32");
-    expect(daystart).toHaveTextContent("DAY 221 / 365");
-    expect(daystart).toHaveTextContent("12:00 LOCAL");
+    const daystart = closestSection(
+      screen.getByText(/^Week \d+$/),
+    );
+    expect(daystart).toHaveTextContent("Sunday 9 August 2026");
+    expect(daystart).toHaveTextContent("Week 32");
+    expect(daystart).toHaveTextContent("Day 221 of 365");
+    expect(daystart).toHaveTextContent("12:00 local");
     expect(daystart).not.toHaveTextContent(/\bJD\s/);
 
     const journal = within(daystart).getByRole("button", {
@@ -284,21 +288,20 @@ describe("Atrium composition", () => {
     const capture = within(daystart).getByRole("button", {
       name: /^Capture/i,
     });
-    const search = within(daystart).getByRole("button", {
-      name: /^Search/i,
-    });
+    // ⌘K covers search (spec decision 11): no hero Search tile.
+    expect(
+      within(daystart).queryByRole("button", { name: /^Search/i }),
+    ).toBeNull();
     const aiJournal = within(daystart).getByRole("button", {
       name: /^AI journal/i,
     });
 
     await user.click(journal);
     await user.click(capture);
-    await user.click(search);
     await user.click(aiJournal);
 
     expect(atriumMocks.openTodayJournal).toHaveBeenCalledOnce();
     expect(atriumMocks.openInscribe).toHaveBeenCalledOnce();
-    expect(atriumMocks.openSearch).toHaveBeenCalledOnce();
     expect(atriumMocks.openTodayAiJournal).toHaveBeenCalledOnce();
   });
 
@@ -313,5 +316,11 @@ describe("Atrium composition", () => {
     expect(
       screen.queryByText(/The notebook is a net for catching days\./),
     ).not.toBeInTheDocument();
+  });
+
+  it("greets in serif without the Vessel grid texture", () => {
+    render(<Atrium />);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveClass("font-serif");
+    expect(document.querySelector(".cl-grid-texture")).toBeNull();
   });
 });

@@ -11,6 +11,7 @@ import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayAiJournal } from "#/hooks/useOpenTodayAiJournal";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { resolveKind } from "#/lib/kind";
 import { formatRelativeTime, pad2 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
@@ -31,6 +32,7 @@ import { ReadingContinuesPanel } from "./ReadingContinues";
 import { Section } from "./Section";
 import { SkyCard } from "./SkyCard";
 import { deriveSky, hasCoords } from "./sky";
+import { Tick } from "./Tick";
 
 export function Atrium() {
   const features = useFeatureFlags();
@@ -47,7 +49,6 @@ export function Atrium() {
 
   const { data: journalToday } = useJournalToday();
   const { data: location } = useLocation();
-  const openSearch = useUiStore((s) => s.openSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
   const openLocation = useUiStore((s) => s.openLocation);
 
@@ -88,8 +89,9 @@ export function Atrium() {
   const calendar = useAtriumCalendar(now);
   const clock = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   const journalSub = journalToday?.meta.id
-    ? `${journalToday.meta.id} · JOURNAL / ${calendar.dotDate}`
-    : `JOURNAL / ${calendar.dotDate}`;
+    ? `${journalToday.meta.id} · Journal · ${calendar.dotDate}`
+    : `Journal · ${calendar.dotDate}`;
+  const longDate = `${now.toLocaleDateString("en-GB", { weekday: "long" })} ${now.getDate()} ${now.toLocaleDateString("en-GB", { month: "long" })} ${now.getFullYear()}`;
 
   const heat = useMemo(
     () => buildHeatmap(items, calendar.utcDate),
@@ -102,68 +104,65 @@ export function Atrium() {
   const located = hasCoords(location);
 
   return (
-    <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-3.5 px-2 py-2 md:px-4 md:py-4">
+    <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-x-24 gap-y-[112px] px-6 pt-12 pb-24 md:px-10 xl:px-[120px] xl:pt-[88px] xl:pb-[120px]">
       {/* HERO — col-12 */}
-      <section className="cl-grid-texture col-span-12 grid items-end gap-6 border border-rule bg-paper-2 px-4 py-4 md:grid-cols-[1fr_auto] md:px-6 md:py-5">
+      <section className="col-span-12 grid items-end gap-12 md:grid-cols-[minmax(0,1fr)_340px] xl:gap-24">
         <div>
-          <div className="cl-mono mb-3 flex flex-wrap items-center gap-4 text-[9px] uppercase tracking-[0.28em] text-ink-mute">
-            <span className="text-accent">●</span>
+          <div className="flex flex-wrap items-center gap-3 text-[14px] text-mute">
+            <Tick variant="pulse" />
+            <span className="text-ink">{longDate}</span>
+            <span aria-hidden>·</span>
+            <span>Week {calendar.week}</span>
+            <span aria-hidden>·</span>
             <span>
-              DAYSTART /{" "}
-              <b className="font-medium text-ink">{calendar.todayLabel}</b>
+              Day {calendar.doy} of {calendar.yearDays}
             </span>
-            <span>WEEK {calendar.week}</span>
-            <span>
-              DAY {calendar.doy} / {calendar.yearDays}
-            </span>
-            <span className="tabular-nums">{clock} LOCAL</span>
+            <span aria-hidden>·</span>
+            <span className="tabular-nums">{clock} local</span>
           </div>
-          <h1 className="font-sans text-[clamp(40px,6vw,72px)] font-black leading-[0.95] tracking-[-0.02em] text-ink">
+          <h1 className="mt-[22px] font-serif text-[clamp(56px,8vw,112px)] leading-[0.95] tracking-[-0.025em] text-ink">
             {greeting(now)}
           </h1>
         </div>
 
-        <div className="flex flex-col gap-2 md:min-w-[280px]">
+        <div className="flex flex-col gap-2.5 pb-2">
           <button
             type="button"
             onClick={openTodayJournal}
-            className="group grid grid-cols-[1fr_auto] items-center gap-4 border border-ink bg-ink px-4 py-3.5 text-left text-paper transition-colors hover:border-accent hover:bg-accent"
+            className={cn(
+              "grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[18px] bg-accent px-[22px] py-[18px] text-left text-raise transition-[filter] hover:brightness-95",
+              FOCUS_RING_NATIVE,
+            )}
           >
-            <div>
-              <div className="font-sans text-[12px] font-semibold uppercase tracking-[0.18em]">
+            <span className="flex flex-col gap-1">
+              <span className="text-[16px] font-medium">
                 Open today’s journal
-              </div>
-              <div className="cl-mono mt-1 text-[9px] uppercase tracking-[0.18em] opacity-75">
-                {journalSub}
-              </div>
-            </div>
-            <div className="text-[16px]">→</div>
+              </span>
+              <span className="text-[12.5px] opacity-80">{journalSub}</span>
+            </span>
+            <span aria-hidden className="text-[18px]">
+              →
+            </span>
           </button>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-2 gap-2.5">
             <button
               type="button"
               onClick={openInscribe}
-              className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
+              className={cn(
+                "flex cursor-pointer items-baseline justify-between rounded-[14px] bg-sink px-4 py-3 text-left text-[14.5px] text-ink hover:bg-sink/70",
+                FOCUS_RING_NATIVE,
+              )}
             >
               Capture
-              <div className="mt-1 hidden text-[9px] tracking-[0.18em] text-ink-mute md:block">
-                ⌘ N
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={openSearch}
-              className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
-            >
-              Search
-              <div className="mt-1 hidden text-[9px] tracking-[0.18em] text-ink-mute md:block">
-                ⌘ K
-              </div>
+              <span className="text-[12px] text-mute">⌘N</span>
             </button>
             <button
               type="button"
               onClick={openTodayAiJournal}
-              className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
+              className={cn(
+                "flex cursor-pointer items-baseline justify-between rounded-[14px] bg-sink px-4 py-3 text-left text-[14.5px] text-ink hover:bg-sink/70",
+                FOCUS_RING_NATIVE,
+              )}
             >
               AI journal
             </button>
@@ -205,7 +204,7 @@ export function Atrium() {
           </div>
           <div className="flex items-center gap-3 px-3 py-2">
             <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-              {recentRows.length} OF {items.length}
+              {recentRows.length} of {items.length.toLocaleString()}
             </span>
           </div>
         </div>

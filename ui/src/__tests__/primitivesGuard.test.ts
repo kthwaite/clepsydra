@@ -10,7 +10,28 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([]);
+const PENDING = new Set<string>([
+  "../codex/Atrium.tsx",
+  "../codex/AgendaTile.tsx",
+  "../codex/FeedRiverPanel.tsx",
+  "../codex/SkyCard.tsx",
+  "../codex/ActivityHeatmap.tsx",
+  "../codex/ReadingContinues.tsx",
+  "../codex/MoonDisc.tsx",
+  "../codex/DayArc.tsx",
+]);
+
+/** Screens restyled in phase 4; guarded like the primitives. */
+const SCREEN_FILES = [
+  "../codex/Atrium.tsx",
+  "../codex/AgendaTile.tsx",
+  "../codex/FeedRiverPanel.tsx",
+  "../codex/SkyCard.tsx",
+  "../codex/ActivityHeatmap.tsx",
+  "../codex/ReadingContinues.tsx",
+  "../codex/MoonDisc.tsx",
+  "../codex/DayArc.tsx",
+];
 
 const FORBIDDEN: Array<[string, RegExp]> = [
   ["uppercase", /\buppercase\b/],
@@ -41,6 +62,7 @@ const files = [
   "../codex/CommandPalette.tsx",
   "../codex/Section.tsx",
   "../codex/Tick.tsx",
+  ...SCREEN_FILES,
 ].filter((f) => {
   try {
     readFileSync(path.join(uiDir, f));
