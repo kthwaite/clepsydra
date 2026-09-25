@@ -41,6 +41,18 @@ impl VaultIndex {
         target: &VaultPath,
         limit: usize,
     ) -> Result<Vec<UnlinkedMention>, IndexError> {
+        self.unlinked_mentions_with_candidate_cap(target, limit, CANDIDATES_PER_TERM)
+    }
+
+    /// [`Self::unlinked_mentions`] with an explicit per-term FTS candidate
+    /// cap, so tests can prove exclusions happen before the cap.
+    #[doc(hidden)]
+    pub fn unlinked_mentions_with_candidate_cap(
+        &self,
+        target: &VaultPath,
+        limit: usize,
+        candidates_per_term: u32,
+    ) -> Result<Vec<UnlinkedMention>, IndexError> {
         let conn = self.connection();
         let row: Option<(String, Option<String>, String, bool)> = conn
             .query_row(
@@ -62,31 +74,40 @@ impl VaultIndex {
             return Ok(Vec::new());
         }
 
+        // Self, linking pages and encrypted pages are excluded inside the
+        // query, before the cap: a hub page's many linkers must not crowd out
+        // its unlinked mentions.
         let canonical = CanonicalName::from_filename(target.stem());
-        let linked: HashSet<String> = conn
-            .prepare(
-                "SELECT DISTINCT source_id FROM links
-                 WHERE target_id = ?1 OR target_path = ?2 OR target_canonical = ?3",
-            )?
-            .query_map(
-                params![target_id, target.as_str(), canonical.as_str()],
-                |r| r.get(0),
-            )?
-            .collect::<rusqlite::Result<_>>()?;
-
         let mut candidates: Vec<String> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
-        let mut fts =
-            conn.prepare("SELECT page_id FROM pages_fts WHERE pages_fts MATCH ?1 LIMIT ?2")?;
+        let mut fts = conn.prepare(
+            "SELECT f.page_id FROM pages_fts f
+             JOIN pages p ON p.id = f.page_id
+             WHERE pages_fts MATCH ?1
+               AND p.encrypted = 0
+               AND f.page_id != ?2
+               AND f.page_id NOT IN (
+                   SELECT source_id FROM links
+                   WHERE target_id = ?2 OR target_path = ?3 OR target_canonical = ?4
+               )
+             LIMIT ?5",
+        )?;
         for term in &terms {
             let query = format!("body : {}", fts_quote(term));
             let ids = fts
-                .query_map(params![query, CANDIDATES_PER_TERM], |r| {
-                    r.get::<_, String>(0)
-                })?
+                .query_map(
+                    params![
+                        query,
+                        target_id,
+                        target.as_str(),
+                        canonical.as_str(),
+                        candidates_per_term
+                    ],
+                    |r| r.get::<_, String>(0),
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             for id in ids {
-                if id != target_id && !linked.contains(&id) && seen.insert(id.clone()) {
+                if seen.insert(id.clone()) {
                     candidates.push(id);
                 }
             }
@@ -182,11 +203,25 @@ fn first_mention(body: &str, terms: &[String]) -> Option<(usize, usize)> {
 }
 
 /// If `body[start..]` begins with `term` (ignoring case), the end offset.
+/// A whitespace run in the term matches any whitespace run in the body, so
+/// hard-wrapped or double-spaced text still matches a multi-word title.
 fn match_at(body: &str, start: usize, term: &str) -> Option<usize> {
-    let mut rest = body[start..].char_indices();
+    let mut rest = body[start..].char_indices().peekable();
+    let mut wanted = term.chars().peekable();
     let mut end = start;
-    for t in term.chars() {
+    while let Some(t) = wanted.next() {
         let (offset, b) = rest.next()?;
+        if t.is_whitespace() {
+            if !b.is_whitespace() {
+                return None;
+            }
+            while wanted.next_if(|c| c.is_whitespace()).is_some() {}
+            end = start + offset + b.len_utf8();
+            while let Some((o, c)) = rest.next_if(|(_, c)| c.is_whitespace()) {
+                end = start + o + c.len_utf8();
+            }
+            continue;
+        }
         if !b.to_lowercase().eq(t.to_lowercase()) {
             return None;
         }

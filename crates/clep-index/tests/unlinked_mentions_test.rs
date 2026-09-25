@@ -212,3 +212,51 @@ async fn cuts_the_context_on_character_boundaries() {
         context.chars().count()
     );
 }
+
+#[tokio::test]
+async fn filters_linking_pages_before_capping_candidates() {
+    // Linkers also match the FTS phrase. With a candidate cap of one, the
+    // lone unlinked page is found only if linkers are excluded in SQL.
+    let linkers: Vec<(String, String)> = (0..30)
+        .map(|i| {
+            (
+                format!("linker-{i:02}.md"),
+                page(1000 + i, &format!("Linker {i}"), "Alpha, see [[Alpha]]."),
+            )
+        })
+        .collect();
+    let lone = page(9, "Lone", "Only mentions alpha.");
+    let mut files: Vec<(&str, &str)> = linkers
+        .iter()
+        .map(|(p, c)| (p.as_str(), c.as_str()))
+        .collect();
+    files.push(("alpha.md", ALPHA));
+    files.push(("lone.md", &lone));
+    let (_tmp, handle) = built(&files).await;
+
+    let found = handle
+        .with_index(|index, _vault| {
+            index.unlinked_mentions_with_candidate_cap(&VaultPath::new("alpha.md").unwrap(), 50, 1)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(sources(&found), vec!["lone.md"]);
+}
+
+#[tokio::test]
+async fn matches_a_multi_word_title_across_a_line_break() {
+    let target = page(1, "Stone and Lamp", "The redesign.");
+    let wrapped = page(2, "Notes", "We sketched the Stone and\nLamp screens today.");
+    let spaced = page(3, "More", "Stone  and Lamp again.");
+    let (_tmp, handle) = built(&[
+        ("stone.md", &target),
+        ("notes.md", &wrapped),
+        ("more.md", &spaced),
+    ])
+    .await;
+
+    let found = mentions(&handle, "stone.md").await;
+    assert_eq!(sources(&found), vec!["more.md", "notes.md"]);
+    assert_eq!(found[1].matched, "Stone and\nLamp");
+}

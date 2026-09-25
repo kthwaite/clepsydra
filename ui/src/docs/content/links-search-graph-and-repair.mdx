@@ -48,7 +48,9 @@ An **outlink** starts in the current folio. Its index entry retains the raw targ
 
 A **backlink** points into the current folio. The Folio's right rail lists them under **Linked from**: each entry names the source and shows nearby body text, with the matching words highlighted. **Unlinked mentions**, **Links out** and **Similar** follow below.
 
-An **unlinked mention** is a page whose body names the current folio — its title (or file name when it has no title) or one of its aliases — as a whole phrase, ignoring case, without linking to it. Names shorter than three characters are not searched, a mention inside another `[[wikilink]]` does not count, and protected (encrypted) pages are never listed. The section appears only when there is at least one; open a mention to decide whether to link it. For a relation or other linkable frontmatter property, the context names the source field instead of exposing a body snippet. Open a backlink to inspect the source before editing it.
+For a backlink from a relation or other linkable frontmatter property, the context names the source field instead of exposing a body snippet. Open a backlink to inspect the source before editing it.
+
+An **unlinked mention** is a page whose body names the current folio — its title (or file name when it has no title) or one of its aliases — as a whole phrase, ignoring case, without linking to it. Names shorter than three characters are not searched, a mention inside another `[[wikilink]]` does not count, and protected (encrypted) pages are never listed. The section appears only when there is at least one; open a mention to decide whether to link it.
 
 The index is authoritative for these panels. A recent file change can briefly leave an editor token ahead of its refreshed outlink projection; Clepsydra refetches once before treating a link as missing during create-from-link navigation.
 
