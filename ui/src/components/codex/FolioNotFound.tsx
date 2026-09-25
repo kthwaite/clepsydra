@@ -1,4 +1,5 @@
-import { shortFolio } from "#/components/codex/folio-utils";
+import { Tick } from "#/components/codex/Tick";
+import { Button } from "#/components/ui/button";
 
 /**
  * Recovery panel shown in the folio area when a tab points to a file that no
@@ -15,31 +16,25 @@ export function FolioNotFound({
 }) {
   return (
     <div className="flex h-full items-center justify-center p-6">
-      <div className="w-full max-w-[440px] border border-rule">
-        <div className="flex items-baseline justify-between border-b border-rule px-3 py-1.5">
-          <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-            FILE / {path ? shortFolio(path) : "—"}
+      <div className="w-full max-w-[440px] rounded-2xl bg-raise px-7 py-6">
+        <span className="flex items-center gap-2.5">
+          <Tick variant="faint" />
+          <span className="font-serif text-[18px] italic text-mute">
+            Not found
           </span>
-          <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-hot">
-            ⁂ NOT FOUND
-          </span>
-        </div>
-        <div className="px-4 py-4">
-          <p className="cl-mono mb-2 text-[12px] text-ink">Folio not found.</p>
-          <p className="cl-marg mb-3 text-[12px]">
-            This tab points to a file that no longer exists.
-          </p>
-          <p className="cl-mono mb-4 break-all text-[11px] text-ink-mute">
-            {path || "(no path)"}
-          </p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="cl-mono cursor-pointer border border-rule px-3 py-1 text-[10px] uppercase tracking-[0.14em] text-ink-mute hover:border-ink hover:text-ink"
-          >
-            Close tab
-          </button>
-        </div>
+        </span>
+        <p className="mt-3 mb-2 font-serif text-[28px] leading-tight text-ink">
+          Folio not found.
+        </p>
+        <p className="mb-3 text-[14px] text-ink-2">
+          This tab points to a file that no longer exists.
+        </p>
+        <p className="mb-5 break-all text-[13px] text-mute">
+          {path || "(no path)"}
+        </p>
+        <Button variant="secondary" onPress={onClose}>
+          Close tab
+        </Button>
       </div>
     </div>
   );

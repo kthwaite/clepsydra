@@ -14,7 +14,9 @@ import {
   formatCellValue,
 } from "#/components/bases/cells/types";
 import { EditableCell } from "#/components/bases/EditableCell";
+import { Tick } from "#/components/codex/Tick";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 interface FolioPropertiesProps {
   pageId: string;
@@ -134,8 +136,8 @@ function displayPropertyValue(property: PageBaseProperty): string {
 }
 
 const ACTION_CLASS = cn(
-  "cl-mono border border-rule px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-ink-2",
-  "hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
+  "cursor-pointer rounded-full bg-sink px-3 py-1 text-[12.5px] text-ink-2 transition-colors hover:text-ink",
+  FOCUS_RING_NATIVE,
 );
 
 /**
@@ -218,27 +220,23 @@ export function FolioProperties({
   }
 
   return (
-    <section
-      aria-labelledby={`${id}-heading`}
-      className="border-b border-rule py-3"
-    >
-      <div className="mb-2 flex items-center justify-between gap-2 border-b py-3">
+    <section aria-labelledby={`${id}-heading`} className="mt-6">
+      <div className="mb-3 flex items-center gap-2.5">
+        <Tick />
         <h2
           id={`${id}-heading`}
-          className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute"
+          className="font-serif text-[18px] italic leading-none text-mute"
         >
-          Properties
+          Base properties
         </h2>
         {projection.isFetching ? (
-          <span className="cl-mono text-[8px] uppercase tracking-[0.12em] text-ink-mute">
-            Refreshing…
-          </span>
+          <span className="text-[12.5px] text-mute">Refreshing…</span>
         ) : null}
       </div>
 
       {errorMessage ? (
-        <div className="mb-2 border border-hot/40 bg-hot/5 p-2">
-          <p role="alert" className="cl-marg m-0 text-[11px] text-hot">
+        <div className="mb-2 rounded-xl bg-[color-mix(in_oklab,var(--hot)_8%,transparent)] p-3">
+          <p role="alert" className="m-0 text-[13px] text-hot">
             {errorMessage}
           </p>
           <button
@@ -252,17 +250,17 @@ export function FolioProperties({
       ) : null}
 
       {!projection.data && projection.isLoading ? (
-        <p className="cl-marg m-0">Loading properties…</p>
+        <p className="m-0 text-[13px] text-mute">Loading properties…</p>
       ) : null}
 
       {projection.data &&
       projection.data.matching_bases.length > 0 &&
       projection.data.properties.length === 0 ? (
         <div>
-          <p className="cl-mono m-0 text-[10px] font-semibold text-ink-2">
+          <p className="m-0 text-[13.5px] font-medium text-ink-2">
             No declared properties
           </p>
-          <p className="cl-marg mt-1 mb-0">
+          <p className="mt-1 mb-0 text-[13px] text-mute">
             {formatBaseNames(projection.data.matching_bases)} match
             {projection.data.matching_bases.length === 1 ? "es" : ""} this page.
           </p>
@@ -278,7 +276,7 @@ export function FolioProperties({
               <section key={group.id} aria-labelledby={groupHeadingId}>
                 <h3
                   id={groupHeadingId}
-                  className="cl-mono mb-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
+                  className="mb-1.5 text-[12.5px] text-mute"
                 >
                   {group.label}
                 </h3>
@@ -314,23 +312,23 @@ export function FolioProperties({
                       >
                         <div className="min-w-0">
                           <div className="flex min-w-0 items-baseline gap-2">
-                            <h4 className="cl-mono m-0 break-all text-[10px] font-semibold text-ink-2">
+                            <h4 className="m-0 break-all text-[13.5px] font-medium text-ink-2">
                               {property.key}
                             </h4>
-                            <span className="cl-mono shrink-0 text-[8px] text-ink-mute">
+                            <span className="shrink-0 text-[12px] text-faint">
                               {propertyTypeLabel(property)}
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-1">
                             {readOnlyReason ? (
-                              <span className="cl-mono text-[8px] uppercase tracking-[0.08em] text-ink-mute">
+                              <span className="text-[12px] text-mute">
                                 {readOnlyReason}
                               </span>
                             ) : null}
                             {blockers.map((blocker) => (
                               <span
                                 key={blocker}
-                                className="cl-mono text-[8px] uppercase tracking-[0.08em] text-hot"
+                                className="text-[12px] text-hot"
                               >
                                 {blocker}
                               </span>
@@ -364,7 +362,7 @@ export function FolioProperties({
                           ) : (
                             <p
                               aria-describedby={provenanceId}
-                              className="cl-mono m-0 break-words text-[11px] text-ink-2"
+                              className="m-0 break-words text-[13.5px] text-ink-2"
                             >
                               {displayPropertyValue(property)}
                             </p>
@@ -378,7 +376,7 @@ export function FolioProperties({
                             {property.declarations.map((declaration) => (
                               <li
                                 key={declaration.base.slug}
-                                className="cl-mono list-none text-[8px] leading-relaxed text-ink-mute"
+                                className="list-none text-[12px] leading-relaxed text-mute"
                               >
                                 {declaration.base.name} ({declaration.base.slug}
                                 ) · {describeDefinition(declaration.definition)}
@@ -389,7 +387,7 @@ export function FolioProperties({
                           {savingKey === property.key ? (
                             <p
                               role="status"
-                              className="cl-mono mt-1 mb-0 text-[8px] uppercase tracking-[0.08em] text-ink-mute"
+                              className="mt-1 mb-0 text-[12px] text-mute"
                             >
                               Saving {property.key}…
                             </p>
@@ -399,7 +397,7 @@ export function FolioProperties({
                             <div id={errorId} className="mt-1">
                               <p
                                 role="alert"
-                                className="cl-marg m-0 text-[11px] text-hot"
+                                className="m-0 text-[13px] text-hot"
                               >
                                 {propertyFailure.message}
                               </p>

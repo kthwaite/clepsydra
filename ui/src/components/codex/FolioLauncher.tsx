@@ -1,8 +1,11 @@
 import { folioDisplayName, shortFolio } from "#/components/codex/folio-utils";
+import { Section } from "#/components/codex/Section";
 import { KindIcon } from "#/components/KindIcon";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayAiJournal } from "#/hooks/useOpenTodayAiJournal";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { resolveKind } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
@@ -28,20 +31,12 @@ export function FolioLauncher() {
   return (
     <div className="flex h-full items-center justify-center p-6">
       <div className="w-full max-w-[520px]">
-        <div className="flex items-baseline justify-between border-b border-rule pb-1.5">
-          <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-            WORKSPACE / EMPTY
-          </span>
-          <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-            NO FOLIO OPEN
-          </span>
-        </div>
+        <h1 className="m-0 font-serif text-[44px] leading-none text-ink">
+          No page open
+        </h1>
 
-        <div className="mt-4">
-          <div className="cl-mono mb-1.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-            Actions
-          </div>
-          <div className="flex flex-col">
+        <Section compact label="Actions" className="mt-10">
+          <div className="flex flex-col gap-0.5">
             <LauncherAction
               label="Open console"
               hint="⌘K"
@@ -68,16 +63,19 @@ export function FolioLauncher() {
               onClick={() => openTab("graph")}
             />
           </div>
-        </div>
+        </Section>
 
-        <div className="mt-5">
-          <div className="cl-mono mb-1.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-            Recent · {recent.length}
-          </div>
+        <Section
+          compact
+          pip="dim"
+          label="Recent"
+          caption={String(recent.length)}
+          className="mt-10"
+        >
           {recent.length === 0 ? (
-            <p className="cl-marg m-0">No recent folios.</p>
+            <p className="m-0 text-[13px] text-mute">No recent folios.</p>
           ) : (
-            <div className="flex flex-col">
+            <div className="flex flex-col gap-0.5">
               {recent.map((entry) => {
                 const name = folioDisplayName(entry.path);
                 return (
@@ -86,19 +84,19 @@ export function FolioLauncher() {
                     type="button"
                     aria-label={`Open ${name || entry.path}`}
                     onClick={() => openTab("page", entry.path, name)}
-                    className="group flex items-center gap-2 border-b border-rule-soft py-1.5 text-left"
+                    className={cn(ROW_CLASS, "gap-2.5")}
                   >
                     <KindIcon
                       kind={resolveKind({ path: entry.path })}
                       className="flex-shrink-0"
                     />
-                    <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] text-ink-mute group-hover:text-ink">
+                    <span className="min-w-0 flex-1 truncate text-ink-2 group-hover:text-ink">
                       {name}
                     </span>
-                    <span className="cl-mono flex-shrink-0 text-[9px] text-ink-mute">
+                    <span className="flex-shrink-0 text-[12.5px] text-faint">
                       {shortFolio(entry.path)}
                     </span>
-                    <span className="cl-mono flex-shrink-0 text-[9px] text-ink-mute">
+                    <span className="flex-shrink-0 text-[12.5px] tabular-nums text-mute">
                       {formatRelativeTime(
                         new Date(entry.openedAt).toISOString(),
                       )}
@@ -108,11 +106,16 @@ export function FolioLauncher() {
               })}
             </div>
           )}
-        </div>
+        </Section>
       </div>
     </div>
   );
 }
+
+const ROW_CLASS = cn(
+  "group flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-left text-[14px] transition-colors hover:bg-sink",
+  FOCUS_RING_NATIVE,
+);
 
 function LauncherAction({
   label,
@@ -124,17 +127,9 @@ function LauncherAction({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group flex items-center justify-between border-b border-rule-soft py-1.5 text-left"
-    >
-      <span className="text-[12px] text-ink-mute group-hover:text-ink">
-        {label}
-      </span>
-      <span className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-        {hint}
-      </span>
+    <button type="button" onClick={onClick} className={ROW_CLASS}>
+      <span className="text-ink-2 group-hover:text-ink">{label}</span>
+      <span className="text-[12.5px] text-faint">{hint}</span>
     </button>
   );
 }

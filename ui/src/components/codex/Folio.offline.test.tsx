@@ -180,7 +180,10 @@ describe("Folio offline", () => {
 
     render(<Folio tabId="t1" path="notes/a-note.md" />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Offline — read only");
+    const notice = screen.getByRole("status");
+    expect(notice).toHaveTextContent("Offline — read only");
+    expect(notice).toHaveClass("rounded-xl", "bg-sink");
+    expect(notice.className).not.toMatch(/(^|\s)border(\s|-)/);
     expect(slateProps.current?.readOnly).toBe(true);
     expect(screen.queryByRole("button", { name: /edit anyway/i })).toBeNull();
   });
@@ -231,6 +234,6 @@ describe("Folio offline", () => {
     expect(
       screen.getByText("This page hasn't been synced to this device yet."),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/fetching folio/i)).toBeNull();
+    expect(screen.queryByText(/^Fetching /)).toBeNull();
   });
 });

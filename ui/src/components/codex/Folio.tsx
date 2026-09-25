@@ -223,7 +223,7 @@ function RawMarkdownNavigationGuard({
         </>
       }
     >
-      <p className="text-sm text-muted-foreground">
+      <p className="text-[13.5px] text-mute">
         This raw draft exists only in this browser until you Apply it.
       </p>
     </Dialog>
@@ -964,7 +964,11 @@ export function Folio({ tabId, path }: FolioProps) {
     mobile,
   );
   const pageActions = editor.isDraft ? null : (
-    <Suspense fallback={<p className="cl-marg mb-0">Loading page actions…</p>}>
+    <Suspense
+      fallback={
+        <p className="mb-0 text-[13px] text-mute">Loading page actions…</p>
+      }
+    >
       <PageActionsMenu
         path={path}
         beforeMutation={editor.saveNow}
@@ -982,10 +986,14 @@ export function Folio({ tabId, path }: FolioProps) {
     ((isTodayDraftPath && (isJournalTodayLoading || journalToday)) ||
       (isTodayAiDraftPath && (isAiJournalTodayLoading || aiJournalToday)))
   ) {
-    return <div className="cl-marg p-6">… fetching today’s journal …</div>;
+    return (
+      <div className="p-10 text-[13.5px] text-mute">
+        Fetching today’s journal…
+      </div>
+    );
   }
   if (!rawMarkdownSession && editor.isLoading) {
-    return <div className="cl-marg p-6">… fetching folio {path} …</div>;
+    return <div className="p-10 text-[13.5px] text-mute">Fetching {path}…</div>;
   }
   if (!rawMarkdownSession && editor.error && !editor.isDraft) {
     // Only a settled 404 means the file is actually gone; any other query
@@ -1948,7 +1956,7 @@ function OfflineBodyNotice() {
   return (
     <div
       role="status"
-      className="mb-4 flex items-center gap-3 border border-rule px-3 py-2 text-[13px] text-ink-2"
+      className="mb-6 flex items-center gap-3 rounded-xl bg-sink px-4 py-3 text-[13.5px] text-ink-2"
     >
       <span>
         Offline — read only. Edits resume when the connection returns.
@@ -1962,14 +1970,16 @@ function ProtectedBodyNotice({ onUnlock }: { onUnlock: () => void }) {
   return (
     <div
       role="status"
-      className="mb-4 flex items-center justify-between gap-3 border border-rule px-3 py-2 text-[13px] text-ink-2"
+      className="mb-6 flex items-center justify-between gap-3 rounded-xl bg-sink px-4 py-3 text-[13.5px] text-ink-2"
     >
       <span>
         This page is a captured archive. Its body is kept as captured so the
         recorded content hash stays true.
       </span>
       <Button
-        className="shrink-0 border border-rule px-2 py-1 text-[12px] hover:bg-highlight disabled:opacity-50"
+        variant="secondary"
+        size="sm"
+        className="shrink-0"
         isDisabled={busy}
         onPress={async () => {
           setBusy(true);
