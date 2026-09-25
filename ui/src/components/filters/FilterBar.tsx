@@ -71,7 +71,7 @@ export function FilterBar({
   onChange,
   primaryFieldIds,
   showText = true,
-  textPlaceholder = "FILTER…",
+  textPlaceholder = "Filter…",
   textAriaLabel = "Filter",
   textInputId,
   filteredCount,
@@ -387,7 +387,7 @@ function FacetChip({
                   data-testid="filter-bar-option-filter"
                   type="search"
                   aria-label={`Filter ${field.label} options`}
-                  placeholder="FILTER OPTIONS…"
+                  placeholder="Filter options…"
                   className={inputClasses}
                   value={optionFilter}
                   onChange={(event) => onOptionFilterChange(event.target.value)}

@@ -201,7 +201,7 @@ describe("BoardHeader", () => {
     renderHeader();
     const input = screen.getByTestId("filter-bar-input");
     expect(input).toHaveAttribute("id", "tasking-filter");
-    expect(input).toHaveAttribute("placeholder", "FILTER…");
+    expect(input).toHaveAttribute("placeholder", "Filter…");
   });
 
   it("typing into the filter input calls onFilterChange with the composed text state", () => {
