@@ -29,13 +29,14 @@ Slate.js editor with a registry-driven schema. Plugin chain: `withReact(withHist
 
 ## Design Aesthetic
 
-The UI is mid-migration from **Vessel** to **Stone & Lamp** (spec: `docs/superpowers/specs/2026-09-25-stone-and-lamp-redesign-design.md`; phases in its §6). Phases 1, 2a and 2b (tokens + fonts; header, Contents, footer; the C3 Sheaf) are done; screen layouts are still Vessel until phases 3–5 land.
+The UI is mid-migration from **Vessel** to **Stone & Lamp** (spec: `docs/superpowers/specs/2026-09-25-stone-and-lamp-redesign-design.md`; phases in its §6). Phases 1–3 (tokens + fonts; header, Contents, footer; the C3 Sheaf; shared primitives) are done; screen layouts are still Vessel until phases 4–5 land.
 
 - Palette: bone (light, `.paper` on `<html>`, the **default**) and charcoal (dark, base `:root`); **cobalt** is the only accent (`#1747E6` bone / `#809CFF` charcoal). No accent presets.
 - Every colour is a bare property on `:root`/`.paper`; the `@theme` `--color-*` tokens are `var()` aliases. Role names for new code: `ground`, `raise`, `sink`, `mute`, `faint`, `accent-tint` (legacy `paper`, `paper-2`, `paper-edge`, `ink-mute`, `ink-faint`, `highlight` still resolve).
 - Type: **Geist** (sans) for UI and prose, **Instrument Serif** (regular + italic only — never bold) as accent, **JetBrains Mono** for code only. `.cl-mono` is a temporary sans alias; don't add new `cl-mono`/`font-mono` outside code.
 - Radius 12px on surfaces, pills for buttons; soft shadows on overlays only. No new hairline borders — separate with space and tone.
 - `data-density` remains on `<html>`; the diegetic-chrome setting is gone.
+- Primitives: `Section` (tick + italic serif eyebrow; replaces `Card`), `Tick` (`live`/`pulse`/`faint`), `Button` variants `primary` (cobalt pill) / `secondary` (the "quiet" sink button) / `ghost` / `danger`, `IconButton` (32px round ghost), and `FOCUS_RING` / `FOCUS_RING_NATIVE` (`lib/focusRing.ts`) on every interactive control. `.cl-btn`/`.cl-btn-hot` are CSS stopgaps until phase 5 migrates them to `<Button>`. `src/__tests__/primitivesGuard.test.ts` fails on Vessel tokens (caps, tracking, mono, hard borders, 9–11px type) in `components/ui/*`, `CodexModalShell`, `TabPreviewCard`, `Section` and `Tick`.
 - Shell: header = wordmark (home) + `CORE_NAV` + `ContentsMenu`; new screens get a `group`/`description` in `VIEW_REGISTRY` and appear in Contents, never in the header. The footer (`ShellFooter`) reads `useSaveStatus` and the `footerContext` store — a screen adds right-hand context with `useFooterContext(parts)`.
 
 All semantic colour tokens live in `ui/src/main.css`; `ui/src/__tests__/themeTokens.test.ts` and `themeFonts.test.ts` pin them.
