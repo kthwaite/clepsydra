@@ -130,7 +130,7 @@ The density presets (`data-density`) keep their row-height role and scale this s
   - Renaming to `data-theme` is optional and out of scope.
   - Default theme: see §9, Q1.
 - **Accent presets.** `data-accent` and the `ACCENTS` list in `lib/theme.ts` and Settings are removed. Cobalt is fixed, so settings still holding a stored accent are ignored.
-- **Diegetic setting.** `data-diegetic` and `DIEGETIC_STORAGE_KEY` are removed, because the chrome it hid is gone.
+- **Diegetic setting.** `data-diegetic` and `DIEGETIC_STORAGE_KEY` are removed, because the chrome it hid is gone. Removal happens in phase 2 with the footer rework, not phase 1.
 - **`index.html`.** Set `<meta name="theme-color">` to the ground colour of the resolved theme, updated by `applyThemeClass`. This closes the open item from the app-icon work.
 
 ## 5. Components
@@ -224,7 +224,7 @@ Each phase is its own feature branch off `develop` and merges when green. Phases
    - Swap the values in §3.1 and §4. Install Geist and Instrument Serif and remove Inter.
    - Stopgap: redefine `.cl-mono { font-family: var(--font-sans) }` and `.cl-cap` (sentence case, no tracking). This takes about 80% of the UI off mono in one commit, before the sweep. `.cl-mono` has 501 uses in 116 files, and `font-mono` has 84 uses in 37 files.
    - Set `--radius` to 12px.
-   - Remove accent presets and the diegetic setting.
+   - Remove accent presets. (Diegetic removal moves to phase 2 with the footer.)
 2. **Shell.** Header and simplified footer with save status (§5.1), Sheaf C3 (§5.3), Contents (§5.2), and the `VIEW_REGISTRY` label, group and description fields.
 3. **Primitives.** `Section` in place of `Card` (§5.4), the `Button` wrapper (§5.5), the `KindIcon` `tone` prop, and the tick component.
 4. **Core screens.** Folio, Atrium, Tasking and the command palette (§5.6).

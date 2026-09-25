@@ -8,18 +8,15 @@ import {
   useState,
 } from "react";
 import {
-  type Accent,
-  applyAccent,
   applyDensity,
   applyDiegetic,
   applyThemeClass,
+  clearLegacyAccent,
   type Density,
-  readStoredAccent,
   readStoredDensity,
   readStoredDiegetic,
   readStoredTheme,
   resolveTheme,
-  storeAccent,
   storeDensity,
   storeDiegetic,
   storeTheme,
@@ -31,8 +28,6 @@ type ThemeContextValue = {
   resolvedTheme: "light" | "dark";
   setMode: (mode: ThemeMode) => void;
   toggle: () => void;
-  accent: Accent;
-  setAccent: (accent: Accent) => void;
   density: Density;
   setDensity: (density: Density) => void;
   diegetic: boolean;
@@ -46,7 +41,6 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">(() =>
     resolveTheme(readStoredTheme()),
   );
-  const [accent, setAccentState] = useState<Accent>(() => readStoredAccent());
   const [density, setDensityState] = useState<Density>(() =>
     readStoredDensity(),
   );
@@ -62,11 +56,6 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   const toggle = useCallback(() => {
     setMode(resolvedTheme === "dark" ? "light" : "dark");
   }, [resolvedTheme, setMode]);
-
-  const setAccent = useCallback((next: Accent) => {
-    setAccentState(next);
-    storeAccent(next);
-  }, []);
 
   const setDensity = useCallback((next: Density) => {
     setDensityState(next);
@@ -84,7 +73,7 @@ export function ThemeProvider({ children }: PropsWithChildren) {
     applyThemeClass(resolved);
   }, [mode]);
 
-  useEffect(() => applyAccent(accent), [accent]);
+  useEffect(() => clearLegacyAccent(), []);
   useEffect(() => applyDensity(density), [density]);
   useEffect(() => applyDiegetic(diegetic), [diegetic]);
 
@@ -118,8 +107,6 @@ export function ThemeProvider({ children }: PropsWithChildren) {
       resolvedTheme,
       setMode,
       toggle,
-      accent,
-      setAccent,
       density,
       setDensity,
       diegetic,
@@ -130,8 +117,6 @@ export function ThemeProvider({ children }: PropsWithChildren) {
       resolvedTheme,
       setMode,
       toggle,
-      accent,
-      setAccent,
       density,
       setDensity,
       diegetic,

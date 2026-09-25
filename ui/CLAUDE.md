@@ -29,16 +29,15 @@ Slate.js editor with a registry-driven schema. Plugin chain: `withReact(withHist
 
 ## Design Aesthetic
 
-The UI follows the **"Vessel" classified-technical-modernism** language (a dark, dense, diegetic dossier terminal). See `docs/plans/2026-05-29-clepsydra-vessel-redesign.md` for the full spec.
+The UI is mid-migration from **Vessel** to **Stone & Lamp** (spec: `docs/superpowers/specs/2026-09-25-stone-and-lamp-redesign-design.md`; phases in its §6). Phase 1 (tokens + fonts) is done; layouts are still Vessel until phases 2–5 land.
 
-- Zero border-radius (`--radius: 0`) — no rounded corners anywhere
-- Hard-edged offset shadows (bottom-right, no blur)
-- Warm-grey achromatic palette with **barbican orange** (`#ee7733`) primary accent; high contrast
-- **Dark is the default** (base `:root`); the light "paper" mode is opt-in via a `.paper` class on `<html>`, toggled by `ThemeProvider`
-- Typography: **JetBrains Mono** for all chrome/UI/telemetry, **Inter** (variable, optical-sizing) for prose + display/headings
-- Operator prefs applied as `<html>` attributes: `data-accent` (6 presets), `data-density` (compact/default/spacious), `data-diegetic` (off hides telemetry chrome)
+- Palette: bone (light, `.paper` on `<html>`, the **default**) and charcoal (dark, base `:root`); **cobalt** is the only accent (`#1747E6` bone / `#809CFF` charcoal). No accent presets.
+- Every colour is a bare property on `:root`/`.paper`; the `@theme` `--color-*` tokens are `var()` aliases. Role names for new code: `ground`, `raise`, `sink`, `mute`, `faint`, `accent-tint` (legacy `paper`, `paper-2`, `paper-edge`, `ink-mute`, `ink-faint`, `highlight` still resolve).
+- Type: **Geist** (sans) for UI and prose, **Instrument Serif** (regular + italic only — never bold) as accent, **JetBrains Mono** for code only. `.cl-mono` is a temporary sans alias; don't add new `cl-mono`/`font-mono` outside code.
+- Radius 12px on surfaces, pills for buttons; soft shadows on overlays only. No new hairline borders — separate with space and tone.
+- `data-density` and `data-diegetic` remain on `<html>` (diegetic goes in phase 2).
 
-All semantic color tokens (background, foreground, primary, muted, border, etc.) are defined in `ui/src/main.css`. Respect these tokens when building UI.
+All semantic colour tokens live in `ui/src/main.css`; `ui/src/__tests__/themeTokens.test.ts` and `themeFonts.test.ts` pin them.
 
 ## Code Style (TypeScript/React)
 

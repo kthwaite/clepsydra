@@ -203,3 +203,32 @@ describe("KIND_META", () => {
     expect(new Set(icons).size).toBe(KINDS.length);
   });
 });
+
+describe("kind colours (Stone & Lamp)", () => {
+  it("maps kinds onto accent, quire hues, and inks", () => {
+    expect(Object.fromEntries(KINDS.map((k) => [k, kindColorVar(k)]))).toEqual({
+      PROJECT: "var(--accent)",
+      TASK: "var(--quire-verdigris)",
+      TODO: "var(--quire-verdigris)",
+      CYCLE: "var(--ink-2)",
+      JOURNAL: "var(--quire-ochre)",
+      AI_JOURNAL: "var(--quire-indigo)",
+      AI_CONVERSATION: "var(--quire-indigo)",
+      PERSON: "var(--quire-madder)",
+      MEETING: "var(--quire-madder)",
+      CAPTURE: "var(--quire-slate)",
+      QUOTE: "var(--quire-slate)",
+      BOOK: "var(--quire-sepia)",
+      RECIPE: "var(--quire-sepia)",
+      CODE: "var(--ink)",
+      NOTE: "var(--ink-mute)",
+      ARCHIVE: "var(--ink-3)",
+    });
+  });
+
+  it("uses no retired Vessel signal token", () => {
+    for (const k of KINDS) {
+      expect(kindColorVar(k)).not.toMatch(/--(cool|hot|warn|accent-deep)\)/);
+    }
+  });
+});

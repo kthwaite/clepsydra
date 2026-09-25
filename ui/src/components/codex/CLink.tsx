@@ -115,7 +115,7 @@ export function CLink({
               {note.words ?? "—"} wd · ↗{note.backlinks ?? 0}
             </span>
           </span>
-          <span className="mb-[3px] block font-serif text-[14px] font-semibold leading-[1.2]">
+          <span className="mb-[3px] block font-serif text-[17px] leading-[1.15]">
             {note.title}
           </span>
           {note.excerpt && (
