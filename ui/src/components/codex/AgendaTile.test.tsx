@@ -132,17 +132,17 @@ describe("AgendaTile", () => {
 
     const later = rowFor("Later due, low priority");
     expect(within(later).getByText("2026-08-20")).toBeInTheDocument();
-    expect(within(later).getByText("LOW")).toBeInTheDocument();
+    expect(within(later).getByText("Low")).toBeInTheDocument();
     expect(within(later).getByText("Source Folio 1")).toBeInTheDocument();
 
     const overdue = rowFor("Overdue high priority");
     expect(within(overdue).getByText("2026-08-13")).toBeInTheDocument();
-    expect(within(overdue).getByText("OVERDUE")).toBeInTheDocument();
-    expect(within(overdue).getByText("HIGH")).toBeInTheDocument();
+    expect(within(overdue).getByText("Overdue")).toBeInTheDocument();
+    expect(within(overdue).getByText("High")).toBeInTheDocument();
     expect(within(overdue).getByText("Alpha Folio")).toBeInTheDocument();
 
     expect(
-      within(rowFor("Undated medium priority")).getByText("MED"),
+      within(rowFor("Undated medium priority")).getByText("Med"),
     ).toBeInTheDocument();
   });
 
@@ -270,5 +270,17 @@ describe("AgendaTile", () => {
     const tile = agendaTile();
     expect(within(tile).getByText(/no outstanding tasks/i)).toBeInTheDocument();
     expect(within(tile).queryByRole("list")).not.toBeInTheDocument();
+  });
+
+  it("renders Stone & Lamp rows: 15.5px text, cobalt action, no rules", () => {
+    render(<AgendaTile />);
+    const row = rowFor("Later due, low priority");
+    expect(within(row).getByText("Later due, low priority")).toHaveClass(
+      "text-[15.5px]",
+    );
+    expect(
+      screen.getByRole("button", { name: "Open the full agenda" }),
+    ).toHaveClass("text-accent");
+    expect(agendaTile().querySelector(".divide-y")).toBeNull();
   });
 });

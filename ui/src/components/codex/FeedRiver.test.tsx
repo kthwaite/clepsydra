@@ -522,7 +522,8 @@ describe("FeedRiver", () => {
       const bar = heading.parentElement;
       expect(bar?.className).toContain("sticky");
       expect(bar?.className).toContain("top-0");
-      expect(bar?.className).toContain("bg-paper-2");
+      // Opaque so rows scroll under it rather than through it.
+      expect(bar?.className).toContain("bg-ground");
     }
   });
 
@@ -793,7 +794,7 @@ describe("FeedRiver", () => {
     ).toBeInTheDocument();
     expect(
       Array.from(unreadRow.querySelectorAll('[aria-hidden="true"]')).some(
-        (element) => element.classList.contains("h-[7px]"),
+        (element) => element.classList.contains("h-1.5"),
       ),
     ).toBe(true);
     expect(
@@ -801,7 +802,7 @@ describe("FeedRiver", () => {
     ).toBeInTheDocument();
     expect(
       Array.from(readRow.querySelectorAll('[aria-hidden="true"]')).some(
-        (element) => element.classList.contains("h-[7px]"),
+        (element) => element.classList.contains("h-1.5"),
       ),
     ).toBe(true);
   });
@@ -1377,5 +1378,26 @@ describe("FeedRiver", () => {
       screen.queryByRole("article", { name: /second dispatch/i }),
     ).toBeNull();
     vi.useRealTimers();
+  });
+
+  it("sets day headings in italic serif and lays compact rows in a two-column grid", () => {
+    renderRiver({ view: "all" }, true);
+    const heading = screen.getAllByRole("heading", { level: 2 })[0];
+    expect(heading).toHaveClass("font-serif", "italic");
+    const row = screen.getByRole("article", { name: /cache semantics/i });
+    expect(row.parentElement).toHaveClass("md:grid-cols-2");
+    expect(row.textContent ?? "").not.toMatch(/[A-Z]{4,}/);
+  });
+
+  it("matches the sticky day bar to its surface in each mode", () => {
+    const { unmount } = renderRiver({ view: "all" }, false);
+    const fullBar = screen.getAllByRole("heading", { level: 2 })[0]
+      .parentElement as HTMLElement;
+    expect(fullBar).toHaveClass("bg-raise");
+    unmount();
+    renderRiver({ view: "all" }, true);
+    const compactBar = screen.getAllByRole("heading", { level: 2 })[0]
+      .parentElement as HTMLElement;
+    expect(compactBar).toHaveClass("bg-ground");
   });
 });

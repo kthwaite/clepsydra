@@ -5,6 +5,12 @@ import { priorityLabel } from "#/components/agenda/AgendaItemList";
 import { TaskStatusButton } from "#/components/ui/task-status-button";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+
+/** Priority labels arrive in caps ("HIGH"); the Atrium reads sentence case. */
+const sentenceCase = (label: string) =>
+  label.charAt(0) + label.slice(1).toLowerCase();
+
 import { localDateKey } from "#/lib/time";
 import { Section } from "./Section";
 
@@ -33,12 +39,14 @@ function AgendaFrame({ children, className, total }: AgendaFrameProps) {
           type="button"
           onClick={() => navigate({ to: "/agenda" })}
           aria-label="Open the full agenda"
-          className="cl-mono border-l border-rule pl-2.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+          className={cn(
+            "cursor-pointer rounded-sm text-[14px] text-accent hover:underline",
+            FOCUS_RING_NATIVE,
+          )}
         >
           Agenda →
         </button>
       }
-      tight
     >
       {children}
     </Section>
@@ -73,7 +81,7 @@ function AgendaTileContent({ className }: AgendaTileProps) {
   if (query.isLoading) {
     return (
       <AgendaFrame className={className}>
-        <p role="status" className="cl-marg m-0 px-3 py-4">
+        <p role="status" className="m-0 py-2 text-[14px] text-mute">
           Loading agenda…
         </p>
       </AgendaFrame>
@@ -83,7 +91,7 @@ function AgendaTileContent({ className }: AgendaTileProps) {
   if (query.isError) {
     return (
       <AgendaFrame className={className}>
-        <p role="alert" className="cl-marg m-0 px-3 py-4 text-warn">
+        <p role="alert" className="m-0 py-2 text-[14px] text-hot">
           Agenda unavailable.
         </p>
       </AgendaFrame>
@@ -96,9 +104,9 @@ function AgendaTileContent({ className }: AgendaTileProps) {
   return (
     <AgendaFrame className={className} total={total}>
       {tasks.length === 0 ? (
-        <p className="cl-marg m-0 px-3 py-4">No outstanding tasks.</p>
+        <p className="m-0 py-2 text-[14px] text-mute">No outstanding tasks.</p>
       ) : (
-        <ul className="divide-y divide-rule">
+        <ul className="flex flex-col gap-[18px]">
           {tasks.map((task) => {
             const due = task.properties.due;
             const priority = task.properties.priority;
@@ -109,7 +117,7 @@ function AgendaTileContent({ className }: AgendaTileProps) {
             return (
               <li
                 key={`${task.page_path}:${task.span_start}`}
-                className="flex min-w-0 items-start gap-2 px-3 py-2"
+                className="grid min-w-0 grid-cols-[18px_minmax(0,1fr)] items-start gap-3"
               >
                 <TaskStatusButton
                   status={task.status}
@@ -123,7 +131,12 @@ function AgendaTileContent({ className }: AgendaTileProps) {
                   isDisabled={toggle.isPending}
                 />
 
-                <div className={cn("min-w-0 flex-1", parent && "pl-2.5")}>
+                <div
+                  className={cn(
+                    "flex min-w-0 flex-col gap-1",
+                    parent && "pl-2.5",
+                  )}
+                >
                   {/* The agenda orders rows by date and priority across every
                       page, so a nested Todo arrives without its parent. The
                       parent line travels with the row instead: the indent
@@ -132,7 +145,7 @@ function AgendaTileContent({ className }: AgendaTileProps) {
                     <span
                       data-testid="agenda-row-parent"
                       title={parent}
-                      className="cl-mono block truncate text-[9px] text-ink-mute"
+                      className="block truncate text-[12.5px] text-mute"
                     >
                       <span aria-hidden>↳ </span>
                       {parent}
@@ -140,32 +153,25 @@ function AgendaTileContent({ className }: AgendaTileProps) {
                   ) : null}
                   <span
                     title={task.content}
-                    className="cl-mono block truncate text-[11px] text-ink"
+                    className="block truncate text-[15.5px] leading-[1.4] text-ink"
                   >
                     {task.content}
                   </span>
-                  <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+                  <div className="flex min-w-0 items-center gap-2.5 text-[12.5px] text-mute">
                     {due ? (
                       <>
                         <span
-                          className={cn(
-                            "cl-mono text-[9px] tabular-nums",
-                            overdue ? "text-warn" : "text-ink-mute",
-                          )}
+                          className={cn("tabular-nums", overdue && "text-hot")}
                         >
                           {due}
                         </span>
                         {overdue ? (
-                          <span className="cl-mono text-[9px] font-medium text-warn">
-                            OVERDUE
-                          </span>
+                          <span className="font-medium text-hot">Overdue</span>
                         ) : null}
                       </>
                     ) : null}
                     {priority ? (
-                      <span className="cl-mono text-[9px] text-ink-mute">
-                        {priorityLabel(priority)}
-                      </span>
+                      <span>{sentenceCase(priorityLabel(priority))}</span>
                     ) : null}
                     {/* The row names a Todo written on a page; the source is
                         the only way back to the line's context, so it opens
@@ -174,7 +180,10 @@ function AgendaTileContent({ className }: AgendaTileProps) {
                       type="button"
                       aria-label={`Open ${source}`}
                       onClick={() => openTab("page", task.page_path, source)}
-                      className="cl-mono min-w-0 cursor-pointer truncate text-left text-[9px] text-ink-mute underline decoration-rule underline-offset-2 hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+                      className={cn(
+                        "min-w-0 cursor-pointer truncate rounded-sm text-left text-mute underline decoration-faint underline-offset-2 hover:text-accent",
+                        FOCUS_RING_NATIVE,
+                      )}
                     >
                       {source}
                     </button>
@@ -194,7 +203,7 @@ export function AgendaTile({ className }: AgendaTileProps) {
     <AgendaErrorBoundary
       fallback={
         <AgendaFrame className={className}>
-          <p role="alert" className="cl-marg m-0 px-3 py-4 text-warn">
+          <p role="alert" className="m-0 py-2 text-[14px] text-hot">
             Agenda unavailable.
           </p>
         </AgendaFrame>

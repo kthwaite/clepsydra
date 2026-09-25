@@ -11,6 +11,7 @@ import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayAiJournal } from "#/hooks/useOpenTodayAiJournal";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { resolveKind } from "#/lib/kind";
 import { formatRelativeTime, pad2 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
@@ -26,11 +27,11 @@ import {
 } from "./atrium-data";
 import { useAtriumCalendar } from "./atrium-time";
 import { FeedRiverPanel } from "./FeedRiverPanel";
-import { shortFolio } from "./folio-utils";
 import { ReadingContinuesPanel } from "./ReadingContinues";
 import { Section } from "./Section";
 import { SkyCard } from "./SkyCard";
 import { deriveSky, hasCoords } from "./sky";
+import { Tick } from "./Tick";
 
 export function Atrium() {
   const features = useFeatureFlags();
@@ -47,7 +48,6 @@ export function Atrium() {
 
   const { data: journalToday } = useJournalToday();
   const { data: location } = useLocation();
-  const openSearch = useUiStore((s) => s.openSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
   const openLocation = useUiStore((s) => s.openLocation);
 
@@ -88,8 +88,9 @@ export function Atrium() {
   const calendar = useAtriumCalendar(now);
   const clock = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   const journalSub = journalToday?.meta.id
-    ? `${journalToday.meta.id} · JOURNAL / ${calendar.dotDate}`
-    : `JOURNAL / ${calendar.dotDate}`;
+    ? `${journalToday.meta.id} · Journal · ${calendar.dotDate}`
+    : `Journal · ${calendar.dotDate}`;
+  const longDate = `${now.toLocaleDateString("en-GB", { weekday: "long" })} ${now.getDate()} ${now.toLocaleDateString("en-GB", { month: "long" })} ${now.getFullYear()}`;
 
   const heat = useMemo(
     () => buildHeatmap(items, calendar.utcDate),
@@ -102,68 +103,65 @@ export function Atrium() {
   const located = hasCoords(location);
 
   return (
-    <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-3.5 px-2 py-2 md:px-4 md:py-4">
+    <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-x-6 gap-y-16 md:gap-x-12 md:gap-y-24 2xl:gap-x-24 2xl:gap-y-[112px] px-6 pt-12 pb-24 md:px-10 xl:px-[120px] xl:pt-[88px] xl:pb-[120px]">
       {/* HERO — col-12 */}
-      <section className="cl-grid-texture col-span-12 grid items-end gap-6 border border-rule bg-paper-2 px-4 py-4 md:grid-cols-[1fr_auto] md:px-6 md:py-5">
+      <section className="col-span-12 grid items-end gap-12 md:grid-cols-[minmax(0,1fr)_340px] xl:gap-24">
         <div>
-          <div className="cl-mono mb-3 flex flex-wrap items-center gap-4 text-[9px] uppercase tracking-[0.28em] text-ink-mute">
-            <span className="text-accent">●</span>
+          <div className="flex flex-wrap items-center gap-3 text-[14px] text-mute">
+            <Tick variant="pulse" />
+            <span className="text-ink">{longDate}</span>
+            <span aria-hidden>·</span>
+            <span>Week {calendar.week}</span>
+            <span aria-hidden>·</span>
             <span>
-              DAYSTART /{" "}
-              <b className="font-medium text-ink">{calendar.todayLabel}</b>
+              Day {calendar.doy} of {calendar.yearDays}
             </span>
-            <span>WEEK {calendar.week}</span>
-            <span>
-              DAY {calendar.doy} / {calendar.yearDays}
-            </span>
-            <span className="tabular-nums">{clock} LOCAL</span>
+            <span aria-hidden>·</span>
+            <span className="tabular-nums">{clock} local</span>
           </div>
-          <h1 className="font-sans text-[clamp(40px,6vw,72px)] font-black leading-[0.95] tracking-[-0.02em] text-ink">
+          <h1 className="mt-[22px] font-serif text-[clamp(56px,8vw,112px)] leading-[0.95] tracking-[-0.025em] text-ink">
             {greeting(now)}
           </h1>
         </div>
 
-        <div className="flex flex-col gap-2 md:min-w-[280px]">
+        <div className="flex flex-col gap-2.5 pb-2">
           <button
             type="button"
             onClick={openTodayJournal}
-            className="group grid grid-cols-[1fr_auto] items-center gap-4 border border-ink bg-ink px-4 py-3.5 text-left text-paper transition-colors hover:border-accent hover:bg-accent"
+            className={cn(
+              "grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[18px] bg-accent px-[22px] py-[18px] text-left text-raise transition-[filter] hover:brightness-95",
+              FOCUS_RING_NATIVE,
+            )}
           >
-            <div>
-              <div className="font-sans text-[12px] font-semibold uppercase tracking-[0.18em]">
+            <span className="flex flex-col gap-1">
+              <span className="text-[16px] font-medium">
                 Open today’s journal
-              </div>
-              <div className="cl-mono mt-1 text-[9px] uppercase tracking-[0.18em] opacity-75">
-                {journalSub}
-              </div>
-            </div>
-            <div className="text-[16px]">→</div>
+              </span>
+              <span className="text-[12.5px] opacity-80">{journalSub}</span>
+            </span>
+            <span aria-hidden className="text-[18px]">
+              →
+            </span>
           </button>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-2 gap-2.5">
             <button
               type="button"
               onClick={openInscribe}
-              className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
+              className={cn(
+                "flex cursor-pointer items-baseline justify-between rounded-[14px] bg-sink px-4 py-3 text-left text-[14.5px] text-ink hover:bg-sink/70",
+                FOCUS_RING_NATIVE,
+              )}
             >
               Capture
-              <div className="mt-1 hidden text-[9px] tracking-[0.18em] text-ink-mute md:block">
-                ⌘ N
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={openSearch}
-              className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
-            >
-              Search
-              <div className="mt-1 hidden text-[9px] tracking-[0.18em] text-ink-mute md:block">
-                ⌘ K
-              </div>
+              <span className="text-[12px] text-mute">⌘N</span>
             </button>
             <button
               type="button"
               onClick={openTodayAiJournal}
-              className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
+              className={cn(
+                "flex cursor-pointer items-baseline justify-between rounded-[14px] bg-sink px-4 py-3 text-left text-[14.5px] text-ink hover:bg-sink/70",
+                FOCUS_RING_NATIVE,
+              )}
             >
               AI journal
             </button>
@@ -171,92 +169,90 @@ export function Atrium() {
         </div>
       </section>
       {/* RECENTS (col-7) */}
-      <section className="col-span-12 flex h-[340px] flex-col border border-rule bg-paper-2 lg:col-span-7">
-        <div className="flex flex-col border-b border-rule bg-paper md:flex-row md:items-center md:justify-between">
-          <div className="flex">
+      <section className="col-span-12 flex min-w-0 flex-col gap-[22px] lg:col-span-7">
+        <div className="flex flex-wrap items-center gap-3">
+          <Tick />
+          <h2 className="font-serif text-[22px] italic leading-none text-ink">
+            Recent
+          </h2>
+          <div className="ml-4 flex gap-5 text-[14px]">
             {(["edited", "created", "opened"] as const).map((t) => (
               <button
                 type="button"
                 key={t}
                 onClick={() => setRecentTab(t)}
+                aria-pressed={recentTab === t}
                 className={cn(
-                  "cl-mono flex-1 border-r border-rule px-2 py-2 text-[9px] uppercase tracking-[0.22em] md:flex-none md:px-3.5",
+                  "cursor-pointer rounded-sm",
+                  FOCUS_RING_NATIVE,
                   recentTab === t
-                    ? "text-ink shadow-[inset_0_2px_0_var(--accent)]"
-                    : "text-ink-mute hover:text-ink",
+                    ? "font-medium text-ink underline decoration-accent decoration-[1.5px] underline-offset-[7px]"
+                    : "text-mute hover:text-ink",
                 )}
               >
-                <span className="md:hidden">
-                  {t === "edited"
-                    ? "Edited"
-                    : t === "created"
-                      ? "Created"
-                      : "Opened"}
-                </span>
-                <span className="hidden md:inline">
-                  {t === "edited"
-                    ? "Recently edited"
-                    : t === "created"
-                      ? "Recently created"
-                      : "Opened"}
-                </span>
+                {t === "edited"
+                  ? "Edited"
+                  : t === "created"
+                    ? "Created"
+                    : "Opened"}
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-3 px-3 py-2">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-              {recentRows.length} OF {items.length}
-            </span>
-          </div>
+          <span className="flex-1" />
+          <span className="text-[13px] tabular-nums text-mute">
+            {recentRows.length} of {items.length.toLocaleString()}
+          </span>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex flex-col pl-[19px]">
           {recentRows.length === 0 ? (
-            <p className="cl-marg m-0 p-3.5">
+            <p className="m-0 py-3 text-[14px] text-mute">
               {recentTab === "opened"
-                ? "∅ Nothing opened yet this session."
-                : "∅ No folios yet inscribed."}
+                ? "Nothing opened yet this session."
+                : "No pages yet."}
             </p>
           ) : (
-            <div className="flex flex-col">
-              {recentRows.map((n, i) => {
-                const kind = resolveKind({ path: n.path, kind: n.kind });
-                const ts =
-                  recentTab === "created"
-                    ? n.created_at
-                    : recentTab === "opened"
-                      ? new Date(
-                          openHistoryMap.get(n.path) ?? Date.now(),
-                        ).toISOString()
-                      : n.updated_at;
-                return (
-                  <button
-                    type="button"
-                    key={n.path}
-                    onClick={() => openTab("page", n.path, n.title || n.path)}
-                    className="grid cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-baseline gap-x-2 gap-y-1 border-b border-dotted border-rule-soft px-2.5 py-2 text-left hover:bg-paper-edge md:grid-cols-[18px_90px_1fr_72px] md:gap-3 md:px-3.5"
-                  >
-                    <span className="cl-mono row-span-2 text-[9px] tabular-nums text-ink-mute md:row-span-1">
-                      {pad2(i + 1)}
-                    </span>
-                    <span className="cl-mono col-start-2 row-start-1 flex min-w-0 items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-ink-mute md:col-start-auto md:row-start-auto">
-                      <KindIcon
-                        kind={kind}
-                        size={11}
-                        className="flex-shrink-0"
-                      />
-                      {shortFolio(n.path)}
-                    </span>
-                    <span className="col-span-2 col-start-2 row-start-2 overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14px] text-ink md:col-span-1 md:col-start-auto md:row-start-auto">
-                      {n.title || n.path}
-                    </span>
-                    <span className="cl-mono col-start-3 row-start-1 text-right text-[9px] uppercase text-ink-mute md:col-start-auto md:row-start-auto">
-                      {formatRelativeTime(ts)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            recentRows.map((n, i) => {
+              const kind = resolveKind({ path: n.path, kind: n.kind });
+              const ts =
+                recentTab === "created"
+                  ? n.created_at
+                  : recentTab === "opened"
+                    ? new Date(
+                        openHistoryMap.get(n.path) ?? Date.now(),
+                      ).toISOString()
+                    : n.updated_at;
+              const folder = n.path.includes("/")
+                ? n.path.slice(0, n.path.lastIndexOf("/"))
+                : "";
+              return (
+                <button
+                  type="button"
+                  key={n.path}
+                  onClick={() => openTab("page", n.path, n.title || n.path)}
+                  className={cn(
+                    "grid cursor-pointer grid-cols-[34px_22px_minmax(0,1fr)_72px] items-baseline gap-3 rounded-md py-[11px] text-left text-ink hover:text-accent md:grid-cols-[34px_22px_minmax(0,1fr)_170px_72px]",
+                    FOCUS_RING_NATIVE,
+                  )}
+                >
+                  <span className="font-serif text-[16px] tabular-nums text-faint">
+                    {pad2(i + 1)}
+                  </span>
+                  <span className="text-mute">
+                    <KindIcon kind={kind} tone="mono" size={13} />
+                  </span>
+                  <span className="truncate text-[16px]">
+                    {n.title || n.path}
+                  </span>
+                  <span className="hidden truncate text-[13px] text-mute md:block">
+                    {folder}
+                  </span>
+                  <span className="text-right text-[13px] text-mute">
+                    {formatRelativeTime(ts)}
+                  </span>
+                </button>
+              );
+            })
           )}
         </div>
       </section>
@@ -267,14 +263,17 @@ export function Atrium() {
       <div className="col-span-12 grid grid-cols-12 gap-3.5">
         {configuredBcl ? (
           <Section
-            className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-7"
+            className="col-span-12 lg:col-span-7"
             label="Brimley-Cocoon Line"
             pip="dim"
           >
-            <div className="cl-mono text-[22px] leading-none text-accent">
+            <div
+              data-testid="bcl-figure"
+              className="font-serif text-[clamp(48px,6vw,96px)] leading-none tracking-[-0.02em] tabular-nums text-accent"
+            >
               {formatBclDuration(configuredBcl.remainingSeconds)}
             </div>
-            <div className="cl-mono mt-1.5 text-[10px] text-ink-mute">
+            <div className="mt-3.5 text-[15px] text-ink-2">
               {configuredBcl.remainingSeconds >= 0 ? "crosses" : "crossed"}{" "}
               {formatBclDate(configuredBcl.date)} · natal{" "}
               {configuredBcl.birthDate}
@@ -283,7 +282,7 @@ export function Atrium() {
         ) : null}
         <SkyCard
           className={cn(
-            "col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5",
+            "col-span-12",
             configuredBcl ? "lg:col-span-5" : "lg:col-span-12",
           )}
           sky={sky}
@@ -294,16 +293,19 @@ export function Atrium() {
 
       {/* HEATMAP */}
       <Section
-        className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5"
-        label="Activity · Rolling 26 weeks"
+        className="col-span-12"
+        label="Activity"
         pip="cool"
-        caption="Captures per day · UTC"
+        caption="Rolling 26 weeks · captures per day · UTC"
         wrapHeader
         action={
           <button
             type="button"
             onClick={() => navigate({ to: "/stats" })}
-            className="cl-mono border-l border-rule pl-2.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+            className={cn(
+              "cursor-pointer rounded-sm text-[14px] text-accent hover:underline",
+              FOCUS_RING_NATIVE,
+            )}
           >
             Stats →
           </button>

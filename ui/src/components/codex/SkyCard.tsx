@@ -1,4 +1,6 @@
 import { Cog } from "lucide-react";
+import { Button } from "#/components/ui/button";
+import { IconButton } from "#/components/ui/icon-button";
 import { cn } from "#/lib/cn";
 import { DayArc } from "./DayArc";
 import { MoonDisc } from "./MoonDisc";
@@ -27,31 +29,29 @@ export function SkyCard({
       className={className}
       label="Sky"
       action={
-        <button
-          type="button"
-          onClick={onEdit}
-          aria-label="Edit location"
-          className="text-ink-mute transition-colors hover:text-accent"
-        >
-          <Cog className="h-3 w-3" />
-        </button>
+        <IconButton aria-label="Edit location" onPress={onEdit}>
+          <Cog />
+        </IconButton>
       }
     >
       <div className="relative">
         <div className={cn(!hasLocation && "pointer-events-none opacity-40")}>
-          <div className="grid grid-cols-[96px_1fr] gap-4">
+          <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-7">
             <MoonDisc info={sky.moon} />
-            <div className="cl-mono flex flex-col gap-1.5 text-[11px]">
-              <div className="border-b border-rule pb-1.5 font-medium uppercase tracking-[0.2em] text-ink">
-                {sky.moon.phaseName} · {sky.moon.illumPct}%
-              </div>
-              <KVLine
-                k="Sunrise"
-                v={`${sky.sunrise}${sky.sunriseIsTomorrow ? " (tomorrow)" : ""}`}
-              />
-              <KVLine k="Sunset" v={sky.sunset} />
-              <KVLine k="Light left" v={sky.lightLeft} />
-              {sky.place && <KVLine k="At" v={sky.place} />}
+            <div className="flex min-w-0 flex-col gap-2">
+              <span className="font-serif text-[26px] leading-tight text-ink">
+                {sky.moon.phaseName}{" "}
+                <span className="italic text-mute">{sky.moon.illumPct}%</span>
+              </span>
+              <dl className="m-0 grid grid-cols-[84px_minmax(0,1fr)] gap-y-1.5 text-[14px]">
+                <KVLine
+                  k="Sunrise"
+                  v={`${sky.sunrise}${sky.sunriseIsTomorrow ? " (tomorrow)" : ""}`}
+                />
+                <KVLine k="Sunset" v={sky.sunset} />
+                <KVLine k="Light left" v={sky.lightLeft} />
+                {sky.place && <KVLine k="At" v={sky.place} />}
+              </dl>
             </div>
           </div>
           <DayArc
@@ -64,17 +64,13 @@ export function SkyCard({
         </div>
 
         {!hasLocation && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
-            <p className="cl-marg m-0 max-w-[24ch]">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-xl bg-ground/85 text-center">
+            <p className="m-0 max-w-[26ch] text-[14px] text-ink-2">
               Set your location for accurate sun times.
             </p>
-            <button
-              type="button"
-              onClick={onEdit}
-              className="cl-btn cl-btn-hot"
-            >
-              ◎ set location
-            </button>
+            <Button variant="primary" size="sm" onPress={onEdit}>
+              Set location
+            </Button>
           </div>
         )}
       </div>
@@ -84,11 +80,9 @@ export function SkyCard({
 
 function KVLine({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-        {k}
-      </span>
-      <span className="text-ink-2">{v}</span>
-    </div>
+    <>
+      <dt className="text-mute">{k}</dt>
+      <dd className="m-0 tabular-nums text-ink">{v}</dd>
+    </>
   );
 }

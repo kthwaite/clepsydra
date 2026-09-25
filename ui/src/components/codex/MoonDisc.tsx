@@ -25,8 +25,7 @@ export function MoonDisc({ info }: { info: MoonInfo }) {
   return (
     <figure
       aria-labelledby={labelId}
-      className="relative m-0 flex h-24 w-24 items-center justify-center border border-rule bg-paper"
-      style={{ boxShadow: "0 0 22px 1px rgba(206,214,226,0.09)" }}
+      className="relative m-0 flex h-24 w-24 items-center justify-center rounded-xl bg-sink"
     >
       <figcaption id={labelId} className="sr-only">
         {info.phaseName} · {info.illumPct}%
@@ -37,7 +36,7 @@ export function MoonDisc({ info }: { info: MoonInfo }) {
       <div
         className="relative h-16 w-16 overflow-hidden rounded-full"
         style={{
-          boxShadow: "inset 0 0 0 1px #4a463c",
+          boxShadow: "inset 0 0 0 1px var(--faint)",
           transform: info.waxing ? "none" : "scaleX(-1)",
         }}
       >
@@ -120,23 +119,18 @@ function PhaseTick({
           style={{
             width: "1px",
             height: current ? "10px" : "6px",
-            background: current ? "var(--accent)" : "var(--ink-mute)",
+            background: current ? "var(--accent)" : "var(--faint)",
           }}
         />
       </Button>
       <Tooltip
         placement={edge}
         offset={4}
-        className="cl-mono z-50 flex items-center gap-1.5 border border-rule px-2 py-0.5 text-[10px] tracking-[0.08em] text-ink"
-        style={{ background: "#15140f", borderLeft: "2px solid var(--accent)" }}
+        className="z-50 flex items-center gap-1.5 rounded-lg bg-ink px-2.5 py-1 text-[12.5px] text-ground shadow-md"
       >
-        <span className="text-ink-2">{glyph}</span>
+        <span>{glyph}</span>
         {name}
-        {current && (
-          <span className="ml-1.5 text-[8px] tracking-[0.16em] text-accent">
-            NOW
-          </span>
-        )}
+        {current && <span className="ml-1 font-medium">· now</span>}
       </Tooltip>
     </TooltipTrigger>
   );

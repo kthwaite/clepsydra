@@ -113,7 +113,7 @@ describe("ActivityHeatmap", () => {
     act(() => emptyDay.focus());
     await screen.findByRole("dialog");
     expect(emptyDay).toHaveFocus();
-    expect(emptyDay).toHaveClass("focus-visible:outline-2");
+    expect(emptyDay).toHaveClass("focus-visible:ring-2");
     expect(screen.getByText("0 captures")).toBeVisible();
     expect(
       screen.queryByRole("button", { name: /^Open / }),
@@ -374,10 +374,26 @@ describe("ActivityHeatmap", () => {
       screen.queryByRole("button", { name: /4 May 2026/i }),
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/4 May 2026/i)).not.toBeInTheDocument();
-    expect(screen.getByText("APR")).toBeVisible();
-    expect(screen.getByText("MAY")).toBeVisible();
+    expect(screen.getByText("Apr")).toBeVisible();
+    expect(screen.getByText("May")).toBeVisible();
     expect(screen.getByText("1,234")).toBeVisible();
-    expect(screen.getByText("9d")).toBeVisible();
-    expect(screen.getByText("2d")).toBeVisible();
+    expect(screen.getByText("9")).toBeVisible();
+    expect(screen.getByText("2")).toBeVisible();
+  });
+
+  it("uses cobalt alpha steps over sink cells and serif summary numerals", () => {
+    render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);
+    const empty = screen.getByRole("button", {
+      name: /1 May 2026, 0 captures/i,
+    });
+    expect(empty).toHaveClass("bg-sink", "rounded-[3px]");
+    expect(screen.getByText("1,234")).toHaveClass("font-serif");
+    expect(screen.getByText("captures")).toHaveClass("text-mute");
+    expect(document.body.textContent).not.toMatch(/LESS|MORE|TOTAL|LONGEST/);
+  });
+
+  it("wraps the summary figures on narrow screens", () => {
+    render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);
+    expect(screen.getByText("1,234").closest("dl")).toHaveClass("flex-wrap");
   });
 });

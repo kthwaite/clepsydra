@@ -1,6 +1,8 @@
 import { useBaseView, usePropertyCommit } from "#/api/bases";
+import { Tick } from "#/components/codex/Tick";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 export interface ReadingRow {
   id: string;
@@ -30,16 +32,18 @@ export function ReadingContinues({
 }) {
   if (rows.length === 0) return null;
   return (
-    <section className="col-span-12 border border-rule bg-paper-2">
-      <div className="flex items-center justify-between border-b border-rule bg-paper px-3.5 py-2">
-        <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-ink-mute">
+    <section
+      aria-label="Reading continues"
+      className="col-span-12 flex flex-col gap-[22px]"
+    >
+      <div className="flex items-center gap-3">
+        <Tick />
+        <h2 className="font-serif text-[22px] italic leading-none text-ink">
           Reading continues
-        </span>
-        <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-          {rows.length} in flight
-        </span>
+        </h2>
+        <span className="text-[13px] text-mute">{rows.length} in flight</span>
       </div>
-      <div className="flex flex-col">
+      <div className="flex max-w-[900px] flex-col gap-5 pl-[19px]">
         {rows.map((row) => {
           const pages = row.pages ?? 0;
           const progress = row.progress ?? 0;
@@ -52,40 +56,43 @@ export function ReadingContinues({
           return (
             <div
               key={row.id}
-              className="grid grid-cols-[1fr_140px_auto] items-center gap-3 border-b border-dotted border-rule-soft px-3.5 py-2 last:border-b-0"
+              className="grid grid-cols-[minmax(0,1fr)_minmax(0,220px)_auto] items-center gap-6"
             >
               <button
                 type="button"
                 onClick={() => onOpen(row)}
-                className="cursor-pointer overflow-hidden text-left"
+                className={cn(
+                  "flex min-w-0 cursor-pointer flex-col gap-0.5 rounded-sm text-left",
+                  FOCUS_RING_NATIVE,
+                )}
               >
-                <span className="block overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14px] text-ink">
+                <span className="truncate font-serif text-[23px] leading-[1.15] text-ink">
                   {row.title ?? row.path}
                 </span>
                 {row.author && (
-                  <span className="cl-mono block text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                  <span className="block truncate text-[13px] text-mute">
                     {row.author}
                   </span>
                 )}
               </button>
-              <div className="flex items-center gap-2">
-                <span className="relative block h-[6px] flex-1 bg-rule-soft">
+              <div className="flex items-center gap-3">
+                <span
+                  data-progress-track
+                  className="relative block h-1 flex-1 overflow-hidden rounded-full bg-sink"
+                >
                   <span
-                    className="absolute inset-y-0 left-0 bg-accent"
+                    className="absolute inset-y-0 left-0 rounded-full bg-accent"
                     style={{ width: `${pct}%` }}
                   />
                 </span>
-                <span className="cl-mono text-[9px] tabular-nums text-ink-mute">
+                <span className="text-[13px] tabular-nums text-mute">
                   {pages > 0 ? `${progress}/${pages}` : `p.${progress}`}
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => onAdvance(row, next)}
-                className={cn(
-                  "cl-mono border border-rule px-2 py-0.5 text-[10px] tracking-[0.08em] text-ink-2",
-                  "hover:border-accent hover:text-accent",
-                )}
+                className="cl-btn"
                 aria-label={`Advance ${row.title ?? row.path} by ${PROGRESS_STEP} pages`}
               >
                 +{PROGRESS_STEP}

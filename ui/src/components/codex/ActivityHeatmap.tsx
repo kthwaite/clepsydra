@@ -13,6 +13,7 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type { HeatmapDay } from "./atrium-data";
 
 export interface ActivityHeatmapProps {
@@ -24,12 +25,14 @@ export interface ActivityHeatmapProps {
   onOpenPage: (path: string, title: string) => void;
 }
 
+/** Empty days sit on `sink`; activity climbs in cobalt alpha steps
+ *  (spec §5.6: 22 / 45 / 70 / 100%, with 85% for the fifth data level). */
 const HEAT_LEVEL = [
-  "bg-rule-soft",
-  "bg-accent/30",
-  "bg-accent/55",
-  "bg-accent/80",
-  "bg-warn",
+  "bg-sink",
+  "bg-accent/[0.22]",
+  "bg-accent/[0.45]",
+  "bg-accent/[0.7]",
+  "bg-accent/[0.85]",
   "bg-accent",
 ];
 const DOW_LABELS = [
@@ -147,109 +150,112 @@ export function ActivityHeatmap({
 
   return (
     <>
-      <div>
-        <div className="mb-1.5 grid grid-cols-[22px_1fr] gap-2">
-          <span />
-          <div className="flex gap-[3px]">
-            {labeledMonths.map(({ key, month }) => (
-              <span
-                key={key}
-                className="cl-mono min-w-0 flex-1 whitespace-nowrap text-[9px] uppercase tracking-[0.16em] text-ink-mute"
-              >
-                {month}
-              </span>
-            ))}
+      <div className="flex flex-wrap items-end gap-x-24 gap-y-8">
+        <div className="min-w-0 max-w-[560px] flex-1">
+          <div className="mb-2.5 grid grid-cols-[22px_1fr] gap-2">
+            <span />
+            <div className="flex gap-[3px]">
+              {labeledMonths.map(({ key, month }) => (
+                <span
+                  key={key}
+                  className="min-w-0 flex-1 whitespace-nowrap text-[12px] text-mute"
+                >
+                  {month.charAt(0) + month.slice(1).toLowerCase()}
+                </span>
+              ))}
+            </div>
           </div>
-        </div>
-        <div className="grid grid-cols-[22px_1fr] gap-2">
-          <div className="grid grid-rows-7 gap-[3px] pr-1 text-right text-[9px] text-ink-mute">
-            {DOW_LABELS.map(({ key, label }) => (
-              <span
-                key={key}
-                className="flex items-center justify-end leading-none"
-              >
-                {label}
-              </span>
-            ))}
-          </div>
-          <div className="flex gap-[3px]">
-            {weeks.map((week) => (
-              <div
-                key={week[0]?.date ?? week.at(-1)?.date}
-                className="flex min-w-0 flex-1 flex-col gap-[3px]"
-              >
-                {week.map((day) => {
-                  const cellClassName = cn(
-                    "aspect-square w-full",
-                    HEAT_LEVEL[day.level],
-                  );
-                  if (day.isFuture) {
+          <div className="grid grid-cols-[22px_1fr] gap-2">
+            <div className="grid grid-rows-7 gap-1 pr-1 text-right text-[11.5px] text-faint">
+              {DOW_LABELS.map(({ key, label }) => (
+                <span
+                  key={key}
+                  className="flex items-center justify-end leading-none"
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-1">
+              {weeks.map((week) => (
+                <div
+                  key={week[0]?.date ?? week.at(-1)?.date}
+                  className="flex min-w-0 flex-1 flex-col gap-1"
+                >
+                  {week.map((day) => {
+                    const cellClassName = cn(
+                      "aspect-square w-full rounded-[3px]",
+                      HEAT_LEVEL[day.level],
+                    );
+                    if (day.isFuture) {
+                      return (
+                        <span
+                          key={day.date}
+                          aria-hidden="true"
+                          className={cellClassName}
+                        />
+                      );
+                    }
+
+                    const date = formatDate(day.date);
                     return (
-                      <span
+                      <button
                         key={day.date}
-                        aria-hidden="true"
-                        className={cellClassName}
+                        type="button"
+                        aria-label={`${date}, ${captureCount(day.count)}`}
+                        aria-haspopup="dialog"
+                        aria-expanded={activeDay?.date === day.date}
+                        aria-controls={
+                          activeDay?.date === day.date ? dialogId : undefined
+                        }
+                        className={cn(
+                          cellClassName,
+                          "cursor-pointer",
+                          FOCUS_RING_NATIVE,
+                        )}
+                        onPointerEnter={(event) =>
+                          openDay(day, event.currentTarget, "pointer")
+                        }
+                        onPointerLeave={(event) =>
+                          scheduleClose(event.currentTarget)
+                        }
+                        onFocus={(event) => focusDay(day, event.currentTarget)}
+                        onBlur={(event) => scheduleClose(event.currentTarget)}
+                        onClick={(event) =>
+                          openDay(day, event.currentTarget, "press")
+                        }
                       />
                     );
-                  }
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
 
-                  const date = formatDate(day.date);
-                  return (
-                    <button
-                      key={day.date}
-                      type="button"
-                      aria-label={`${date}, ${captureCount(day.count)}`}
-                      aria-haspopup="dialog"
-                      aria-expanded={activeDay?.date === day.date}
-                      aria-controls={
-                        activeDay?.date === day.date ? dialogId : undefined
-                      }
-                      className={cn(
-                        cellClassName,
-                        "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1",
-                      )}
-                      onPointerEnter={(event) =>
-                        openDay(day, event.currentTarget, "pointer")
-                      }
-                      onPointerLeave={(event) =>
-                        scheduleClose(event.currentTarget)
-                      }
-                      onFocus={(event) => focusDay(day, event.currentTarget)}
-                      onBlur={(event) => scheduleClose(event.currentTarget)}
-                      onClick={(event) =>
-                        openDay(day, event.currentTarget, "press")
-                      }
-                    />
-                  );
-                })}
-              </div>
+          <div className="mt-3 flex items-center gap-1.5 text-[12px] text-mute">
+            Less
+            {HEAT_LEVEL.map((className) => (
+              <i
+                key={className}
+                className={cn("inline-block h-3 w-3 rounded-[3px]", className)}
+              />
             ))}
+            More
           </div>
         </div>
-      </div>
 
-      <div className="cl-mono mt-3 flex flex-wrap items-center justify-between gap-2 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-        <span>
-          TOTAL{" "}
-          <b className="font-medium text-ink">
-            {total.toLocaleString("en-US")}
-          </b>{" "}
-          · LONGEST <b className="font-medium text-ink">{longest}d</b> · CURRENT{" "}
-          <b className="text-accent">{current}d</b>
-        </span>
-        <span className="flex items-center gap-1.5">
-          LESS
-          {HEAT_LEVEL.map((className) => (
-            <i
-              key={className}
-              className={cn(
-                "inline-block h-3 w-3 border border-rule",
-                className,
-              )}
-            />
-          ))}
-          MORE
-        </span>
+        <dl className="m-0 flex flex-wrap gap-x-16 gap-y-6 pb-1">
+          <SummaryFigure
+            value={total.toLocaleString("en-US")}
+            label="captures"
+          />
+          <SummaryFigure value={String(longest)} label="longest streak, days" />
+          <SummaryFigure
+            value={String(current)}
+            label="current streak"
+            accent
+          />
+        </dl>
       </div>
 
       {activeDay ? (
@@ -265,7 +271,7 @@ export function ActivityHeatmap({
               ref={refs.setFloating}
               data-placement={placement}
               style={floatingStyles}
-              className="z-50 w-72 border border-rule bg-paper outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1"
+              className="z-50 w-72 overflow-hidden rounded-xl bg-raise shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-accent"
               {...getFloatingProps({
                 id: dialogId,
                 "aria-labelledby": headingId,
@@ -280,19 +286,16 @@ export function ActivityHeatmap({
                 },
               })}
             >
-              <div className="border-b border-rule bg-paper-2 px-3 py-2">
-                <h2
-                  id={headingId}
-                  className="cl-mono text-[10px] font-medium uppercase tracking-[0.18em] text-ink"
-                >
+              <div className="px-4 pt-3.5 pb-2">
+                <h2 id={headingId} className="font-serif text-[18px] text-ink">
                   {activeDate} activity
                 </h2>
-                <p className="cl-mono mt-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                <p className="mt-0.5 text-[12.5px] text-mute">
                   {captureCount(activeDay.count)}
                 </p>
               </div>
               {activeDay.pages.length > 0 ? (
-                <div className="flex flex-col py-1">
+                <div className="flex flex-col px-1.5 pb-1.5">
                   {activeDay.pages.slice(0, VISIBLE_PAGES).map((page) => {
                     const title = page.title || page.path;
                     return (
@@ -300,7 +303,10 @@ export function ActivityHeatmap({
                         key={`${page.path}:${page.activityAt}`}
                         type="button"
                         aria-label={`Open ${title}`}
-                        className="cl-mono cursor-pointer px-3 py-2 text-left text-[10px] text-ink-2 hover:bg-paper-edge hover:text-ink focus-visible:bg-paper-edge focus-visible:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:outline-offset-[-1px]"
+                        className={cn(
+                          "cursor-pointer truncate rounded-lg px-2.5 py-1.5 text-left text-[13.5px] text-ink hover:bg-sink",
+                          FOCUS_RING_NATIVE,
+                        )}
                         onClick={() => {
                           closeDay();
                           onOpenPage(page.path, title);
@@ -311,7 +317,7 @@ export function ActivityHeatmap({
                     );
                   })}
                   {activeDay.pages.length > VISIBLE_PAGES ? (
-                    <span className="cl-mono px-3 py-2 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                    <span className="px-2.5 py-1.5 text-[12.5px] text-mute">
                       +{activeDay.pages.length - VISIBLE_PAGES} more
                     </span>
                   ) : null}
@@ -322,5 +328,29 @@ export function ActivityHeatmap({
         </FloatingPortal>
       ) : null}
     </>
+  );
+}
+
+function SummaryFigure({
+  value,
+  label,
+  accent = false,
+}: {
+  value: string;
+  label: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="flex flex-col-reverse gap-1">
+      <dt className="text-[13px] text-mute">{label}</dt>
+      <dd
+        className={cn(
+          "m-0 font-serif text-[56px] leading-none tabular-nums",
+          accent ? "text-accent" : "text-ink",
+        )}
+      >
+        {value}
+      </dd>
+    </div>
   );
 }

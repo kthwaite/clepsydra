@@ -20,6 +20,7 @@ const atriumMocks = vi.hoisted(() => ({
   featureFlags: { academic: true, feeds: true },
   feedHook: vi.fn(),
   readingContinues: false,
+  contentItems: [] as Array<Record<string, unknown>>,
   workspaceState: {
     openHistory: [] as Array<{ path: string; openedAt: number }>,
   },
@@ -40,7 +41,7 @@ vi.mock("#/api/bcl", () => ({
 vi.mock("#/api/index", () => ({
   useTags: () => ({ data: [] }),
   useStats: () => ({ data: undefined }),
-  useContentIndex: () => ({ data: { items: [] } }),
+  useContentIndex: () => ({ data: { items: atriumMocks.contentItems } }),
   useReferenceIssues: () => ({
     data: { items: [], total: 0, limit: 1, offset: 0 },
   }),
@@ -143,6 +144,7 @@ function expectBefore(first: HTMLElement, second: HTMLElement) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  atriumMocks.contentItems = [];
   atriumMocks.bcl = undefined;
   atriumMocks.readingContinues = false;
   atriumMocks.featureFlags = { academic: true, feeds: true };
@@ -159,14 +161,14 @@ describe("Atrium composition", () => {
 
     render(<Atrium />);
 
-    const daystart = closestSection(screen.getByText(/DAYSTART \//));
-    const recents = closestSection(screen.getByText(/^\d+ OF \d+$/));
+    const daystart = closestSection(screen.getByText(/^Week \d+$/));
+    const recents = closestSection(screen.getByText(/^\d+ of [\d,]+$/));
     const agenda = screen.getByRole("region", { name: "Outstanding agenda" });
     const feed = screen.getByRole("region", { name: "Feed river panel" });
     const bcl = closestSection(screen.getByText("Brimley-Cocoon Line"));
     const sky = screen.getByRole("region", { name: "Sky" });
     const activity = closestSection(
-      screen.getByText("Activity · Rolling 26 weeks"),
+      screen.getByRole("heading", { name: "Activity" }),
     );
     const reading = screen.getByRole("region", {
       name: "Reading Continues",
@@ -216,7 +218,7 @@ describe("Atrium composition", () => {
     const feed = screen.getByRole("region", { name: "Feed river panel" });
     const sky = screen.getByRole("region", { name: "Sky" });
     const activity = closestSection(
-      screen.getByText("Activity · Rolling 26 weeks"),
+      screen.getByRole("heading", { name: "Activity" }),
     );
 
     expect(screen.queryByText("Brimley-Cocoon Line")).not.toBeInTheDocument();
@@ -237,7 +239,7 @@ describe("Atrium composition", () => {
     rerender(<Atrium />);
 
     const activity = closestSection(
-      screen.getByText("Activity · Rolling 26 weeks"),
+      screen.getByRole("heading", { name: "Activity" }),
     );
     const reading = screen.getByRole("region", {
       name: "Reading Continues",
@@ -262,20 +264,20 @@ describe("Atrium composition", () => {
     const header = actionCluster?.parentElement;
     expect(header).toHaveClass("min-w-0", "flex-wrap");
     expect(actionCluster).toHaveClass("min-w-0", "flex-wrap");
-    expect(screen.getByText("Captures per day · UTC")).toHaveClass(
-      "whitespace-normal",
-    );
+    expect(
+      screen.getByText("Rolling 26 weeks · captures per day · UTC"),
+    ).toHaveClass("whitespace-normal");
   });
 
   it("keeps daystart compact and action-oriented without Julian time", async () => {
     const user = userEvent.setup();
     render(<Atrium />);
 
-    const daystart = closestSection(screen.getByText(/DAYSTART \//));
-    expect(daystart).toHaveTextContent("2026.08.09 (SUN)");
-    expect(daystart).toHaveTextContent("WEEK 32");
-    expect(daystart).toHaveTextContent("DAY 221 / 365");
-    expect(daystart).toHaveTextContent("12:00 LOCAL");
+    const daystart = closestSection(screen.getByText(/^Week \d+$/));
+    expect(daystart).toHaveTextContent("Sunday 9 August 2026");
+    expect(daystart).toHaveTextContent("Week 32");
+    expect(daystart).toHaveTextContent("Day 221 of 365");
+    expect(daystart).toHaveTextContent("12:00 local");
     expect(daystart).not.toHaveTextContent(/\bJD\s/);
 
     const journal = within(daystart).getByRole("button", {
@@ -284,21 +286,20 @@ describe("Atrium composition", () => {
     const capture = within(daystart).getByRole("button", {
       name: /^Capture/i,
     });
-    const search = within(daystart).getByRole("button", {
-      name: /^Search/i,
-    });
+    // ⌘K covers search (spec decision 11): no hero Search tile.
+    expect(
+      within(daystart).queryByRole("button", { name: /^Search/i }),
+    ).toBeNull();
     const aiJournal = within(daystart).getByRole("button", {
       name: /^AI journal/i,
     });
 
     await user.click(journal);
     await user.click(capture);
-    await user.click(search);
     await user.click(aiJournal);
 
     expect(atriumMocks.openTodayJournal).toHaveBeenCalledOnce();
     expect(atriumMocks.openInscribe).toHaveBeenCalledOnce();
-    expect(atriumMocks.openSearch).toHaveBeenCalledOnce();
     expect(atriumMocks.openTodayAiJournal).toHaveBeenCalledOnce();
   });
 
@@ -313,5 +314,60 @@ describe("Atrium composition", () => {
     expect(
       screen.queryByText(/The notebook is a net for catching days\./),
     ).not.toBeInTheDocument();
+  });
+
+  it("greets in serif without the Vessel grid texture", () => {
+    render(<Atrium />);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveClass("font-serif");
+    expect(document.querySelector(".cl-grid-texture")).toBeNull();
+  });
+
+  it("shows Recent as an eyebrowed list with text tabs and serif numbering", () => {
+    atriumMocks.contentItems = [
+      {
+        path: "notes/ctesibius.md",
+        title: "Ctesibius",
+        kind: "NOTE",
+        created_at: "2026-08-01T10:00:00Z",
+        updated_at: "2026-08-09T10:00:00Z",
+      },
+    ];
+    render(<Atrium />);
+    const heading = screen.getByRole("heading", { name: "Recent" });
+    expect(heading).toHaveClass("font-serif", "italic");
+    const edited = screen.getByRole("button", { name: /Edited/ });
+    expect(edited).toHaveClass("underline", "decoration-accent");
+    const count = screen.getByText(/^\d+ of [\d,]+$/);
+    const recents = count.closest("section") as HTMLElement;
+    const row = within(recents).getByRole("button", { name: /Ctesibius/ });
+    expect(row.querySelector(".font-serif")).toHaveTextContent("01");
+    expect(row).toHaveTextContent("notes");
+  });
+
+  it("sets the Brimley-Cocoon Line figure in cobalt serif numerals", () => {
+    atriumMocks.bcl = {
+      birth_date: "1980-01-01",
+      bcl_date: "2050-01-01",
+      remaining_seconds: 86_400 * 10,
+    };
+    render(<Atrium />);
+    const figure = screen.getByTestId("bcl-figure");
+    expect(figure).toHaveClass("font-serif", "text-accent", "tabular-nums");
+  });
+
+  it("scales the column gap with the viewport so narrow screens never overflow", () => {
+    render(<Atrium />);
+    const page = screen
+      .getByRole("heading", { level: 1 })
+      .closest("div.grid-cols-12") as HTMLElement;
+    expect(page.className).not.toMatch(/(^|\s)gap-x-24\b/);
+    expect(page).toHaveClass("gap-x-6", "2xl:gap-x-24");
+  });
+
+  it("keeps UTC in the Activity caption, since days are bucketed in UTC", () => {
+    render(<Atrium />);
+    expect(
+      screen.getByText("Rolling 26 weeks · captures per day · UTC"),
+    ).toBeInTheDocument();
   });
 });

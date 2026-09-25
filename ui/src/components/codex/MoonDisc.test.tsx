@@ -65,4 +65,11 @@ describe("sky components", () => {
     );
     expect(container.querySelector("svg")).not.toBeNull();
   });
+
+  it("sets the disc on a sink tile with no border", () => {
+    const { container } = render(<MoonDisc info={GIBBOUS} />);
+    const figure = container.querySelector("figure");
+    expect(figure).toHaveClass("bg-sink", "rounded-xl");
+    expect(figure?.className).not.toMatch(/border/);
+  });
 });
