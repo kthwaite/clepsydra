@@ -10,7 +10,7 @@ import {
 } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
 import { Plus, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SheafContextMenu } from "#/components/codex/SheafContextMenu";
 import { TabPreviewCard } from "#/components/codex/TabPreviewCard";
 import { shouldPreviewTab } from "#/components/codex/tab-preview";
@@ -18,7 +18,12 @@ import { KindIcon } from "#/components/KindIcon";
 import { useActivateTabWithFolioHistory } from "#/hooks/useFolioHistoryNavigation";
 import { cn } from "#/lib/cn";
 import { resolveKindFromPath } from "#/lib/kind";
-import { type Quire, quireColorVar, sheafSegments } from "#/store/quires";
+import {
+  type Quire,
+  quireColorVar,
+  sheafRuns,
+  sheafSegments,
+} from "#/store/quires";
 import { useUiStore } from "#/store/ui";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
@@ -63,7 +68,7 @@ export function Sheaf({
   const moveTab = useWorkspaceStore((s) => s.moveTab);
 
   const pageTabs = tabs.filter((tab) => tab.type === "page");
-  const segments = sheafSegments(pageTabs, quires);
+  const runs = sheafRuns(sheafSegments(pageTabs, quires));
 
   const [hovered, setHovered] = useState<{ id: string; rect: DOMRect } | null>(
     null,
@@ -160,94 +165,113 @@ export function Sheaf({
     });
   }, [moveTab]);
 
+  const renderTab = (tab: TabDescriptor) => (
+    <FolioTab
+      key={tab.id}
+      tab={tab}
+      active={tab.id === activeTabId}
+      dragged={tab.id === draggedTabId}
+      dropEdge={
+        dropFeedback?.kind === "tab" && dropFeedback.tabId === tab.id
+          ? dropFeedback.edge
+          : null
+      }
+      setDropFeedback={setDropFeedback}
+      onDndStart={onTabDndStart}
+      onDndEnd={onTabDndEnd}
+      onActivate={onActivate}
+      onEnter={onTabEnter}
+      onLeave={onTabLeave}
+    />
+  );
+
   return (
     <div
       ref={sheafRef}
       className={cn(
-        "cl-serif cl-noscroll flex flex-shrink-0 items-stretch overflow-x-auto border-b border-rule bg-paper-2",
+        "cl-noscroll mx-10 flex h-12 flex-shrink-0 items-stretch gap-7 overflow-x-auto text-[13.5px]",
         className,
       )}
     >
-      <span className="flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap border-r border-rule-soft px-3 py-1 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-        <span className="text-ink-2">{pageTabs.length} tabs</span>
-      </span>
-
-      {segments.map((seg) =>
-        seg.kind === "tab" ? (
-          <FolioTab
-            key={seg.tab.id}
-            tab={seg.tab}
-            active={seg.tab.id === activeTabId}
-            dragged={seg.tab.id === draggedTabId}
-            dropEdge={
-              dropFeedback?.kind === "tab" && dropFeedback.tabId === seg.tab.id
-                ? dropFeedback.edge
-                : null
-            }
-            setDropFeedback={setDropFeedback}
-            onDndStart={onTabDndStart}
-            onDndEnd={onTabDndEnd}
-            onActivate={onActivate}
-            onEnter={onTabEnter}
-            onLeave={onTabLeave}
-          />
-        ) : (
-          <Fragment key={seg.quire.id}>
+      {runs.map((run, index) =>
+        run.kind === "quire" ? (
+          <Segment
+            key={run.quire.id}
+            label={run.quire.name}
+            rule={quireRule(run.quire)}
+          >
             <QuireHeader
-              quire={seg.quire}
-              memberCount={seg.members.length}
+              quire={run.quire}
+              memberCount={run.members.length}
               highlighted={
                 dropFeedback?.kind === "quire" &&
-                dropFeedback.quireId === seg.quire.id
+                dropFeedback.quireId === run.quire.id
               }
               setDropFeedback={setDropFeedback}
-              onToggle={() => toggleQuireCollapse(seg.quire.id)}
+              onToggle={() => toggleQuireCollapse(run.quire.id)}
             />
-            {!seg.quire.collapsed &&
-              seg.members.map((t) => (
-                <FolioTab
-                  key={t.id}
-                  tab={t}
-                  quire={seg.quire}
-                  active={t.id === activeTabId}
-                  dragged={t.id === draggedTabId}
-                  dropEdge={
-                    dropFeedback?.kind === "tab" && dropFeedback.tabId === t.id
-                      ? dropFeedback.edge
-                      : null
-                  }
-                  setDropFeedback={setDropFeedback}
-                  onDndStart={onTabDndStart}
-                  onDndEnd={onTabDndEnd}
-                  onActivate={onActivate}
-                  onEnter={onTabEnter}
-                  onLeave={onTabLeave}
-                />
-              ))}
-          </Fragment>
+            {!run.quire.collapsed && run.members.map(renderTab)}
+          </Segment>
+        ) : (
+          <Segment
+            // Loose runs have no stable id; their position is their identity.
+            // biome-ignore lint/suspicious/noArrayIndexKey: see above
+            key={`loose-${index}`}
+            label="Ungrouped"
+            rule="var(--rule)"
+            grow={index === runs.length - 1}
+          >
+            {run.tabs.map(renderTab)}
+            {index === runs.length - 1 && (
+              <button
+                type="button"
+                aria-label="New page"
+                title="New page"
+                onClick={openInscribe}
+                className="flex flex-shrink-0 cursor-pointer items-center px-2.5 text-faint hover:text-accent focus-visible:text-accent focus-visible:outline-none"
+              >
+                <Plus aria-hidden="true" size={16} />
+              </button>
+            )}
+          </Segment>
         ),
       )}
 
       {hoveredPath && hovered && (
         <TabPreviewCard path={hoveredPath} rect={hovered.rect} />
       )}
-
-      <span className="flex-1" />
-      <span className="flex flex-shrink-0 items-center gap-2 border-l border-rule-soft px-3 py-1 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-        <button
-          type="button"
-          aria-label="New page"
-          title="New page"
-          onClick={openInscribe}
-          className="flex flex-shrink-0 cursor-pointer items-center gap-1 border-r border-rule-soft px-2.5 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
-        >
-          <Plus aria-hidden="true" size={11} />
-          New
-        </button>
-      </span>
     </div>
   );
 }
+
+/** One C3 segment: a run of tabs over a 1px rule in its quire's hue (or the
+ *  neutral rule for ungrouped tabs). */
+function Segment({
+  label,
+  rule,
+  grow,
+  children,
+}: {
+  label: string;
+  rule: string;
+  grow?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a run of tab buttons, not form controls; a fieldset would add form semantics and default borders, so an ARIA group names the quire instead.
+    <div
+      role="group"
+      aria-label={label}
+      className={cn("flex flex-shrink-0 items-stretch gap-1", grow && "flex-1")}
+      style={{ boxShadow: `inset 0 -1px 0 0 ${rule}` }}
+    >
+      {children}
+    </div>
+  );
+}
+
+const quireRule = (q: Quire) =>
+  `color-mix(in srgb, ${quireColorVar(q.color)} 55%, transparent)`;
 
 type QuireHeaderProps = {
   quire: Quire;
@@ -294,17 +318,19 @@ function QuireHeader({
         aria-label={`quire ${quire.name}, ${memberCount} folios${
           quire.collapsed ? ", collapsed" : ""
         }`}
-        className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-r border-rule-soft px-2.5 py-1 text-[9px] uppercase tracking-[0.18em]"
+        className="flex flex-shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap pr-2.5"
         style={{
           color: quireColorVar(quire.color),
-          boxShadow: `inset 0 2px 0 0 ${quireColorVar(quire.color)}`,
           outline: highlighted ? "1px solid var(--accent)" : undefined,
           outlineOffset: highlighted ? "-1px" : undefined,
         }}
       >
-        {quire.name}
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current" />
+        <span className="font-serif text-[17px] italic leading-none">
+          {quire.name}
+        </span>
         {quire.collapsed && (
-          <span className="text-ink-mute">·{memberCount}</span>
+          <span className="text-[12.5px] text-mute">·{memberCount}</span>
         )}
       </button>
     </SheafContextMenu>
@@ -313,7 +339,6 @@ function QuireHeader({
 
 type FolioTabProps = {
   tab: TabDescriptor;
-  quire?: Quire;
   active: boolean;
   dragged: boolean;
   dropEdge: "left" | "right" | null;
@@ -327,7 +352,6 @@ type FolioTabProps = {
 
 function FolioTab({
   tab: t,
-  quire,
   active,
   dragged,
   dropEdge,
@@ -404,9 +428,9 @@ function FolioTab({
     );
   }, [moveTab, onDndEnd, onDndStart, setDropFeedback, t.id]);
   // Rules paint on the wrapper so they span the full tab, close control
-  // included — the label button alone stops short of the ✕.
+  // included — the label button alone stops short of the ✕. The quire's
+  // own rule lives on its Segment.
   const rules = [
-    quire ? `inset 0 2px 0 0 ${quireColorVar(quire.color)}` : null,
     active ? "inset 0 -2px 0 0 var(--accent)" : null,
     dropEdge === "left" ? "inset 2px 0 0 0 var(--accent)" : null,
     dropEdge === "right" ? "inset -2px 0 0 0 var(--accent)" : null,
@@ -416,8 +440,8 @@ function FolioTab({
     <div
       ref={ref}
       className={cn(
-        "group flex max-w-[240px] flex-shrink-0 items-stretch whitespace-nowrap border-r border-rule-soft",
-        active ? "bg-paper text-ink" : "text-ink-mute hover:text-ink",
+        "group flex max-w-[260px] flex-shrink-0 items-stretch whitespace-nowrap",
+        active ? "font-medium text-ink" : "text-mute hover:text-ink",
       )}
       style={rules.length ? { boxShadow: rules.join(", ") } : undefined}
     >
@@ -431,12 +455,17 @@ function FolioTab({
           title={t.path ? undefined : t.label}
           aria-label={t.label || t.path || "untitled folio"}
           className={cn(
-            "flex min-w-0 cursor-pointer items-center gap-2 py-1 pl-3",
+            "flex min-w-0 cursor-pointer items-center gap-2 pl-2.5",
             dragged && "opacity-50",
           )}
         >
-          <KindIcon kind={kind} className="flex-shrink-0" />
-          <span className="max-w-[160px] overflow-hidden text-ellipsis text-[12px] select-none">
+          <KindIcon
+            kind={kind}
+            tone="mono"
+            size={14}
+            className={cn("flex-shrink-0", active && "text-accent")}
+          />
+          <span className="max-w-[180px] overflow-hidden text-ellipsis select-none">
             {t.label || t.path || "(untitled)"}
           </span>
         </button>
@@ -445,9 +474,12 @@ function FolioTab({
         type="button"
         onClick={onClose}
         aria-label="close folio"
-        className="flex-shrink-0 cursor-pointer px-2 leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
+        className={cn(
+          "flex-shrink-0 cursor-pointer pr-2.5 pl-1 leading-none text-faint transition-opacity hover:text-ink focus-visible:opacity-100",
+          active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+        )}
       >
-        <X size={11} />
+        <X size={12} />
       </button>
     </div>
   );

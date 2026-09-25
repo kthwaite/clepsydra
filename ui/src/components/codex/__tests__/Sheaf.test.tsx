@@ -23,6 +23,7 @@ vi.hoisted(async () => {
   const { installMemoryStorage } = await import("#/test/memoryStorage");
   installMemoryStorage();
 });
+
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 import { Sheaf } from "../Sheaf";
@@ -358,23 +359,19 @@ describe("Sheaf quire rendering", () => {
     expect(screen.getByText("·2")).toBeInTheDocument();
   });
 
-  it("counts hidden members in the SHEAF total", () => {
-    seed(true);
-    render(<Sheaf activeTabId="t3" />);
-    expect(screen.getByText("3 tabs")).toBeInTheDocument();
-  });
-
-  it("an active quire member renders both the quire and active rules", () => {
+  it("draws the quire rule on its segment and the active rule on the tab", () => {
     seed(false);
     useWorkspaceStore.setState({ activeTabId: "t1" });
     render(<Sheaf activeTabId="t1" />);
-    const tabButton = screen.getByRole("button", { name: "Alpha" });
-    const wrapper = tabButton.parentElement;
-    if (!(wrapper instanceof HTMLElement)) {
-      throw new Error("Alpha tab wrapper was not rendered");
-    }
-    expect(wrapper.style.boxShadow).toContain("var(--quire-sepia)");
-    expect(wrapper.style.boxShadow).toContain("var(--accent)");
+    const segment = screen.getByRole("group", { name: "thesis" });
+    expect(segment.style.boxShadow).toContain(
+      "color-mix(in srgb, var(--quire-sepia) 55%, transparent)",
+    );
+    const wrapper = screen.getByRole("button", { name: "Alpha" }).parentElement;
+    expect(wrapper?.style.boxShadow).toContain(
+      "inset 0 -2px 0 0 var(--accent)",
+    );
+    expect(wrapper?.style.boxShadow ?? "").not.toContain("--quire-");
   });
 
   it("draws the quire and active rules across the close control too", () => {
@@ -440,7 +437,6 @@ describe("Sheaf creation action", () => {
     seed(false);
     render(<Sheaf activeTabId="t3" />);
 
-    expect(screen.getByText("3 tabs")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "New page" }),
     ).not.toHaveAttribute("aria-selected");
@@ -879,5 +875,108 @@ describe("Sheaf tab preview gating", () => {
     act(() => vi.advanceTimersByTime(220));
 
     expect(screen.getByTestId("tab-preview")).toHaveTextContent("c.md");
+  });
+});
+
+describe("Sheaf C3 segments", () => {
+  it("keeps ungrouped runs in place, each on a neutral segment", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t0", type: "page", path: "z.md", label: "Zero" },
+        { id: "t1", type: "page", path: "a.md", label: "Alpha", quireId: "q1" },
+        { id: "t3", type: "page", path: "c.md", label: "Gamma" },
+      ],
+      activeTabId: "t3",
+      quires: {
+        q1: { id: "q1", name: "thesis", color: "sepia", collapsed: false },
+      },
+      openHistory: [],
+    });
+    render(<Sheaf activeTabId="t3" />);
+    const groups = screen.getAllByRole("group");
+    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual([
+      "Ungrouped",
+      "thesis",
+      "Ungrouped",
+    ]);
+    expect(within(groups[0]).getByText("Zero")).toBeInTheDocument();
+    expect(within(groups[2]).getByText("Gamma")).toBeInTheDocument();
+    expect(groups[0].style.boxShadow).toContain("var(--rule)");
+  });
+
+  it("puts + on a trailing stretching segment even when a quire is last", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "a.md", label: "Alpha", quireId: "q1" },
+      ],
+      activeTabId: "t1",
+      quires: {
+        q1: { id: "q1", name: "thesis", color: "sepia", collapsed: false },
+      },
+      openHistory: [],
+    });
+    render(<Sheaf activeTabId="t1" />);
+    const last = screen.getAllByRole("group").at(-1) as HTMLElement;
+    expect(last.getAttribute("aria-label")).toBe("Ungrouped");
+    expect(last).toHaveClass("flex-1");
+    expect(
+      within(last).getByRole("button", { name: "New page" }),
+    ).toBeInTheDocument();
+  });
+
+  it("still offers + with no tabs open", () => {
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      quires: {},
+      openHistory: [],
+    });
+    render(<Sheaf activeTabId={null} />);
+    expect(
+      screen.getByRole("button", { name: "New page" }),
+    ).toBeInTheDocument();
+  });
+
+  it("labels a quire with a dot and italic serif name, and the hidden count when collapsed", () => {
+    seed(true);
+    render(<Sheaf activeTabId="t3" />);
+    const label = screen.getByRole("button", { name: /quire thesis/i });
+    expect(within(label).getByText("thesis")).toHaveClass(
+      "font-serif",
+      "italic",
+    );
+    expect(within(label).getByText("·2")).toBeInTheDocument();
+  });
+
+  it("draws glyphs in currentColor: accent on the active tab, mute elsewhere", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    const active = screen.getByRole("button", { name: "Gamma" });
+    const idle = screen.getByRole("button", { name: "Alpha" });
+    expect(active.querySelector("svg")?.getAttribute("stroke")).toBe(
+      "currentColor",
+    );
+    expect(active.querySelector("svg")).toHaveClass("text-accent");
+    expect(idle.querySelector("svg")).not.toHaveClass("text-accent");
+  });
+
+  it("shows × on the active tab and reveals it on hover or focus elsewhere", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    const [alphaClose, , gammaClose] = screen.getAllByRole("button", {
+      name: "close folio",
+    });
+    expect(gammaClose).not.toHaveClass("opacity-0");
+    expect(alphaClose).toHaveClass(
+      "opacity-0",
+      "group-hover:opacity-100",
+      "focus-visible:opacity-100",
+    );
+  });
+
+  it("drops the Vessel tab counter", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    expect(screen.queryByText(/\d+ tabs/)).toBeNull();
   });
 });
