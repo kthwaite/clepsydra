@@ -317,6 +317,12 @@ import { useWorkspaceStore } from "#/store/workspace";
 import { Folio } from "../Folio";
 
 beforeEach(() => {
+  useCollapsibleRailMock.mockImplementation(() => ({
+    collapsed: false,
+    width: 240,
+    toggle: vi.fn(),
+    onResizeStart: vi.fn(),
+  }));
   blockerState.current = { status: "idle" };
   useBlockerMock.mockClear();
   routerHistory.replace.mockClear();
@@ -615,6 +621,58 @@ describe("Folio invalid-tab recovery", () => {
     const title = screen.getByRole("textbox", { name: "Page title" });
     expect(title).toHaveClass("font-serif", "leading-[1.02]");
     expect(title.className).not.toMatch(/font-bold/);
+  });
+
+  it("frames the rails at 232 and 296 with no rules and round hide buttons", async () => {
+    const user = userEvent.setup();
+    const toggle = vi.fn();
+    useCollapsibleRailMock.mockImplementation(() => ({
+      collapsed: false,
+      width: 240,
+      toggle,
+      onResizeStart: vi.fn(),
+    }));
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    expect(useCollapsibleRailMock).toHaveBeenCalledWith(
+      expect.objectContaining({ side: "left", defaultWidth: 232 }),
+    );
+    expect(useCollapsibleRailMock).toHaveBeenCalledWith(
+      expect.objectContaining({ side: "right", defaultWidth: 296 }),
+    );
+    for (const name of ["Page details", "Page links"]) {
+      const rail = screen.getByRole("complementary", { name });
+      expect(rail.className).not.toMatch(/border-(l|r)\b/);
+    }
+    const hideLeft = screen.getByRole("button", { name: "Hide left sidebar" });
+    expect(hideLeft).toHaveClass("rounded-full");
+    await user.click(hideLeft);
+    await user.click(
+      screen.getByRole("button", { name: "Hide right sidebar" }),
+    );
+    expect(toggle).toHaveBeenCalledTimes(2);
+  });
+
+  it("collapses each rail to a round sink button that shows it again", async () => {
+    const user = userEvent.setup();
+    const toggle = vi.fn();
+    useCollapsibleRailMock.mockImplementation(() => ({
+      collapsed: true,
+      width: 240,
+      toggle,
+      onResizeStart: vi.fn(),
+    }));
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const showLeft = screen.getByRole("button", { name: "Show left sidebar" });
+    expect(showLeft).toHaveClass("h-8", "w-8", "rounded-full", "bg-sink");
+    expect(
+      screen.getByRole("button", { name: "Show right sidebar" }),
+    ).toHaveClass("bg-sink");
+    await user.click(showLeft);
+    expect(toggle).toHaveBeenCalledOnce();
   });
 
   it("suggests indexed tags while editing folio tags", async () => {
@@ -1591,7 +1649,7 @@ describe("Folio mobile presentation", () => {
     ).not.toBe(0);
     expect(screen.getAllByTestId("folio-properties")).toHaveLength(1);
     expect(
-      screen.queryByRole("button", { name: "collapse panel" }),
+      screen.queryByRole("button", { name: "Hide right sidebar" }),
     ).not.toBeInTheDocument();
     expect(useCollapsibleRailMock).not.toHaveBeenCalled();
 

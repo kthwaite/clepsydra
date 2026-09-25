@@ -5,6 +5,12 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import {
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+} from "lucide-react";
+import {
   type CSSProperties,
   lazy,
   Suspense,
@@ -64,6 +70,7 @@ import { KindIcon } from "#/components/KindIcon";
 import { OfflineUnavailable } from "#/components/OfflineUnavailable";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
+import { IconButton } from "#/components/ui/icon-button";
 import { TagInput } from "#/components/ui/tag-input";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
 import { BaseRenderingProvider } from "#/editor/baseRendering";
@@ -94,7 +101,7 @@ import {
 } from "#/lib/journal";
 import { kindDisplayLabel, kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
-import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
+import { formatChord, matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { formatAbsoluteDate, formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
 import { isOfflineUncached } from "#/offline/swPolicy";
@@ -1700,31 +1707,34 @@ function DesktopFolioLayout({
   const left = useCollapsibleRail({
     storageKey: FOLIO_LEFT_RAIL,
     side: "left",
-    defaultWidth: 240,
+    defaultWidth: 232,
     min: 180,
     max: 480,
   });
   const right = useCollapsibleRail({
     storageKey: FOLIO_RIGHT_RAIL,
     side: "right",
-    defaultWidth: 280,
+    defaultWidth: 296,
     min: 220,
     max: 480,
   });
   const column = useReadingColumn();
-  const lw = left.collapsed ? 34 : left.width;
-  const rw = right.collapsed ? 34 : right.width;
+  const lw = left.collapsed ? 32 : left.width;
+  const rw = right.collapsed ? 32 : right.width;
 
   return (
     <div
-      className="grid h-full min-h-0"
+      className="grid h-full min-h-0 gap-16 px-10"
       style={{ gridTemplateColumns: `${lw}px 1fr ${rw}px` }}
     >
       {left.collapsed ? (
-        <RailStub label="META" side="left" onExpand={left.toggle} />
+        <RailStub side="left" onExpand={left.toggle} />
       ) : (
-        <aside className="cl-noscroll relative overflow-auto border-r border-rule">
-          <RailHeader label="META" onCollapse={left.toggle} side="left" />
+        <aside
+          aria-label="Page details"
+          className="cl-noscroll relative flex min-w-0 flex-col gap-12 overflow-auto pt-16 pb-10"
+        >
+          <RailHideButton side="left" onCollapse={left.toggle} />
           {details}
           {contents}
           {supplementalDetails}
@@ -1751,7 +1761,7 @@ function DesktopFolioLayout({
           className="cl-noscroll h-full overflow-auto"
         >
           <div
-            className="mx-auto px-7 py-[18px] pb-10"
+            className="mx-auto px-7 pt-16 pb-16"
             style={{ maxWidth: `${column.width}px` }}
           >
             {header}
@@ -1777,19 +1787,15 @@ function DesktopFolioLayout({
       </div>
 
       {right.collapsed ? (
-        <RailStub label="LINKS" side="right" onExpand={right.toggle} />
+        <RailStub side="right" onExpand={right.toggle} />
       ) : (
-        <aside className="cl-noscroll relative overflow-auto border-l border-rule">
+        <aside
+          aria-label="Page links"
+          className="cl-noscroll relative flex min-w-0 flex-col gap-7 overflow-auto pt-16 pb-10"
+        >
           <Resizer onPointerDown={right.onResizeStart} side="left" />
+          <RailHideButton side="right" onCollapse={right.toggle} />
           {relationships}
-          <button
-            type="button"
-            onClick={right.toggle}
-            className="cl-mono absolute top-0 right-0 cursor-pointer px-2 py-1.5 text-[12px] text-ink-mute hover:text-ink"
-            aria-label="collapse panel"
-          >
-            ›
-          </button>
         </aside>
       )}
       {protection}
@@ -1953,10 +1959,10 @@ function ReadingTicks({
           >
             <span
               className={cn(
-                "h-[3px] transition-all",
+                "h-[3px] rounded-full transition-all",
                 active
                   ? "w-7 bg-accent"
-                  : "w-3.5 bg-ink-mute/40 group-hover:w-5 group-hover:bg-ink",
+                  : "w-3.5 bg-faint group-hover:w-5 group-hover:bg-ink",
               )}
             />
           </button>
@@ -2008,57 +2014,56 @@ function ProtectedBodyNotice({ onUnlock }: { onUnlock: () => void }) {
   );
 }
 
-function RailHeader({
-  label,
-  onCollapse,
+const RAIL_CHORD = {
+  left: SHORTCUTS["folio.toggleLeft"].chord,
+  right: SHORTCUTS["folio.toggleRight"].chord,
+} as const;
+
+/** The rail's hide control: a 32px round ghost button level with the first
+ *  section's eyebrow (mockup), so no header band is needed. */
+function RailHideButton({
   side,
+  onCollapse,
 }: {
-  label: string;
-  onCollapse: () => void;
   side: "left" | "right";
+  onCollapse: () => void;
 }) {
   return (
-    <div className="sticky top-0 z-10 flex items-center justify-between border-b border-rule bg-paper px-3 py-1">
-      <span className="cl-serif text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-        {label}
+    <IconButton
+      aria-label={`Hide ${side} sidebar`}
+      onPress={onCollapse}
+      className="absolute top-[58px] right-0 z-10 text-faint"
+    >
+      <span aria-hidden title={`Hide sidebar ${formatChord(RAIL_CHORD[side])}`}>
+        {side === "left" ? <PanelLeftClose /> : <PanelRightClose />}
       </span>
-      <button
-        type="button"
-        onClick={onCollapse}
-        className="cl-mono cursor-pointer text-[12px] text-ink-mute hover:text-ink"
-        aria-label={`collapse ${label}`}
-      >
-        {side === "left" ? "‹" : "›"}
-      </button>
-    </div>
+    </IconButton>
   );
 }
 
+/** A collapsed rail: one 32px round `sink` button that shows it again. */
 function RailStub({
-  label,
   side,
   onExpand,
 }: {
-  label: string;
   side: "left" | "right";
   onExpand: () => void;
 }) {
   return (
-    <aside
-      className={cn(
-        "flex justify-center border-rule pt-3",
-        side === "left" ? "border-r" : "border-l",
-      )}
-    >
+    <div className={cn("flex pt-16", side === "right" && "justify-end")}>
       <button
         type="button"
         onClick={onExpand}
-        className="cl-mono cursor-pointer text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-ink [writing-mode:vertical-rl]"
-        aria-label={`expand ${label}`}
+        aria-label={`Show ${side} sidebar`}
+        title={`Show sidebar ${formatChord(RAIL_CHORD[side])}`}
+        className={cn(
+          "flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-sink text-mute transition-colors hover:text-ink [&_svg]:h-4 [&_svg]:w-4",
+          FOCUS_RING_NATIVE,
+        )}
       >
-        {label} {side === "left" ? "›" : "‹"}
+        {side === "left" ? <PanelLeftOpen /> : <PanelRightOpen />}
       </button>
-    </aside>
+    </div>
   );
 }
 
@@ -2073,7 +2078,7 @@ function Resizer({
     <div
       onPointerDown={onPointerDown}
       className={cn(
-        "absolute top-0 z-20 h-full w-[3px] cursor-col-resize hover:bg-accent",
+        "absolute top-0 z-20 h-full w-[3px] cursor-col-resize rounded-full hover:bg-accent",
         side === "left" ? "left-0" : "right-0",
       )}
       aria-hidden
