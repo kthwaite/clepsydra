@@ -219,7 +219,7 @@ function renderAtrium(client: QueryClient) {
 function expectAtriumSurfaces() {
   expect(screen.getByText("Activity · Rolling 26 weeks")).toBeInTheDocument();
   expect(screen.getByText(/DAYSTART \//)).toBeInTheDocument();
-  expect(screen.getByText("FIG. VI")).toBeInTheDocument();
+  expect(screen.getByText(/^\d+ OF \d+$/)).toBeInTheDocument();
 }
 
 beforeEach(() => {

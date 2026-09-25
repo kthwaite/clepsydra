@@ -160,7 +160,7 @@ describe("Atrium composition", () => {
     render(<Atrium />);
 
     const daystart = closestSection(screen.getByText(/DAYSTART \//));
-    const recents = closestSection(screen.getByText("FIG. VI"));
+    const recents = closestSection(screen.getByText(/^\d+ OF \d+$/));
     const agenda = screen.getByRole("region", { name: "Outstanding agenda" });
     const feed = screen.getByRole("region", { name: "Feed river panel" });
     const bcl = closestSection(screen.getByText("Brimley-Cocoon Line"));
@@ -262,7 +262,7 @@ describe("Atrium composition", () => {
     const header = actionCluster?.parentElement;
     expect(header).toHaveClass("min-w-0", "flex-wrap");
     expect(actionCluster).toHaveClass("min-w-0", "flex-wrap");
-    expect(screen.getByText("FIG. IV — CAPTURES PER DAY · UTC")).toHaveClass(
+    expect(screen.getByText("Captures per day · UTC")).toHaveClass(
       "whitespace-normal",
     );
   });

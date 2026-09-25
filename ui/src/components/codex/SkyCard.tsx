@@ -1,8 +1,8 @@
 import { Cog } from "lucide-react";
 import { cn } from "#/lib/cn";
-import { Card } from "./Card";
 import { DayArc } from "./DayArc";
 import { MoonDisc } from "./MoonDisc";
+import { Section } from "./Section";
 import type { SkyData } from "./sky";
 
 /**
@@ -23,10 +23,9 @@ export function SkyCard({
   className?: string;
 }) {
   return (
-    <Card
+    <Section
       className={className}
       label="Sky"
-      caption="FIG. III"
       action={
         <button
           type="button"
@@ -79,7 +78,7 @@ export function SkyCard({
           </div>
         )}
       </div>
-    </Card>
+    </Section>
   );
 }
 

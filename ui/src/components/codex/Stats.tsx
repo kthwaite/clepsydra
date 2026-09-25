@@ -8,7 +8,7 @@ import {
 } from "#/api/index";
 import { cn } from "#/lib/cn";
 import { deriveInventory } from "./atrium-data";
-import { Card } from "./Card";
+import { Section } from "./Section";
 
 const REFERENCE_ISSUE_COUNT_FILTERS = { limit: 1, offset: 0 };
 
@@ -34,10 +34,10 @@ export function Stats() {
 
   return (
     <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-3.5 px-2 py-2 md:px-4 md:py-4">
-      <Card
+      <Section
         className="col-span-12"
         label="Vessel · Inventory"
-        caption="FIG. I — STEADY-STATE TELEMETRY"
+        caption="Steady-state telemetry"
         action={
           <button
             type="button"
@@ -90,12 +90,11 @@ export function Stats() {
             </div>
           ))}
         </div>
-      </Card>
+      </Section>
 
-      <Card
+      <Section
         className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-4"
         label="Subjects, by frequency"
-        caption="FIG. V"
       >
         {topTags.length === 0 ? (
           <p className="cl-marg m-0">No tags yet.</p>
@@ -131,7 +130,7 @@ export function Stats() {
             ))}
           </div>
         )}
-      </Card>
+      </Section>
     </div>
   );
 }

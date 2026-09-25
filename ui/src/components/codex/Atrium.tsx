@@ -25,10 +25,10 @@ import {
   sortRecents,
 } from "./atrium-data";
 import { useAtriumCalendar } from "./atrium-time";
-import { Card } from "./Card";
 import { FeedRiverPanel } from "./FeedRiverPanel";
 import { shortFolio } from "./folio-utils";
 import { ReadingContinuesPanel } from "./ReadingContinues";
+import { Section } from "./Section";
 import { SkyCard } from "./SkyCard";
 import { deriveSky, hasCoords } from "./sky";
 
@@ -207,9 +207,6 @@ export function Atrium() {
             <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
               {recentRows.length} OF {items.length}
             </span>
-            <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-              FIG. VI
-            </span>
           </div>
         </div>
 
@@ -269,11 +266,10 @@ export function Atrium() {
       {/* BCL (col-7) + SKY (col-5) */}
       <div className="col-span-12 grid grid-cols-12 gap-3.5">
         {configuredBcl ? (
-          <Card
+          <Section
             className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-7"
             label="Brimley-Cocoon Line"
             pip="dim"
-            caption="FIG. VII"
           >
             <div className="cl-mono text-[22px] leading-none text-accent">
               {formatBclDuration(configuredBcl.remainingSeconds)}
@@ -283,7 +279,7 @@ export function Atrium() {
               {formatBclDate(configuredBcl.date)} · natal{" "}
               {configuredBcl.birthDate}
             </div>
-          </Card>
+          </Section>
         ) : null}
         <SkyCard
           className={cn(
@@ -297,11 +293,11 @@ export function Atrium() {
       </div>
 
       {/* HEATMAP */}
-      <Card
+      <Section
         className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5"
         label="Activity · Rolling 26 weeks"
         pip="cool"
-        caption="FIG. IV — CAPTURES PER DAY · UTC"
+        caption="Captures per day · UTC"
         wrapHeader
         action={
           <button
@@ -321,7 +317,7 @@ export function Atrium() {
           current={heat.currentStreak}
           onOpenPage={(path, title) => openTab("page", path, title)}
         />
-      </Card>
+      </Section>
 
       {/* READING CONTINUES — the bases pilot; hidden without a reading base */}
       <ReadingContinuesPanel />

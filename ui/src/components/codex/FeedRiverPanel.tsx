@@ -2,8 +2,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "react-aria-components";
 import { type EntryView, useFeeds } from "#/api/feeds";
-import { Card } from "#/components/codex/Card";
 import { FeedRiver } from "#/components/codex/FeedRiver";
+import { Section } from "#/components/codex/Section";
 import { cn } from "#/lib/cn";
 
 export function FeedRiverPanel() {
@@ -53,7 +53,7 @@ export function FeedRiverPanel() {
 
   return (
     <section aria-label="Feed river panel" className="col-span-12">
-      <Card
+      <Section
         label="Feed river"
         wrapHeader
         caption={`${feedsQuery.data.counts.unread} UNREAD · ${feedsQuery.data.counts.saved} SAVED · ${subscriptionCount} ${subscriptionCount === 1 ? "SOURCE" : "SOURCES"}`}
@@ -163,7 +163,7 @@ export function FeedRiverPanel() {
             <FeedRiver compact filters={{ view }} />
           </>
         )}
-      </Card>
+      </Section>
     </section>
   );
 }
