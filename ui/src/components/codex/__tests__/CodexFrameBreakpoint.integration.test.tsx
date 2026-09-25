@@ -79,6 +79,9 @@ const {
 vi.stubGlobal("matchMedia", matchMediaController.query);
 vi.mock("@tanstack/react-query", () => ({
   useIsMutating: () => 0,
+  useQueryClient: () => ({
+    getMutationCache: () => ({ subscribe: () => () => {} }),
+  }),
   // FolioError constructs the app QueryClient singleton at module load.
   QueryClient: class {},
 }));
@@ -117,7 +120,9 @@ vi.mock("#/api/index", () => ({
     data: { pages: 2, links_total: 1, last_indexed_at: null },
     isError: false,
   }),
+  useSyncConflicts: () => ({ data: undefined }),
 }));
+vi.mock("#/api/feeds", () => ({ useFeeds: () => ({ data: undefined }) }));
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
 }));
@@ -294,22 +299,21 @@ describe("CodexFrame real breakpoint transitions", () => {
       const primary = screen.getByRole("navigation", {
         name: "Primary navigation",
       });
-      expect(
-        within(primary).getByRole("button", { name: /02.*stats/i }),
-      ).toBeVisible();
-      expect(
-        within(primary).getByRole("button", { name: /07.*feeds/i }),
-      ).toBeVisible();
+      // Stone & Lamp header (phase 2a): the core three plus Contents, which
+      // reaches every other screen; ⌘K and the theme live in shortcuts.
+      for (const name of ["Folio", "Tasking", "Gazetteer", "Contents"]) {
+        expect(within(primary).getByRole("button", { name })).toBeVisible();
+      }
       expect(
         screen.queryByRole("navigation", { name: "Mobile roots" }),
       ).not.toBeInTheDocument();
 
-      await user.click(screen.getByRole("button", { name: /query/i }));
       await user.click(
-        screen.getByRole("button", { name: "Switch to dark mode" }),
+        within(primary).getByRole("button", { name: "Contents" }),
       );
-      expect(openSearchMock).toHaveBeenCalledOnce();
-      expect(toggleThemeMock).toHaveBeenCalledOnce();
+      expect(
+        await screen.findByRole("option", { name: /Stats/ }),
+      ).toBeVisible();
     },
   );
 

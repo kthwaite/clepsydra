@@ -192,7 +192,7 @@ describe("TaskingScreen smoke", () => {
       vi.fn(() => new Promise(() => {})),
     );
     renderScreen();
-    expect(screen.getByText("LOADING")).toBeInTheDocument();
+    expect(screen.getByText("Loading the board…")).toBeInTheDocument();
   });
 
   it("renders the error state when the board fetch fails", async () => {
@@ -202,7 +202,7 @@ describe("TaskingScreen smoke", () => {
     );
     renderScreen();
     expect(
-      await screen.findByText(/ERROR — board unavailable/),
+      await screen.findByText("The board is unavailable."),
     ).toBeInTheDocument();
   });
 
@@ -223,10 +223,10 @@ describe("TaskingScreen smoke", () => {
     );
     renderScreen();
     expect(
-      await screen.findByText(/ERROR — board unavailable/),
+      await screen.findByText("The board is unavailable."),
     ).toBeInTheDocument();
 
-    const retryButton = screen.getByRole("button", { name: /retry/i });
+    const retryButton = screen.getByRole("button", { name: "Retry" });
     await userEvent.click(retryButton);
 
     expect(await screen.findByTestId("kb-col-INTAKE")).toBeInTheDocument();
@@ -235,14 +235,16 @@ describe("TaskingScreen smoke", () => {
   it("renders the board shell when data loads successfully", async () => {
     stubBoardFetch();
     renderScreen();
-    expect(await screen.findByText("Task Board")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Task board" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Scope")).toBeInTheDocument();
   });
 
   it("renders neutral mode labels after load", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
     expect(screen.getByRole("tab", { name: "Board" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "List" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Cycles" })).toBeInTheDocument();
@@ -252,14 +254,14 @@ describe("TaskingScreen smoke", () => {
   it("renders ALL OPS rail row after load", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
-    expect(screen.getByText("All projects")).toBeInTheDocument();
+    await screen.findByRole("tab", { name: "Board" });
+    expect(screen.getAllByText("All projects").length).toBeGreaterThan(0);
   });
 
   it("shows fixed human-facing status labels in board mode", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     for (const [id, label] of [
       ["INTAKE", "Inbox"],
@@ -278,7 +280,7 @@ describe("TaskingScreen smoke", () => {
     useBoardStore.setState({ mode: "backlog" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
     // BacklogView's header row is mounted
     expect(screen.getByText("ID")).toBeInTheDocument();
     expect(screen.queryByText(/COMING SOON/)).not.toBeInTheDocument();
@@ -287,7 +289,7 @@ describe("TaskingScreen smoke", () => {
   it("op with null project: clicking its row shows op-meta and zero tasks", async () => {
     stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     const row = screen.getByRole("button", { name: /OPS-3/ });
     await userEvent.click(row);
@@ -296,13 +298,13 @@ describe("TaskingScreen smoke", () => {
     expect(useBoardStore.getState().opFilter).toBe("OPS-3");
 
     // op-meta line resolves the same op (LEAD label only renders there)
-    expect(screen.getByText("LEAD")).toBeInTheDocument();
+    expect(screen.getByText("Lead")).toBeInTheDocument();
     expect(screen.getByText("Riva")).toBeInTheDocument();
 
     // no task carries the op code as a project → zero visible tasks
     const openStat = screen.getByText("Open").parentElement;
     assert(openStat !== null);
-    expect(within(openStat).getByText("00")).toBeInTheDocument();
+    expect(within(openStat).getByText("0")).toBeInTheDocument();
   });
 });
 
@@ -313,7 +315,7 @@ describe("TaskingScreen — kanban column + project preset", () => {
     useBoardStore.setState({ opFilter: "alpha" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByTestId("kb-add-FIELD"));
     expect(useBoardStore.getState().taskModal).toEqual({
@@ -325,7 +327,7 @@ describe("TaskingScreen — kanban column + project preset", () => {
   it("ALL ops: + presets status only, no project key", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByTestId("kb-add-FIELD"));
     const modal = useBoardStore.getState().taskModal;
@@ -337,7 +339,7 @@ describe("TaskingScreen — kanban column + project preset", () => {
     useBoardStore.setState({ opFilter: "OPS-3" });
     stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByTestId("kb-add-FIELD"));
     const modal = useBoardStore.getState().taskModal;
@@ -352,7 +354,7 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
   it("mounts NewTaskModal when taskModal is non-null", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     useBoardStore.setState({ taskModal: { status: "INTAKE" } });
 
@@ -365,7 +367,7 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
   it("does not mount NewTaskModal when taskModal is null", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     expect(screen.queryByTestId("new-task-modal")).not.toBeInTheDocument();
   });
@@ -373,7 +375,7 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
   it("mounts TaskEditPanel when editTaskId matches a task in board data", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     // t1 exists in BOARD_FIXTURE
     useBoardStore.setState({ editTaskId: "t1" });
@@ -386,7 +388,7 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
   it("does not mount TaskEditPanel when editTaskId is null", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     expect(screen.queryByTestId("edit-panel")).not.toBeInTheDocument();
   });
@@ -394,7 +396,7 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
   it("does not mount TaskEditPanel when editTaskId does not match any task", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     useBoardStore.setState({ editTaskId: "ghost-task" });
 
@@ -423,7 +425,7 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
     vi.stubGlobal("fetch", stub);
 
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     act(() => useBoardStore.setState({ editTaskId: "t1" }));
     await screen.findByTestId("edit-panel");
@@ -478,7 +480,7 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
     const onOpenDossier = vi.fn();
     stubBoardFetch();
     renderScreenWithProps(onOpenPage, onOpenDossier);
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     // Open the edit panel for t1
     useBoardStore.setState({ editTaskId: "t1" });
@@ -509,7 +511,7 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
     const onOpenPage = vi.fn();
     const onOpenDossier = vi.fn();
     renderScreenWithProps(onOpenPage, onOpenDossier);
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     useBoardStore.setState({ editTaskId: "t1" });
     await screen.findByTestId("edit-panel");
@@ -524,7 +526,7 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
     const onOpenDossier = vi.fn();
     stubBoardFetch();
     renderScreenWithProps(onOpenPage, onOpenDossier);
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     // Select OPS-1 via its ScopeRail row → the op-meta line renders
     await userEvent.click(screen.getByRole("button", { name: /OPS-1/ }));
@@ -543,7 +545,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
   it("uses Project, Status, and Priority as primary facets in that order", async () => {
     stubBoardFetch();
     renderScreenWithFilter();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     const project = screen.getByTestId("filter-bar-chip-project");
     const status = screen.getByTestId("filter-bar-chip-status");
@@ -575,7 +577,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
   it("renders priority filter labels while applying the raw priority id", async () => {
     stubBoardFetch(FILTER_FIXTURE);
     renderScreenWithFilter();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByTestId("filter-bar-chip-pri"));
 
@@ -596,7 +598,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
   it("renders status filter labels while applying the raw status id", async () => {
     stubBoardFetch();
     renderScreenWithFilter();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByTestId("filter-bar-chip-status"));
 
@@ -616,7 +618,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
   it("typing text filters visible cards and shows the N OF M count", async () => {
     stubBoardFetch(FILTER_FIXTURE);
     renderScreenWithFilter();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     expect(screen.getByText("Alpha task")).toBeInTheDocument();
     expect(screen.getByText("Beta task")).toBeInTheDocument();
@@ -628,15 +630,13 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     expect(screen.getByText("Alpha task")).toBeInTheDocument();
     expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
     expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "01 OF 03",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("1 of 3");
   });
 
   it("adding a project facet chip narrows to that project's tasks", async () => {
     stubBoardFetch();
     renderScreenWithFilter();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
     expect(screen.getByText("Task Beta 1")).toBeInTheDocument();
@@ -653,15 +653,13 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     expect(screen.getByText("Task Sealed")).toBeInTheDocument();
     expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Unfiled")).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "03 OF 05",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("3 of 5");
   });
 
   it("composes a project facet with the text filter", async () => {
     stubBoardFetch();
     renderScreenWithFilter();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByTestId("filter-bar-chip-project"));
     await userEvent.click(
@@ -676,15 +674,13 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     expect(screen.getByText("Task Sealed")).toBeInTheDocument();
     expect(screen.queryByText("Task Alpha 1")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Alpha 2")).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "01 OF 05",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("1 of 5");
   });
 
   it("clearing the filter restores all cards and hides the count line", async () => {
     stubBoardFetch(FILTER_FIXTURE);
     renderScreenWithFilter();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.type(screen.getByTestId("filter-bar-input"), "alpha");
     expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
@@ -701,7 +697,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     // t2 in BOARD_FIXTURE carries hold="blocker"
     stubBoardFetch();
     renderScreenWithFilter();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByTestId("filter-bar-add"));
     await userEvent.click(screen.getByTestId("filter-bar-field-hold"));
@@ -711,9 +707,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Unfiled")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Sealed")).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "01 OF 05",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("1 of 5");
   });
 });
 
@@ -738,7 +732,7 @@ describe("TaskingScreen — fixed human-facing status labels", () => {
     };
     stubBoardFetch(relabeled);
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     for (const [id, sublabel, retiredSublabel] of [
       ["INTAKE", "Unassessed", "unfiled"],
@@ -777,7 +771,7 @@ describe("TaskingScreen — fixed human-facing status labels", () => {
     useBoardStore.setState({ mode: "backlog" });
     stubBoardFetch(relabeled);
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     const row = screen.getByTestId("bk-row-t1");
     expect(within(row).getByText("In Progress")).toBeInTheDocument();
@@ -794,7 +788,7 @@ describe("TaskingScreen — fixed human-facing status labels", () => {
     useBoardStore.setState({ mode: "backlog" });
     stubBoardFetch(relabeled);
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByTestId("bk-inline-status-t1"));
 
@@ -812,7 +806,7 @@ describe("TaskingScreen — stale opFilter self-heal", () => {
     useBoardStore.setState({ opFilter: "ghost-op" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     // The effect resets the stale filter to ALL…
     await waitFor(() => expect(useBoardStore.getState().opFilter).toBe("ALL"));
@@ -825,7 +819,7 @@ describe("TaskingScreen — stale opFilter self-heal", () => {
     useBoardStore.setState({ opFilter: "UNFILED" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
     expect(useBoardStore.getState().opFilter).toBe("UNFILED");
 
     act(() => useBoardStore.setState({ opFilter: "alpha" }));
@@ -843,7 +837,7 @@ describe("TaskingScreen — task slugs with no operation", () => {
   it("derives rail rows from task slugs; No project counts null-project tasks only", async () => {
     stubBoardFetch(NO_OPS_BOARD);
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     expect(screen.getByText("2 projects · 2 cycles")).toBeInTheDocument();
     const alphaRow = screen.getByRole("button", { name: /ALPHA/ });
@@ -857,7 +851,7 @@ describe("TaskingScreen — task slugs with no operation", () => {
   it("clicking a synthesized row scopes the board to that slug", async () => {
     stubBoardFetch(NO_OPS_BOARD);
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByRole("button", { name: /ALPHA/ }));
     expect(useBoardStore.getState().opFilter).toBe("alpha");
@@ -865,7 +859,7 @@ describe("TaskingScreen — task slugs with no operation", () => {
     // Open = non-SEALED alpha tasks (t1, t2)
     const openStat = screen.getByText("Open").parentElement;
     assert(openStat !== null);
-    expect(within(openStat).getByText("02")).toBeInTheDocument();
+    expect(within(openStat).getByText("2")).toBeInTheDocument();
     expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Unfiled")).not.toBeInTheDocument();
     // No page behind the slug → no op-meta strip
@@ -876,7 +870,7 @@ describe("TaskingScreen — task slugs with no operation", () => {
     useBoardStore.setState({ opFilter: "alpha" });
     stubBoardFetch(NO_OPS_BOARD);
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
     await screen.findByText("Task Alpha 1");
 
     expect(useBoardStore.getState().opFilter).toBe("alpha");
@@ -886,7 +880,7 @@ describe("TaskingScreen — task slugs with no operation", () => {
     useBoardStore.setState({ opFilter: "beta" });
     stubBoardFetch(NO_OPS_BOARD);
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByTestId("kb-add-FIELD"));
     expect(useBoardStore.getState().taskModal).toEqual({
@@ -903,7 +897,7 @@ describe("TaskingScreen — list view completed toggle", () => {
     useBoardStore.setState({ mode: "backlog" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     // t5 is the only SEALED fixture task
     expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
@@ -919,7 +913,7 @@ describe("TaskingScreen — list view completed toggle", () => {
     useBoardStore.setState({ mode: "backlog" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByTestId("board-show-completed"));
 
@@ -942,7 +936,7 @@ describe("TaskingScreen — list view completed toggle", () => {
     useBoardStore.setState({ mode: "backlog" });
     stubBoardFetch();
     renderScreenWithFilter();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     await userEvent.click(screen.getByTestId("filter-bar-chip-project"));
     await userEvent.click(
@@ -953,24 +947,20 @@ describe("TaskingScreen — list view completed toggle", () => {
     expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
     expect(screen.getByText("Task Alpha 2")).toBeInTheDocument();
     expect(screen.queryByText("Task Sealed")).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "02 OF 04",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("2 of 4");
 
     // Close the facet popover, then reveal completed → 3 of 5
     await userEvent.click(screen.getByTestId("filter-bar-chip-project"));
     await userEvent.click(screen.getByTestId("board-show-completed"));
     expect(await screen.findByText("Task Sealed")).toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "03 OF 05",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("3 of 5");
   });
 
   it("kanban mode is unaffected: SEALED tasks stay in the Done column and no toggle renders", async () => {
     useBoardStore.setState({ mode: "card", showCompleted: false });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByRole("tab", { name: "Board" });
 
     expect(
       within(screen.getByTestId("kb-col-SEALED")).getByText("Task Sealed"),

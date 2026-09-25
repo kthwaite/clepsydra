@@ -39,7 +39,7 @@ describe("ChecklistBar", () => {
 
     expect(screen.getByTestId("checklist-indicator")).toHaveStyle({
       width: "50%",
-      background: "var(--ink-2)",
+      background: "var(--mute)",
     });
   });
 
@@ -50,7 +50,7 @@ describe("ChecklistBar", () => {
 
     expect(container.querySelector("i")).toHaveStyle({
       width: "100%",
-      background: "var(--cool)",
+      background: "var(--accent)",
     });
   });
 });

@@ -9,9 +9,10 @@ import {
   MODES,
   PRI_LABEL,
   PRI_ORDER,
+  priColor,
   taskStatusLabel,
 } from "../board-constants";
-import { DispositionRow, PriorityRow } from "../fields";
+import { DispositionRow, PRI_ON_STYLE, PriorityRow } from "../fields";
 
 describe("Task Board display vocabulary", () => {
   it("uses neutral priority descriptions without changing priority ids", () => {
@@ -104,5 +105,21 @@ describe("Task Board display vocabulary", () => {
       ["BACKLOG", "Backlog"],
       ["PAUSED", "PAUSED"],
     ]);
+  });
+});
+
+describe("priority tones stay legible", () => {
+  it("draws Low's label in mute (faint only for its bar)", () => {
+    expect(priColor("P3")).toEqual({
+      bar: "var(--faint)",
+      text: "var(--mute)",
+    });
+  });
+
+  it("puts ground text on the Critical, High and Medium fills; ink only on Low", () => {
+    expect(PRI_ON_STYLE.P0.color).toBe("var(--ground)");
+    expect(PRI_ON_STYLE.P1.color).toBe("var(--ground)");
+    expect(PRI_ON_STYLE.P2.color).toBe("var(--ground)");
+    expect(PRI_ON_STYLE.P3.color).toBe("var(--ink)");
   });
 });

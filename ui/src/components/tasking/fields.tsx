@@ -66,7 +66,10 @@ export const PRI_ON_STYLE: Record<string, React.CSSProperties> =
   Object.fromEntries(
     PRI_ORDER.map((p) => {
       const { bar } = priColor(p);
-      return [p, { background: bar, borderColor: bar, color: "#000" }];
+      // Ground text reads on the hot, ink and mute fills; only Low's faint
+      // fill is light enough to take ink.
+      const color = p === "P3" ? "var(--ink)" : "var(--ground)";
+      return [p, { background: bar, borderColor: bar, color }];
     }),
   );
 

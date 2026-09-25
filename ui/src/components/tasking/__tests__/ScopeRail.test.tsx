@@ -146,11 +146,6 @@ describe("ScopeRail", () => {
     expect(within(row).getByText("2")).toBeInTheDocument();
   });
 
-  it("renders the + New task button", () => {
-    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByText(/New task/)).toBeInTheDocument();
-  });
-
   it("collapse button sets railOpen to false", async () => {
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
     const collapseBtn = screen.getByTitle("Collapse");
@@ -213,22 +208,6 @@ describe("ScopeRail", () => {
     expect(state.mode).toBe("cycle");
   });
 
-  it("+ New task opens taskModal with no project when ALL", async () => {
-    useBoardStore.setState({ opFilter: "ALL" });
-    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    const btn = screen.getByText(/New task/);
-    await userEvent.click(btn);
-    expect(useBoardStore.getState().taskModal).toEqual({});
-  });
-
-  it("+ New task opens taskModal with project preset when op is selected", async () => {
-    useBoardStore.setState({ opFilter: "alpha" });
-    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    const btn = screen.getByText(/New task/);
-    await userEvent.click(btn);
-    expect(useBoardStore.getState().taskModal).toEqual({ project: "alpha" });
-  });
-
   it("+ cycle button opens cycleModal with kind=new", async () => {
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
     const addBtn = screen.getByTitle("New cycle");
@@ -252,16 +231,6 @@ describe("ScopeRail — op with null project", () => {
     const row = screen.getByRole("button", { name: /OPS-3/ });
     await userEvent.click(row);
     expect(useBoardStore.getState().opFilter).toBe("OPS-3");
-  });
-
-  it("+ New task omits the project preset (a code is not a project)", async () => {
-    useBoardStore.setState({ opFilter: "OPS-3" });
-    wrap(
-      <ScopeRail projects={scopesWithNoSlug} cycles={cycles} tasks={tasks} />,
-    );
-    const btn = screen.getByText(/New task/);
-    await userEvent.click(btn);
-    expect(useBoardStore.getState().taskModal).toEqual({});
   });
 
   it("badge for a slug-less op matches what clicking reveals (zero)", () => {
@@ -326,12 +295,18 @@ describe("ScopeRail — synthesized project scope", () => {
     expect(within(row).getByText("1")).toBeInTheDocument(); // t4 only
   });
 
-  it("+ New task presets the slug as project", async () => {
-    useBoardStore.setState({ opFilter: "ghost" });
-    wrap(
-      <ScopeRail projects={scopes} cycles={cycles} tasks={tasksWithGhost} />,
+  it("leaves New task to the board header", () => {
+    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
+    expect(screen.queryByText(/New task/)).toBeNull();
+  });
+
+  it("marks the active scope with the accent tint and uses italic serif section labels", () => {
+    useBoardStore.setState({ opFilter: "ALL" });
+    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
+    expect(screen.getByRole("button", { name: /All projects/ })).toHaveClass(
+      "bg-accent-tint",
     );
-    await userEvent.click(screen.getByText(/New task/));
-    expect(useBoardStore.getState().taskModal).toEqual({ project: "ghost" });
+    expect(screen.getByText("Projects")).toHaveClass("font-serif", "italic");
+    expect(screen.getByText("Cycles")).toHaveClass("font-serif", "italic");
   });
 });

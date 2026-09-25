@@ -5,6 +5,7 @@ import {
   Dialog as RACDialog,
 } from "react-aria-components";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 /** Shared modal width variants — the only sizes board modals use. */
 export const BOARD_MODAL_WIDTHS = {
@@ -13,7 +14,7 @@ export const BOARD_MODAL_WIDTHS = {
   confirm: "w-[460px]",
 } as const;
 
-/** The header ESC chip every board modal renders (copy-pasted today). */
+/** The header Esc chip every board modal renders. */
 export function ModalEscChip({
   onClose,
   testId,
@@ -24,11 +25,14 @@ export function ModalEscChip({
   return (
     <button
       type="button"
-      className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
+      className={cn(
+        "ml-auto inline-flex h-7 cursor-pointer items-center rounded-full px-2.5 text-[12.5px] text-mute transition-colors hover:bg-sink hover:text-ink",
+        FOCUS_RING_NATIVE,
+      )}
       onClick={onClose}
       data-testid={testId}
     >
-      ESC
+      Esc
     </button>
   );
 }
@@ -63,7 +67,7 @@ export function BoardModalFrame({
         if (!open) onClose();
       }}
       isDismissable={isDismissable}
-      className="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[9vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-[9000] flex justify-center bg-scrim pt-[9vh]"
       data-testid={backdropTestId}
     >
       <Modal className={cn(widthClassName, "max-w-[94vw]")}>
@@ -72,12 +76,9 @@ export function BoardModalFrame({
             onKeyDown={onKeyDown}
             onSubmit={(event) => event.preventDefault()}
             className={cn(
-              "flex flex-col border border-[var(--ink-3)] bg-[var(--bg)]",
+              "flex flex-col overflow-hidden rounded-2xl bg-raise shadow-[0_18px_60px_rgb(0_0_0/0.18)]",
               constrainHeight && "max-h-[82vh]",
             )}
-            style={{
-              boxShadow: "0 20px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--rule)",
-            }}
             data-testid={modalTestId}
           >
             {children}

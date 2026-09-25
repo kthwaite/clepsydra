@@ -12,6 +12,20 @@ const OUT_OF_SCOPE = new Set<string>([]);
  *  that is already clean fail, forcing its removal here. */
 const PENDING = new Set<string>([]);
 
+/** Tasking board screen (phase 4.3). */
+const TASKING_FILES = [
+  "../tasking/BoardHeader.tsx",
+  "../filters/FilterBar.tsx",
+  "../tasking/ScopeRail.tsx",
+  "../tasking/KanbanView.tsx",
+  "../tasking/TaskCard.tsx",
+  "../tasking/QuickAddRow.tsx",
+  "../tasking/board-constants.tsx",
+  "../tasking/board-presentation.tsx",
+  "../tasking/TaskingScreen.tsx",
+  "../tasking/BoardModalFrame.tsx",
+];
+
 /** Screens restyled in phase 4; guarded like the primitives. */
 const SCREEN_FILES = [
   "../codex/Atrium.tsx",
@@ -57,6 +71,7 @@ const files = [
   "../codex/Section.tsx",
   "../codex/Tick.tsx",
   ...SCREEN_FILES,
+  ...TASKING_FILES,
 ].filter((f) => {
   try {
     readFileSync(path.join(uiDir, f));

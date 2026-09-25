@@ -555,8 +555,8 @@ describe("FeedManagement", () => {
         "min-w-11",
         "md:min-h-0",
         "md:min-w-0",
-        "h-7",
-        "w-7",
+        "h-8",
+        "w-8",
         "p-0",
         "[&_svg]:h-4",
         "[&_svg]:w-4",
@@ -1114,7 +1114,9 @@ describe("FeedManagement", () => {
 
   it("persists one committed transition once under StrictMode", async () => {
     managementMocks.feedsQuery.data = disclosureFeedList;
-    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    // The test Storage is an in-memory object (Node 26), so spy on the
+    // instance rather than Storage.prototype.
+    const setItem = vi.spyOn(window.localStorage, "setItem");
     const user = userEvent.setup();
     render(
       <StrictMode>

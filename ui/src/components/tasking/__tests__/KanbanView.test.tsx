@@ -20,6 +20,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Mock } from "vitest";
@@ -529,12 +530,11 @@ describe("KanbanView — column header", () => {
     }
   });
 
-  it("always styles the pill with the neutral ink/rule colours", () => {
+  it("always styles the count in neutral mute", () => {
     renderBoard();
     for (const col of columns) {
       const cnt = screen.getByTestId(`kb-cnt-${col.id}`);
-      expect(cnt).toHaveClass("text-[var(--ink-2)]");
-      expect(cnt).toHaveClass("border-[var(--rule)]");
+      expect(cnt).toHaveClass("text-mute");
       // No per-column inline colour override (the old hot/over branch).
       expect(cnt.style.color).toBe("");
       expect(cnt.style.borderColor).toBe("");
@@ -560,7 +560,7 @@ describe("KanbanView — column header", () => {
     const classNames = columns.map(
       (col) => screen.getByTestId(`kb-head-${col.id}`).className,
     );
-    expect(classNames[0]).toContain("h-[36px]");
+    expect(classNames[0]).toContain("h-11");
     for (const cls of classNames) {
       expect(cls).toBe(classNames[0]);
     }
@@ -667,9 +667,9 @@ describe("TaskCard — card anatomy", () => {
     // The progress bar fill should have cool color (done state)
     // Check via the parent test id structure
     const card = screen.getByTestId("task-card-t-done");
-    // The fill element has style background: var(--cool) when done
+    // The fill element turns cobalt when done
     const fill = card.querySelector("i");
-    expect(fill).toHaveStyle({ background: "var(--cool)" });
+    expect(fill).toHaveStyle({ background: "var(--accent)" });
   });
 
   it("renders up to 3 tag chips with no overflow chip when tags.length <= 3", () => {
@@ -1313,5 +1313,54 @@ describe("KanbanView — link chip stacking", () => {
     // over those as the column scrolls.
     expect(linkButton.className).not.toMatch(/\bz-(?:10|20|30|40|50)\b/);
     expect(linkButton.className).toContain("z-[1]");
+  });
+});
+
+describe("KanbanView — Stone & Lamp", () => {
+  function renderBoard() {
+    return wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+  }
+
+  it("heads columns with a tick and an italic serif name; Inbox and Done ticks are faint", () => {
+    renderBoard();
+    for (const id of ["INTAKE", "SEALED"]) {
+      const col = screen.getByTestId(`kb-col-${id}`);
+      expect(col.querySelector("[data-tick]")).toHaveClass("bg-faint");
+    }
+    const ready = screen.getByTestId("kb-col-TRIAGE");
+    expect(ready.querySelector("[data-tick]")).toHaveClass("bg-accent");
+    expect(within(ready).getByText(FIXTURE_COL_LABEL("TRIAGE"))).toHaveClass(
+      "font-serif",
+      "italic",
+    );
+  });
+
+  it("draws open cards on raise without borders and done cards without a fill", () => {
+    renderBoard();
+    const open = tasks.find((t) => t.status !== "SEALED");
+    const sealed = tasks.find((t) => t.status === "SEALED");
+    if (!open || !sealed)
+      throw new Error("fixture needs open and sealed tasks");
+    const openCard = screen.getByTestId(`task-card-${open.id}`);
+    expect(openCard).toHaveClass("bg-raise", "rounded-[14px]");
+    expect(openCard.className).not.toMatch(/(^|\s)border(\s|-\[)/);
+    const doneCard = screen.getByTestId(`task-card-${sealed.id}`);
+    expect(doneCard).not.toHaveClass("bg-raise");
+    expect(doneCard.querySelector("[data-card-title]")).toHaveClass(
+      "text-mute",
+    );
+  });
+
+  it("has no caps styling on the board", () => {
+    const { container } = renderBoard();
+    expect(container.querySelector(".uppercase")).toBeNull();
   });
 });

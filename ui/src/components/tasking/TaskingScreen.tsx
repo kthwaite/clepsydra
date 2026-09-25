@@ -11,6 +11,7 @@ import {
   FLAG_ON,
 } from "#/lib/filters/model";
 import { useBoardStore } from "#/store/board";
+import { Button } from "../ui/button";
 import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
 import {
@@ -102,6 +103,7 @@ export function TaskingScreen({
     activeScope,
     activeOp,
     visibleTasks,
+    scopedTasks,
     opFilteredCount,
     hiddenCompletedCount,
     editTask,
@@ -114,6 +116,7 @@ export function TaskingScreen({
         activeScope: null,
         activeOp: null,
         visibleTasks: [],
+        scopedTasks: [],
         opFilteredCount: 0,
         hiddenCompletedCount: 0,
         editTask: null,
@@ -148,6 +151,7 @@ export function TaskingScreen({
       // The backing PROJECT page, when one exists — drives the op-meta strip.
       activeOp: active?.op ?? null,
       visibleTasks: filtered,
+      scopedTasks: scoped,
       opFilteredCount: opFiltered.length,
       hiddenCompletedCount: scoped.length - opFiltered.length,
       editTask: editTaskId
@@ -243,19 +247,19 @@ export function TaskingScreen({
 
   if (isLoading) {
     return (
-      <div className="cl-mono flex h-full items-center justify-center text-[11px] uppercase tracking-[0.18em] text-[var(--ink-mute)]">
-        LOADING
+      <div className="flex h-full items-center justify-center text-[13.5px] text-mute">
+        Loading the board…
       </div>
     );
   }
 
   if (isError || !data) {
     return (
-      <div className="cl-mono flex h-full flex-col items-center justify-center gap-[12px] text-[11px] uppercase tracking-[0.18em] text-[var(--hot)]">
-        ERROR — board unavailable
-        <button type="button" className="cl-btn" onClick={() => refetch()}>
-          RETRY
-        </button>
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-[13.5px] text-hot">
+        The board is unavailable.
+        <Button variant="secondary" onPress={() => refetch()}>
+          Retry
+        </Button>
       </div>
     );
   }
@@ -298,6 +302,7 @@ export function TaskingScreen({
             projects={projects}
             cycles={cycles}
             tasks={visibleTasks}
+            scopedTasks={scopedTasks}
             activeOp={activeOp}
             filteredCount={visibleTasks.length}
             opFilteredCount={opFilteredCount}

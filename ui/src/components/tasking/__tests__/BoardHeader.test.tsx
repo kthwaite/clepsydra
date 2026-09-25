@@ -10,7 +10,8 @@ import {
 } from "#/lib/filters/model";
 import { useBoardStore } from "#/store/board";
 import { BoardHeader } from "../BoardHeader";
-import { BOARD_FIXTURE, PROJECT_SCOPES } from "./fixtures";
+import { deriveProjectScopes } from "../board-projects";
+import { BOARD_FIXTURE, NO_SLUG_OP, PROJECT_SCOPES } from "./fixtures";
 
 const { operations, cycles, tasks } = BOARD_FIXTURE;
 
@@ -46,6 +47,7 @@ function renderHeader(
         projects={PROJECT_SCOPES}
         cycles={cycles}
         tasks={tasks}
+        scopedTasks={tasks}
         activeOp={null}
         filteredCount={tasks.length}
         opFilteredCount={tasks.length}
@@ -95,7 +97,7 @@ describe("BoardHeader", () => {
     // "04" = 4 open tasks
     const openStat = screen.getByText("Open").parentElement;
     assert(openStat !== null);
-    expect(within(openStat).getByText("04")).toBeInTheDocument();
+    expect(within(openStat).getByText("4")).toBeInTheDocument();
   });
 
   it("computes In progress count zero-padded", () => {
@@ -103,7 +105,7 @@ describe("BoardHeader", () => {
     renderHeader();
     const fieldStat = screen.getByText("In progress").parentElement;
     assert(fieldStat !== null);
-    expect(within(fieldStat).getByText("01")).toBeInTheDocument();
+    expect(within(fieldStat).getByText("1")).toBeInTheDocument();
   });
 
   it("computes Blocked count zero-padded", () => {
@@ -111,7 +113,7 @@ describe("BoardHeader", () => {
     renderHeader();
     const holdStat = screen.getByText("Blocked").parentElement;
     assert(holdStat !== null);
-    expect(within(holdStat).getByText("01")).toBeInTheDocument();
+    expect(within(holdStat).getByText("1")).toBeInTheDocument();
   });
 
   it("renders Completed · 14 days sparkline", () => {
@@ -160,10 +162,11 @@ describe("BoardHeader", () => {
 
   it("renders op-meta line when activeOp is set", () => {
     const activeOp = operations[0]; // Operation Alpha
+    useBoardStore.setState({ opFilter: PROJECT_SCOPES[0].key });
     renderHeader({ activeOp });
-    expect(screen.getByText("LEAD")).toBeInTheDocument();
-    expect(screen.getByText("HEALTH")).toBeInTheDocument();
-    expect(screen.getByText("TARGET")).toBeInTheDocument();
+    expect(screen.getByText("Lead")).toBeInTheDocument();
+    expect(screen.getByText("Health")).toBeInTheDocument();
+    expect(screen.getByText("Target")).toBeInTheDocument();
     expect(screen.getByText("Operation Alpha")).toBeInTheDocument();
   });
 
@@ -191,7 +194,7 @@ describe("BoardHeader", () => {
     renderHeader({ activeOp: noneOp });
     const healthEl = screen.getByText("NONE") as HTMLElement;
     expect(healthEl.tagName).toBe("B");
-    expect(healthEl.style.color).toBe("var(--ink-mute)");
+    expect(healthEl.style.color).toBe("var(--mute)");
   });
 
   // ── filter strip: shared FilterBar wiring ─────────────────────────────────
@@ -200,7 +203,7 @@ describe("BoardHeader", () => {
     renderHeader();
     const input = screen.getByTestId("filter-bar-input");
     expect(input).toHaveAttribute("id", "tasking-filter");
-    expect(input).toHaveAttribute("placeholder", "FILTER…");
+    expect(input).toHaveAttribute("placeholder", "Filter…");
   });
 
   it("typing into the filter input calls onFilterChange with the composed text state", () => {
@@ -302,8 +305,118 @@ describe("BoardHeader", () => {
       filteredCount: 1,
       opFilteredCount: 3,
     });
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "01 OF 03",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("1 of 3");
+  });
+
+  describe("Stone & Lamp header", () => {
+    it("titles an unscoped board in serif under an All projects eyebrow", () => {
+      renderHeader();
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Task board" }),
+      ).toHaveClass("font-serif");
+      expect(screen.getByText("All projects")).toHaveClass("italic");
+    });
+
+    it("titles a scoped board with the project name under a Project eyebrow", () => {
+      useBoardStore.setState({ opFilter: PROJECT_SCOPES[0].key });
+      renderHeader({ activeOp: operations[0] });
+      expect(
+        screen.getByRole("heading", { level: 1, name: operations[0].name }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Project")).toHaveClass("italic");
+    });
+
+    it("titles the No project scope rather than the whole board", () => {
+      useBoardStore.setState({ opFilter: "UNFILED" });
+      renderHeader();
+      expect(
+        screen.getByRole("heading", { level: 1, name: "No project" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Project")).toHaveClass("italic");
+    });
+
+    it("titles a slug-only scope (no Project page) by its code", () => {
+      const synth = {
+        key: "loose",
+        slug: "loose",
+        code: "LOOSE",
+        name: "",
+        health: null,
+        op: null,
+      };
+      useBoardStore.setState({ opFilter: synth.key });
+      renderHeader({ projects: [...PROJECT_SCOPES, synth] });
+      expect(
+        screen.getByRole("heading", { level: 1, name: synth.code }),
+      ).toBeInTheDocument();
+    });
+
+    it("counts cycle progress over the scoped tasks, not the filtered ones", () => {
+      renderHeader({ tasks: [], filteredCount: 0 });
+      expect(screen.getByText("1 of 3")).toBeInTheDocument();
+    });
+
+    it("shows the active cycle with a progress bar", () => {
+      renderHeader();
+      expect(screen.getByText("1 of 3")).toBeInTheDocument();
+      expect(screen.getByRole("progressbar")).toHaveAttribute(
+        "aria-valuenow",
+        "1",
+      );
+    });
+
+    it("draws the view switch as a sink track with a raised selection", () => {
+      renderHeader();
+      const board = screen.getByRole("tab", { name: "Board" });
+      expect(board).toHaveClass("bg-raise");
+      expect(board.parentElement).toHaveClass("bg-sink", "rounded-full");
+    });
+
+    it("presets the scoped project when creating a task", async () => {
+      const user = userEvent.setup();
+      useBoardStore.setState({ opFilter: "alpha" });
+      renderHeader();
+      await user.click(screen.getByRole("button", { name: "New task" }));
+      expect(useBoardStore.getState().taskModal).toEqual({ project: "alpha" });
+    });
+
+    it("presets nothing for a slug-less op (a code is not a project)", async () => {
+      const user = userEvent.setup();
+      useBoardStore.setState({ opFilter: "OPS-3" });
+      renderHeader({
+        projects: deriveProjectScopes([...operations, NO_SLUG_OP], tasks),
+      });
+      await user.click(screen.getByRole("button", { name: "New task" }));
+      expect(useBoardStore.getState().taskModal).toEqual({});
+    });
+
+    it("presets a synthesized task slug as the project", async () => {
+      const user = userEvent.setup();
+      const withGhost = [...tasks, { ...tasks[0], id: "tg", project: "ghost" }];
+      useBoardStore.setState({ opFilter: "ghost" });
+      renderHeader({
+        projects: deriveProjectScopes(operations, withGhost),
+        tasks: withGhost,
+      });
+      await user.click(screen.getByRole("button", { name: "New task" }));
+      expect(useBoardStore.getState().taskModal).toEqual({ project: "ghost" });
+    });
+
+    it("presets nothing on the unscoped board", async () => {
+      const user = userEvent.setup();
+      useBoardStore.setState({ opFilter: "ALL" });
+      renderHeader();
+      await user.click(screen.getByRole("button", { name: "New task" }));
+      expect(useBoardStore.getState().taskModal).toEqual({});
+    });
+
+    it("offers New task as the primary action", async () => {
+      const user = userEvent.setup();
+      renderHeader();
+      const button = screen.getByRole("button", { name: "New task" });
+      expect(button).toHaveClass("bg-accent");
+      await user.click(button);
+      expect(useBoardStore.getState().taskModal).not.toBeNull();
+    });
   });
 });

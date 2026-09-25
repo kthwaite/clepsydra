@@ -19,7 +19,6 @@ import {
   setText,
   toggleFacetValue,
 } from "#/lib/filters/model";
-import { pad2 } from "#/lib/time";
 
 interface FilterBarProps {
   fields: readonly FilterField[];
@@ -45,16 +44,15 @@ interface FilterBarProps {
 const OPTION_FILTER_THRESHOLD = 8;
 
 const inputClasses =
-  "cl-mono border border-[var(--rule)] bg-transparent px-[8px] py-[4px] text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink)] outline-none placeholder:text-[var(--ink-4)] focus:border-[var(--hot)]";
+  "h-9 min-w-[180px] rounded-full bg-sink px-4 text-[13.5px] text-ink outline-none placeholder:text-mute focus-visible:ring-2 focus-visible:ring-accent";
 
 const chromeButtonClasses =
-  "cl-mono shrink-0 cursor-pointer whitespace-nowrap border border-[var(--rule)] px-[7px] py-[3px] text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-mute)] outline-none transition-colors hover:text-[var(--ink-2)] focus-visible:border-[var(--hot)]";
+  "h-8 shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-sink px-3 text-[13px] text-ink-2 outline-none transition-colors hover:text-ink data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent focus-visible:ring-2 focus-visible:ring-accent";
 
-const activeChipClasses =
-  "border-[var(--hot)] bg-[var(--hot)] text-[var(--paper)] hover:text-[var(--paper)]";
+const activeChipClasses = "bg-accent-tint text-ink hover:text-ink";
 
 const optionClasses =
-  "cl-mono flex cursor-pointer items-center justify-between gap-[8px] px-[6px] py-[4px] text-left text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-2)] outline-none transition-colors hover:bg-[var(--paper-edge)] data-[focus-visible]:outline data-[focus-visible]:outline-1 data-[focus-visible]:outline-[var(--hot)] data-[selected]:bg-[var(--hot)] data-[selected]:text-[var(--paper)]";
+  "flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13.5px] text-ink outline-none transition-colors hover:bg-sink data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent data-[selected]:bg-accent-tint";
 
 function chipLabel(field: FilterField, values: readonly string[]): string {
   if (field.kind === "flag" || values.length === 0) return field.label;
@@ -73,7 +71,7 @@ export function FilterBar({
   onChange,
   primaryFieldIds,
   showText = true,
-  textPlaceholder = "FILTER…",
+  textPlaceholder = "Filter…",
   textAriaLabel = "Filter",
   textInputId,
   filteredCount,
@@ -218,7 +216,7 @@ export function FilterBar({
                   aria-label={`Clear ${field.label} filter`}
                   className={cn(
                     chromeButtonClasses,
-                    "border-l-0 border-[var(--hot)] bg-[var(--hot)] px-[5px] text-[var(--paper)] hover:text-[var(--paper)]",
+                    "-ml-1 bg-accent-tint px-2 text-ink hover:text-ink",
                   )}
                   onPress={clearField}
                 >
@@ -277,12 +275,12 @@ export function FilterBar({
           data-testid="filter-bar-add"
           className={chromeButtonClasses}
         >
-          + FILTER
+          + Filter
         </Button>
         <Popover hideArrow placement="bottom start">
           <Dialog
             aria-label="Add filter"
-            className="w-[220px] border border-[var(--ink-3)] bg-[var(--bg)] p-[6px] outline-none"
+            className="w-[240px] rounded-xl bg-raise p-1.5 shadow-lg outline-none"
           >
             <ListBox
               aria-label="Available filters"
@@ -312,16 +310,16 @@ export function FilterBar({
           className={chromeButtonClasses}
           onClick={handleClearAll}
         >
-          CLEAR
+          Clear
         </button>
       )}
 
       {showCount && (
         <span
           data-testid="filter-bar-count"
-          className="cl-mono ml-auto shrink-0 whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.15em] text-[var(--ink-mute)]"
+          className="ml-auto shrink-0 whitespace-nowrap text-[12.5px] tabular-nums text-mute"
         >
-          {pad2(filteredCount as number)} OF {pad2(totalCount as number)}
+          {filteredCount as number} of {totalCount as number}
         </span>
       )}
     </div>
@@ -381,7 +379,7 @@ function FacetChip({
         <Popover hideArrow placement="bottom start">
           <Dialog
             aria-label={`${field.label} options`}
-            className="w-[220px] border border-[var(--ink-3)] bg-[var(--bg)] p-[6px] outline-none"
+            className="w-[240px] rounded-xl bg-raise p-1.5 shadow-lg outline-none"
           >
             <div className="flex flex-col gap-[4px]">
               {field.options.length > OPTION_FILTER_THRESHOLD && (
@@ -389,7 +387,7 @@ function FacetChip({
                   data-testid="filter-bar-option-filter"
                   type="search"
                   aria-label={`Filter ${field.label} options`}
-                  placeholder="FILTER OPTIONS…"
+                  placeholder="Filter options…"
                   className={inputClasses}
                   value={optionFilter}
                   onChange={(event) => onOptionFilterChange(event.target.value)}
@@ -431,7 +429,7 @@ function FacetChip({
           aria-label={`Clear ${field.label} filter`}
           className={cn(
             chromeButtonClasses,
-            "border-l-0 border-[var(--hot)] bg-[var(--hot)] px-[5px] text-[var(--paper)] hover:text-[var(--paper)]",
+            "-ml-1 bg-accent-tint px-2 text-ink hover:text-ink",
           )}
           onPress={onClear}
         >
