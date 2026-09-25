@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
 const src = path.resolve(import.meta.dirname, "..");
 const uiDir = path.join(src, "components/ui");
 
-/** Restyled in phase 4 with the command palette. */
-const OUT_OF_SCOPE = new Set(["command-palette.tsx"]);
+/** Files deliberately outside the guard (none since phase 4.1). */
+const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
@@ -38,6 +38,7 @@ const files = [
     .filter((f) => !OUT_OF_SCOPE.has(f)),
   "../codex/TabPreviewCard.tsx",
   "../codex/CodexModalShell.tsx",
+  "../codex/CommandPalette.tsx",
   "../codex/Section.tsx",
   "../codex/Tick.tsx",
 ].filter((f) => {

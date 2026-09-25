@@ -258,7 +258,7 @@ describe("CommandPalette keyboard navigation", () => {
 
     expect(commits).toHaveLength(1);
     expect(screen.getByRole("button", { name: /Open Atrium/ })).toHaveClass(
-      "bg-ink",
+      "bg-accent-tint",
     );
   });
 
@@ -633,13 +633,17 @@ describe("CommandPalette keyboard navigation", () => {
       "Quire:",
     );
 
-    expect(screen.getByText("quire.new")).toBeInTheDocument();
-    expect(screen.getByText("quire.add.quire-2")).toBeInTheDocument();
-    expect(screen.queryByText("quire.add.quire-1")).not.toBeInTheDocument();
-    expect(screen.getByText("quire.remove")).toBeInTheDocument();
+    const ids = () =>
+      Array.from(document.querySelectorAll("[data-command-id]")).map((el) =>
+        el.getAttribute("data-command-id"),
+      );
+    expect(ids()).toContain("quire.new");
+    expect(ids()).toContain("quire.add.quire-2");
+    expect(ids()).not.toContain("quire.add.quire-1");
+    expect(ids()).toContain("quire.remove");
     await user.click(
       screen.getByRole("button", {
-        name: /quire\.add\.quire-2.*Quire: add active folio to Research/i,
+        name: /Quire: add active folio to Research/i,
       }),
     );
     expect(workspaceStateMock.addTabToQuire).toHaveBeenCalledWith(
@@ -699,5 +703,45 @@ describe("CommandPalette pointer highlight", () => {
     expect(first).toHaveTextContent("Re-run boot sequence");
     expect(second).toHaveTextContent("Open Reference Repairs");
     expect(activeRow()).toBe(first);
+  });
+
+  it("has no Vessel prompt and a 21px query input", () => {
+    render(<CommandPalette />);
+    expect(screen.queryByText("CLP>")).toBeNull();
+    expect(screen.queryByText("CHANNEL")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Command query" })).toHaveClass(
+      "text-[21px]",
+    );
+  });
+
+  it("groups results under one italic eyebrow per kind", () => {
+    render(<CommandPalette />);
+    const eyebrows = screen
+      .getAllByRole("heading", { level: 3 })
+      .map((h) => h.textContent);
+    expect(eyebrows).toContain("Commands");
+    expect(new Set(eyebrows).size).toBe(eyebrows.length);
+    expect(screen.getByRole("heading", { name: "Commands" })).toHaveClass(
+      "font-serif",
+      "italic",
+    );
+  });
+
+  it("shows a shortcut hint, never a raw command id", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+    await user.type(
+      screen.getByRole("textbox", { name: "Command query" }),
+      "boot sequence",
+    );
+    const row = screen.getByRole("button", { name: /Re-run boot sequence/ });
+    expect(row.textContent).not.toContain("sys.boot");
+  });
+
+  it("uses sentence-case footer hints and a result count", () => {
+    render(<CommandPalette />);
+    expect(screen.getByText("↑↓ move")).toBeInTheDocument();
+    expect(screen.getByText(/^\d+ results?$/)).toBeInTheDocument();
+    expect(screen.queryByText(/HITS/)).toBeNull();
   });
 });
