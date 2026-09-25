@@ -20,6 +20,7 @@ const atriumMocks = vi.hoisted(() => ({
   featureFlags: { academic: true, feeds: true },
   feedHook: vi.fn(),
   readingContinues: false,
+  contentItems: [] as Array<Record<string, unknown>>,
   workspaceState: {
     openHistory: [] as Array<{ path: string; openedAt: number }>,
   },
@@ -40,7 +41,7 @@ vi.mock("#/api/bcl", () => ({
 vi.mock("#/api/index", () => ({
   useTags: () => ({ data: [] }),
   useStats: () => ({ data: undefined }),
-  useContentIndex: () => ({ data: { items: [] } }),
+  useContentIndex: () => ({ data: { items: atriumMocks.contentItems } }),
   useReferenceIssues: () => ({
     data: { items: [], total: 0, limit: 1, offset: 0 },
   }),
@@ -143,6 +144,7 @@ function expectBefore(first: HTMLElement, second: HTMLElement) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  atriumMocks.contentItems = [];
   atriumMocks.bcl = undefined;
   atriumMocks.readingContinues = false;
   atriumMocks.featureFlags = { academic: true, feeds: true };
@@ -159,9 +161,7 @@ describe("Atrium composition", () => {
 
     render(<Atrium />);
 
-    const daystart = closestSection(
-      screen.getByText(/^Week \d+$/),
-    );
+    const daystart = closestSection(screen.getByText(/^Week \d+$/));
     const recents = closestSection(screen.getByText(/^\d+ of [\d,]+$/));
     const agenda = screen.getByRole("region", { name: "Outstanding agenda" });
     const feed = screen.getByRole("region", { name: "Feed river panel" });
@@ -273,9 +273,7 @@ describe("Atrium composition", () => {
     const user = userEvent.setup();
     render(<Atrium />);
 
-    const daystart = closestSection(
-      screen.getByText(/^Week \d+$/),
-    );
+    const daystart = closestSection(screen.getByText(/^Week \d+$/));
     expect(daystart).toHaveTextContent("Sunday 9 August 2026");
     expect(daystart).toHaveTextContent("Week 32");
     expect(daystart).toHaveTextContent("Day 221 of 365");
@@ -322,5 +320,27 @@ describe("Atrium composition", () => {
     render(<Atrium />);
     expect(screen.getByRole("heading", { level: 1 })).toHaveClass("font-serif");
     expect(document.querySelector(".cl-grid-texture")).toBeNull();
+  });
+
+  it("shows Recent as an eyebrowed list with text tabs and serif numbering", () => {
+    atriumMocks.contentItems = [
+      {
+        path: "notes/ctesibius.md",
+        title: "Ctesibius",
+        kind: "NOTE",
+        created_at: "2026-08-01T10:00:00Z",
+        updated_at: "2026-08-09T10:00:00Z",
+      },
+    ];
+    render(<Atrium />);
+    const heading = screen.getByRole("heading", { name: "Recent" });
+    expect(heading).toHaveClass("font-serif", "italic");
+    const edited = screen.getByRole("button", { name: /Edited/ });
+    expect(edited).toHaveClass("underline", "decoration-accent");
+    const count = screen.getByText(/^\d+ of [\d,]+$/);
+    const recents = count.closest("section") as HTMLElement;
+    const row = within(recents).getByRole("button", { name: /Ctesibius/ });
+    expect(row.querySelector(".font-serif")).toHaveTextContent("01");
+    expect(row).toHaveTextContent("notes");
   });
 });

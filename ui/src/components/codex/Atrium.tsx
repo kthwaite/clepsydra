@@ -27,7 +27,6 @@ import {
 } from "./atrium-data";
 import { useAtriumCalendar } from "./atrium-time";
 import { FeedRiverPanel } from "./FeedRiverPanel";
-import { shortFolio } from "./folio-utils";
 import { ReadingContinuesPanel } from "./ReadingContinues";
 import { Section } from "./Section";
 import { SkyCard } from "./SkyCard";
@@ -170,92 +169,90 @@ export function Atrium() {
         </div>
       </section>
       {/* RECENTS (col-7) */}
-      <section className="col-span-12 flex h-[340px] flex-col border border-rule bg-paper-2 lg:col-span-7">
-        <div className="flex flex-col border-b border-rule bg-paper md:flex-row md:items-center md:justify-between">
-          <div className="flex">
+      <section className="col-span-12 flex min-w-0 flex-col gap-[22px] lg:col-span-7">
+        <div className="flex flex-wrap items-center gap-3">
+          <Tick />
+          <h2 className="font-serif text-[22px] italic leading-none text-ink">
+            Recent
+          </h2>
+          <div className="ml-4 flex gap-5 text-[14px]">
             {(["edited", "created", "opened"] as const).map((t) => (
               <button
                 type="button"
                 key={t}
                 onClick={() => setRecentTab(t)}
+                aria-pressed={recentTab === t}
                 className={cn(
-                  "cl-mono flex-1 border-r border-rule px-2 py-2 text-[9px] uppercase tracking-[0.22em] md:flex-none md:px-3.5",
+                  "cursor-pointer rounded-sm",
+                  FOCUS_RING_NATIVE,
                   recentTab === t
-                    ? "text-ink shadow-[inset_0_2px_0_var(--accent)]"
-                    : "text-ink-mute hover:text-ink",
+                    ? "font-medium text-ink underline decoration-accent decoration-[1.5px] underline-offset-[7px]"
+                    : "text-mute hover:text-ink",
                 )}
               >
-                <span className="md:hidden">
-                  {t === "edited"
-                    ? "Edited"
-                    : t === "created"
-                      ? "Created"
-                      : "Opened"}
-                </span>
-                <span className="hidden md:inline">
-                  {t === "edited"
-                    ? "Recently edited"
-                    : t === "created"
-                      ? "Recently created"
-                      : "Opened"}
-                </span>
+                {t === "edited"
+                  ? "Edited"
+                  : t === "created"
+                    ? "Created"
+                    : "Opened"}
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-3 px-3 py-2">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-              {recentRows.length} of {items.length.toLocaleString()}
-            </span>
-          </div>
+          <span className="flex-1" />
+          <span className="text-[13px] tabular-nums text-mute">
+            {recentRows.length} of {items.length.toLocaleString()}
+          </span>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex flex-col pl-[19px]">
           {recentRows.length === 0 ? (
-            <p className="cl-marg m-0 p-3.5">
+            <p className="m-0 py-3 text-[14px] text-mute">
               {recentTab === "opened"
-                ? "∅ Nothing opened yet this session."
-                : "∅ No folios yet inscribed."}
+                ? "Nothing opened yet this session."
+                : "No pages yet."}
             </p>
           ) : (
-            <div className="flex flex-col">
-              {recentRows.map((n, i) => {
-                const kind = resolveKind({ path: n.path, kind: n.kind });
-                const ts =
-                  recentTab === "created"
-                    ? n.created_at
-                    : recentTab === "opened"
-                      ? new Date(
-                          openHistoryMap.get(n.path) ?? Date.now(),
-                        ).toISOString()
-                      : n.updated_at;
-                return (
-                  <button
-                    type="button"
-                    key={n.path}
-                    onClick={() => openTab("page", n.path, n.title || n.path)}
-                    className="grid cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-baseline gap-x-2 gap-y-1 border-b border-dotted border-rule-soft px-2.5 py-2 text-left hover:bg-paper-edge md:grid-cols-[18px_90px_1fr_72px] md:gap-3 md:px-3.5"
-                  >
-                    <span className="cl-mono row-span-2 text-[9px] tabular-nums text-ink-mute md:row-span-1">
-                      {pad2(i + 1)}
-                    </span>
-                    <span className="cl-mono col-start-2 row-start-1 flex min-w-0 items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-ink-mute md:col-start-auto md:row-start-auto">
-                      <KindIcon
-                        kind={kind}
-                        size={11}
-                        className="flex-shrink-0"
-                      />
-                      {shortFolio(n.path)}
-                    </span>
-                    <span className="col-span-2 col-start-2 row-start-2 overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14px] text-ink md:col-span-1 md:col-start-auto md:row-start-auto">
-                      {n.title || n.path}
-                    </span>
-                    <span className="cl-mono col-start-3 row-start-1 text-right text-[9px] uppercase text-ink-mute md:col-start-auto md:row-start-auto">
-                      {formatRelativeTime(ts)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            recentRows.map((n, i) => {
+              const kind = resolveKind({ path: n.path, kind: n.kind });
+              const ts =
+                recentTab === "created"
+                  ? n.created_at
+                  : recentTab === "opened"
+                    ? new Date(
+                        openHistoryMap.get(n.path) ?? Date.now(),
+                      ).toISOString()
+                    : n.updated_at;
+              const folder = n.path.includes("/")
+                ? n.path.slice(0, n.path.lastIndexOf("/"))
+                : "";
+              return (
+                <button
+                  type="button"
+                  key={n.path}
+                  onClick={() => openTab("page", n.path, n.title || n.path)}
+                  className={cn(
+                    "grid cursor-pointer grid-cols-[34px_22px_minmax(0,1fr)_72px] items-baseline gap-3 rounded-md py-[11px] text-left text-ink hover:text-accent md:grid-cols-[34px_22px_minmax(0,1fr)_170px_72px]",
+                    FOCUS_RING_NATIVE,
+                  )}
+                >
+                  <span className="font-serif text-[16px] tabular-nums text-faint">
+                    {pad2(i + 1)}
+                  </span>
+                  <span className="text-mute">
+                    <KindIcon kind={kind} tone="mono" size={13} />
+                  </span>
+                  <span className="truncate text-[16px]">
+                    {n.title || n.path}
+                  </span>
+                  <span className="hidden truncate text-[13px] text-mute md:block">
+                    {folder}
+                  </span>
+                  <span className="text-right text-[13px] text-mute">
+                    {formatRelativeTime(ts)}
+                  </span>
+                </button>
+              );
+            })
           )}
         </div>
       </section>
