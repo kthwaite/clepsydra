@@ -550,7 +550,9 @@ samp.cl-mono {
     border: 1px solid var(--rule);
     background: var(--paper-2);
     color: var(--ink);
-    font-family: var(--font-serif);
+    /* was var(--font-serif), a sans alias under Vessel; now real serif, so
+       buttons stay sans until the phase 3 Button replaces .cl-btn */
+    font-family: var(--font-sans);
     text-transform: uppercase;
     letter-spacing: 0.14em;
     font-size: 11px;

@@ -44,6 +44,10 @@ describe("Stone & Lamp fonts", () => {
     expect(prop(cap, "letter-spacing")).toBe("normal");
   });
 
+  it("keeps Vessel buttons in sans until Button replaces them (phase 3)", () => {
+    expect(prop(rule(".cl-btn"), "font-family")).toBe("var(--font-sans)");
+  });
+
   it("keeps code monospace, including code marked .cl-mono", () => {
     const code = rule(
       ":where(pre, code, kbd, samp), pre.cl-mono, code.cl-mono, kbd.cl-mono, samp.cl-mono",
