@@ -77,35 +77,37 @@ export type KindMeta = {
   icon: LucideIcon;
 };
 
-// Colour assignment leans on the Vessel signal tokens: --accent (primary),
-// --cool (secondary), --warn (attention), with neutral ink ramps for the rest.
+// Colour assignment (Stone & Lamp): cobalt marks projects; related kinds share
+// a quire hue (people → madder, work → verdigris, days → ochre, machine-made →
+// indigo/plum, collected → slate, reading → sepia); neutral kinds use inks.
+// The icon names the kind; colour only groups.
 export const KIND_META: Record<Kind, KindMeta> = {
   PROJECT: { label: "PROJECT", color: "var(--accent)", icon: Compass },
-  TODO: { label: "TODO", color: "var(--warn)", icon: ListChecks },
-  JOURNAL: { label: "JOURNAL", color: "var(--cool)", icon: Calendar },
-  QUOTE: { label: "QUOTE", color: "var(--warn)", icon: Quote },
-  BOOK: { label: "BOOK", color: "var(--accent-deep)", icon: BookOpen },
+  TODO: { label: "TODO", color: "var(--quire-verdigris)", icon: ListChecks },
+  JOURNAL: { label: "JOURNAL", color: "var(--quire-ochre)", icon: Calendar },
+  QUOTE: { label: "QUOTE", color: "var(--quire-slate)", icon: Quote },
+  BOOK: { label: "BOOK", color: "var(--quire-sepia)", icon: BookOpen },
   CODE: { label: "CODE", color: "var(--ink)", icon: Code },
-  PERSON: { label: "PERSON", color: "var(--cool)", icon: User },
-  CAPTURE: { label: "CAPTURE", color: "var(--cool)", icon: Inbox },
+  PERSON: { label: "PERSON", color: "var(--quire-madder)", icon: User },
+  CAPTURE: { label: "CAPTURE", color: "var(--quire-slate)", icon: Inbox },
   NOTE: { label: "NOTE", color: "var(--ink-mute)", icon: FileText },
-  TASK: { label: "TASK", color: "var(--hot)", icon: SquareCheckBig },
+  TASK: { label: "TASK", color: "var(--quire-verdigris)", icon: SquareCheckBig },
   CYCLE: { label: "CYCLE", color: "var(--ink-2)", icon: Repeat },
-  RECIPE: { label: "RECIPE", color: "var(--accent-deep)", icon: CookingPot },
-  // Meetings are about people, so they take PERSON's cool hue. A 1:1 is a
+  RECIPE: { label: "RECIPE", color: "var(--quire-sepia)", icon: CookingPot },
+  // Meetings are about people, so they share PERSON's madder. A 1:1 is a
   // MEETING tagged `1:1`, not a kind of its own.
-  MEETING: { label: "MEETING", color: "var(--cool)", icon: Users },
+  MEETING: { label: "MEETING", color: "var(--quire-madder)", icon: Users },
   // Archived pages are inert captures of someone else's writing; a muted ink
   // hue keeps them legible without competing with authored material.
   ARCHIVE: { label: "ARCHIVE", color: "var(--ink-3)", icon: Archive },
   AI_CONVERSATION: {
     label: "AI CONVERSATION",
-    color: "var(--cool)",
+    color: "var(--quire-indigo)",
     icon: MessagesSquare,
   },
-  // The assistants' own daily stream; deep accent separates it from the
-  // human JOURNAL's cool calendar at a glance.
-  AI_JOURNAL: { label: "AI JOURNAL", color: "var(--accent-deep)", icon: Bot },
+  // The assistants' daily stream shares the machine-made indigo (plum) hue,
+  // separating it from the human JOURNAL's ochre at a glance.
+  AI_JOURNAL: { label: "AI JOURNAL", color: "var(--quire-indigo)", icon: Bot },
 };
 
 export const kindLabel = (kind: Kind): string => KIND_META[kind].label;
