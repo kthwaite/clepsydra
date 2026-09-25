@@ -11,11 +11,6 @@ const OUT_OF_SCOPE = new Set(["command-palette.tsx"]);
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
 const PENDING = new Set<string>([
-  "button.tsx",
-  "badge.tsx",
-  "CopyButton.tsx",
-  "task-status-button.tsx",
-  "section-heading.tsx",
   "menu.tsx",
   "dialog.tsx",
   "tooltip.tsx",

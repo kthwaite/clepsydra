@@ -4,6 +4,7 @@ import {
   type ButtonProps as RACButtonProps,
 } from "react-aria-components";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 type ButtonSize = "sm" | "md" | "icon";
@@ -14,24 +15,28 @@ export interface ButtonProps extends RACButtonProps {
   size?: ButtonSize;
 }
 
-const base =
-  "inline-flex items-center justify-center gap-1.5 border text-xs uppercase tracking-wider transition-colors data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-ring data-[focus-visible]:outline-offset-2";
+const base = cn(
+  "inline-flex cursor-pointer items-center justify-center gap-1.5 font-medium transition-colors data-[disabled]:cursor-not-allowed data-[disabled]:opacity-45",
+  FOCUS_RING,
+);
 
+/** Stone & Lamp button looks (spec §5.5). `secondary` is the spec's
+ *  "quiet" button; `ghost` is text only. */
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    "border-border bg-primary text-primary-foreground hover:bg-primary/90 data-[hovered]:bg-primary/90",
+    "rounded-full bg-accent text-raise data-[hovered]:bg-accent/90 data-[pressed]:bg-accent/85",
   secondary:
-    "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground data-[hovered]:bg-accent data-[hovered]:text-foreground",
+    "rounded-[14px] bg-sink text-ink data-[hovered]:bg-sink/70 data-[pressed]:bg-sink/60",
   ghost:
-    "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground data-[hovered]:bg-accent data-[hovered]:text-foreground",
+    "rounded-full text-mute data-[hovered]:bg-sink data-[hovered]:text-ink",
   danger:
-    "border-destructive bg-destructive text-destructive-foreground hover:bg-destructive/90 data-[hovered]:bg-destructive/90",
+    "rounded-full bg-hot text-raise data-[hovered]:bg-hot/90 data-[pressed]:bg-hot/85",
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
-  sm: "px-3 py-1 text-sm font-medium normal-case tracking-normal",
-  md: "px-3 py-1.5",
-  icon: "h-7 w-7 p-0",
+  sm: "h-8 px-3.5 text-[13px]",
+  md: "h-11 px-5 text-[14px]",
+  icon: "h-8 w-8 rounded-full p-0",
 };
 
 /** Shared visual contract for buttons and router links presented as buttons. */

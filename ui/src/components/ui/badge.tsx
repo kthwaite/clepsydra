@@ -10,15 +10,15 @@ export interface BadgeProps {
 }
 
 const sizeClasses: Record<BadgeSize, string> = {
-  sm: "px-1 py-px text-[10px]",
-  md: "px-2 py-0.5 text-xs",
+  sm: "px-1.5 text-[11.5px]",
+  md: "px-2 py-0.5 text-[12px]",
 };
 
 export function Badge({ children, size = "md", className }: BadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center border border-border font-mono uppercase tracking-wider text-muted-foreground",
+        "inline-flex items-center rounded-full bg-sink text-ink-2 tabular-nums",
         sizeClasses[size],
         className,
       )}

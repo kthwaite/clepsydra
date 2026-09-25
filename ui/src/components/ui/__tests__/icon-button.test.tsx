@@ -22,13 +22,18 @@ describe("IconButton", () => {
     expect(btn.className).toContain("[&_svg]:h-4");
   });
 
-  it("renders with size=icon", () => {
+  it("is a 32px round ghost button with the focus ring", () => {
     render(
       <IconButton aria-label="Close">
         <svg />
       </IconButton>,
     );
-    const btn = screen.getByRole("button");
-    expect(btn.className).toContain("h-7");
+    expect(screen.getByRole("button")).toHaveClass(
+      "h-8",
+      "w-8",
+      "rounded-full",
+      "text-mute",
+      "data-[focus-visible]:ring-2",
+    );
   });
 });
