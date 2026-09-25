@@ -19,7 +19,6 @@ export type StaticCommandAction =
   | "open-settings"
   | "toggle-theme"
   | "open-shortcut-help"
-  | "toggle-diegetic-chrome"
   | "run-boot-sequence";
 
 export interface StaticCommandDescriptor {
@@ -238,11 +237,6 @@ export const STATIC_COMMANDS: readonly StaticCommandDescriptor[] = [
     title: "Keyboard shortcuts",
     shortcut: "app.shortcutHelp",
     action: "open-shortcut-help",
-  },
-  {
-    id: "sys.chrome",
-    title: "Toggle diegetic chrome",
-    action: "toggle-diegetic-chrome",
   },
   {
     id: "sys.boot",

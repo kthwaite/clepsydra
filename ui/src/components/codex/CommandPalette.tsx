@@ -74,7 +74,7 @@ function CommandPaletteContent() {
   const leaveWorkspace = useLeaveFolioWorkspace();
   const openTodayJournal = useOpenTodayJournal();
   const openTodayAiJournal = useOpenTodayAiJournal();
-  const { toggle: toggleTheme, diegetic, setDiegetic } = useTheme();
+  const { toggle: toggleTheme } = useTheme();
 
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -224,9 +224,6 @@ function CommandPaletteContent() {
             case "open-shortcut-help":
               openShortcutHelp();
               return;
-            case "toggle-diegetic-chrome":
-              setDiegetic(!diegetic);
-              return;
             case "run-boot-sequence":
               runBoot();
               return;
@@ -250,8 +247,6 @@ function CommandPaletteContent() {
       openSettings,
       openShortcutHelp,
       runBoot,
-      diegetic,
-      setDiegetic,
     ],
   );
 

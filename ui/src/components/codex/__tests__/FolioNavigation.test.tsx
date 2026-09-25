@@ -198,7 +198,6 @@ vi.mock("#/components/ThemeProvider", () => ({
   useTheme: () => ({
     toggle: vi.fn(),
     resolvedTheme: "light",
-    diegetic: false,
   }),
 }));
 vi.mock("#/components/page-tree/PageActionsMenu", () => ({

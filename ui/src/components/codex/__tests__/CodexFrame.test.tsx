@@ -155,7 +155,6 @@ vi.mock("#/components/ThemeProvider", () => ({
   useTheme: () => ({
     toggle: toggleThemeMock,
     resolvedTheme: "light",
-    diegetic: false,
   }),
 }));
 vi.mock("#/hooks/useVaultEvents", () => ({

@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   closeSettings: vi.fn(),
   setActiveSettingsSection: vi.fn(),
   setDensity: vi.fn(),
-  setDiegetic: vi.fn(),
   setMode: vi.fn(),
 }));
 
@@ -29,8 +28,6 @@ vi.mock("#/components/ThemeProvider", () => ({
     setMode: mocks.setMode,
     density: "default",
     setDensity: mocks.setDensity,
-    diegetic: true,
-    setDiegetic: mocks.setDiegetic,
   }),
 }));
 
@@ -65,5 +62,10 @@ describe("SettingsModal appearance", () => {
 
     await user.click(screen.getByRole("radio", { name: /Compact/i }));
     expect(mocks.setDensity).toHaveBeenCalledWith("compact");
+  });
+
+  it("has no diegetic chrome control", () => {
+    render(<SettingsModal />);
+    expect(screen.queryByText(/diegetic/i)).toBeNull();
   });
 });

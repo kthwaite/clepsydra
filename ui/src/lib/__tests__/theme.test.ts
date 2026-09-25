@@ -102,3 +102,21 @@ describe("clearLegacyAccent", () => {
     expect(() => clearLegacyAccent()).not.toThrow();
   });
 });
+
+describe("clearLegacyDiegetic", () => {
+  it("drops a pre-upgrade diegetic-off attribute and stored key", async () => {
+    const storage = fakeStorage({ "clepsydra.diegetic": "off" });
+    vi.stubGlobal("localStorage", storage);
+    document.documentElement.setAttribute("data-diegetic", "off");
+    const { clearLegacyDiegetic } = await import("#/lib/theme");
+    clearLegacyDiegetic();
+    expect(document.documentElement.hasAttribute("data-diegetic")).toBe(false);
+    expect(storage.getItem("clepsydra.diegetic")).toBeNull();
+  });
+
+  it("does not throw when storage is unavailable", async () => {
+    vi.stubGlobal("localStorage", undefined);
+    const { clearLegacyDiegetic } = await import("#/lib/theme");
+    expect(() => clearLegacyDiegetic()).not.toThrow();
+  });
+});

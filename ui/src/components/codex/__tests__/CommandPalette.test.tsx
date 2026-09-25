@@ -85,8 +85,6 @@ vi.mock("#/components/FeatureFlagsProvider", () => ({
 vi.mock("#/components/ThemeProvider", () => ({
   useTheme: () => ({
     toggle: vi.fn(),
-    diegetic: false,
-    setDiegetic: vi.fn(),
   }),
 }));
 vi.mock("#/hooks/useOpenTab", () => ({
@@ -153,6 +151,13 @@ describe("CommandPalette keyboard navigation", () => {
 
     expect(navigateMock).not.toHaveBeenCalled();
     expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+
+  it("offers no diegetic chrome command", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+    await user.type(screen.getByRole("textbox"), "chrome");
+    expect(screen.queryByText("Toggle diegetic chrome")).toBeNull();
   });
 
   it("lists Today's journal and not Open Diurnal", () => {

@@ -145,7 +145,6 @@ vi.mock("#/components/ThemeProvider", () => ({
   useTheme: () => ({
     toggle: toggleThemeMock,
     resolvedTheme: "light",
-    diegetic: false,
   }),
 }));
 vi.mock("#/components/codex/useCollapsibleRail", () => ({

@@ -165,11 +165,7 @@ describe("feature documentation inventory", () => {
   });
 
   it("classifies persistent appearance controls as user-facing configuration", () => {
-    const appearanceCommandIds = [
-      "app.settings",
-      "app.themeToggle",
-      "sys.chrome",
-    ];
+    const appearanceCommandIds = ["app.settings", "app.themeToggle"];
 
     expect(
       FEATURE_INVENTORY.filter((entry) =>
@@ -222,7 +218,6 @@ describe("feature documentation inventory", () => {
       "preferences",
     ],
     ["app.themeToggle", "configuration", "### Theme toggle", "theme"],
-    ["sys.chrome", "configuration", "### Diegetic chrome", "diegetic chrome"],
   ] as const)(
     "%s is owned by useful content and discovery metadata in %s",
     (id, slug, heading, discoveryTerm) => {

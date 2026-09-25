@@ -18,7 +18,7 @@ open the Settings dialog directly on **Appearance**. The folio sidebar’s
 
 - **General** shows current corpus and index counts.
 - **Navigation** selects Smart, New Tab, or Replace behavior for opening pages.
-- **Appearance** controls mode, density, and diegetic chrome.
+- **Appearance** controls mode and density.
 - **Location** saves coordinates and an optional label to
   `.clepsydra/location.toml` for Atrium’s sunrise, sunset, and day arc.
 - **Editor** currently displays informational placeholders; it has no shipped
@@ -38,16 +38,8 @@ Theme and density are browser-local preferences stored in `localStorage`
 (`clepsydra.theme` and `clepsydra.density`). They persist for that browser
 origin; they do not modify `config.toml`, vault files, or other clients.
 Cobalt is the only accent; the old accent presets were retired, and a leftover
-`clepsydra.accent` value is cleared on load.
-
-### Diegetic chrome
-
-Use **Status → Appearance → Diegetic chrome** or run **Toggle diegetic
-chrome**. Turning it off suppresses the ornamental footer annotations such as
-the VESSEL/write indicator and index-collation text; primary navigation, page
-content, query, Status, and the theme toggle remain available. The setting is
-on by default and persists for the browser origin under
-`clepsydra.diegetic`; it does not change vault data.
+`clepsydra.accent` value is cleared on load. The Vessel-era diegetic chrome
+switch is gone too; a leftover `clepsydra.diegetic` value is cleared on load.
 
 The privacy boundary for these preferences is distinct from protected folios:
 browser-local appearance values are not synchronized or encrypted by
