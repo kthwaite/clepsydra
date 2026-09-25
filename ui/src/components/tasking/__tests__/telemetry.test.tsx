@@ -150,7 +150,7 @@ describe("tasking telemetry", () => {
     useBoardStore.setState({ mode: "cycle", cycleSel: "C-01" });
     renderScreen();
 
-    expect(await screen.findByText("Task Board")).toBeInTheDocument();
+    expect(await screen.findByText("Task board")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText("Unavailable")).toBeInTheDocument();
       expect(screen.getByText("UNAVAILABLE")).toBeInTheDocument();

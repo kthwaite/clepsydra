@@ -1097,7 +1097,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("mounts NewCycleModal when cycleModal.kind === 'new'", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByText("Task board");
 
     useBoardStore.setState({ cycleModal: { kind: "new" } });
 
@@ -1107,7 +1107,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("does NOT mount NewCycleModal when cycleModal is null", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByText("Task board");
 
     expect(screen.queryByTestId("new-cycle-modal")).not.toBeInTheDocument();
   });
@@ -1115,7 +1115,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("mounts OpenCycleModal when cycleModal.kind === 'open' and cycleId resolves", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByText("Task board");
 
     // BOARD_FIXTURE has cyc-111 = ACTIVE (C-01) and cyc-222 = PLANNED (C-02)
     useBoardStore.setState({
@@ -1128,7 +1128,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("does NOT mount OpenCycleModal when cycleId does not match any cycle", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByText("Task board");
 
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "ghost-id" },
@@ -1140,7 +1140,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("mounts SealCycleModal when cycleModal.kind === 'seal' and cycleId resolves", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByText("Task board");
 
     useBoardStore.setState({
       cycleModal: { kind: "seal", cycleId: "cyc-111" },
@@ -1152,7 +1152,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("does NOT mount SealCycleModal when cycleId does not match any cycle", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("Task Board");
+    await screen.findByText("Task board");
 
     useBoardStore.setState({
       cycleModal: { kind: "seal", cycleId: "ghost-id" },

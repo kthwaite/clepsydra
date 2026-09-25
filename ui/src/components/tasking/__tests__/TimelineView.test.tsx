@@ -797,7 +797,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline" });
     stubBoardFetch(TL_BOARD);
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
     expect(screen.getByTestId("tl-root")).toBeInTheDocument();
   });
 
@@ -805,7 +805,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline", opFilter: "ALL" });
     stubBoardFetch(TL_BOARD);
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
     // t1 → alpha; t3 → beta
     expect(screen.getByTestId("tl-grp-alpha")).toBeInTheDocument();
     expect(screen.getByTestId("tl-grp-beta")).toBeInTheDocument();
@@ -815,7 +815,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline", opFilter: "alpha" });
     stubBoardFetch(TL_BOARD);
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
     expect(screen.getByTestId("tl-grp-alpha")).toBeInTheDocument();
     expect(screen.queryByTestId("tl-grp-beta")).not.toBeInTheDocument();
   });
@@ -824,7 +824,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline" });
     stubBoardFetch(BOARD_FIXTURE); // no due dates in base fixture
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
     expect(screen.getByTestId("tl-empty")).toBeInTheDocument();
   });
 
@@ -832,7 +832,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline" });
     stubBoardFetch(TL_BOARD);
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
     expect(screen.queryByText(/COMING SOON/)).not.toBeInTheDocument();
   });
 
@@ -862,7 +862,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline", opFilter: "UNFILED" });
     stubBoardFetch(boardWithUnfiled);
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
     // Unfiled group should exist
     expect(screen.getByTestId("tl-grp-UNFILED")).toBeInTheDocument();
     // Named operation groups should NOT exist (filtered out by TaskingScreen)

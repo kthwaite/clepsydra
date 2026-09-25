@@ -95,7 +95,7 @@ describe("BoardHeader", () => {
     // "04" = 4 open tasks
     const openStat = screen.getByText("Open").parentElement;
     assert(openStat !== null);
-    expect(within(openStat).getByText("04")).toBeInTheDocument();
+    expect(within(openStat).getByText("4")).toBeInTheDocument();
   });
 
   it("computes In progress count zero-padded", () => {
@@ -103,7 +103,7 @@ describe("BoardHeader", () => {
     renderHeader();
     const fieldStat = screen.getByText("In progress").parentElement;
     assert(fieldStat !== null);
-    expect(within(fieldStat).getByText("01")).toBeInTheDocument();
+    expect(within(fieldStat).getByText("1")).toBeInTheDocument();
   });
 
   it("computes Blocked count zero-padded", () => {
@@ -111,7 +111,7 @@ describe("BoardHeader", () => {
     renderHeader();
     const holdStat = screen.getByText("Blocked").parentElement;
     assert(holdStat !== null);
-    expect(within(holdStat).getByText("01")).toBeInTheDocument();
+    expect(within(holdStat).getByText("1")).toBeInTheDocument();
   });
 
   it("renders Completed · 14 days sparkline", () => {
@@ -161,9 +161,9 @@ describe("BoardHeader", () => {
   it("renders op-meta line when activeOp is set", () => {
     const activeOp = operations[0]; // Operation Alpha
     renderHeader({ activeOp });
-    expect(screen.getByText("LEAD")).toBeInTheDocument();
-    expect(screen.getByText("HEALTH")).toBeInTheDocument();
-    expect(screen.getByText("TARGET")).toBeInTheDocument();
+    expect(screen.getByText("Lead")).toBeInTheDocument();
+    expect(screen.getByText("Health")).toBeInTheDocument();
+    expect(screen.getByText("Target")).toBeInTheDocument();
     expect(screen.getByText("Operation Alpha")).toBeInTheDocument();
   });
 
@@ -305,5 +305,48 @@ describe("BoardHeader", () => {
     expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
       "01 OF 03",
     );
+  });
+
+  describe("Stone & Lamp header", () => {
+    it("titles an unscoped board in serif under an All projects eyebrow", () => {
+      renderHeader();
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Task board" }),
+      ).toHaveClass("font-serif");
+      expect(screen.getByText("All projects")).toHaveClass("italic");
+    });
+
+    it("titles a scoped board with the project name under a Project eyebrow", () => {
+      renderHeader({ activeOp: operations[0] });
+      expect(
+        screen.getByRole("heading", { level: 1, name: operations[0].name }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Project")).toHaveClass("italic");
+    });
+
+    it("shows the active cycle with a progress bar", () => {
+      renderHeader();
+      expect(screen.getByText("1 of 3")).toBeInTheDocument();
+      expect(screen.getByRole("progressbar")).toHaveAttribute(
+        "aria-valuenow",
+        "1",
+      );
+    });
+
+    it("draws the view switch as a sink track with a raised selection", () => {
+      renderHeader();
+      const board = screen.getByRole("tab", { name: "Board" });
+      expect(board).toHaveClass("bg-raise");
+      expect(board.parentElement).toHaveClass("bg-sink", "rounded-full");
+    });
+
+    it("offers New task as the primary action", async () => {
+      const user = userEvent.setup();
+      renderHeader();
+      const button = screen.getByRole("button", { name: "New task" });
+      expect(button).toHaveClass("bg-accent");
+      await user.click(button);
+      expect(useBoardStore.getState().taskModal).not.toBeNull();
+    });
   });
 });

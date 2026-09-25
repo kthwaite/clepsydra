@@ -669,7 +669,7 @@ describe("TaskingScreen integration — cycle mode", () => {
     useBoardStore.setState({ mode: "cycle", cycleSel: "C-01" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
     // CycleView renders the cycle label as h2
     expect(
       screen.getByRole("heading", { name: /Cycle 01/i }),
@@ -681,7 +681,7 @@ describe("TaskingScreen integration — cycle mode", () => {
     useBoardStore.setState({ mode: "cycle", cycleSel: "" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
     // C-01 is ACTIVE
     expect(
       screen.getByRole("heading", { name: /Cycle 01/i }),
@@ -692,7 +692,7 @@ describe("TaskingScreen integration — cycle mode", () => {
     useBoardStore.setState({ mode: "cycle", cycleSel: "BACKLOG" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
     expect(
       screen.getByRole("heading", { name: /BACKLOG/i }),
     ).toBeInTheDocument();
@@ -709,7 +709,7 @@ describe("TaskingScreen integration — cycle mode", () => {
     });
     stubBoardFetch();
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
 
     const cycleEmptyState = screen.getByText(
       "No tasks in Cycle 02",
@@ -734,7 +734,7 @@ describe("TaskingScreen integration — cycle mode", () => {
     });
     stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
 
     const cycleEmptyState = screen.getByText(
       "No tasks in Cycle 02",
@@ -767,7 +767,7 @@ describe("ScopeRail — cycle selection still passes", () => {
     useBoardStore.setState({ mode: "card", cycleSel: "" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByRole("heading", { name: "Task Board" });
+    await screen.findByRole("tab", { name: "Board" });
 
     // Click C-02 in the rail
     const c02btn = screen.getByRole("button", { name: /C-02/ });
