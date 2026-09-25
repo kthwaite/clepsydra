@@ -64,7 +64,7 @@ export function SkyCard({
         </div>
 
         {!hasLocation && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-xl bg-ground/85 text-center">
             <p className="m-0 max-w-[26ch] text-[14px] text-ink-2">
               Set your location for accurate sun times.
             </p>

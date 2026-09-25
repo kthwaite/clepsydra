@@ -44,6 +44,9 @@ describe("SkyCard", () => {
     const onEdit = vi.fn();
     const user = userEvent.setup();
     render(<SkyCard sky={SKY} hasLocation={false} onEdit={onEdit} />);
+    // The prompt sits on its own backdrop so it never overlaps the dimmed facts.
+    const prompt = screen.getByText(/Set your location/);
+    expect(prompt.parentElement).toHaveClass("bg-ground/85");
     await user.click(screen.getByRole("button", { name: "Set location" }));
     expect(onEdit).toHaveBeenCalledOnce();
   });
