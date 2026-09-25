@@ -29,6 +29,9 @@ import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal()),
   useIsMutating: () => 0,
+  useQueryClient: () => ({
+    getMutationCache: () => ({ subscribe: () => () => {} }),
+  }),
 }));
 vi.mock("#/components/FeatureFlagsProvider", () => ({
   useFeatureFlags: () => ({ academic: true, feeds: true }),
@@ -883,7 +886,7 @@ describe("mobile Folio Back", () => {
     });
     const router = renderNavigation("/");
 
-    await user.click(await screen.findByRole("button", { name: /FOLIO/ }));
+    await user.click(await screen.findByRole("button", { name: /^Folio$/ }));
 
     await waitFor(() =>
       expect(router.state.location.pathname).toBe("/workspace"),
@@ -1685,7 +1688,7 @@ describe("mobile Folio Back", () => {
           mobileLayout.current = false;
         },
         exit: async (user: ReturnType<typeof userEvent.setup>) => {
-          await user.click(screen.getByRole("button", { name: /GAZETTEER/ }));
+          await user.click(screen.getByRole("button", { name: /^Gazetteer$/ }));
         },
       },
       {
