@@ -343,4 +343,15 @@ describe("Atrium composition", () => {
     expect(row.querySelector(".font-serif")).toHaveTextContent("01");
     expect(row).toHaveTextContent("notes");
   });
+
+  it("sets the Brimley-Cocoon Line figure in cobalt serif numerals", () => {
+    atriumMocks.bcl = {
+      birth_date: "1980-01-01",
+      bcl_date: "2050-01-01",
+      remaining_seconds: 86_400 * 10,
+    };
+    render(<Atrium />);
+    const figure = screen.getByTestId("bcl-figure");
+    expect(figure).toHaveClass("font-serif", "text-accent", "tabular-nums");
+  });
 });

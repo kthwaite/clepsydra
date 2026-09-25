@@ -263,14 +263,17 @@ export function Atrium() {
       <div className="col-span-12 grid grid-cols-12 gap-3.5">
         {configuredBcl ? (
           <Section
-            className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-7"
+            className="col-span-12 lg:col-span-7"
             label="Brimley-Cocoon Line"
             pip="dim"
           >
-            <div className="cl-mono text-[22px] leading-none text-accent">
+            <div
+              data-testid="bcl-figure"
+              className="font-serif text-[clamp(48px,6vw,96px)] leading-none tracking-[-0.02em] tabular-nums text-accent"
+            >
               {formatBclDuration(configuredBcl.remainingSeconds)}
             </div>
-            <div className="cl-mono mt-1.5 text-[10px] text-ink-mute">
+            <div className="mt-3.5 text-[15px] text-ink-2">
               {configuredBcl.remainingSeconds >= 0 ? "crosses" : "crossed"}{" "}
               {formatBclDate(configuredBcl.date)} · natal{" "}
               {configuredBcl.birthDate}
@@ -279,7 +282,7 @@ export function Atrium() {
         ) : null}
         <SkyCard
           className={cn(
-            "col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5",
+            "col-span-12",
             configuredBcl ? "lg:col-span-5" : "lg:col-span-12",
           )}
           sky={sky}
