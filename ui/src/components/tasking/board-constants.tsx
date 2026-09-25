@@ -86,13 +86,14 @@ export function cycleStateLabel(state: string): string {
 /**
  * Single-sourced priority color map: bar (on-state fill) and text (badge
  * foreground / off-state outline) per priority. Stone & Lamp ranks by tone:
- * Critical hot, High ink, Medium mute, Low faint.
+ * Critical hot, High ink, Medium mute, Low faint (bar) / mute (label).
  */
 export const PRI_COLOR: Record<string, { bar: string; text: string }> = {
   P0: { bar: "var(--hot)", text: "var(--hot)" },
   P1: { bar: "var(--ink)", text: "var(--ink)" },
   P2: { bar: "var(--mute)", text: "var(--mute)" },
-  P3: { bar: "var(--faint)", text: "var(--faint)" },
+  // Low's label stays mute: faint text is illegible on raise cards.
+  P3: { bar: "var(--faint)", text: "var(--mute)" },
 };
 
 /** Looks up a priority's color pair, falling back to a neutral default. */

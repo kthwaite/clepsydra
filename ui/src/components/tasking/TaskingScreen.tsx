@@ -103,6 +103,7 @@ export function TaskingScreen({
     activeScope,
     activeOp,
     visibleTasks,
+    scopedTasks,
     opFilteredCount,
     hiddenCompletedCount,
     editTask,
@@ -115,6 +116,7 @@ export function TaskingScreen({
         activeScope: null,
         activeOp: null,
         visibleTasks: [],
+        scopedTasks: [],
         opFilteredCount: 0,
         hiddenCompletedCount: 0,
         editTask: null,
@@ -149,6 +151,7 @@ export function TaskingScreen({
       // The backing PROJECT page, when one exists — drives the op-meta strip.
       activeOp: active?.op ?? null,
       visibleTasks: filtered,
+      scopedTasks: scoped,
       opFilteredCount: opFiltered.length,
       hiddenCompletedCount: scoped.length - opFiltered.length,
       editTask: editTaskId
@@ -299,6 +302,7 @@ export function TaskingScreen({
             projects={projects}
             cycles={cycles}
             tasks={visibleTasks}
+            scopedTasks={scopedTasks}
             activeOp={activeOp}
             filteredCount={visibleTasks.length}
             opFilteredCount={opFilteredCount}

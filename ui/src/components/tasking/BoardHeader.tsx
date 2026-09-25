@@ -18,6 +18,9 @@ interface BoardHeaderProps {
   cycles: BoardCycle[];
   /** Op-filtered tasks (already filtered by opFilter in TaskingScreen). */
   tasks: BoardTask[];
+  /** Tasks in scope before the list-mode hide rule and the FilterBar, so
+   *  cycle progress does not move with filters. */
+  scopedTasks: BoardTask[];
   /** The active operation object when a single op is selected, else null. */
   activeOp: BoardOperation | null;
   /** Task count after the shared FilterBar filtering (the `tasks` prop's length). */
@@ -45,6 +48,7 @@ export function BoardHeader({
   projects,
   cycles,
   tasks,
+  scopedTasks,
   activeOp,
   filteredCount,
   opFilteredCount,
@@ -86,8 +90,20 @@ export function BoardHeader({
   // The running cycle, with progress as sealed of all its tasks.
   const activeCycle = cycles.find((c) => c.state === "ACTIVE") ?? null;
   const cycleTasks = activeCycle
-    ? tasks.filter((t) => t.cycle === activeCycle.code)
+    ? scopedTasks.filter((t) => t.cycle === activeCycle.code)
     : [];
+
+  // Title the scope the rail selected, including No project and scopes
+  // synthesized from task slugs (no Project page, so no activeOp).
+  const scope = projects.find((p) => p.key === opFilter) ?? null;
+  const title =
+    opFilter === "ALL"
+      ? "Task board"
+      : opFilter === "UNFILED"
+        ? "No project"
+        : scope
+          ? scope.name || scope.code
+          : (activeOp?.name ?? "Task board");
   const cycleDone = cycleTasks.filter((t) => t.status === "SEALED").length;
   const cycleTotal = cycleTasks.length;
 
@@ -99,11 +115,11 @@ export function BoardHeader({
           <span className="flex items-center gap-2.5">
             <Tick />
             <span className="font-serif text-[19px] italic text-mute">
-              {activeOp ? "Project" : "All projects"}
+              {opFilter === "ALL" ? "All projects" : "Project"}
             </span>
           </span>
           <h1 className="font-serif text-[clamp(40px,4.5vw,56px)] leading-none tracking-[-0.015em] text-ink">
-            {activeOp ? activeOp.name : "Task board"}
+            {title}
           </h1>
           <span className="text-[13px] text-mute">
             {projects.length} {projects.length === 1 ? "project" : "projects"} ·{" "}

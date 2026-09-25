@@ -47,6 +47,7 @@ function renderHeader(
         projects={PROJECT_SCOPES}
         cycles={cycles}
         tasks={tasks}
+        scopedTasks={tasks}
         activeOp={null}
         filteredCount={tasks.length}
         opFilteredCount={tasks.length}
@@ -161,6 +162,7 @@ describe("BoardHeader", () => {
 
   it("renders op-meta line when activeOp is set", () => {
     const activeOp = operations[0]; // Operation Alpha
+    useBoardStore.setState({ opFilter: PROJECT_SCOPES[0].key });
     renderHeader({ activeOp });
     expect(screen.getByText("Lead")).toBeInTheDocument();
     expect(screen.getByText("Health")).toBeInTheDocument();
@@ -316,11 +318,42 @@ describe("BoardHeader", () => {
     });
 
     it("titles a scoped board with the project name under a Project eyebrow", () => {
+      useBoardStore.setState({ opFilter: PROJECT_SCOPES[0].key });
       renderHeader({ activeOp: operations[0] });
       expect(
         screen.getByRole("heading", { level: 1, name: operations[0].name }),
       ).toBeInTheDocument();
       expect(screen.getByText("Project")).toHaveClass("italic");
+    });
+
+    it("titles the No project scope rather than the whole board", () => {
+      useBoardStore.setState({ opFilter: "UNFILED" });
+      renderHeader();
+      expect(
+        screen.getByRole("heading", { level: 1, name: "No project" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Project")).toHaveClass("italic");
+    });
+
+    it("titles a slug-only scope (no Project page) by its code", () => {
+      const synth = {
+        key: "loose",
+        slug: "loose",
+        code: "LOOSE",
+        name: "",
+        health: null,
+        op: null,
+      };
+      useBoardStore.setState({ opFilter: synth.key });
+      renderHeader({ projects: [...PROJECT_SCOPES, synth] });
+      expect(
+        screen.getByRole("heading", { level: 1, name: synth.code }),
+      ).toBeInTheDocument();
+    });
+
+    it("counts cycle progress over the scoped tasks, not the filtered ones", () => {
+      renderHeader({ tasks: [], filteredCount: 0 });
+      expect(screen.getByText("1 of 3")).toBeInTheDocument();
     });
 
     it("shows the active cycle with a progress bar", () => {
