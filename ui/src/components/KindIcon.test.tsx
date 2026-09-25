@@ -59,4 +59,9 @@ describe("KindIcon", () => {
 
     expect(svgOf(container).getAttribute("class")).toContain("flex-shrink-0");
   });
+
+  it("mono tone draws in currentColor so the parent sets the colour", () => {
+    const { container } = render(<KindIcon kind="NOTE" tone="mono" />);
+    expect(svgOf(container).getAttribute("stroke")).toBe("currentColor");
+  });
 });

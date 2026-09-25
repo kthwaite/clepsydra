@@ -10,6 +10,8 @@ import {
   QUIRE_COLORS,
   type Quire,
   quireColorVar,
+  type SheafSegment,
+  sheafRuns,
   sheafSegments,
 } from "./quires";
 
@@ -162,5 +164,37 @@ describe("sheafSegments", () => {
   it("treats tabs with unknown quireIds as ungrouped", () => {
     const segs = sheafSegments([tab("a", "ghost")], {});
     expect(segs[0].kind).toBe("tab");
+  });
+});
+
+describe("sheafRuns", () => {
+  const q = quire;
+
+  it("keeps store order: loose runs sit where their tabs are", () => {
+    const segs: SheafSegment[] = [
+      { kind: "quire", quire: q("r"), members: [tab("a", "r"), tab("b", "r")] },
+      { kind: "tab", tab: tab("c") },
+      { kind: "quire", quire: q("s"), members: [tab("d", "s")] },
+      { kind: "tab", tab: tab("e") },
+      { kind: "tab", tab: tab("f") },
+    ];
+    expect(
+      sheafRuns(segs).map((r) =>
+        r.kind === "quire"
+          ? `Q:${r.quire.id}`
+          : `L:${r.tabs.map((t) => t.id).join("")}`,
+      ),
+    ).toEqual(["Q:r", "L:c", "Q:s", "L:ef"]);
+  });
+
+  it("ends with an empty loose run when the last segment is a quire", () => {
+    const runs = sheafRuns([
+      { kind: "quire", quire: q("r"), members: [tab("a", "r")] },
+    ]);
+    expect(runs.at(-1)).toEqual({ kind: "loose", tabs: [] });
+  });
+
+  it("is a single empty loose run when there are no tabs", () => {
+    expect(sheafRuns([])).toEqual([{ kind: "loose", tabs: [] }]);
   });
 });

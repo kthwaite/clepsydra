@@ -9,17 +9,25 @@ type KindIconProps = {
   /** Accessible name. Omit to hide the glyph from assistive tech — the usual
    * case, where the adjacent title already names the page. */
   title?: string;
+  /** "mono" draws in currentColor (Sheaf tabs); "kind" uses the kind hue. */
+  tone?: "kind" | "mono";
 };
 
 /** The kind marker: a lucide glyph in the kind's colour, replacing the 6px
  * pip that used to carry kind on colour alone. */
-export function KindIcon({ kind, size = 12, className, title }: KindIconProps) {
+export function KindIcon({
+  kind,
+  size = 12,
+  className,
+  title,
+  tone = "kind",
+}: KindIconProps) {
   const Icon = kindIcon(kind);
   return (
     <Icon
       size={size}
       strokeWidth={1.75}
-      color={kindColorVar(kind)}
+      color={tone === "mono" ? "currentColor" : kindColorVar(kind)}
       className={className}
       aria-hidden={title ? undefined : true}
       role={title ? "img" : undefined}
