@@ -5,6 +5,7 @@ import { type EntryView, useFeeds } from "#/api/feeds";
 import { FeedRiver } from "#/components/codex/FeedRiver";
 import { Section } from "#/components/codex/Section";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 
 export function FeedRiverPanel() {
   const navigate = useNavigate();
@@ -24,7 +25,7 @@ export function FeedRiverPanel() {
       <section aria-label="Feed river panel" className="col-span-12">
         <div
           role="alert"
-          className="border border-hot bg-paper-2 px-3 py-3 text-[12px] text-hot"
+          className="rounded-xl bg-sink px-4 py-3 text-[13.5px] text-hot"
         >
           {queryErrorMessage}
         </div>
@@ -38,7 +39,7 @@ export function FeedRiverPanel() {
         <div
           role="status"
           aria-label="Loading feed subscriptions"
-          className="cl-mono border border-rule bg-paper-2 px-3 py-6 text-center text-[10px] uppercase tracking-[0.18em] text-ink-mute"
+          className="rounded-xl bg-sink px-4 py-6 text-center text-[13.5px] text-mute"
         >
           Loading feed subscriptions…
         </div>
@@ -56,7 +57,7 @@ export function FeedRiverPanel() {
       <Section
         label="Feed river"
         wrapHeader
-        caption={`${feedsQuery.data.counts.unread} UNREAD · ${feedsQuery.data.counts.saved} SAVED · ${subscriptionCount} ${subscriptionCount === 1 ? "SOURCE" : "SOURCES"}`}
+        caption={`${feedsQuery.data.counts.unread} unread · ${feedsQuery.data.counts.saved} saved · ${subscriptionCount} ${subscriptionCount === 1 ? "source" : "sources"}`}
         pip={
           feedsQuery.isError || feedsQuery.data.diagnostics.length
             ? "hot"
@@ -65,7 +66,10 @@ export function FeedRiverPanel() {
         action={
           subscriptionCount > 0 ? (
             <Button
-              className="cl-btn shrink-0 px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className={cn(
+                "shrink-0 cursor-pointer rounded-sm text-[14px] text-accent hover:underline",
+                FOCUS_RING,
+              )}
               onPress={() =>
                 navigate({
                   to: "/feeds",
@@ -81,7 +85,7 @@ export function FeedRiverPanel() {
         {feedsQuery.isError ? (
           <div
             role="alert"
-            className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
+            className="mb-3 rounded-xl bg-sink px-4 py-3 text-[13.5px] text-hot"
           >
             {queryErrorMessage}
           </div>
@@ -90,11 +94,9 @@ export function FeedRiverPanel() {
         {feedsQuery.data.diagnostics.length > 0 ? (
           <div
             role="alert"
-            className="mb-3 border-l-2 border-hot bg-paper px-3 py-2 text-[11px] text-hot"
+            className="mb-3 rounded-xl bg-sink px-4 py-3 text-[13px] text-hot"
           >
-            <p className="cl-mono mb-1 text-[9px] uppercase tracking-[0.18em]">
-              Manifest diagnostics
-            </p>
+            <p className="mb-1 font-medium">Manifest diagnostics</p>
             <ul className="space-y-1">
               {feedsQuery.data.diagnostics.map((diagnostic) => (
                 <li key={`${diagnostic.line}:${diagnostic.message}`}>
@@ -106,15 +108,15 @@ export function FeedRiverPanel() {
         ) : null}
 
         {subscriptionCount === 0 ? (
-          <div className="border border-dashed border-rule px-4 py-6 text-center">
-            <p className="font-sans text-[14px] font-semibold text-ink">
+          <div className="rounded-xl bg-sink px-4 py-8 text-center">
+            <p className="text-[15px] font-medium text-ink">
               No feed subscriptions
             </p>
-            <p className="cl-marg mt-1">
+            <p className="mt-1 text-[13.5px] text-mute">
               Add a source or import an OPML file to start your river.
             </p>
             <Button
-              className="cl-btn mt-3 px-3 py-2 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="cl-btn cl-btn-hot mt-4"
               onPress={() =>
                 navigate({
                   to: "/feeds",
@@ -127,7 +129,7 @@ export function FeedRiverPanel() {
           </div>
         ) : (
           <>
-            <fieldset className="mb-3 flex min-w-0 border border-rule p-0">
+            <fieldset className="mb-6 flex w-fit min-w-0 gap-0.5 rounded-full border-0 bg-sink p-1">
               <legend className="sr-only">Feed river view</legend>
               <Button
                 aria-pressed={view === "unread"}
@@ -137,10 +139,11 @@ export function FeedRiverPanel() {
                   )
                 }
                 className={cn(
-                  "cl-mono flex-1 border-r border-rule px-3 py-2 text-[9px] uppercase tracking-[0.18em] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent",
+                  "cursor-pointer rounded-full px-3 py-1 text-[13px]",
+                  FOCUS_RING,
                   view === "unread"
-                    ? "bg-ink text-paper"
-                    : "bg-paper text-ink-mute hover:text-ink",
+                    ? "bg-raise font-medium text-ink shadow-sm"
+                    : "text-mute hover:text-ink",
                 )}
               >
                 Hide read ({feedsQuery.data.counts.unread})
@@ -151,10 +154,11 @@ export function FeedRiverPanel() {
                   setView((current) => (current === "saved" ? "all" : "saved"))
                 }
                 className={cn(
-                  "cl-mono flex-1 px-3 py-2 text-[9px] uppercase tracking-[0.18em] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent",
+                  "cursor-pointer rounded-full px-3 py-1 text-[13px]",
+                  FOCUS_RING,
                   view === "saved"
-                    ? "bg-ink text-paper"
-                    : "bg-paper text-ink-mute hover:text-ink",
+                    ? "bg-raise font-medium text-ink shadow-sm"
+                    : "text-mute hover:text-ink",
                 )}
               >
                 Saved ({feedsQuery.data.counts.saved})

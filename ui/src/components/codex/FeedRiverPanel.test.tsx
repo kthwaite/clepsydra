@@ -155,7 +155,7 @@ describe("FeedRiverPanel", () => {
     const river = screen.getByTestId("feed-river");
     expect(river).toHaveAttribute("data-compact", "true");
     expect(river).toHaveAttribute("data-view", "all");
-    expect(screen.getByText("12 UNREAD · 6 SAVED · 1 SOURCE")).toBeVisible();
+    expect(screen.getByText("12 unread · 6 saved · 1 source")).toBeVisible();
 
     const hideRead = screen.getByRole("button", { name: /^hide read/i });
     expect(hideRead).toHaveAttribute("aria-pressed", "false");
@@ -184,7 +184,7 @@ describe("FeedRiverPanel", () => {
     };
     rerender(<FeedRiverPanel />);
 
-    expect(screen.getByText("7 UNREAD · 8 SAVED · 1 SOURCE")).toBeVisible();
+    expect(screen.getByText("7 unread · 8 saved · 1 source")).toBeVisible();
     expect(screen.getByRole("button", { name: /^hide read/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /^saved/i })).toHaveAttribute(
       "aria-pressed",
@@ -209,7 +209,7 @@ describe("FeedRiverPanel", () => {
       </div>,
     );
 
-    const caption = screen.getByText("12 UNREAD · 6 SAVED · 1 SOURCE");
+    const caption = screen.getByText("12 unread · 6 saved · 1 source");
     const action = screen.getByRole("button", { name: "Open feed reader" });
     const headerCluster = action.parentElement;
     const cardHeader = headerCluster?.parentElement;
@@ -226,5 +226,15 @@ describe("FeedRiverPanel", () => {
     expect(screen.getByRole("button", { name: /^hide read/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /^saved/i })).toBeVisible();
     expect(action).toBeVisible();
+  });
+
+  it("uses quiet toggles, never the inverted ink fill", () => {
+    panelMocks.feedsQuery.data = activeFeedList;
+    render(<FeedRiverPanel />);
+    for (const name of [/^hide read/i, /^saved/i]) {
+      expect(screen.getByRole("button", { name }).className).not.toMatch(
+        /\bbg-ink\b|uppercase|tracking-/,
+      );
+    }
   });
 });

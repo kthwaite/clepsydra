@@ -12,7 +12,6 @@ const OUT_OF_SCOPE = new Set<string>([]);
  *  that is already clean fail, forcing its removal here. */
 const PENDING = new Set<string>([
   "../codex/Atrium.tsx",
-  "../codex/FeedRiverPanel.tsx",
   "../codex/SkyCard.tsx",
   "../codex/ActivityHeatmap.tsx",
   "../codex/ReadingContinues.tsx",
@@ -30,6 +29,7 @@ const SCREEN_FILES = [
   "../codex/ReadingContinues.tsx",
   "../codex/MoonDisc.tsx",
   "../codex/DayArc.tsx",
+  "../codex/FeedRiver.tsx",
 ];
 
 const FORBIDDEN: Array<[string, RegExp]> = [

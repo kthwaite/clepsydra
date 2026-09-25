@@ -196,7 +196,7 @@ export function FeedRiver({
       <div
         role="status"
         aria-label="Loading feed entries"
-        className="cl-mono border border-rule bg-paper-2 px-3 py-6 text-center text-[10px] uppercase tracking-[0.18em] text-ink-mute"
+        className="rounded-xl bg-sink px-4 py-6 text-center text-[13.5px] text-mute"
       >
         Loading feed entries…
       </div>
@@ -215,7 +215,7 @@ export function FeedRiver({
       {!compact && feedsQuery.isError ? (
         <div
           role="alert"
-          className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
+          className="mb-3 rounded-xl bg-sink px-4 py-3 text-[13.5px] text-hot"
         >
           {errorMessage(
             feedsQuery.error,
@@ -226,7 +226,7 @@ export function FeedRiver({
       {entriesQuery.isError ? (
         <div
           role="alert"
-          className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
+          className="mb-3 rounded-xl bg-sink px-4 py-3 text-[13.5px] text-hot"
         >
           {errorMessage(
             entriesQuery.error,
@@ -237,7 +237,7 @@ export function FeedRiver({
       {patchEntry.error ? (
         <div
           role="alert"
-          className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
+          className="mb-3 rounded-xl bg-sink px-4 py-3 text-[13.5px] text-hot"
         >
           {errorMessage(
             patchEntry.error,
@@ -248,7 +248,7 @@ export function FeedRiver({
       {markEntriesRead.error ? (
         <div
           role="alert"
-          className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
+          className="mb-3 rounded-xl bg-sink px-4 py-3 text-[13.5px] text-hot"
         >
           {errorMessage(
             markEntriesRead.error,
@@ -258,18 +258,20 @@ export function FeedRiver({
       ) : null}
 
       {!entriesQuery.isError && visibleEntries.length === 0 ? (
-        <div className="border border-dashed border-rule px-4 py-8 text-center">
-          <p className="font-sans text-[14px] font-semibold text-ink">
+        <div className="rounded-xl bg-sink px-4 py-8 text-center">
+          <p className="text-[15px] font-medium text-ink">
             {emptyTitle(filters.view)}
           </p>
-          <p className="cl-marg mt-1">{emptyGuidance(filters.view)}</p>
+          <p className="mt-1 text-[13.5px] text-mute">
+            {emptyGuidance(filters.view)}
+          </p>
         </div>
       ) : null}
 
       {filters.view === "unread" && riverEntries.length > 0 ? (
         <div className="mb-3 flex justify-end">
           <Button
-            className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="cl-btn cl-btn-hot"
             isDisabled={markEntriesRead.isPending}
             onPressStart={() => markEntriesRead.reset()}
             onPress={() => {
@@ -296,22 +298,24 @@ export function FeedRiver({
         </div>
       ) : null}
 
-      <div className="space-y-5">
+      <div className="space-y-6">
         {days.map(({ key, label, entries: dayEntries }) => (
           <section key={key} aria-labelledby={`feed-day-${key}`}>
-            <div className="sticky top-0 z-10 mb-1.5 flex items-center gap-3 bg-paper-2 py-1">
+            <div className="sticky top-0 z-10 mb-3.5 bg-ground py-1">
               <h2
                 id={`feed-day-${key}`}
-                className="cl-mono shrink-0 text-[10px] font-medium uppercase tracking-[0.2em] text-ink-mute"
+                className="font-serif text-[17px] italic text-mute"
               >
                 {label}
               </h2>
-              <span
-                aria-hidden="true"
-                className="h-px min-w-0 flex-1 bg-rule"
-              />
             </div>
-            <div className="border-t border-rule">
+            <div
+              className={
+                compact
+                  ? "grid gap-x-[72px] gap-y-[26px] md:grid-cols-2"
+                  : "flex flex-col gap-1"
+              }
+            >
               {dayEntries.map((entry) =>
                 compact ? (
                   <EntryRow
@@ -400,15 +404,12 @@ export function FeedRiver({
       </div>
 
       {compact && riverEntries.length > 0 ? (
-        <a
-          className="cl-btn cl-btn-hot mt-3 w-full justify-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          href={fullReaderHref(filters)}
-        >
+        <a className="cl-btn cl-btn-hot mt-6" href={fullReaderHref(filters)}>
           Continue in Feeds →
         </a>
       ) : !compact && entriesQuery.hasNextPage ? (
         <Button
-          className="cl-btn mt-3 w-full justify-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="cl-btn mt-4 w-full justify-center"
           isDisabled={entriesQuery.isFetchingNextPage}
           onPress={() => entriesQuery.fetchNextPage()}
         >
@@ -440,29 +441,29 @@ function EntrySelectionRow({
       aria-current={isSelected ? "true" : undefined}
       aria-labelledby={titleId}
       className={cn(
-        "min-w-0 border-b border-rule",
-        isSelected ? "bg-highlight" : "bg-paper-2",
+        "min-w-0 rounded-xl",
+        isSelected && "bg-accent-tint",
         isDeparting && "cl-feed-exit",
       )}
     >
       <h3 id={titleId} className="m-0">
         <Button
           data-feed-entry-id={entry.id}
-          className="group grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)_auto] items-start gap-3 px-2.5 py-3 text-left outline-none hover:bg-paper-edge focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent md:px-3.5"
+          className="group grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)_auto] items-start gap-3 rounded-xl px-3 py-3 text-left outline-none hover:bg-sink focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent md:px-3.5"
           onPress={onSelect}
         >
           <span
             aria-hidden="true"
-            className={`mt-1.5 h-[7px] w-[7px] ${entry.read ? "bg-ink-mute" : "bg-accent"}`}
+            className={`mt-2 h-1.5 w-1.5 rounded-full ${entry.read ? "bg-faint" : "bg-accent"}`}
           />
           <span className="sr-only">
             {entry.read ? "Read entry" : "Unread entry"}
           </span>
           <span className="min-w-0">
-            <span className="block break-words font-sans text-[14px] font-semibold leading-[1.3] text-ink">
+            <span className="block break-words text-[16px] font-medium leading-[1.4] text-ink">
               {entry.title}
             </span>
-            <span className="cl-mono mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+            <span className="mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[12.5px] text-mute">
               {feedName ? <span className="text-ink-2">{feedName}</span> : null}
               {domain ? <span>{domain}</span> : null}
               {entry.author ? <span>{entry.author}</span> : null}
@@ -479,7 +480,7 @@ function EntrySelectionRow({
           </span>
           <span
             aria-hidden="true"
-            className={`cl-mono mt-0.5 text-[12px] ${isSelected ? "text-accent" : "text-ink-mute"}`}
+            className={`mt-0.5 text-[12.5px] ${isSelected ? "text-accent" : "text-mute"}`}
           >
             →
           </span>
@@ -521,20 +522,17 @@ function EntryRow({
   return (
     <article
       aria-labelledby={titleId}
-      className={cn(
-        "group min-w-0 border-b border-rule bg-paper-2 hover:bg-paper-edge focus-within:bg-paper-edge",
-        isDeparting && "cl-feed-exit",
-      )}
+      className={cn("group min-w-0", isDeparting && "cl-feed-exit")}
     >
-      <div className="grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)] items-start gap-3 px-2.5 py-3 md:grid-cols-[7px_minmax(0,1fr)_auto] md:px-3.5">
+      <div className="grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)] items-start gap-3.5 md:grid-cols-[7px_minmax(0,1fr)_auto]">
         <span
           aria-hidden="true"
-          className={`mt-1.5 h-[7px] w-[7px] ${entry.read ? "bg-ink-mute" : "bg-accent"}`}
+          className={`mt-2 h-1.5 w-1.5 rounded-full ${entry.read ? "bg-faint" : "bg-accent"}`}
         />
         <div className="min-w-0">
           <h3
             id={titleId}
-            className="m-0 break-words font-sans text-[14px] font-semibold leading-[1.3] text-ink"
+            className="m-0 break-words text-[16px] font-medium leading-[1.4] text-ink"
           >
             <span className="sr-only">
               {entry.read ? "Read entry" : "Unread entry"}
@@ -545,7 +543,7 @@ function EntryRow({
                 target="_blank"
                 rel="noreferrer"
                 onClick={onOpenOriginal}
-                className="outline-none hover:text-accent focus-visible:ring-2 focus-visible:ring-accent"
+                className="rounded-sm outline-none hover:text-accent focus-visible:ring-2 focus-visible:ring-accent"
               >
                 {entry.title}
               </a>
@@ -553,7 +551,7 @@ function EntryRow({
               entry.title
             )}
           </h3>
-          <span className="cl-mono mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+          <span className="mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[12.5px] text-mute">
             {feedName ? <span className="text-ink-2">{feedName}</span> : null}
             {domain ? <span>{domain}</span> : null}
             {entry.author ? <span>{entry.author}</span> : null}
@@ -584,14 +582,14 @@ function EntryRow({
               rel="noreferrer"
               aria-label={`Open original: ${entry.title}`}
               onClick={onOpenOriginal}
-              className="cl-btn cl-btn-hot px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="cl-btn cl-btn-hot"
             >
               Open ↗
             </a>
           ) : null}
           <Button
             aria-label={`Mark ${entry.title} ${entry.read ? "unread" : "read"}`}
-            className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="cl-btn"
             isDisabled={isPatchPending}
             onPress={onToggleRead}
           >
@@ -599,7 +597,7 @@ function EntryRow({
           </Button>
           <Button
             aria-label={`${entry.bookmarked ? "Remove bookmark from" : "Bookmark"} ${entry.title}`}
-            className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="cl-btn"
             isDisabled={isPatchPending}
             onPress={onToggleBookmark}
           >
@@ -607,7 +605,7 @@ function EntryRow({
           </Button>
           <Button
             aria-label={`Edit tags for ${entry.title}`}
-            className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="cl-btn"
             isDisabled={isPatchPending}
             onPress={onEditTags}
           >
@@ -617,7 +615,7 @@ function EntryRow({
       </div>
 
       {isEditingTags ? (
-        <div className="border-t border-rule-soft px-2.5 pb-3 md:px-3.5">
+        <div className="pt-2 pb-3 pl-[21px]">
           <TagEditor
             entry={entry}
             isPending={isPatchPending}
@@ -644,19 +642,19 @@ function TagEditor({
   const [value, setValue] = useState(entry.tags.join(", "));
   return (
     <form
-      className="mt-3 grid gap-2 border-l-2 border-accent pl-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+      className="mt-3 grid gap-2 rounded-xl bg-sink p-3 sm:grid-cols-[minmax(0,1fr)_auto]"
       onSubmit={(event) => {
         event.preventDefault();
         void onSave(normalizeFeedEntryTags(value));
       }}
     >
-      <label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+      <label className="text-[12.5px] text-mute">
         Tags for {entry.title}
         <input
           disabled={isPending}
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-1.5 text-[12px] normal-case tracking-normal text-ink outline-none focus:border-accent"
+          className="mt-1 block h-9 w-full min-w-0 rounded-full bg-raise px-3 text-[13.5px] text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
           placeholder="reading, systems"
         />
       </label>
