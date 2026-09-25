@@ -297,7 +297,7 @@ describe("Folio journal draft", () => {
     usePageEditorMock.mockReturnValue(draftEditor());
     render(<Folio tabId="t1" path="journals/2026-08-07.md" />);
     expect(screen.queryByText(/not found/i)).toBeNull();
-    expect(screen.getByText(/END OF FILE/)).toBeInTheDocument();
+    expect(screen.getByTestId("folio-meta")).toBeInTheDocument();
   });
 
   it("derives an immutable journal tag for a resolved journal", () => {
@@ -429,7 +429,7 @@ describe("Folio journal draft", () => {
       isDraft: false,
     });
     render(<Folio tabId="t1" path="notes/missing.md" />);
-    expect(screen.queryByText(/END OF FILE/)).toBeNull();
+    expect(screen.queryByTestId("folio-meta")).toBeNull();
   });
 
   it("coalesces scroll progress writes into one animation frame", () => {

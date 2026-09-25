@@ -85,13 +85,14 @@ import {
 } from "#/hooks/useFolioHistoryNavigation";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import {
   aiJournalDateFromPath,
   journalDateFromPath,
   todayAiJournalPath,
   todayJournalPath,
 } from "#/lib/journal";
-import { kindLabel, resolveKind } from "#/lib/kind";
+import { kindDisplayLabel, kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { formatAbsoluteDate, formatRelativeTime } from "#/lib/time";
@@ -1037,9 +1038,19 @@ export function Folio({ tabId, path }: FolioProps) {
   const dossierHeader = (
     <>
       <div className="flex items-baseline justify-between gap-3">
-        <span className="cl-mono inline-flex gap-1.5 text-xs uppercase tracking-[0.18em] text-ink-mute items-center">
-          <KindIcon kind={kind} size={11} className="flex-shrink-0" />
-          {kindLabel(kind)} / {folioCode}
+        <span
+          data-testid="folio-meta"
+          className="inline-flex items-center gap-1 text-[13px] text-mute"
+        >
+          <span>{kindDisplayLabel(kind)}</span>
+          <span aria-hidden className="text-faint">
+            {" · "}
+          </span>
+          <span>
+            {editor.updatedAt
+              ? `edited ${formatRelativeTime(editor.updatedAt)}`
+              : "not saved yet"}
+          </span>
         </span>
         <div className="flex items-center gap-3">
           {folioReadOnly && !archiveTagEditor && editor.revisionConflict ? (
@@ -1056,7 +1067,6 @@ export function Folio({ tabId, path }: FolioProps) {
           )}
         </div>
       </div>
-      <hr className="cl-rule-dash mt-2" />
     </>
   );
 
@@ -1168,8 +1178,6 @@ export function Folio({ tabId, path }: FolioProps) {
         </div>
       ) : null}
 
-      <hr className="cl-rule-dash mt-3" />
-
       {rawMarkdownSession ? (
         <RawMarkdownEditor
           value={rawMarkdownSession.value}
@@ -1185,7 +1193,7 @@ export function Folio({ tabId, path }: FolioProps) {
       ) : (
         <article
           className={cn(
-            "codex-prose mt-5 font-sans text-[17px] leading-[1.65]",
+            "codex-prose mt-9 font-sans text-[17px] leading-[1.7] text-ink-2",
             isAiConversation && `ai-conversation--${conversationMode}`,
           )}
         >
@@ -1254,14 +1262,6 @@ export function Folio({ tabId, path }: FolioProps) {
           </WikilinkResolutionProvider>
         </article>
       )}
-
-      <hr className="cl-rule-dash mt-8" />
-      <div className="cl-mono mt-1 flex justify-between text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-        <span>END OF FILE</span>
-        <span>
-          {folioCode} · {wordCount > 0 ? `${wordCount} WD` : "—"}
-        </span>
-      </div>
     </>
   );
 
@@ -1835,16 +1835,14 @@ function ReadOnlyPageHeader({
       className="mt-4 pb-4 max-md:flex max-md:flex-col max-md:gap-3"
     >
       {encrypted ? (
-        <span className="cl-serif mb-2 block text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-          encrypted
-        </span>
+        <span className="mb-2 block text-[13px] text-mute">Encrypted</span>
       ) : null}
       <div className="flex items-start gap-2">
-        <h1 className="min-w-0 w-full flex-1 font-heading text-2xl font-bold">
+        <h1 className="min-w-0 w-full flex-1 font-serif text-[clamp(44px,4.2vw,60px)] font-normal leading-[1.02] tracking-[-0.015em] text-ink">
           {displayTitle}
         </h1>
         {onOpenRawMarkdown ? (
-          <div className="flex shrink-0 items-center gap-1 pt-1.5 max-md:pt-0">
+          <div className="flex shrink-0 items-center gap-1 pt-3 max-md:pt-0">
             <RawMarkdownButton onPress={onOpenRawMarkdown} />
           </div>
         ) : null}
@@ -1853,7 +1851,10 @@ function ReadOnlyPageHeader({
         <Link
           to="/archive/$"
           params={{ _splat: path }}
-          className="cl-serif mt-2 inline-block text-[10px] uppercase tracking-[0.14em] text-accent underline decoration-accent-deep underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
+          className={cn(
+            "mt-3 inline-block rounded text-[13.5px] text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent",
+            FOCUS_RING_NATIVE,
+          )}
         >
           View archived snapshot
         </Link>
@@ -1875,18 +1876,16 @@ function ReadOnlyPageHeader({
         />
       ) : null}
       {!archiveTagEditor || aliases.length > 0 ? (
-        <dl className="cl-mono mt-2 grid gap-2 text-[10px]">
+        <dl className="mt-3 grid gap-2 text-[13px]">
           {!archiveTagEditor ? (
             <div className="flex flex-wrap items-baseline gap-2">
-              <dt className="uppercase tracking-[0.12em] text-ink-mute">
-                Tags
-              </dt>
+              <dt className="text-mute">Tags</dt>
               <dd className="m-0 flex flex-wrap gap-1.5 text-ink-2">
                 {tags.length > 0
                   ? tags.map((tag) => (
                       <span
                         key={tag}
-                        className="border border-rule px-1.5 py-[1px]"
+                        className="rounded-full bg-sink px-2.5 leading-6"
                       >
                         {tag}
                       </span>
@@ -1897,14 +1896,12 @@ function ReadOnlyPageHeader({
           ) : null}
           {aliases.length > 0 ? (
             <div className="flex flex-wrap items-baseline gap-2">
-              <dt className="uppercase tracking-[0.12em] text-ink-mute">
-                Aliases
-              </dt>
+              <dt className="text-mute">Aliases</dt>
               <dd className="m-0 flex flex-wrap gap-1.5 text-ink-2">
                 {aliases.map((alias) => (
                   <span
                     key={alias}
-                    className="border border-rule px-1.5 py-[1px]"
+                    className="rounded-full bg-sink px-2.5 leading-6"
                   >
                     {alias}
                   </span>

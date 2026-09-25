@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import "./FolioProperties.mock";
 
 const {
@@ -180,8 +180,9 @@ describe("Folio meeting header band", () => {
       within(band).getByRole("combobox", { name: "add attendee" }),
     ).toBeInTheDocument();
     // The rail is expanded, so a surviving rail block would be mounted.
-    expect(screen.getByText("Vitals")).toBeInTheDocument();
-    expect(screen.queryByText("Meeting")).toBeNull();
+    const rail = screen.getByText("Vitals").closest("aside");
+    assert(rail, "left rail is mounted");
+    expect(within(rail).queryByText("Meeting")).toBeNull();
   });
 
   it("keeps the band on the mobile layout", () => {

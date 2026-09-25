@@ -598,6 +598,25 @@ describe("Folio invalid-tab recovery", () => {
     expect(screen.getByTestId("slate-editor")).toBeInTheDocument();
   });
 
+  it("opens the page with a meta line, not the Vessel FILE header", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const meta = screen.getByTestId("folio-meta");
+    expect(meta).toHaveTextContent(/^Note · edited /);
+    expect(meta).toHaveClass("text-[13px]", "text-mute");
+    expect(meta.className).not.toMatch(/uppercase|tracking-/);
+    expect(document.querySelector("hr.cl-rule-dash")).toBeNull();
+    expect(screen.queryByText(/END OF FILE/)).toBeNull();
+  });
+
+  it("sets the page title in the serif at display size", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const title = screen.getByRole("textbox", { name: "Page title" });
+    expect(title).toHaveClass("font-serif", "leading-[1.02]");
+    expect(title.className).not.toMatch(/font-bold/);
+  });
+
   it("suggests indexed tags while editing folio tags", async () => {
     const user = userEvent.setup();
     usePageEditorMock.mockReturnValue(editableEditor());

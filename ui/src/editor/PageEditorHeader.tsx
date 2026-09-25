@@ -1,8 +1,11 @@
 import { FileCode } from "lucide-react";
 import { useState } from "react";
 import { Button, TooltipTrigger } from "react-aria-components";
+import { Button as UiButton } from "#/components/ui/button";
 import { TagInput } from "#/components/ui/tag-input";
 import { VesselTooltip } from "#/components/ui/tooltip";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 
 interface PageEditorHeaderProps {
   path: string;
@@ -35,7 +38,7 @@ function filename(path: string): string {
 }
 
 /**
- * The Raw Markdown toggle: a quiet mono icon button with a Vessel tooltip.
+ * The Raw Markdown toggle: a 32px round ghost icon button with a tooltip.
  * Shared by `PageEditorHeader` and Folio's `ReadOnlyPageHeader`.
  */
 export function RawMarkdownButton({ onPress }: { onPress: () => void }) {
@@ -44,7 +47,10 @@ export function RawMarkdownButton({ onPress }: { onPress: () => void }) {
       <Button
         aria-label="Raw Markdown"
         onPress={onPress}
-        className="inline-flex h-7 w-7 cursor-pointer items-center justify-center border border-transparent bg-transparent text-ink-mute outline-none transition-colors data-[hovered]:text-accent data-[focus-visible]:text-accent data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-accent max-md:h-11 max-md:w-11"
+        className={cn(
+          "inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-transparent text-mute transition-colors data-[hovered]:bg-sink data-[hovered]:text-ink max-md:h-11 max-md:w-11",
+          FOCUS_RING,
+        )}
       >
         <FileCode size={14} />
       </Button>
@@ -99,28 +105,27 @@ export function PageEditorHeader({
     <div className="pb-4 max-md:flex max-md:flex-col max-md:gap-3">
       {encrypted && onRequestLock ? (
         <div className="mb-2 flex items-center justify-end gap-2 max-md:mb-0 max-md:min-h-11 max-md:w-full max-md:justify-between">
-          <span className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-            encrypted
-          </span>
-          <button
-            type="button"
-            className="cl-btn max-md:min-h-11"
-            disabled={locking}
-            onClick={() => void requestLock()}
+          <span className="text-[13px] text-mute">Encrypted</span>
+          <UiButton
+            variant="secondary"
+            size="sm"
+            className="max-md:min-h-11"
+            isDisabled={locking}
+            onPress={() => void requestLock()}
             aria-label="Lock encrypted notes"
           >
-            {locking ? "locking…" : "lock"}
-          </button>
+            {locking ? "Locking…" : "Lock"}
+          </UiButton>
         </div>
       ) : null}
       {lockError ? (
-        <p role="alert" className="cl-mono mb-2 text-[10px] text-hot">
-          ⁂ {lockError}
+        <p role="alert" className="mb-2 text-[13px] text-hot">
+          {lockError}
         </p>
       ) : null}
       <div className="flex items-start gap-2">
         {readOnlyTitle !== undefined ? (
-          <h1 className="min-w-0 w-full flex-1 font-heading text-2xl font-bold">
+          <h1 className="min-w-0 w-full flex-1 font-serif text-[clamp(44px,4.2vw,60px)] font-normal leading-[1.02] tracking-[-0.015em] text-ink">
             {readOnlyTitle}
           </h1>
         ) : (
@@ -138,11 +143,11 @@ export function PageEditorHeader({
               }
             }}
             placeholder={filename(path)}
-            className="field-sizing-content block min-w-0 w-full max-w-full flex-1 resize-none overflow-hidden whitespace-pre-wrap break-words bg-transparent font-heading text-2xl font-bold outline-none placeholder:text-muted-foreground max-md:min-h-11"
+            className="field-sizing-content block min-w-0 w-full max-w-full flex-1 resize-none overflow-hidden whitespace-pre-wrap break-words bg-transparent font-serif text-[clamp(44px,4.2vw,60px)] font-normal leading-[1.02] tracking-[-0.015em] text-ink outline-none placeholder:text-faint max-md:min-h-11"
           />
         )}
         {onOpenRawMarkdown ? (
-          <div className="flex shrink-0 items-center gap-1 pt-1.5 max-md:pt-0">
+          <div className="flex shrink-0 items-center gap-1 pt-3 max-md:pt-0">
             <RawMarkdownButton onPress={onOpenRawMarkdown} />
           </div>
         ) : null}
