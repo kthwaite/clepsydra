@@ -65,6 +65,15 @@ export function BoardHeader({
   const setShowCompleted = useBoardStore((s) => s.setShowCompleted);
 
   const openTaskModal = useBoardStore((s) => s.openTaskModal);
+  const opFilter = useBoardStore((s) => s.opFilter);
+
+  function handleNewTask() {
+    // Only preset a real project slug — an op code is not a valid project
+    // label for task creation, so a slug-less op (and the ALL/UNFILED
+    // sentinels) presets nothing.
+    const scoped = projects.find((p) => p.key === opFilter);
+    openTaskModal(scoped?.slug ? { project: scoped.slug } : {});
+  }
 
   // Stats
   const open = tasks.filter((t) => t.status !== "SEALED").length;
@@ -226,7 +235,7 @@ export function BoardHeader({
 
         <div className="flex-1" />
 
-        <Button variant="primary" onPress={() => openTaskModal({})}>
+        <Button variant="primary" onPress={handleNewTask}>
           New task
         </Button>
       </div>

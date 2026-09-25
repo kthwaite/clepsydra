@@ -10,7 +10,8 @@ import {
 } from "#/lib/filters/model";
 import { useBoardStore } from "#/store/board";
 import { BoardHeader } from "../BoardHeader";
-import { BOARD_FIXTURE, PROJECT_SCOPES } from "./fixtures";
+import { deriveProjectScopes } from "../board-projects";
+import { BOARD_FIXTURE, NO_SLUG_OP, PROJECT_SCOPES } from "./fixtures";
 
 const { operations, cycles, tasks } = BOARD_FIXTURE;
 
@@ -336,6 +337,44 @@ describe("BoardHeader", () => {
       const board = screen.getByRole("tab", { name: "Board" });
       expect(board).toHaveClass("bg-raise");
       expect(board.parentElement).toHaveClass("bg-sink", "rounded-full");
+    });
+
+    it("presets the scoped project when creating a task", async () => {
+      const user = userEvent.setup();
+      useBoardStore.setState({ opFilter: "alpha" });
+      renderHeader();
+      await user.click(screen.getByRole("button", { name: "New task" }));
+      expect(useBoardStore.getState().taskModal).toEqual({ project: "alpha" });
+    });
+
+    it("presets nothing for a slug-less op (a code is not a project)", async () => {
+      const user = userEvent.setup();
+      useBoardStore.setState({ opFilter: "OPS-3" });
+      renderHeader({
+        projects: deriveProjectScopes([...operations, NO_SLUG_OP], tasks),
+      });
+      await user.click(screen.getByRole("button", { name: "New task" }));
+      expect(useBoardStore.getState().taskModal).toEqual({});
+    });
+
+    it("presets a synthesized task slug as the project", async () => {
+      const user = userEvent.setup();
+      const withGhost = [...tasks, { ...tasks[0], id: "tg", project: "ghost" }];
+      useBoardStore.setState({ opFilter: "ghost" });
+      renderHeader({
+        projects: deriveProjectScopes(operations, withGhost),
+        tasks: withGhost,
+      });
+      await user.click(screen.getByRole("button", { name: "New task" }));
+      expect(useBoardStore.getState().taskModal).toEqual({ project: "ghost" });
+    });
+
+    it("presets nothing on the unscoped board", async () => {
+      const user = userEvent.setup();
+      useBoardStore.setState({ opFilter: "ALL" });
+      renderHeader();
+      await user.click(screen.getByRole("button", { name: "New task" }));
+      expect(useBoardStore.getState().taskModal).toEqual({});
     });
 
     it("offers New task as the primary action", async () => {
