@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ACCENT_STORAGE_KEY,
   applyThemeClass,
+  clearLegacyAccent,
   readStoredTheme,
   THEME_COLOR,
   THEME_STORAGE_KEY,
@@ -82,5 +84,21 @@ describe("applyThemeClass", () => {
       1,
     );
     expect(tag.content).toBe("#151412");
+  });
+});
+
+describe("clearLegacyAccent", () => {
+  it("drops a pre-upgrade accent attribute and stored key", () => {
+    const storage = fakeStorage({ [ACCENT_STORAGE_KEY]: "alert" });
+    vi.stubGlobal("localStorage", storage);
+    document.documentElement.setAttribute("data-accent", "alert");
+    clearLegacyAccent();
+    expect(document.documentElement.hasAttribute("data-accent")).toBe(false);
+    expect(storage.getItem(ACCENT_STORAGE_KEY)).toBeNull();
+  });
+
+  it("does not throw when storage is unavailable", () => {
+    vi.stubGlobal("localStorage", undefined);
+    expect(() => clearLegacyAccent()).not.toThrow();
   });
 });

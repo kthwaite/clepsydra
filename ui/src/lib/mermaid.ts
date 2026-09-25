@@ -93,10 +93,10 @@ export function vesselThemeVariables(): Record<string, string | boolean> {
   };
 }
 
-// Theme changes arrive as attribute writes on <html> (see lib/theme.ts:
-// `.paper` for light mode, `data-accent` for the accent presets), so a single
-// MutationObserver is enough to know when rendered diagrams went stale.
-const THEME_ATTRIBUTES = ["class", "data-accent"];
+// Theme changes arrive as class writes on <html> (see lib/theme.ts: `.paper`
+// for light mode), so a single MutationObserver is enough to know when
+// rendered diagrams went stale.
+const THEME_ATTRIBUTES = ["class"];
 
 let signature: string | null = null;
 let observer: MutationObserver | null = null;

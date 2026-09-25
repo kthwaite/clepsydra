@@ -13,7 +13,7 @@ import { Badge } from "#/components/ui/badge";
 import { IconButton } from "#/components/ui/icon-button";
 import { SegmentedControl } from "#/components/ui/segmented-control";
 import { cn } from "#/lib/cn";
-import { ACCENTS, DENSITIES } from "#/lib/theme";
+import { DENSITIES } from "#/lib/theme";
 import { formatRelativeTime } from "#/lib/time";
 import { type SettingsSection, useUiStore } from "#/store/ui";
 
@@ -216,8 +216,6 @@ function OperatorPreferences() {
   const {
     resolvedTheme,
     setMode,
-    accent,
-    setAccent,
     density,
     setDensity,
     diegetic,
@@ -240,27 +238,6 @@ function OperatorPreferences() {
         />
       </Row>
 
-      <Row label="Accent">
-        <SegmentedControl
-          label="Accent"
-          value={accent}
-          options={ACCENTS.map((item) => ({
-            id: item.id,
-            label: item.label,
-            visual: (
-              <span
-                className="inline-block h-[10px] w-[10px]"
-                style={{ background: swatch(item.id) }}
-              />
-            ),
-          }))}
-          onChange={(value) =>
-            setAccent(value as (typeof ACCENTS)[number]["id"])
-          }
-          optionsClassName="flex-wrap gap-1.5"
-          itemClassName="cl-mono ml-0 flex items-center gap-1.5 border px-2 py-1 text-[9px] uppercase tracking-[0.1em] data-[hovered]:border-border data-[hovered]:bg-transparent data-[hovered]:text-muted-foreground data-[selected]:border-accent data-[selected]:bg-transparent data-[selected]:font-normal data-[selected]:text-foreground [&[data-hovered][data-selected]]:border-accent [&[data-hovered][data-selected]]:text-foreground"
-        />
-      </Row>
 
       <Row label="Density">
         <SegmentedControl
@@ -367,18 +344,6 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
       {children}
     </div>
   );
-}
-
-function swatch(id: string): string {
-  const map: Record<string, string> = {
-    barbican: "#ee7733",
-    alert: "#ff3b1f",
-    amber: "#ffb84a",
-    cyan: "#4cd9ff",
-    phosphor: "#5dffa6",
-    bone: "#e8e6df",
-  };
-  return map[id] ?? "#ee7733";
 }
 
 function SettingsCard({

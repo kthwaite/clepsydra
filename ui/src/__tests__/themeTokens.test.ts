@@ -103,6 +103,10 @@ describe("Stone & Lamp palette", () => {
     );
   });
 
+  it("has no accent presets (cobalt is fixed)", () => {
+    expect(mainCss).not.toContain("[data-accent");
+  });
+
   it("retires barbican orange", () => {
     expect(mainCss.toLowerCase()).not.toContain("#ee7733");
   });

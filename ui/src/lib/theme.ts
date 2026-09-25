@@ -2,29 +2,11 @@
 //
 // Charcoal (dark) is the base palette on :root; bone (light) is `.paper` on
 // <html>. Bone is the default for new installs; a stored preference wins.
-// Accent / density / diegetic-chrome are data-attributes on <html> consumed
-// by main.css.
+// Density / diegetic-chrome are data-attributes on <html> consumed by main.css.
 
 export type ThemeMode = "light" | "dark" | "system";
 
-export type Accent =
-  | "barbican"
-  | "alert"
-  | "amber"
-  | "cyan"
-  | "phosphor"
-  | "bone";
-
 export type Density = "compact" | "default" | "spacious";
-
-export const ACCENTS: { id: Accent; label: string }[] = [
-  { id: "barbican", label: "BARBICAN-ORG" },
-  { id: "alert", label: "ALERT-RED" },
-  { id: "amber", label: "AMBER-CRT" },
-  { id: "cyan", label: "RADAR-CYAN" },
-  { id: "phosphor", label: "PHOSPHOR-GR" },
-  { id: "bone", label: "BONE-WHITE" },
-];
 
 export const DENSITIES: Density[] = ["compact", "default", "spacious"];
 
@@ -35,7 +17,6 @@ export const DIEGETIC_STORAGE_KEY = "clepsydra.diegetic";
 
 // Bone is the resting default (Stone & Lamp spec §9 Q1).
 const DEFAULT_THEME: ThemeMode = "light";
-const DEFAULT_ACCENT: Accent = "barbican";
 const DEFAULT_DENSITY: Density = "default";
 const DEFAULT_DIEGETIC = true;
 
@@ -69,14 +50,6 @@ export function readStoredTheme(): ThemeMode {
   return read(THEME_STORAGE_KEY, ["light", "dark", "system"], DEFAULT_THEME);
 }
 
-export function readStoredAccent(): Accent {
-  return read(
-    ACCENT_STORAGE_KEY,
-    ACCENTS.map((a) => a.id),
-    DEFAULT_ACCENT,
-  );
-}
-
 export function readStoredDensity(): Density {
   return read(DENSITY_STORAGE_KEY, DENSITIES, DEFAULT_DENSITY);
 }
@@ -102,7 +75,6 @@ function store(key: string, value: string) {
 }
 
 export const storeTheme = (mode: ThemeMode) => store(THEME_STORAGE_KEY, mode);
-export const storeAccent = (a: Accent) => store(ACCENT_STORAGE_KEY, a);
 export const storeDensity = (d: Density) => store(DENSITY_STORAGE_KEY, d);
 export const storeDiegetic = (on: boolean) =>
   store(DIEGETIC_STORAGE_KEY, on ? "on" : "off");
@@ -127,10 +99,17 @@ export function applyThemeClass(resolved: Exclude<ThemeMode, "system">) {
   meta.content = THEME_COLOR[resolved];
 }
 
-export function applyAccent(accent: Accent) {
-  const root = document.documentElement;
-  if (accent === DEFAULT_ACCENT) root.removeAttribute("data-accent");
-  else root.setAttribute("data-accent", accent);
+/** Accent presets were retired in Stone & Lamp (cobalt is fixed). Clears
+ *  what an older build may have left behind so it can't recolour anything. */
+export function clearLegacyAccent() {
+  if (typeof document !== "undefined") {
+    document.documentElement.removeAttribute("data-accent");
+  }
+  try {
+    window.localStorage.removeItem(ACCENT_STORAGE_KEY);
+  } catch {
+    // storage unavailable (private mode, tests) — nothing to clear
+  }
 }
 
 export function applyDensity(density: Density) {

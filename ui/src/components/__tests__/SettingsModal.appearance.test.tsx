@@ -5,7 +5,6 @@ import { SettingsModal } from "#/components/SettingsModal";
 
 const mocks = vi.hoisted(() => ({
   closeSettings: vi.fn(),
-  setAccent: vi.fn(),
   setActiveSettingsSection: vi.fn(),
   setDensity: vi.fn(),
   setDiegetic: vi.fn(),
@@ -28,8 +27,6 @@ vi.mock("#/components/ThemeProvider", () => ({
   useTheme: () => ({
     resolvedTheme: "dark",
     setMode: mocks.setMode,
-    accent: "barbican",
-    setAccent: mocks.setAccent,
     density: "default",
     setDensity: mocks.setDensity,
     diegetic: true,
@@ -52,16 +49,15 @@ beforeEach(() => {
 });
 
 describe("SettingsModal appearance", () => {
-  it("routes mode, density, and accent radio choices to theme callbacks", async () => {
+  it("routes mode and density choices to theme callbacks, with no accent picker", async () => {
     const user = userEvent.setup();
     render(<SettingsModal />);
 
     expect(screen.getByRole("radiogroup", { name: "Mode" })).toBeVisible();
-    expect(screen.getByRole("radiogroup", { name: "Accent" })).toBeVisible();
     expect(screen.getByRole("radiogroup", { name: "Density" })).toBeVisible();
+    expect(screen.queryByRole("radiogroup", { name: "Accent" })).toBeNull();
 
     expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked();
-    expect(screen.getByRole("radio", { name: /Barbican/i })).toBeChecked();
     expect(screen.getByRole("radio", { name: /Default/i })).toBeChecked();
 
     await user.click(screen.getByRole("radio", { name: "Paper" }));
@@ -69,8 +65,5 @@ describe("SettingsModal appearance", () => {
 
     await user.click(screen.getByRole("radio", { name: /Compact/i }));
     expect(mocks.setDensity).toHaveBeenCalledWith("compact");
-
-    await user.click(screen.getByRole("radio", { name: /Alert/i }));
-    expect(mocks.setAccent).toHaveBeenCalledWith("alert");
   });
 });

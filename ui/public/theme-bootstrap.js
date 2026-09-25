@@ -18,8 +18,6 @@
     root.style.colorScheme = resolved;
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", resolved === "light" ? "#F4EFE4" : "#151412");
-    var accent = ls.getItem("clepsydra.accent");
-    if (accent && accent !== "barbican") root.setAttribute("data-accent", accent);
     var density = ls.getItem("clepsydra.density");
     if (density && density !== "default") root.setAttribute("data-density", density);
     if (ls.getItem("clepsydra.diegetic") === "off")
