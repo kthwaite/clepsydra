@@ -1,9 +1,8 @@
 @import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/instrument-serif/400-italic.css";
 @import "@fontsource-variable/jetbrains-mono";
-/* Inter via the optical-size axis: one dual-axis face (wght 100–900 + opsz)
-   so large display text picks up Inter's "Display" optical shapes automatically
-   and body text stays in the text-optimized cut. See font-optical-sizing on body. */
-@import "@fontsource-variable/inter/opsz.css";
 
 /* =============================================================================
    CLEPSYDRA — Stone & Lamp tokens (spec: docs/superpowers/specs/
@@ -14,18 +13,17 @@
 
 @theme {
     /* Typography stacks ---------------------------------------------------- */
+    --font-sans:
+        "Geist Variable", "Geist", ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
+    --font-serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
     --font-mono:
         "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-    --font-sans:
-        "Inter Variable", "Inter", ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
+    /* Legacy aliases: keep resolving to sans until their call sites are
+       migrated (font-heading has 18 users; phase 4/5 decides each). */
     --font-body: var(--font-sans);
-    /* Legacy aliases retained so existing components keep resolving. Serif/slab
-       are dropped from the design — they now point at the sans face; the
-       small-caps label face becomes mono. */
-    --font-serif: var(--font-sans);
-    --font-serif-sc: var(--font-mono);
-    --font-slab: var(--font-sans);
     --font-heading: var(--font-sans);
+    --font-slab: var(--font-sans);
+    --font-serif-sc: var(--font-sans);
 
     /* Colours: every Tailwind colour points at a bare property defined per
        theme on :root (charcoal) / .paper (bone). One source of truth. */
@@ -274,17 +272,12 @@
 body {
     background: var(--paper);
     color: var(--ink);
-    font-family: var(--font-mono);
-    font-size: 13px;
+    font-family: var(--font-sans);
+    font-size: 14px;
     line-height: 1.5;
-    letter-spacing: 0.005em;
-    font-feature-settings:
-        "tnum" 1,
-        "zero" 1,
-        "calt" 0;
-    font-optical-sizing: auto;
+    letter-spacing: 0;
     -webkit-font-smoothing: antialiased;
-    text-rendering: geometricPrecision;
+    text-rendering: optimizeLegibility;
 }
 
 ul {
@@ -328,13 +321,13 @@ ul {
     color: #000;
 }
 
-/* Tracked-out labels — hairline section headers (was serif small-caps). */
+/* Stopgap (spec §6 phase 1): Vessel's tracked caps labels read as plain sans
+   until each call site is restyled in the phase 5 sweep. */
 .cl-cap {
-    font-family: var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.18em;
+    font-family: var(--font-sans);
+    text-transform: none;
+    letter-spacing: normal;
     font-weight: 500;
-    font-feature-settings: "kern" 1;
 }
 
 .cl-cap-tight {
@@ -345,7 +338,19 @@ ul {
     letter-spacing: 0.3em;
 }
 
+/* Stopgap (spec §6 phase 1): `.cl-mono` has 501 uses; point it at sans so
+   the chrome leaves mono in one commit. Code keeps mono via the rule below. */
 .cl-mono {
+    font-family: var(--font-sans);
+}
+
+/* Code is the only monospace (spec decision 3). Element selectors carry the
+   `.cl-mono` class too, so they outrank the stopgap above. */
+:where(pre, code, kbd, samp),
+pre.cl-mono,
+code.cl-mono,
+kbd.cl-mono,
+samp.cl-mono {
     font-family: var(--font-mono);
     font-feature-settings:
         "calt" 0,
