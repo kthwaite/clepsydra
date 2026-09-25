@@ -300,6 +300,7 @@ vi.mock("#/lib/useProjects", () => ({
 }));
 
 import { TabContent } from "#/components/TabContent";
+import { useActivateTabWithFolioHistory } from "#/hooks/useFolioHistoryNavigation";
 import { todayJournalPath } from "#/lib/journal";
 import { queryClient } from "#/lib/queryClient";
 import {
@@ -675,6 +676,55 @@ describe("Folio invalid-tab recovery", () => {
     expect(toggle).toHaveBeenCalledOnce();
   });
 
+  it("orders the left rail: On this page, Properties, Attachments, Organization", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const rail = screen.getByRole("complementary", { name: "Page details" });
+    const names = within(rail)
+      .getAllByRole("heading", { level: 2 })
+      .map((h) => h.textContent);
+    expect(names).toEqual([
+      "On this page",
+      "Properties",
+      "Attachments",
+      "Organization",
+    ]);
+    for (const old of ["Document", "Chronology", "Vitals"]) {
+      expect(within(rail).queryByText(old)).toBeNull();
+    }
+    expect(within(rail).getByText("No headings yet.")).toBeInTheDocument();
+  });
+
+  it("gathers the page facts into one Properties list", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const rail = screen.getByRole("complementary", { name: "Page details" });
+    const dl = rail.querySelector("dl");
+    assert(dl, "Properties is a definition list");
+    expect(dl).toHaveClass("grid-cols-[64px_minmax(0,1fr)]");
+    const terms = Array.from(dl.querySelectorAll("dt")).map(
+      (dt) => dt.textContent,
+    );
+    expect(terms).toEqual([
+      "Kind",
+      "Project",
+      "ID",
+      "Path",
+      "Protection",
+      "Created",
+      "Modified",
+      "Words",
+      "Tags",
+    ]);
+    const tags = Array.from(dl.querySelectorAll("dt")).find(
+      (dt) => dt.textContent === "Tags",
+    )?.nextElementSibling;
+    expect(tags).toHaveTextContent("mobile");
+    expect(
+      within(dl).getByRole("button", { name: /Plaintext · protect/ }),
+    ).toBeInTheDocument();
+  });
+
   it("suggests indexed tags while editing folio tags", async () => {
     const user = userEvent.setup();
     usePageEditorMock.mockReturnValue(editableEditor());
@@ -774,50 +824,11 @@ describe("Folio invalid-tab recovery", () => {
     expect(screen.queryByText(/END OF FILE/)).toBeNull();
   });
 
-  it("orders recent open Folios by activation without tab pin controls", async () => {
-    const user = userEvent.setup();
+  it("drops the Open files list from the rail (the Sheaf lists open pages)", () => {
     usePageEditorMock.mockReturnValue(editableEditor());
-    useWorkspaceStore.setState({
-      tabs: [
-        {
-          id: "t1",
-          type: "page",
-          path: "notes/alpha.md",
-          label: "Alpha",
-          lastActiveAt: 1,
-        },
-        {
-          id: "t2",
-          type: "page",
-          path: "notes/beta.md",
-          label: "Beta",
-          lastActiveAt: 2,
-        },
-      ],
-      activeTabId: "t1",
-      quires: {},
-      openHistory: [],
-    });
-
     render(<Folio tabId="t1" path="notes/alpha.md" />);
-
-    const recent = screen.getByText("Recent").parentElement;
-    assert.isNotNull(recent);
-    expect(
-      within(recent).queryByRole("button", { name: /pin tab/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(recent).getAllByRole("button", { name: "Close tab" }),
-    ).toHaveLength(2);
-
-    const beta = within(recent).getByRole("button", { name: "Beta" });
-    const alpha = within(recent).getByRole("button", { name: "Alpha" });
-    expect(
-      beta.compareDocumentPosition(alpha) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).not.toBe(0);
-
-    await user.click(beta);
-    expect(useWorkspaceStore.getState().activeTabId).toBe("t2");
+    expect(screen.queryByText(/Open files/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close tab" })).toBeNull();
   });
 });
 
@@ -854,11 +865,6 @@ describe("Folio outbound links", () => {
 
     render(<Folio tabId="t1" path="notes/alpha.md" />);
 
-    const vitals = screen.getByText("Vitals").parentElement;
-    assert.isNotNull(vitals);
-    expect(within(vitals).getByText("Links").closest("div")).toHaveTextContent(
-      "1",
-    );
     const linksTab = screen.getByRole("button", { name: /^Links/ });
     expect(linksTab).toHaveTextContent("1");
     await user.click(linksTab);
@@ -1188,7 +1194,21 @@ describe("Folio raw Markdown mode", () => {
       ],
       activeTabId: "t1",
     });
-    render(<TabContent />);
+    // The Sheaf activates tabs through this hook; stand in for it.
+    function ActivateBeta() {
+      const activateTab = useActivateTabWithFolioHistory();
+      return (
+        <button type="button" onClick={() => activateTab("t2")}>
+          Beta
+        </button>
+      );
+    }
+    render(
+      <>
+        <TabContent />
+        <ActivateBeta />
+      </>,
+    );
 
     await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {

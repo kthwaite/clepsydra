@@ -63,6 +63,7 @@ import { RawMarkdownEditor } from "#/components/codex/RawMarkdownEditor";
 import { ReadingColumnResizer } from "#/components/codex/ReadingColumnResizer";
 import { useSetReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { RecipeFolioBody } from "#/components/codex/recipe/RecipeFolioBody";
+import { Section } from "#/components/codex/Section";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useReadingColumn } from "#/components/codex/useReadingColumn";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
@@ -87,7 +88,6 @@ import { useDebounce } from "#/hooks/useDebounce";
 import {
   registerFolioHistoryTraversalGuard,
   replaceFolioHistoryAfterArchive,
-  useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
@@ -128,7 +128,6 @@ import { useFooterContext } from "#/store/footerContext";
 import {
   registerWorkspaceTransitionGuard,
   runWorkspaceTransition,
-  type TabDescriptor,
   useWorkspaceStore,
 } from "#/store/workspace";
 
@@ -1273,116 +1272,106 @@ export function Folio({ tabId, path }: FolioProps) {
   );
 
   const details = (
-    <>
-      <Block label="Document">
-        <KV k="ID" v={folioCode} />
-        <KV
-          k="Kind"
-          v={
-            folioReadOnly ? (
-              <span>{kindLabel(kind)}</span>
-            ) : (
-              <KindSelect
-                value={kind}
-                inferred={inferred}
-                immutableReason={
-                  kind === "JOURNAL"
-                    ? "Journal kind cannot be changed."
-                    : kind === "AI_JOURNAL"
-                      ? "AI journal kind cannot be changed."
-                      : undefined
-                }
-                onAssign={(k) =>
-                  assign.mutate(
-                    { params: { path: { path } }, body: { kind: k } },
-                    { onSuccess: followMove },
-                  )
-                }
-              />
-            )
-          }
-        />
-        <KV
-          k="Project"
-          v={
-            folioReadOnly || isJournalKind ? (
-              <span
-                title={
-                  isJournalKind
-                    ? "Journal pages cannot join a project."
+    <Section compact label="Properties">
+      <dl className="m-0 grid grid-cols-[64px_minmax(0,1fr)] gap-x-3.5 gap-y-3 text-[13.5px] leading-[1.4]">
+        <Prop k="Kind">
+          {folioReadOnly ? (
+            <span>{kindLabel(kind)}</span>
+          ) : (
+            <KindSelect
+              value={kind}
+              inferred={inferred}
+              immutableReason={
+                kind === "JOURNAL"
+                  ? "Journal kind cannot be changed."
+                  : kind === "AI_JOURNAL"
+                    ? "AI journal kind cannot be changed."
                     : undefined
-                }
-              >
-                {project ?? "—"}
-              </span>
-            ) : (
-              <ProjectCombo
-                key={project ?? ""}
-                value={project}
-                options={projects}
-                onAssign={(slug) =>
-                  assign.mutate(
-                    { params: { path: { path } }, body: { project: slug } },
-                    { onSuccess: followMove },
-                  )
-                }
-                onClear={() =>
-                  assign.mutate(
-                    {
-                      params: { path: { path } },
-                      body: { clear_project: true },
-                    },
-                    { onSuccess: followMove },
-                  )
-                }
-              />
-            )
-          }
-        />
-        <KV
-          k="Path"
-          v={<span className="break-all text-ink-mute">{path}</span>}
-        />
-        <KV
-          k="Protection"
-          v={
-            folioReadOnly ? (
-              <span>{encrypted ? "encrypted" : "plaintext"}</span>
-            ) : (
-              <button
-                type="button"
-                className="cl-mono text-[10px] uppercase tracking-[0.1em] text-accent hover:underline"
-                disabled={!editor.pageId}
-                onClick={() =>
-                  setProtectionDialog(encrypted ? "unprotect" : "protect")
-                }
-              >
-                {encrypted ? "encrypted · remove" : "plaintext · protect"}
-              </button>
-            )
-          }
-        />
-      </Block>
-    </>
+              }
+              onAssign={(k) =>
+                assign.mutate(
+                  { params: { path: { path } }, body: { kind: k } },
+                  { onSuccess: followMove },
+                )
+              }
+            />
+          )}
+        </Prop>
+        <Prop k="Project">
+          {folioReadOnly || isJournalKind ? (
+            <span
+              title={
+                isJournalKind
+                  ? "Journal pages cannot join a project."
+                  : undefined
+              }
+            >
+              {project ?? "—"}
+            </span>
+          ) : (
+            <ProjectCombo
+              key={project ?? ""}
+              value={project}
+              options={projects}
+              onAssign={(slug) =>
+                assign.mutate(
+                  { params: { path: { path } }, body: { project: slug } },
+                  { onSuccess: followMove },
+                )
+              }
+              onClear={() =>
+                assign.mutate(
+                  {
+                    params: { path: { path } },
+                    body: { clear_project: true },
+                  },
+                  { onSuccess: followMove },
+                )
+              }
+            />
+          )}
+        </Prop>
+        <Prop k="ID">{folioCode}</Prop>
+        <Prop k="Path">
+          <span className="break-all text-mute">{path}</span>
+        </Prop>
+        <Prop k="Protection">
+          {folioReadOnly ? (
+            <span>{encrypted ? "Encrypted" : "Plaintext"}</span>
+          ) : (
+            <button
+              type="button"
+              className={cn(
+                "cursor-pointer rounded text-accent hover:underline disabled:cursor-default disabled:text-mute",
+                FOCUS_RING_NATIVE,
+              )}
+              disabled={!editor.pageId}
+              onClick={() =>
+                setProtectionDialog(encrypted ? "unprotect" : "protect")
+              }
+            >
+              {encrypted ? "Encrypted · remove" : "Plaintext · protect"}
+            </button>
+          )}
+        </Prop>
+        <Prop k="Created">{formatAbsoluteDate(editor.createdAt)}</Prop>
+        <Prop k="Modified">{formatRelativeTime(editor.updatedAt)}</Prop>
+        <Prop k="Words">{wordCount > 0 ? wordCount : "—"}</Prop>
+        <Prop k="Tags">
+          <span className="text-ink-2">
+            {effectiveTags.length > 0 ? effectiveTags.join(" · ") : "—"}
+          </span>
+        </Prop>
+      </dl>
+    </Section>
   );
 
   const supplementalDetails = (
     <>
-      <Block label="Chronology">
-        <KV k="Created" v={formatAbsoluteDate(editor.createdAt)} />
-        <KV k="Modified" v={formatRelativeTime(editor.updatedAt)} />
-      </Block>
-
-      <Block label="Vitals">
-        <KV k="Words" v={wordCount > 0 ? wordCount : "—"} />
-        <KV k="Backlinks" v={backlinks?.length ?? 0} />
-        <KV k="Links" v={visibleOutlinks.length} />
-      </Block>
-
       {(() => {
         const Extras = presentation.metaExtras;
         return Extras ? (
-          <Block label={presentation.metaExtrasLabel ?? "Details"}>
+          <Section compact label={presentation.metaExtrasLabel ?? "Details"}>
             <Extras
               path={path}
               tabId={tabId}
@@ -1390,19 +1379,24 @@ export function Folio({ tabId, path }: FolioProps) {
               tags={editableTags}
               onTagsChange={editor.setTags}
             />
-          </Block>
+          </Section>
         ) : null;
       })()}
 
-      <Block label="Attachments">
+      <Section compact pip="dim" label="Attachments">
         {folioReadOnly ? (
-          <p className="cl-marg m-0">Switch to Edit to manage attachments.</p>
+          <p className="m-0 text-[13px] text-mute">
+            Switch to Edit to manage attachments.
+          </p>
         ) : (
           <>
             <button
               type="button"
               aria-expanded={attachmentsOpen}
-              className="cl-serif flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+              className={cn(
+                "flex w-full cursor-pointer items-center justify-between rounded text-[13.5px] text-mute transition-colors hover:text-ink",
+                FOCUS_RING_NATIVE,
+              )}
               onClick={() => setAttachmentsOpen((open) => !open)}
             >
               <span>Manage attachments</span>
@@ -1411,7 +1405,9 @@ export function Folio({ tabId, path }: FolioProps) {
             {attachmentsOpen ? (
               <Suspense
                 fallback={
-                  <p className="cl-marg mt-2 mb-0">Loading attachment tools…</p>
+                  <p className="mt-2 mb-0 text-[13px] text-mute">
+                    Loading attachment tools…
+                  </p>
                 }
               >
                 <div className="mt-2">
@@ -1425,16 +1421,16 @@ export function Folio({ tabId, path }: FolioProps) {
             ) : null}
           </>
         )}
-      </Block>
+      </Section>
 
-      <Block label="Organization">
+      <Section compact pip="dim" label="Organization">
         {editor.isDraft ? (
-          <p className="cl-marg m-0">
+          <p className="m-0 text-[13px] text-mute">
             Save this page before moving or archiving it.
           </p>
         ) : folioReadOnly ? (
           <div className="grid gap-2">
-            <p className="cl-marg m-0">
+            <p className="m-0 text-[13px] text-mute">
               Switch to Edit to move this page. Archiving remains available.
             </p>
             {pageActions}
@@ -1444,7 +1440,10 @@ export function Folio({ tabId, path }: FolioProps) {
             <button
               type="button"
               aria-expanded={organizationOpen}
-              className="cl-serif flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+              className={cn(
+                "flex w-full cursor-pointer items-center justify-between rounded text-[13.5px] text-mute transition-colors hover:text-ink",
+                FOCUS_RING_NATIVE,
+              )}
               onClick={() => setOrganizationOpen((open) => !open)}
             >
               <span>Manage paths</span>
@@ -1453,7 +1452,9 @@ export function Folio({ tabId, path }: FolioProps) {
             {organizationOpen ? (
               <Suspense
                 fallback={
-                  <p className="cl-marg mt-2 mb-0">Loading path tools…</p>
+                  <p className="mt-2 mb-0 text-[13px] text-mute">
+                    Loading path tools…
+                  </p>
                 }
               >
                 <div className="mt-2 grid gap-2">
@@ -1482,18 +1483,16 @@ export function Folio({ tabId, path }: FolioProps) {
             ) : null}
           </>
         )}
-      </Block>
-
-      <OpenFilesAccordion activeTabId={tabId} />
+      </Section>
     </>
   );
 
   const contents = (
-    <Block label={`Contents · ${toc.length}`}>
+    <Section compact label="On this page">
       {toc.length === 0 ? (
-        <p className="cl-marg m-0">No headings yet.</p>
+        <p className="m-0 text-[13px] text-mute">No headings yet.</p>
       ) : (
-        <div className="cl-mono">
+        <nav aria-label="On this page" className="flex flex-col gap-2.5">
           {toc.map((h, i) => {
             const active = i === activeIndex;
             return (
@@ -1501,24 +1500,21 @@ export function Folio({ tabId, path }: FolioProps) {
                 key={h.number}
                 type="button"
                 onClick={() => scrollTo(i)}
+                aria-current={active ? "location" : undefined}
                 className={cn(
-                  "flex w-full cursor-pointer items-baseline gap-1.5 py-[2px] pr-1 text-left text-[11px]",
-                  active
-                    ? "border-l-2 border-accent bg-highlight pl-2 text-ink"
-                    : "border-l-2 border-transparent pl-2 text-ink-mute hover:text-ink",
+                  "cursor-pointer truncate rounded text-left text-[14px] transition-colors",
+                  active ? "text-ink" : "text-mute hover:text-ink",
+                  FOCUS_RING_NATIVE,
                 )}
-                style={{ paddingLeft: (h.depth - 1) * 8 + 8 }}
+                style={{ paddingLeft: (h.depth - 1) * 14 }}
               >
-                <span className="text-[9px] text-ink-mute">{h.number}</span>
-                <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                  {h.text}
-                </span>
+                {h.text}
               </button>
             );
           })}
-        </div>
+        </nav>
       )}
-    </Block>
+    </Section>
   );
 
   const relationships = (
@@ -1582,7 +1578,7 @@ export function Folio({ tabId, path }: FolioProps) {
         )}
         {rTab === "tags" &&
           ((editor.tags ?? []).length === 0 ? (
-            <p className="cl-marg m-0">∅ No tags.</p>
+            <p className="m-0 text-[13px] text-mute">∅ No tags.</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {(editor.tags ?? []).map((t) => (
@@ -1735,8 +1731,8 @@ function DesktopFolioLayout({
           className="cl-noscroll relative flex min-w-0 flex-col gap-12 overflow-auto pt-16 pb-10"
         >
           <RailHideButton side="left" onCollapse={left.toggle} />
-          {details}
           {contents}
+          {details}
           {supplementalDetails}
           <Resizer onPointerDown={left.onResizeStart} side="right" />
         </aside>
@@ -2086,31 +2082,13 @@ function Resizer({
   );
 }
 
-function Block({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+/** One Properties row: a muted term and its value. */
+function Prop({ k, children }: { k: string; children: React.ReactNode }) {
   return (
-    <div className="border-b border-rule-soft px-3 py-3">
-      <div className="cl-serif mb-1.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function KV({ k, v }: { k: string; v: React.ReactNode }) {
-  return (
-    <div className="cl-serif grid grid-cols-[64px_1fr] items-center gap-2 py-[1px] text-[11px]">
-      <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-        {k}
-      </span>
-      <span className="flex min-w-0 items-center text-ink-2">{v}</span>
-    </div>
+    <>
+      <dt className="text-mute">{k}</dt>
+      <dd className="m-0 flex min-w-0 items-center text-ink">{children}</dd>
+    </>
   );
 }
 
@@ -2150,7 +2128,7 @@ function LinkList({
   empty: string;
 }) {
   if (items.length === 0) {
-    return empty ? <p className="cl-marg m-0">{empty}</p> : null;
+    return empty ? <p className="m-0 text-[13px] text-mute">{empty}</p> : null;
   }
   return (
     <div className="flex flex-col gap-1.5">
@@ -2177,109 +2155,4 @@ function LinkList({
 function resolveKindAndColor(path: string) {
   // list-level kind derives from path only
   return resolveKind({ path });
-}
-
-/* ── open-files vertical accordion ────────────────────────────────────── */
-
-function OpenFilesAccordion({ activeTabId }: { activeTabId: string }) {
-  const tabs = useWorkspaceStore((s) => s.tabs);
-  const closeTab = useWorkspaceStore((s) => s.closeTab);
-  const activateTab = useActivateTabWithFolioHistory();
-  const [open, setOpen] = useState(true);
-
-  const recent = tabs
-    .filter((tab) => tab.type === "page")
-    .sort(
-      (left, right) => (right.lastActiveAt ?? 0) - (left.lastActiveAt ?? 0),
-    );
-
-  return (
-    <div className="border-b border-rule-soft px-3 py-3">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="cl-mono mb-1.5 flex w-full cursor-pointer items-center justify-between text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-ink"
-      >
-        <span>Open files · {recent.length}</span>
-        <span>{open ? "⌄" : "›"}</span>
-      </button>
-      {open && (
-        <Section title="Recent">
-          {recent.length === 0 ? (
-            <p className="cl-marg m-0">None open.</p>
-          ) : (
-            recent.map((tab) => (
-              <OpenRow
-                key={tab.id}
-                t={tab}
-                active={tab.id === activeTabId}
-                onActivate={() => activateTab(tab.id)}
-                onClose={() => closeTab(tab.id)}
-              />
-            ))
-          )}
-        </Section>
-      )}
-    </div>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mt-1.5">
-      <div className="cl-mono mb-0.5 text-[8px] uppercase tracking-[0.2em] text-ink-mute opacity-70">
-        {title}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function OpenRow({
-  t,
-  active,
-  onActivate,
-  onClose,
-}: {
-  t: TabDescriptor;
-  active: boolean;
-  onActivate: () => void;
-  onClose: () => void;
-}) {
-  const kind = resolveKind({ path: t.path ?? "" });
-  return (
-    <div
-      className={cn(
-        "group flex w-full items-center gap-1.5 py-[2px] text-[11px]",
-        active ? "text-ink" : "text-ink-mute",
-      )}
-    >
-      <button
-        type="button"
-        onClick={onActivate}
-        title={t.path ?? t.label}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left hover:text-ink"
-      >
-        <KindIcon kind={kind} className="flex-shrink-0" />
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          {t.label || t.path || "(untitled)"}
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="Close tab"
-        title="Close"
-        className="cl-mono flex-shrink-0 cursor-pointer px-1 text-[11px] text-ink-mute opacity-0 hover:text-hot group-hover:opacity-100"
-      >
-        ×
-      </button>
-    </div>
-  );
 }
