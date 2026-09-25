@@ -26,6 +26,12 @@ const TASKING_FILES = [
   "../tasking/BoardModalFrame.tsx",
 ];
 
+/** Slate prose elements restyled in phase 4.4a. */
+const PROSE_FILES = [
+  "../../editor/schema/elements/heading.tsx",
+  "../../editor/schema/elements/blockquote.tsx",
+];
+
 /** Screens restyled in phase 4; guarded like the primitives. */
 const SCREEN_FILES = [
   "../codex/Atrium.tsx",
@@ -72,6 +78,7 @@ const files = [
   "../codex/Tick.tsx",
   ...SCREEN_FILES,
   ...TASKING_FILES,
+  ...PROSE_FILES,
 ].filter((f) => {
   try {
     readFileSync(path.join(uiDir, f));

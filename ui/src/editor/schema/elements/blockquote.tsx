@@ -16,8 +16,17 @@ export const blockquoteDescriptor: ElementDescriptor<BlockquoteElement> = {
     <blockquote
       {...attributes}
       data-block-id={element.blockId}
-      className="my-4 border-l-2 border-accent bg-paper-2 py-2 pl-4 pr-3 text-[0.97em] italic text-ink-2"
+      className="relative my-8 pl-7 font-serif text-[25px] italic leading-[1.35] text-ink"
     >
+      {/* Pull quote (spec §5.6): a cobalt serif open-quote hangs at the left. */}
+      <span
+        aria-hidden
+        data-quote-mark
+        contentEditable={false}
+        className="pointer-events-none absolute -left-1.5 -top-3.5 select-none font-serif text-[64px] not-italic leading-none text-accent"
+      >
+        {"\u201C"}
+      </span>
       {children}
     </blockquote>
   ),
