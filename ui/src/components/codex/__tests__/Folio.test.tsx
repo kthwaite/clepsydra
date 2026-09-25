@@ -786,6 +786,23 @@ describe("Folio invalid-tab recovery", () => {
     );
   });
 
+  it("leaves the page itself out of Linked from (its own alias property)", () => {
+    backlinksState.data = [
+      {
+        kind: "property_ref",
+        source_id: "page-alpha",
+        source_path: "notes/alpha.md",
+        source_title: "Alpha",
+        target_raw: "Alpha",
+        context: "frontmatter field: aliases",
+      },
+    ];
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    expect(within(rail).getByText("No pages link here yet.")).toBeVisible();
+  });
+
   it("shows one Linked from entry per source page", () => {
     const link = {
       kind: "wiki",

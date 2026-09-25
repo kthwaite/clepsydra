@@ -1513,9 +1513,12 @@ export function Folio({ tabId, path }: FolioProps) {
 
   const similarItems = similar?.items ?? [];
   const unlinked = unlinkedMentions ?? [];
-  // The index returns one row per link; the rail shows one card per source.
+  // The index returns one row per link; the rail shows one card per source,
+  // and never the page itself (its own aliases index as property links).
   const linkedFrom = (backlinks ?? []).filter(
-    (b, i, all) => all.findIndex((o) => o.source_path === b.source_path) === i,
+    (b, i, all) =>
+      b.source_path !== path &&
+      all.findIndex((o) => o.source_path === b.source_path) === i,
   );
   const relationships = (
     <>
