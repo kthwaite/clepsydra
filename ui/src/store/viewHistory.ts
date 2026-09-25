@@ -5,6 +5,16 @@ import { isCoreView, VIEW_REGISTRY } from "#/components/codex/viewRegistry";
 
 const MAX_RECENT = 3;
 
+function knownViews(value: unknown): CodexView[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (v): v is CodexView =>
+        typeof v === "string" && Object.hasOwn(VIEW_REGISTRY, v),
+    )
+    .slice(0, MAX_RECENT);
+}
+
 interface ViewHistoryState {
   recent: CodexView[];
   record: (view: CodexView) => void;
@@ -30,6 +40,12 @@ export const useViewHistory = create<ViewHistoryState>()(
     {
       name: "clepsydra.recentViews",
       partialize: (s) => ({ recent: s.recent }),
+      // Stored names may outlive their view (renamed or removed later);
+      // an unknown one would crash Contents, so keep only registry views.
+      merge: (persisted, current) => ({
+        ...current,
+        recent: knownViews((persisted as { recent?: unknown })?.recent),
+      }),
     },
   ),
 );

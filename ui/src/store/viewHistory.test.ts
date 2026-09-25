@@ -41,3 +41,23 @@ describe("viewHistory", () => {
     expect(useViewHistory.getState().recent).toEqual([]);
   });
 });
+
+describe("viewHistory persistence", () => {
+  it("drops stored views the registry no longer knows, and non-arrays", async () => {
+    localStorage.setItem(
+      "clepsydra.recentViews",
+      JSON.stringify({ state: { recent: ["gone", "bases", 7] }, version: 0 }),
+    );
+    vi.resetModules();
+    const { useViewHistory: fresh } = await import("#/store/viewHistory");
+    expect(fresh.getState().recent).toEqual(["bases"]);
+
+    localStorage.setItem(
+      "clepsydra.recentViews",
+      JSON.stringify({ state: { recent: "bases" }, version: 0 }),
+    );
+    vi.resetModules();
+    const { useViewHistory: again } = await import("#/store/viewHistory");
+    expect(again.getState().recent).toEqual([]);
+  });
+});

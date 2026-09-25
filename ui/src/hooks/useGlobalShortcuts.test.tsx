@@ -387,9 +387,31 @@ describe("useGlobalShortcuts", () => {
 describe("Folio sidebar shortcuts", () => {
   beforeEach(() => {
     window.history.pushState({}, "", "/workspace");
+    useWorkspaceStore.setState({
+      tabs: [{ id: "p", type: "page", label: "P", path: "notes/p.md" }],
+      activeTabId: "p",
+    });
     useFolioRails.setState({
       collapsed: { [FOLIO_LEFT_RAIL]: false, [FOLIO_RIGHT_RAIL]: false },
     });
+  });
+
+  it.each([
+    ["the launcher", { tabs: [], activeTabId: null }],
+    [
+      "Constellation",
+      { tabs: [{ id: "g", type: "graph", label: "Graph" }], activeTabId: "g" },
+    ],
+  ])("leaves the hidden sidebars alone in %s", (_name, state) => {
+    useWorkspaceStore.setState(
+      state as Parameters<typeof useWorkspaceStore.setState>[0],
+    );
+    renderHook(() => useGlobalShortcuts());
+    const e = press("]", {}, { code: "BracketRight" });
+    press("\\", { metaKey: true }, { code: "Backslash" });
+    expect(e.defaultPrevented).toBe(false);
+    expect(useFolioRails.getState().isCollapsed(FOLIO_LEFT_RAIL)).toBe(false);
+    expect(useFolioRails.getState().isCollapsed(FOLIO_RIGHT_RAIL)).toBe(false);
   });
 
   it("⌘⌥[ toggles the left sidebar in the workspace", () => {

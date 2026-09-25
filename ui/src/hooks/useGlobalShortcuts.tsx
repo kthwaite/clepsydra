@@ -25,7 +25,7 @@ import {
 } from "#/store/folioRails";
 import { cycleTargetId } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
-import { useWorkspaceStore } from "#/store/workspace";
+import { selectWorkspaceMode, useWorkspaceStore } from "#/store/workspace";
 
 /** Bare-key chords (no mod/ctrl/alt) must not fire while the user is typing
  *  — buttons and other non-form elements are not "editable" and stay live. */
@@ -89,6 +89,11 @@ export function useGlobalShortcuts() {
   const bindings = useMemo<Record<GlobalShortcutId, Binding>>(() => {
     const inWorkspace = () =>
       routeViewFromMatches(router.state.matches) === "workspace";
+    // Folio's sidebars exist only in folio mode; the launcher and the
+    // Constellation tab share the workspace route but hide them.
+    const inFolio = () =>
+      inWorkspace() &&
+      selectWorkspaceMode(useWorkspaceStore.getState()) === "folio";
     const inTasking = () =>
       routeViewFromMatches(router.state.matches) === "tasking";
     return {
@@ -137,23 +142,23 @@ export function useGlobalShortcuts() {
       "app.themeToggle": { run: toggleTheme },
       "app.shortcutHelp": { run: openShortcutHelp },
       "folio.toggleLeft": {
-        when: inWorkspace,
+        when: inFolio,
         run: () => useFolioRails.getState().toggle(FOLIO_LEFT_RAIL),
       },
       "folio.toggleRight": {
-        when: inWorkspace,
+        when: inFolio,
         run: () => useFolioRails.getState().toggle(FOLIO_RIGHT_RAIL),
       },
       "folio.toggleBoth": {
-        when: inWorkspace,
+        when: inFolio,
         run: () => useFolioRails.getState().toggleBoth(),
       },
       "folio.toggleLeftBare": {
-        when: inWorkspace,
+        when: inFolio,
         run: () => useFolioRails.getState().toggle(FOLIO_LEFT_RAIL),
       },
       "folio.toggleRightBare": {
-        when: inWorkspace,
+        when: inFolio,
         run: () => useFolioRails.getState().toggle(FOLIO_RIGHT_RAIL),
       },
       "tabs.close": {
