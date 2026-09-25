@@ -40,4 +40,12 @@ describe("TextField", () => {
       screen.getByLabelText("Name").getAttribute("disabled"),
     ).not.toBeNull();
   });
+
+  it("is a borderless sink pill with a hot error message", () => {
+    render(<TextField label="Name" isInvalid errorMessage="Required" />);
+    const input = screen.getByLabelText("Name");
+    expect(input).toHaveClass("rounded-full", "bg-sink");
+    expect(input.className).not.toMatch(/(^|\s)border(\s|$)|border-input/);
+    expect(screen.getByText("Required")).toHaveClass("text-hot");
+  });
 });

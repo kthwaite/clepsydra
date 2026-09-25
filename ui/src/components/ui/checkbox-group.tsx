@@ -37,9 +37,7 @@ export function CheckboxGroup({
       )}
     >
       {label ? (
-        <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-          {label}
-        </Label>
+        <Label className="text-[12.5px] text-mute">{label}</Label>
       ) : null}
       <div
         className={cn(
@@ -52,13 +50,11 @@ export function CheckboxGroup({
         {children}
       </div>
       {description ? (
-        <Description className="text-xs text-muted-foreground">
+        <Description className="text-[12.5px] text-mute">
           {description}
         </Description>
       ) : null}
-      <FieldError className="text-xs text-destructive">
-        {errorMessage}
-      </FieldError>
+      <FieldError className="text-[12.5px] text-hot">{errorMessage}</FieldError>
     </RACCheckboxGroup>
   );
 }

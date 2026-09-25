@@ -48,32 +48,26 @@ export function Select<T, M extends "single" | "multiple" = "single">({
         cn("group relative flex w-full flex-col gap-1", className),
       )}
     >
-      {label && (
-        <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-          {label}
-        </Label>
-      )}
+      {label && <Label className="text-[12.5px] text-mute">{label}</Label>}
       <Button
         ref={triggerRef}
-        className="w-full min-w-0 justify-between text-start group-data-[invalid]:border-destructive data-[pressed]:bg-accent data-[pressed]:text-accent-foreground"
+        className="h-10 w-full min-w-0 justify-between rounded-full px-4 text-start text-[14px] font-normal group-data-[invalid]:ring-2 group-data-[invalid]:ring-hot"
       >
-        <SelectValue className="min-w-0 flex-1 truncate text-sm normal-case tracking-normal data-[placeholder]:text-muted-foreground" />
+        <SelectValue className="min-w-0 flex-1 truncate text-[14px] data-[placeholder]:text-mute" />
         <ChevronDown
           aria-hidden
-          className="size-4 shrink-0 text-muted-foreground group-data-[disabled]:opacity-50"
+          className="size-4 shrink-0 text-mute group-data-[disabled]:opacity-45"
         />
       </Button>
       {description && (
-        <Description className="text-xs text-muted-foreground">
+        <Description className="text-[12.5px] text-mute">
           {description}
         </Description>
       )}
-      <FieldError className="text-xs text-destructive">
-        {errorMessage}
-      </FieldError>
+      <FieldError className="text-[12.5px] text-hot">{errorMessage}</FieldError>
       <Popover
         hideArrow
-        className="min-w-(--trigger-width) border border-border bg-popover text-popover-foreground shadow-lg"
+        className="min-w-(--trigger-width) rounded-xl bg-raise text-ink shadow-lg"
       >
         <SelectListBox items={items}>{children}</SelectListBox>
       </Popover>
@@ -86,7 +80,7 @@ export function SelectListBox<T>({ className, ...props }: ListBoxProps<T>) {
     <DropdownListBox
       {...props}
       className={composeRenderProps(className, (className) =>
-        cn("max-h-64 overflow-auto p-1 outline-none", className),
+        cn("max-h-64 overflow-auto p-1.5 outline-none", className),
       )}
     />
   );
@@ -100,7 +94,7 @@ export function SelectSection<T>({
     <ListBoxSection
       {...props}
       className={cn(
-        "py-1 first:pt-0 last:pb-0 [&>header]:px-2 [&>header]:py-1 [&>header]:text-xs [&>header]:font-bold [&>header]:uppercase [&>header]:tracking-widest [&>header]:text-muted-foreground",
+        "py-1 first:pt-0 last:pb-0 [&>header]:px-3 [&>header]:pt-2 [&>header]:pb-1 [&>header]:text-[12px] [&>header]:text-mute",
         className,
       )}
     />
@@ -115,10 +109,10 @@ export function SelectItem({ className, ...props }: ListBoxItemProps) {
         className,
         (className, { isDisabled, isFocused, isHovered, isSelected }) =>
           cn(
-            "flex cursor-default items-center gap-2 p-2 text-sm outline-none transition-colors",
-            (isHovered || isFocused) && "bg-accent text-accent-foreground",
-            isSelected && "bg-accent font-medium text-accent-foreground",
-            isDisabled && "pointer-events-none opacity-50",
+            "flex cursor-default items-center gap-2 rounded-lg px-3 py-1.5 text-[13.5px] text-ink outline-none transition-colors",
+            (isHovered || isFocused) && "bg-sink",
+            isSelected && "bg-accent-tint font-medium",
+            isDisabled && "pointer-events-none opacity-45",
             className,
           ),
       )}

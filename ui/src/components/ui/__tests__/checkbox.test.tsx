@@ -64,4 +64,14 @@ describe("Checkbox", () => {
     await user.keyboard(" ");
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("fills the box with sink when unchecked and cobalt when checked", () => {
+    const { rerender, container } = render(<Checkbox>Remember</Checkbox>);
+    const box = () =>
+      container.querySelector("[data-slot=checkbox-box]") as HTMLElement;
+    expect(box()).toHaveClass("bg-sink");
+    expect(box()).toHaveClass("group-data-[selected]:bg-accent");
+    rerender(<Checkbox isSelected>Remember</Checkbox>);
+    expect(box().className).not.toMatch(/border-input/);
+  });
 });

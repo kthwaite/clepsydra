@@ -10,16 +10,7 @@ const OUT_OF_SCOPE = new Set(["command-palette.tsx"]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([
-  "select.tsx",
-  "text-field.tsx",
-  "search-field.tsx",
-  "checkbox.tsx",
-  "checkbox-group.tsx",
-  "radio-group.tsx",
-  "tabs.tsx",
-  "tag-input.tsx",
-]);
+const PENDING = new Set<string>([]);
 
 const FORBIDDEN: Array<[string, RegExp]> = [
   ["uppercase", /\buppercase\b/],
