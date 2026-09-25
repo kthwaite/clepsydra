@@ -324,4 +324,25 @@ describe("Menu", () => {
       screen.queryByRole("menu", { name: "Escape target" }),
     ).not.toBeInTheDocument();
   });
+
+  it("renders as a Stone & Lamp sheet: raise, rounded, soft shadow, no border or caps", async () => {
+    const user = userEvent.setup();
+    render(
+      <MenuTrigger>
+        <Button>Open actions</Button>
+        <Menu aria-label="Actions">
+          <MenuItem id="open">Open</MenuItem>
+          <MenuItem id="del" variant="destructive">
+            Delete
+          </MenuItem>
+        </Menu>
+      </MenuTrigger>,
+    );
+    await user.click(screen.getByRole("button", { name: "Open actions" }));
+    const menu = await screen.findByRole("menu");
+    expect(menu).toHaveClass("bg-raise", "rounded-xl", "shadow-lg");
+    expect(menu.className).not.toMatch(/border|uppercase|tracking-/);
+    const del = screen.getByRole("menuitem", { name: "Delete" });
+    expect(del.className).toContain("data-[variant=destructive]:text-hot");
+  });
 });

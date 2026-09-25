@@ -468,7 +468,7 @@ describe("Sheaf context menu integration", () => {
 
     const menu = await screen.findByRole("menu", { name: "Gamma" });
     expect(
-      await within(menu).findByRole("menuitem", { name: "CLOSE" }),
+      await within(menu).findByRole("menuitem", { name: "Close" }),
     ).toBeVisible();
   });
 
@@ -483,7 +483,7 @@ describe("Sheaf context menu integration", () => {
       keys: "[MouseRight]",
     });
     expect(
-      await screen.findByRole("menuitem", { name: "CLOSE" }),
+      await screen.findByRole("menuitem", { name: "Close" }),
     ).toBeVisible();
 
     await user.pointer({
@@ -495,10 +495,10 @@ describe("Sheaf context menu integration", () => {
       name: /quire thesis/i,
     });
     expect(
-      await within(quireMenu).findByRole("menuitem", { name: "RENAME…" }),
+      await within(quireMenu).findByRole("menuitem", { name: "Rename…" }),
     ).toBeVisible();
     expect(
-      within(quireMenu).getByRole("menuitem", { name: "COLLAPSE" }),
+      within(quireMenu).getByRole("menuitem", { name: "Collapse" }),
     ).toBeVisible();
     await waitFor(() => {
       expect(

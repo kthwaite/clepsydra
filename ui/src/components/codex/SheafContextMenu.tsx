@@ -163,14 +163,14 @@ export function SheafContextMenu({
           aria-label="sheaf context menu"
           onAction={handleRootAction}
         >
-          <MenuItem id="close">CLOSE</MenuItem>
-          <MenuItem id="close-others">CLOSE OTHERS</MenuItem>
-          <MenuItem id="close-all">CLOSE ALL</MenuItem>
+          <MenuItem id="close">Close</MenuItem>
+          <MenuItem id="close-others">Close others</MenuItem>
+          <MenuItem id="close-all">Close all</MenuItem>
           <MenuSeparator />
-          <MenuItem id="new-quire">NEW QUIRE…</MenuItem>
+          <MenuItem id="new-quire">New quire…</MenuItem>
           {otherQuires.length > 0 && (
             <SubmenuTrigger>
-              <MenuItem id="add-to-quire">ADD TO QUIRE</MenuItem>
+              <MenuItem id="add-to-quire">Add to quire</MenuItem>
               <Menu aria-label="Add to quire" onAction={handleAddToQuire}>
                 {otherQuires.map((candidate) => (
                   <MenuItem
@@ -178,14 +178,14 @@ export function SheafContextMenu({
                     id={candidate.id}
                     swatch={quireColorVar(candidate.color)}
                   >
-                    {candidate.name.toUpperCase()}
+                    {candidate.name}
                   </MenuItem>
                 ))}
               </Menu>
             </SubmenuTrigger>
           )}
           {tab.quireId && (
-            <MenuItem id="remove-from-quire">REMOVE FROM QUIRE</MenuItem>
+            <MenuItem id="remove-from-quire">Remove from quire</MenuItem>
           )}
         </Menu>
       </ContextMenuTrigger>
@@ -199,31 +199,31 @@ export function SheafContextMenu({
           aria-label="sheaf context menu"
           onAction={handleRootAction}
         >
-          <MenuItem id="rename">RENAME…</MenuItem>
+          <MenuItem id="rename">Rename…</MenuItem>
           <SubmenuTrigger>
-            <MenuItem id="color">COLOR</MenuItem>
+            <MenuItem id="color">Colour</MenuItem>
             <Menu
-              aria-label="Color"
+              aria-label="Colour"
               selectionMode="single"
               selectedKeys={new Set([quire.color])}
               onAction={handleColorAction}
             >
               {QUIRE_COLORS.map((color) => (
                 <MenuItem key={color} id={color} swatch={quireColorVar(color)}>
-                  {color.toUpperCase()}
+                  {color.charAt(0).toUpperCase() + color.slice(1)}
                 </MenuItem>
               ))}
             </Menu>
           </SubmenuTrigger>
           <MenuItem id="toggle-collapse">
-            {quire.collapsed ? "EXPAND" : "COLLAPSE"}
+            {quire.collapsed ? "Expand" : "Collapse"}
           </MenuItem>
           <MenuSeparator />
-          <MenuItem id="ungroup">UNGROUP</MenuItem>
+          <MenuItem id="ungroup">Ungroup</MenuItem>
           <MenuItem id="close-quire" variant="destructive">
-            CLOSE QUIRE
+            Close quire
           </MenuItem>
-          <MenuItem id="close-all">CLOSE ALL TABS</MenuItem>
+          <MenuItem id="close-all">Close all tabs</MenuItem>
         </Menu>
       </ContextMenuTrigger>
     );

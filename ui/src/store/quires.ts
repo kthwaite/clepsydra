@@ -44,10 +44,11 @@ export function nextQuireColor(quires: Record<string, Quire>): QuireColor {
   );
 }
 
-/** Default quire name derived from a tab label (palette flow). */
+/** Default quire name derived from a tab label (palette flow): its first
+ *  word in sentence case, capped at 12 characters. */
 export function deriveQuireName(label: string): string {
-  const word = label.trim().split(/\s+/)[0] ?? "";
-  return (word || "QUIRE").toUpperCase().slice(0, 12);
+  const word = (label.trim().split(/\s+/)[0] ?? "").slice(0, 12) || "Quire";
+  return word.charAt(0).toUpperCase() + word.slice(1);
 }
 
 /** A tab is hidden when it belongs to a collapsed quire. */

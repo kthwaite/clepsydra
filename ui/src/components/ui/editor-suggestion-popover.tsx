@@ -104,7 +104,7 @@ export function EditorSuggestionPopover<T>({
     return (
       <div
         ref={refs.setFloating}
-        className="fixed z-50 border border-border bg-popover p-2 text-xs text-muted-foreground shadow-md"
+        className="fixed z-50 rounded-xl bg-raise px-3 py-2 text-[13px] text-mute shadow-lg"
         style={positionedStyles}
       >
         Searching...
@@ -117,7 +117,7 @@ export function EditorSuggestionPopover<T>({
     return (
       <div
         ref={refs.setFloating}
-        className="fixed z-50 border border-border bg-popover p-2 text-xs text-muted-foreground shadow-md"
+        className="fixed z-50 rounded-xl bg-raise px-3 py-2 text-[13px] text-mute shadow-lg"
         style={positionedStyles}
       >
         {emptyMessage}
@@ -129,7 +129,7 @@ export function EditorSuggestionPopover<T>({
     <div
       ref={refs.setFloating}
       role="listbox"
-      className="fixed z-50 max-h-64 overflow-y-auto border border-border bg-popover shadow-md"
+      className="fixed z-50 max-h-64 overflow-y-auto rounded-xl bg-raise p-1.5 shadow-lg"
       style={positionedStyles}
     >
       {items.map((item, index) => {
@@ -142,10 +142,8 @@ export function EditorSuggestionPopover<T>({
             aria-selected={isActive}
             tabIndex={-1}
             className={cn(
-              "cursor-pointer px-3 py-1.5 text-sm",
-              isActive
-                ? "bg-accent text-accent-foreground"
-                : "text-popover-foreground hover:bg-accent/50",
+              "cursor-pointer rounded-lg px-3 py-1.5 text-[13.5px] text-ink",
+              isActive ? "bg-accent-tint" : "hover:bg-sink",
             )}
             onMouseDown={(e) => {
               e.preventDefault();

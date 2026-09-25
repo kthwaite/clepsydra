@@ -53,11 +53,11 @@ export function Dialog({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       isDismissable={isDismissable}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/30 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4"
     >
       <Modal
         className={cn(
-          "flex max-h-[calc(100dvh-2rem)] w-full flex-col border border-border bg-background shadow-lg",
+          "flex max-h-[calc(100dvh-2rem)] w-full flex-col rounded-2xl bg-raise text-ink shadow-xl",
           sizeClasses[size],
           className,
         )}
@@ -72,11 +72,11 @@ export function Dialog({
         >
           {({ close }) => (
             <>
-              <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
+              <div className="flex shrink-0 items-start justify-between gap-3 px-7 pt-6 pb-3">
                 <div>
                   <Heading
                     slot="title"
-                    className="text-sm font-bold uppercase tracking-widest"
+                    className="font-serif text-[26px] italic leading-tight text-ink"
                   >
                     {title}
                   </Heading>
@@ -84,27 +84,25 @@ export function Dialog({
                     <Text
                       id={descriptionId}
                       slot="description"
-                      className="mt-1 block text-xs text-muted-foreground"
+                      className="mt-1.5 block text-[13.5px] text-mute"
                     >
                       {description}
                     </Text>
                   )}
                 </div>
                 <IconButton
-                  variant="secondary"
                   isDisabled={isCloseDisabled}
                   onPress={close}
                   aria-label="Close dialog"
-                  className="h-auto w-auto p-1"
                 >
                   <X />
                 </IconButton>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              <div className="min-h-0 flex-1 overflow-y-auto px-7 py-3 text-[14px] text-ink-2">
                 {children}
               </div>
               {footer && (
-                <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-4 py-3">
+                <div className="flex shrink-0 items-center justify-end gap-3 px-7 pt-3 pb-6">
                   {footer}
                 </div>
               )}

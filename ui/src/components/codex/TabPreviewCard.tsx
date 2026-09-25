@@ -31,7 +31,7 @@ export function TabPreviewCard({ path, rect }: TabPreviewCardProps) {
   return createPortal(
     <div
       style={{ left, top, width: PREVIEW_WIDTH, zIndex: 900 }}
-      className="pointer-events-none fixed border-[1.5px] border-ink bg-paper text-ink shadow-[0_14px_40px_rgba(0,0,0,0.7),0_0_0_1px_var(--color-bg)] font-body"
+      className="pointer-events-none fixed overflow-hidden rounded-xl bg-raise text-ink shadow-lg"
     >
       <PreviewBody
         path={path}

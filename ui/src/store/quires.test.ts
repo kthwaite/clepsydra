@@ -48,13 +48,14 @@ describe("nextQuireColor", () => {
 });
 
 describe("deriveQuireName", () => {
-  it("uppercases the first word, capped at 12 chars", () => {
-    expect(deriveQuireName("thesis chapter one")).toBe("THESIS");
-    expect(deriveQuireName("antidisestablishment")).toBe("ANTIDISESTAB");
+  it("takes the first word in sentence case, capped at 12 chars", () => {
+    expect(deriveQuireName("thesis chapter one")).toBe("Thesis");
+    expect(deriveQuireName("antidisestablishment")).toBe("Antidisestab");
+    expect(deriveQuireName("iPhone notes")).toBe("IPhone");
   });
 
-  it("falls back to QUIRE for empty labels", () => {
-    expect(deriveQuireName("   ")).toBe("QUIRE");
+  it("falls back to Quire for empty labels", () => {
+    expect(deriveQuireName("   ")).toBe("Quire");
   });
 });
 

@@ -96,4 +96,19 @@ describe("Dialog", () => {
     );
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("uses an italic serif title on a rounded raise panel with no rules", () => {
+    render(
+      <Dialog isOpen onOpenChange={() => {}} title="Create note">
+        <p>Body</p>
+      </Dialog>,
+    );
+    expect(screen.getByRole("heading", { name: "Create note" })).toHaveClass(
+      "font-serif",
+      "italic",
+    );
+    const panel = screen.getByRole("dialog").parentElement as HTMLElement;
+    expect(panel).toHaveClass("rounded-2xl", "bg-raise");
+    expect(panel.className).not.toMatch(/border/);
+  });
 });

@@ -339,7 +339,7 @@ it("documents SHEAF close and ordering behavior", () => {
   const source = registeredGuideSource("codex-and-conversation-capture");
 
   expect(source).toContain(
-    "**CLOSE QUIRE** closes every member and dissolves the empty quire",
+    "**Close quire** closes every member and dissolves the empty quire",
   );
   expect(source).toContain(
     "The SHEAF follows workspace order, while each quire keeps its member order",

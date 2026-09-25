@@ -11,12 +11,6 @@ const OUT_OF_SCOPE = new Set(["command-palette.tsx"]);
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
 const PENDING = new Set<string>([
-  "menu.tsx",
-  "dialog.tsx",
-  "tooltip.tsx",
-  "Toaster.tsx",
-  "lightbox.tsx",
-  "editor-suggestion-popover.tsx",
   "select.tsx",
   "text-field.tsx",
   "search-field.tsx",
@@ -25,7 +19,6 @@ const PENDING = new Set<string>([
   "radio-group.tsx",
   "tabs.tsx",
   "tag-input.tsx",
-  "../codex/TabPreviewCard.tsx",
 ]);
 
 const FORBIDDEN: Array<[string, RegExp]> = [
