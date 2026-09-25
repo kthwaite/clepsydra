@@ -11,7 +11,6 @@ const OUT_OF_SCOPE = new Set<string>([]);
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
 const PENDING = new Set<string>([
-  "../filters/FilterBar.tsx",
   "../tasking/ScopeRail.tsx",
   "../tasking/KanbanView.tsx",
   "../tasking/TaskCard.tsx",

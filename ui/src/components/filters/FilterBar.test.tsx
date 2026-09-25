@@ -495,9 +495,7 @@ describe("FilterBar", () => {
     expect(screen.queryByTestId("filter-bar-count")).not.toBeInTheDocument();
     await user.type(input, "abc");
     expect(input).toHaveValue("abc");
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "03 OF 09",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("3 of 9");
 
     await user.keyboard("{Escape}");
     expect(input).toHaveValue("");
@@ -518,5 +516,14 @@ describe("FilterBar", () => {
       />,
     );
     expect(screen.getByRole("textbox", { name: "Search pages" })).toBeVisible();
+  });
+
+  it("uses Stone & Lamp pills: sink input and chips, sentence-case actions, no caps", () => {
+    const { container } = render(<Harness showText />);
+    expect(screen.getByRole("textbox")).toHaveClass("rounded-full", "bg-sink");
+    expect(screen.getByTestId("filter-bar-add")).toHaveTextContent("+ Filter");
+    expect(screen.getByTestId("filter-bar-add")).toHaveClass("rounded-full");
+    expect(container.querySelector(".uppercase")).toBeNull();
+    expect(container.innerHTML).not.toMatch(/border-\[var\(--rule\)\]/);
   });
 });

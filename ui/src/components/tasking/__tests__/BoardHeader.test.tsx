@@ -302,9 +302,7 @@ describe("BoardHeader", () => {
       filteredCount: 1,
       opFilteredCount: 3,
     });
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "01 OF 03",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("1 of 3");
   });
 
   describe("Stone & Lamp header", () => {

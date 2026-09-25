@@ -630,9 +630,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     expect(screen.getByText("Alpha task")).toBeInTheDocument();
     expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
     expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "01 OF 03",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("1 of 3");
   });
 
   it("adding a project facet chip narrows to that project's tasks", async () => {
@@ -655,9 +653,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     expect(screen.getByText("Task Sealed")).toBeInTheDocument();
     expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Unfiled")).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "03 OF 05",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("3 of 5");
   });
 
   it("composes a project facet with the text filter", async () => {
@@ -678,9 +674,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     expect(screen.getByText("Task Sealed")).toBeInTheDocument();
     expect(screen.queryByText("Task Alpha 1")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Alpha 2")).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "01 OF 05",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("1 of 5");
   });
 
   it("clearing the filter restores all cards and hides the count line", async () => {
@@ -713,9 +707,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Unfiled")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Sealed")).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "01 OF 05",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("1 of 5");
   });
 });
 
@@ -955,17 +947,13 @@ describe("TaskingScreen — list view completed toggle", () => {
     expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
     expect(screen.getByText("Task Alpha 2")).toBeInTheDocument();
     expect(screen.queryByText("Task Sealed")).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "02 OF 04",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("2 of 4");
 
     // Close the facet popover, then reveal completed → 3 of 5
     await userEvent.click(screen.getByTestId("filter-bar-chip-project"));
     await userEvent.click(screen.getByTestId("board-show-completed"));
     expect(await screen.findByText("Task Sealed")).toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "03 OF 05",
-    );
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("3 of 5");
   });
 
   it("kanban mode is unaffected: SEALED tasks stay in the Done column and no toggle renders", async () => {
