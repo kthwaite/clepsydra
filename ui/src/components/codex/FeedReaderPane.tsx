@@ -1,5 +1,5 @@
+import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "react-aria-components";
 import {
   type FeedEntry,
   useFeedEntry,
@@ -7,9 +7,11 @@ import {
   usePatchFeedEntry,
 } from "#/api/feeds";
 import { useQuickCapture } from "#/api/journal";
+import { Button, buttonStyles } from "#/components/ui/button";
 import { useCopyToClipboard } from "#/hooks/useCopyToClipboard";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { formatFeedTime } from "#/lib/time";
 
 export function FeedReaderPane({
@@ -139,37 +141,34 @@ export function FeedReaderPane({
       aria-label="Feed reader"
       data-reader-focus={showBack ? undefined : ""}
       tabIndex={showBack ? undefined : -1}
-      className="min-h-0 overflow-y-auto border border-rule bg-paper-2 outline-none md:h-full"
+      className="min-h-0 overflow-y-auto rounded-2xl bg-raise outline-none md:h-full"
     >
-      <div
-        className={cn(
-          "sticky top-0 z-10 flex items-center gap-3 border-b border-rule bg-paper px-3 py-2",
-          showBack ? "justify-between" : "justify-end",
-        )}
-      >
-        {showBack ? (
+      {showBack ? (
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 bg-raise px-4 pt-3 pb-2">
           <Button
             aria-label="Back to entries"
             data-reader-focus
-            className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            variant="ghost"
+            size="sm"
             onPress={onBack}
           >
-            ← Back to entries
+            <ArrowLeft aria-hidden className="size-4" />
+            Back to entries
           </Button>
-        ) : null}
-        {selectedEntryId !== undefined ? (
-          <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-            Entry {selectedEntryId}
-          </span>
-        ) : null}
-      </div>
+          {selectedEntryId !== undefined ? (
+            <span className="text-[12.5px] text-mute">
+              Entry {selectedEntryId}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {selectedEntryId === undefined ? (
         <div className="grid min-h-64 place-content-center px-6 py-12 text-center">
-          <p className="font-sans text-[16px] font-semibold text-ink">
+          <p className="font-serif text-[26px] leading-tight text-ink">
             Select an entry to read
           </p>
-          <p className="cl-marg mt-1 max-w-sm">
+          <p className="mt-2 max-w-sm text-[13.5px] text-mute">
             Choose a dispatch from the river. Its stored copy will open here.
           </p>
         </div>
@@ -178,25 +177,31 @@ export function FeedReaderPane({
         (!entry && !entryQuery.isError) ? (
         <div
           role="status"
-          className="cl-mono px-4 py-12 text-center text-[10px] uppercase tracking-[0.18em] text-ink-mute"
+          className="px-4 py-12 text-center text-[13.5px] text-mute"
         >
           Loading entry {selectedEntryId}…
         </div>
       ) : missing ? (
         <div className="px-4 py-10 text-center">
-          <p className="font-sans text-[15px] font-semibold text-ink">
+          <p className="text-[15px] font-medium text-ink">
             Entry {selectedEntryId} is no longer available
           </p>
-          <p className="cl-marg mt-1">Returning to the river.</p>
+          <p className="mt-1 text-[13.5px] text-mute">
+            Returning to the river.
+          </p>
         </div>
       ) : entryQuery.isError ? (
-        <div role="alert" className="m-3 border border-hot px-3 py-3 text-hot">
-          <p className="text-[12px]">
+        <div
+          role="alert"
+          className="m-4 rounded-xl bg-hot/5 px-4 py-3 text-[13.5px] text-hot"
+        >
+          <p>
             Entry {selectedEntryId} could not be loaded.{" "}
             {errorMessage(entryQuery.error)}
           </p>
           <Button
-            className="cl-btn mt-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            size="sm"
+            className="mt-3"
             onPress={() => entryQuery.refetch()}
           >
             Retry
@@ -337,94 +342,56 @@ function ReaderArticle({
   return (
     <article
       aria-labelledby={titleId}
-      className="min-w-0 px-4 py-5 md:px-6 md:py-6"
+      className="min-w-0 max-w-[800px] px-5 pt-4 pb-8 md:px-10"
     >
-      <header className="border-b border-rule pb-4">
-        <h2
-          id={titleId}
-          className="font-sans text-[clamp(24px,4vw,38px)] font-black leading-[1.05] tracking-[-0.02em] text-ink"
-        >
-          {entry.title}
-        </h2>
-        <div className="cl-mono mt-3 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-          {feedName ? <span className="text-ink-2">{feedName}</span> : null}
-          {entry.author ? <span>{entry.author}</span> : null}
-          <time dateTime={timestamp}>{formatFeedTime(timestamp)}</time>
-          <span>{entry.read ? "Read entry" : "Unread entry"}</span>
-          {entry.bookmarked ? <span className="text-accent">Saved</span> : null}
-          {entry.tags.map((tag) => (
-            <span key={tag}>#{tag}</span>
-          ))}
-        </div>
-      </header>
-
-      <div className="py-5">
-        {entry.content_html ? (
-          <div
-            className="feed-entry-content"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: the backend sanitizes feed HTML with ammonia before storage, and the DTO returns that stored HTML unchanged
-            dangerouslySetInnerHTML={{ __html: entry.content_html }}
-          />
-        ) : (
-          <p className="cl-marg">
-            This entry has no stored body. Open the original to continue
-            reading.
-          </p>
-        )}
-      </div>
-
-      {mutationError ? (
-        <div
-          role="alert"
-          className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
-        >
-          {errorMessage(mutationError, "The entry change could not be saved.")}
-        </div>
-      ) : null}
-
-      <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-rule-soft pt-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         {originalUrl ? (
           <a
             href={originalUrl}
             target="_blank"
             rel="noreferrer"
-            className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className={buttonStyles("primary", "sm", FOCUS_RING_NATIVE)}
           >
-            Open original ↗
+            Open original
+            <ArrowUpRight aria-hidden className="size-4" />
           </a>
         ) : null}
         {markdownLink ? (
-          <Button
-            className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            onPress={onOpenCapture}
-          >
+          <Button size="sm" className="rounded-full" onPress={onOpenCapture}>
             Capture in journal
           </Button>
         ) : null}
         {markdownLink ? (
           <Button
-            className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            size="sm"
+            className="rounded-full"
             onPress={() => void copy(markdownLink)}
           >
             {copied ? "Copied" : "Copy link"}
           </Button>
         ) : null}
         <Button
-          className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          variant="ghost"
+          size="sm"
+          className="ml-auto text-ink-2"
           isDisabled={isPatchPending}
           onPress={onToggleRead}
         >
           {entry.read ? "Mark unread" : "Mark read"}
         </Button>
         <Button
-          className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          variant="ghost"
+          size="sm"
+          className={entry.bookmarked ? "text-accent" : "text-ink-2"}
           isDisabled={isPatchPending}
           onPress={onToggleBookmark}
         >
           {entry.bookmarked ? "Unsave" : "Bookmark"}
         </Button>
         <Button
-          className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          variant="ghost"
+          size="sm"
+          className="text-ink-2"
           isDisabled={isPatchPending}
           onPress={onEditTags}
         >
@@ -432,36 +399,50 @@ function ReaderArticle({
         </Button>
       </div>
 
+      {mutationError ? (
+        <div
+          role="alert"
+          className="mt-3 rounded-xl bg-hot/5 px-4 py-3 text-[13.5px] text-hot"
+        >
+          {errorMessage(mutationError, "The entry change could not be saved.")}
+        </div>
+      ) : null}
+
       {isCapturing ? (
         <form
-          className="mt-3 grid gap-2 border-l-2 border-accent pl-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+          className="mt-3 grid gap-2 rounded-xl bg-sink p-3 sm:grid-cols-[minmax(0,1fr)_auto]"
           onSubmit={(event) => {
             event.preventDefault();
             void onSubmitCapture();
           }}
         >
-          <label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+          <label className="text-[12.5px] text-mute">
             Journal entry
             <textarea
               ref={captureDraftRef}
               disabled={isCapturePending}
               value={captureDraft}
               onChange={(event) => onCaptureDraftChange(event.target.value)}
-              className="mt-1 block min-h-20 w-full min-w-0 resize-y border border-rule bg-paper px-2 py-1.5 text-[12px] normal-case tracking-normal text-ink outline-none focus:border-accent"
+              className={cn(
+                "mt-1 block min-h-20 w-full min-w-0 resize-y rounded-xl bg-raise px-3 py-2 text-[14px] text-ink",
+                FOCUS_RING_NATIVE,
+              )}
             />
           </label>
           <div className="flex items-end gap-2">
             <Button
               type="submit"
+              variant="primary"
+              size="sm"
               isDisabled={isCapturePending || !captureDraft.trim()}
-              className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               {isCapturePending ? "Capturing…" : "Capture"}
             </Button>
             <Button
               type="button"
+              variant="ghost"
+              size="sm"
               isDisabled={isCapturePending}
-              className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
               onPress={onCancelCapture}
             >
               Cancel
@@ -470,7 +451,7 @@ function ReaderArticle({
           {hasCaptureFailure ? (
             <div
               role="alert"
-              className="border border-hot px-3 py-2 text-[12px] text-hot sm:col-span-2"
+              className="rounded-xl bg-raise px-3 py-2 text-[13.5px] text-hot sm:col-span-2"
             >
               {errorMessage(captureFailure, "Capture failed. Try again.")}
             </div>
@@ -479,16 +460,17 @@ function ReaderArticle({
       ) : null}
 
       {captured ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2 border-l-2 border-accent pl-3">
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-sink px-4 py-2.5">
           <div
             role="status"
             aria-live="polite"
-            className="text-[12px] text-ink-2"
+            className="text-[13.5px] text-ink-2"
           >
             Captured in today’s journal.
           </div>
           <Button
-            className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            size="sm"
+            className="rounded-full bg-raise"
             onPress={onOpenTodayJournal}
           >
             Open today’s journal
@@ -498,33 +480,38 @@ function ReaderArticle({
 
       {isEditingTags ? (
         <form
-          className="mt-3 grid gap-2 border-l-2 border-accent pl-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+          className="mt-3 grid gap-2 rounded-xl bg-sink p-3 sm:grid-cols-[minmax(0,1fr)_auto]"
           onSubmit={(event) => {
             event.preventDefault();
             void onSaveTags();
           }}
         >
-          <label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+          <label className="text-[12.5px] text-mute">
             Tags for {entry.title}
             <input
               disabled={isPatchPending}
               value={tagDraft}
               onChange={(event) => onTagDraftChange(event.target.value)}
-              className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-1.5 text-[12px] normal-case tracking-normal text-ink outline-none focus:border-accent"
+              className={cn(
+                "mt-1 block h-9 w-full min-w-0 rounded-full bg-raise px-3 text-[14px] text-ink",
+                FOCUS_RING_NATIVE,
+              )}
             />
           </label>
           <div className="flex items-end gap-2">
             <Button
               type="submit"
+              variant="primary"
+              size="sm"
               isDisabled={isPatchPending}
-              className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               {isPatchPending ? "Saving…" : "Save tags"}
             </Button>
             <Button
               type="button"
+              variant="ghost"
+              size="sm"
               isDisabled={isPatchPending}
-              className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
               onPress={onCancelTags}
             >
               Cancel
@@ -532,6 +519,45 @@ function ReaderArticle({
           </div>
         </form>
       ) : null}
+
+      <header className="mt-8 flex flex-col gap-3.5">
+        <h2
+          id={titleId}
+          className="font-serif text-[32px] leading-[1.08] tracking-[-0.01em] text-ink md:text-[40px]"
+        >
+          {entry.title}
+        </h2>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-mute">
+          {feedName ? <span className="text-ink-2">{feedName}</span> : null}
+          {entry.author ? <span>{entry.author}</span> : null}
+          <time dateTime={timestamp}>{formatFeedTime(timestamp)}</time>
+          <span>{entry.read ? "Read" : "Unread"}</span>
+          {entry.bookmarked ? <span className="text-accent">Saved</span> : null}
+          {entry.tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full bg-sink px-2.5 py-0.5 text-[12.5px] text-ink-2"
+            >
+              #{tag}
+            </span>
+          ))}
+        </div>
+      </header>
+
+      <div className="mt-7">
+        {entry.content_html ? (
+          <div
+            className="feed-entry-content"
+            // biome-ignore lint/security/noDangerouslySetInnerHtml: the backend sanitizes feed HTML with ammonia before storage, and the DTO returns that stored HTML unchanged
+            dangerouslySetInnerHTML={{ __html: entry.content_html }}
+          />
+        ) : (
+          <p className="text-[14px] text-mute">
+            This entry has no stored body. Open the original to continue
+            reading.
+          </p>
+        )}
+      </div>
     </article>
   );
 }

@@ -1,7 +1,9 @@
+import { Check, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { Button, Dialog, DialogTrigger } from "react-aria-components";
 import { Popover } from "#/components/ui/popover";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING, FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 export type FeedFacetOption = { value: string; label: string };
 
@@ -26,7 +28,7 @@ export function FeedFacetSelect({
   const [open, setOpen] = useState(false);
   const summary =
     value.length === 0
-      ? "All"
+      ? "any"
       : value.length === 1
         ? (options.find((option) => option.value === value[0])?.label ??
           value[0])
@@ -51,19 +53,28 @@ export function FeedFacetSelect({
         aria-label={`${label} filter`}
         isDisabled={options.length === 0}
         className={cn(
-          "cl-btn max-w-[13rem] gap-2 px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent",
-          value.length > 0 && "cl-btn-hot",
-          options.length === 0 && "opacity-50",
+          "inline-flex h-9 max-w-[16rem] cursor-pointer items-center gap-2 rounded-full pr-3 pl-3.5 text-[13.5px] transition-colors data-[disabled]:cursor-not-allowed data-[disabled]:opacity-45",
+          value.length > 0
+            ? "bg-accent-tint text-accent"
+            : "bg-sink text-ink data-[hovered]:bg-sink/70",
+          FOCUS_RING,
         )}
       >
         <span>{label}</span>
-        <span className="min-w-0 truncate text-ink-mute">{summary}</span>
-        <span aria-hidden="true">▾</span>
+        <span
+          className={cn(
+            "min-w-0 truncate",
+            value.length > 0 ? "text-accent" : "text-mute",
+          )}
+        >
+          {summary}
+        </span>
+        <ChevronDown aria-hidden className="size-4 shrink-0" />
       </Button>
-      <Popover hideArrow placement="bottom start">
+      <Popover hideArrow placement="bottom start" offset={6}>
         <Dialog
           aria-label={`${label} options`}
-          className="max-h-64 w-[15rem] overflow-y-auto border border-rule bg-paper-2 p-1.5 outline-none"
+          className="max-h-64 w-[15rem] overflow-y-auto rounded-2xl bg-raise p-1.5 text-ink shadow-lg outline-none"
         >
           <div className="flex flex-col gap-0.5">
             {options.map((option) => {
@@ -75,14 +86,20 @@ export function FeedFacetSelect({
                   aria-pressed={selected}
                   onClick={() => toggle(option.value)}
                   className={cn(
-                    "cl-mono flex items-center justify-between gap-2 px-1.5 py-1 text-left text-[10px] uppercase tracking-[0.12em] transition-colors",
+                    "flex cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-1.5 text-left text-[13.5px] transition-colors",
                     selected
-                      ? "bg-accent text-black"
-                      : "text-ink-2 hover:bg-paper-edge",
+                      ? "bg-accent-tint font-medium text-ink"
+                      : "text-ink-2 hover:bg-sink",
+                    FOCUS_RING_NATIVE,
                   )}
                 >
                   <span className="truncate">{option.label}</span>
-                  {selected ? <span aria-hidden="true">✓</span> : null}
+                  {selected ? (
+                    <Check
+                      aria-hidden
+                      className="size-4 shrink-0 text-accent"
+                    />
+                  ) : null}
                 </button>
               );
             })}

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -93,6 +93,7 @@ vi.mock("#/components/codex/MobileCodexFrame", () => ({
 vi.mock("#/api/feeds", () => ({
   useFeeds: routeMocks.useFeeds.mockImplementation(() => ({
     data: {
+      counts: { all: 12, unread: 4, saved: 2 },
       diagnostics: [],
       groups: [
         {
@@ -214,6 +215,7 @@ vi.mock("#/components/codex/FeedManagement", () => ({
 
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { Route } from "#/routes/feeds";
+import { useFooterContextStore } from "#/store/footerContext";
 
 const FeedsPage = Route.options.component as () => ReactNode;
 
@@ -714,7 +716,7 @@ describe("feeds route controls", () => {
 
     const user = userEvent.setup();
     render(<FeedsPage />);
-    await user.click(screen.getByRole("button", { name: /hide read/i }));
+    await user.click(screen.getByRole("radio", { name: "Unread" }));
 
     const navigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
@@ -1149,19 +1151,45 @@ describe("feeds route controls", () => {
     expect(routeMocks.fetchMock).not.toHaveBeenCalled();
   });
 
-  it("maps Hide read to unread and toggles it off without changing other search state", async () => {
+  it("heads the page with a serif title and the unread and source counts", () => {
+    render(<FeedsPage />);
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Feeds" }),
+    ).toHaveClass("font-serif");
+    expect(screen.getByText("4 unread · 3 sources")).toBeVisible();
+    expect(screen.queryByText(/incoming ledger/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Manage subscriptions" }),
+    ).toBeVisible();
+  });
+
+  it("shows the selected entry in the footer context", () => {
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+    render(<FeedsPage />);
+
+    expect(useFooterContextStore.getState().parts).toEqual([
+      "Feeds",
+      "Entry 501",
+    ]);
+  });
+
+  it("switches the view with the All / Unread / Saved segmented control without changing other search state", async () => {
     const user = userEvent.setup();
     routeMocks.search.view = "all";
     const page = render(<FeedsPage />);
 
-    const hideRead = screen.getByRole("button", { name: /hide read/i });
-    expect(hideRead).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: /^saved$/i })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    const show = screen.getByRole("radiogroup", { name: "Show" });
+    expect(within(show).getByRole("radio", { name: "All" })).toBeChecked();
+    expect(
+      within(show).getByRole("radio", { name: "Unread" }),
+    ).not.toBeChecked();
+    expect(
+      within(show).getByRole("radio", { name: "Saved" }),
+    ).not.toBeChecked();
 
-    await user.click(hideRead);
+    await user.click(within(show).getByRole("radio", { name: "Unread" }));
     const enabled = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
@@ -1172,7 +1200,7 @@ describe("feeds route controls", () => {
 
     routeMocks.search.view = "unread";
     page.rerender(<FeedsPage />);
-    await user.click(screen.getByRole("button", { name: /hide read/i }));
+    await user.click(screen.getByRole("radio", { name: "All" }));
     const disabled = routeMocks.navigate.mock.calls[1]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
@@ -1180,6 +1208,12 @@ describe("feeds route controls", () => {
       ...routeMocks.search,
       view: "all",
     });
+
+    await user.click(screen.getByRole("radio", { name: "Saved" }));
+    const saved = routeMocks.navigate.mock.calls[2]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(saved.search(routeMocks.search)).toMatchObject({ view: "saved" });
   });
 
   it("offers tag options derived from loaded feed tags, deduped and sorted", async () => {

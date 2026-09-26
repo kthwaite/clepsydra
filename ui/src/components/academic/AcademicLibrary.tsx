@@ -8,6 +8,7 @@ import {
 } from "#/api/academic";
 import { ImportDialog } from "#/components/academic/ImportDialog";
 import { WorkDetail } from "#/components/academic/WorkDetail";
+import { Tick } from "#/components/codex/Tick";
 import { FilterBar } from "#/components/filters/FilterBar";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
@@ -20,6 +21,7 @@ import {
   type FilterState,
   isFilterActive,
 } from "#/lib/filters/model";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 const PAGE_SIZE = 200;
 
@@ -83,11 +85,35 @@ function formatError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/** "paper" → "Paper": vocabulary values read in sentence case. */
+function sentence(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+/** Row meta line: "Book · 1914 · reading". */
+function workMeta(work: WorkSummary): string {
+  const parts = [
+    sentence(work.work_type ?? "work"),
+    work.year?.toString() ?? "Undated",
+  ];
+  if (work.status) parts.push(work.status);
+  return parts.join(" · ");
+}
+
 function splitValues(value: string): string[] {
   return value
     .split(/[\n,]/)
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+/** Text search runs over loaded works only, so while more remain on the
+ *  server the count names the loaded set rather than the facet total. */
+function searchCountLabel(matches: number, loaded: number, total: number) {
+  if (loaded < total) {
+    return `${matches} ${matches === 1 ? "match" : "matches"} in ${loaded} loaded works`;
+  }
+  return `${matches} of ${total} works`;
 }
 
 function matchesSearch(work: WorkSummary, query: string): boolean {
@@ -169,19 +195,19 @@ export function AcademicLibrary({
       {
         id: "work_type",
         kind: "single",
-        label: "TYPE",
+        label: "Type",
         options: WORK_TYPES.map((value) => ({ value })),
       },
       {
         id: "status",
         kind: "single",
-        label: "STATUS",
+        label: "Status",
         options: READING_STATUSES.map((value) => ({ value })),
       },
       {
         id: "year",
         kind: "single",
-        label: "YEAR",
+        label: "Year",
         options: [
           ...new Set(
             items
@@ -195,7 +221,7 @@ export function AcademicLibrary({
       {
         id: "tag",
         kind: "single",
-        label: "TAG",
+        label: "Tag",
         options: [...new Set(items.flatMap((work) => work.tags ?? []))]
           .sort()
           .map((value) => ({ value })),
@@ -249,53 +275,61 @@ export function AcademicLibrary({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-rule px-4 py-3">
-        <div>
-          <p className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-            Research / Corpus
-          </p>
-          <h1 className="font-heading text-lg font-bold">Academic Library</h1>
+      <header className="flex flex-shrink-0 flex-wrap items-end gap-x-8 gap-y-4 px-4 pt-8 md:px-10 md:pt-11">
+        <div className="flex flex-col gap-2.5">
+          <span className="flex items-center gap-2.5">
+            <Tick />
+            <span className="font-serif text-[19px] italic text-mute">
+              Research
+            </span>
+          </span>
+          <h1 className="font-serif text-[44px] leading-none tracking-[-0.015em] text-ink md:text-[56px]">
+            Academic library
+          </h1>
         </div>
-        <div className="flex gap-2">
-          <Button size="sm" onPress={() => setImportOpen(true)}>
-            Import
-          </Button>
-          <Button size="sm" variant="primary" onPress={openCreate}>
+        <span className="pb-2 text-[14px] text-mute">
+          {total} {total === 1 ? "work" : "works"}
+        </span>
+        <div className="flex-1" />
+        <div className="flex items-center gap-2">
+          <Button onPress={() => setImportOpen(true)}>Import</Button>
+          <Button variant="primary" onPress={openCreate}>
             Add work
           </Button>
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(260px,340px)_1fr]">
-        <aside className="flex min-h-[280px] flex-col border-b border-rule md:min-h-0 md:border-r md:border-b-0">
-          <div className="border-b border-rule-soft px-3 py-3">
-            <FilterBar
-              fields={filterFields}
-              primaryFieldIds={["work_type", "status", "year"]}
-              state={filterState}
-              onChange={onFilterChange}
-              textPlaceholder="Title, author, citation key…"
-              textAriaLabel="Search works"
-              className="flex-wrap"
-            />
-            <div className="cl-mono mt-2 flex justify-between text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-              <span>{worksQuery.data?.total ?? items.length} works</span>
-              {query ? <span>{filteredWorks.length} matches</span> : null}
-            </div>
-          </div>
+      <div className="grid min-h-0 flex-1 gap-10 px-4 pt-9 pb-6 md:grid-cols-[minmax(260px,400px)_minmax(0,1fr)] md:px-10">
+        <aside className="flex min-h-[280px] min-w-0 flex-col gap-3.5 md:min-h-0">
+          <FilterBar
+            fields={filterFields}
+            primaryFieldIds={["work_type", "status", "year"]}
+            state={filterState}
+            onChange={onFilterChange}
+            textPlaceholder="Title, author, citation key…"
+            textAriaLabel="Search works"
+            className="flex-wrap"
+          />
+          {query.trim() ? (
+            <p className="px-1 text-[12.5px] tabular-nums text-mute">
+              {searchCountLabel(filteredWorks.length, items.length, total)}
+            </p>
+          ) : null}
 
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="-mx-4 min-h-0 flex-1 overflow-y-auto px-1 py-1">
             {worksQuery.isPending ? (
-              <p className="cl-marg p-4">Loading works…</p>
+              <p className="px-3 py-2 text-[13.5px] text-mute">
+                Loading works…
+              </p>
             ) : worksQuery.error ? (
-              <p role="alert" className="p-4 text-sm text-destructive">
+              <p role="alert" className="px-3 py-2 text-[13.5px] text-hot">
                 {formatError(
                   worksQuery.error,
                   "Academic works could not be loaded.",
                 )}
               </p>
             ) : filteredWorks.length === 0 ? (
-              <p className="cl-marg p-4">
+              <p className="px-3 py-2 text-[13.5px] text-mute">
                 {filterActive
                   ? hasMore
                     ? "No loaded works match this search. Load more to continue searching."
@@ -303,34 +337,31 @@ export function AcademicLibrary({
                   : "No academic works yet."}
               </p>
             ) : (
-              <ul>
+              <ul aria-label="Works" className="flex flex-col gap-0.5">
                 {filteredWorks.map((work) => {
                   const label = work.title || work.path;
+                  const isSelected = selectedWorkId === work.id;
                   return (
                     <li key={work.id}>
                       <button
                         type="button"
                         aria-label={`Open ${label}`}
-                        aria-current={
-                          selectedWorkId === work.id ? "true" : undefined
-                        }
+                        aria-current={isSelected ? "true" : undefined}
                         onClick={() => setSelectedWorkId(work.id)}
                         className={cn(
-                          "w-full border-b border-rule-soft px-3 py-3 text-left hover:bg-ink/[0.035]",
-                          selectedWorkId === work.id
-                            ? "bg-ink/[0.05] shadow-[inset_2px_0_0_0_var(--accent)]"
-                            : "",
+                          "flex w-full cursor-pointer flex-col gap-[3px] rounded-xl px-3 py-[11px] text-left transition-colors",
+                          isSelected ? "bg-accent-tint" : "hover:bg-sink",
+                          FOCUS_RING_NATIVE,
                         )}
                       >
-                        <span className="block text-sm font-medium text-ink">
+                        <span className="text-[14.5px] font-medium leading-[1.4] text-ink">
                           {label}
                         </span>
-                        <span className="mt-1 block text-xs text-ink-mute">
+                        <span className="text-[13px] text-ink-2">
                           {(work.authors ?? []).join(", ") || "Unknown author"}
                         </span>
-                        <span className="cl-mono mt-1 block text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-                          {work.work_type ?? "work"} · {work.year ?? "undated"}
-                          {work.status ? ` · ${work.status}` : ""}
+                        <span className="text-[12.5px] text-mute">
+                          {workMeta(work)}
                         </span>
                       </button>
                     </li>
@@ -340,8 +371,8 @@ export function AcademicLibrary({
             )}
           </div>
           {hasMore ? (
-            <div className="border-t border-rule-soft px-3 py-2">
-              <p className="cl-marg mb-2">
+            <div className="flex flex-col gap-2">
+              <p className="text-[12.5px] text-mute">
                 Showing the first {items.length} of {total} works.
               </p>
               <Button
@@ -362,12 +393,12 @@ export function AcademicLibrary({
           {selectedWorkId ? (
             <WorkDetail workId={selectedWorkId} />
           ) : (
-            <div className="flex h-full min-h-[360px] items-center justify-center p-8 text-center">
+            <div className="flex h-full min-h-[360px] items-center justify-center rounded-2xl bg-raise p-8 text-center">
               <div>
-                <p className="font-heading text-base font-bold">
+                <p className="font-serif text-[26px] italic text-ink">
                   Select a work
                 </p>
-                <p className="cl-marg mt-2 max-w-sm">
+                <p className="mt-2 max-w-sm text-[13.5px] text-mute">
                   Review metadata and annotations, or import a bibliography to
                   grow the library.
                 </p>
@@ -461,7 +492,7 @@ export function AcademicLibrary({
             className="md:col-span-2"
           />
           {error ? (
-            <p role="alert" className="text-sm text-destructive md:col-span-2">
+            <p role="alert" className="text-[13.5px] text-hot md:col-span-2">
               {error}
             </p>
           ) : null}

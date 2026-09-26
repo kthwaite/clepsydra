@@ -212,6 +212,8 @@ describe("FeedReaderPane", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent(/entry 101/i);
     expect(screen.getByRole("alert")).toHaveTextContent(/archive unavailable/i);
+    // Hot text on sink is 4.48:1 in bone; the faint hot tint keeps AA.
+    expect(screen.getByRole("alert")).toHaveClass("bg-hot/5");
     await userEvent
       .setup()
       .click(screen.getByRole("button", { name: /retry/i }));
@@ -250,7 +252,7 @@ describe("FeedReaderPane", () => {
     expect(within(article).getByText("Ada Reader")).toBeVisible();
     expect(within(article).getByText("#systems")).toBeVisible();
     expect(within(article).getByText("#reading")).toBeVisible();
-    expect(within(article).getByText("Unread entry")).toBeVisible();
+    expect(within(article).getByText("Unread")).toBeVisible();
     expect(within(article).getByText("Saved")).toBeVisible();
     expect(within(article).getByRole("time")).toHaveAttribute(
       "datetime",
@@ -310,7 +312,7 @@ describe("FeedReaderPane", () => {
         action.textContent?.trim(),
       ),
     ).toEqual([
-      "Open original ↗",
+      "Open original",
       "Capture in journal",
       "Copy link",
       "Mark read",

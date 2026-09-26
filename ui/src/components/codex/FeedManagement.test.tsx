@@ -219,6 +219,10 @@ describe("FeedManagement", () => {
     renderManagement();
 
     await user.tab();
+    expect(
+      screen.getByRole("button", { name: /refresh feeds/i }),
+    ).toHaveFocus();
+    await user.tab();
     expect(screen.getByRole("button", { name: /^subscribe$/i })).toHaveFocus();
     await user.keyboard("{Enter}");
 
@@ -1270,5 +1274,77 @@ describe("FeedManagement", () => {
       "false",
     );
     expect(setItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("FeedManagement — Stone & Lamp", () => {
+  it("counts sources in sentence case beside the Subscriptions heading", () => {
+    renderManagement();
+
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Subscriptions" }),
+    ).toBeVisible();
+    expect(screen.getByText("1 source")).toBeVisible();
+    expect(screen.queryByText(/SOURCES/)).toBeNull();
+
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    renderManagement();
+    expect(screen.getByText("2 sources")).toBeVisible();
+  });
+
+  it("uses a primary Subscribe and a quiet Refresh feeds button", () => {
+    renderManagement();
+
+    expect(screen.getByRole("button", { name: /^subscribe$/i })).toHaveClass(
+      "bg-accent",
+    );
+    expect(screen.getByRole("button", { name: /refresh feeds/i })).toHaveClass(
+      "bg-sink",
+    );
+    expect(screen.getByRole("button", { name: /export opml/i })).toHaveClass(
+      "bg-sink",
+    );
+  });
+
+  it("reads fetch times as sentence meta without the Vessel separator", () => {
+    renderManagement();
+
+    const item = screen.getByText("One Example").closest("li");
+    const feed = within(item as HTMLElement);
+    expect(feed.getByText(/^last fetch \S/i).textContent).not.toContain("·");
+    expect(feed.getByText(/^next fetch \S/i).textContent).not.toContain("·");
+  });
+
+  it("titles the side sections and explains where subscriptions live", () => {
+    renderManagement();
+
+    expect(screen.getByText("Manifest diagnostics")).toBeVisible();
+    // Hot text keeps AA on bone ground only over a 5% hot tint.
+    expect(document.querySelector("ul.list-disc")).toHaveClass("bg-hot/5");
+    expect(
+      screen.getByText(
+        /subscriptions live in feeds\.md\. edits here rewrite that page\./i,
+      ),
+    ).toBeVisible();
+    expect(screen.getByText("OPML")).toBeVisible();
+    expect(screen.getByText("Folders import as feed groups.")).toBeVisible();
+  });
+
+  it("confirms unsubscribe with the danger button", async () => {
+    const user = userEvent.setup();
+    renderManagement();
+
+    await user.click(
+      screen.getByRole("button", { name: /unsubscribe one example/i }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: /unsubscribe one example/i,
+    });
+    expect(
+      within(dialog).getByRole("button", { name: /confirm unsubscribe/i }),
+    ).toHaveClass("bg-hot");
+    expect(
+      within(dialog).getByRole("heading", { name: /unsubscribe one example/i }),
+    ).toHaveClass("font-serif");
   });
 });

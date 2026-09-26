@@ -7,11 +7,14 @@ import {
   useUpdateWork,
   useWork,
 } from "#/api/academic";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { Select, SelectItem } from "#/components/ui/select";
 import { TextField } from "#/components/ui/text-field";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 function formatError(error: unknown, fallback: string): string {
   if (error instanceof Error) return error.message;
@@ -33,6 +36,11 @@ function splitValues(value: string): string[] {
     .filter(Boolean);
 }
 
+/** "highlight" → "Highlight": vocabulary values read in sentence case. */
+function sentence(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 function DetailRow({
   label,
   children,
@@ -40,12 +48,18 @@ function DetailRow({
   label: string;
   children: React.ReactNode;
 }) {
+  const value = children || "—";
   return (
-    <div className="grid grid-cols-[100px_1fr] gap-3 border-b border-rule-soft py-1.5 text-sm">
-      <dt className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-        {label}
-      </dt>
-      <dd className="min-w-0 break-words text-ink-2">{children || "—"}</dd>
+    <div className="flex min-w-0 flex-col gap-1">
+      <dt className="text-[12.5px] text-mute">{label}</dt>
+      <dd
+        className={cn(
+          "min-w-0 break-words text-[14px]",
+          value === "—" ? "text-mute" : "text-ink",
+        )}
+      >
+        {value}
+      </dd>
     </div>
   );
 }
@@ -78,11 +92,11 @@ export function WorkDetail({ workId }: { workId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   if (workQuery.isPending) {
-    return <p className="cl-marg p-6">Loading work…</p>;
+    return <p className="p-6 text-[13.5px] text-mute">Loading work…</p>;
   }
   if (workQuery.error || !workQuery.data) {
     return (
-      <p role="alert" className="p-6 text-sm text-destructive">
+      <p role="alert" className="p-6 text-[13.5px] text-hot">
         {formatError(workQuery.error, "Work could not be loaded.")}
       </p>
     );
@@ -196,26 +210,32 @@ export function WorkDetail({ workId }: { workId: string }) {
   }
 
   return (
-    <article className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl p-5 md:p-8">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-rule pb-3">
-          <div>
-            <p className="cl-mono mb-1 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-              {work.work_type} / {work.year ?? "undated"}
-            </p>
-            <h2 className="font-heading text-xl font-bold text-ink">
+    <article
+      aria-labelledby={`${id}-title`}
+      className="h-full overflow-y-auto rounded-2xl bg-raise"
+    >
+      <div className="flex flex-col gap-8 px-6 py-7 md:px-12 md:py-9">
+        <div className="flex flex-wrap items-start gap-6">
+          <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+            <span className="flex items-center gap-2.5">
+              <Tick />
+              <span className="font-serif text-[19px] italic text-mute">
+                {sentence(work.work_type)} · {work.year ?? "Undated"}
+              </span>
+            </span>
+            <h2
+              id={`${id}-title`}
+              className="font-serif text-[34px] leading-[1.05] tracking-[-0.01em] text-ink md:text-[44px]"
+            >
               {work.title}
             </h2>
-            <p className="mt-1 text-sm text-ink-mute">
+            <p className="text-[15px] text-ink-2">
               {(work.authors ?? []).join(", ") || "Unknown author"}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" onPress={openEditor}>
-              Edit metadata
-            </Button>
+          <div className="flex flex-wrap items-center gap-2 md:pt-[30px]">
+            <Button onPress={openEditor}>Edit metadata</Button>
             <Button
-              size="sm"
               variant="primary"
               onPress={() => openPage("page", work.path, work.title)}
             >
@@ -224,8 +244,10 @@ export function WorkDetail({ workId }: { workId: string }) {
           </div>
         </div>
 
-        <dl className="mt-4">
-          <DetailRow label="Status">{work.status ?? "unread"}</DetailRow>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-[18px] xl:grid-cols-4">
+          <DetailRow label="Status">
+            {sentence(work.status ?? "unread")}
+          </DetailRow>
           <DetailRow label="Rating">
             {work.rating ? `${work.rating} / 5` : "—"}
           </DetailRow>
@@ -240,55 +262,69 @@ export function WorkDetail({ workId }: { workId: string }) {
         </dl>
 
         {work.body ? (
-          <section className="mt-5" aria-labelledby={`${id}-notes`}>
+          <section
+            className="flex flex-col gap-2.5"
+            aria-labelledby={`${id}-notes`}
+          >
             <h3
               id={`${id}-notes`}
-              className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute"
+              className="flex items-center gap-2.5 font-serif text-[20px] italic text-mute"
             >
+              <Tick variant="faint" />
               Notes
             </h3>
-            <p className="mt-2 whitespace-pre-wrap text-sm text-ink-2">
+            <p className="whitespace-pre-wrap pl-[17px] text-[15px] leading-[1.65] text-ink-2">
               {work.body}
             </p>
           </section>
         ) : null}
 
-        <section className="mt-7" aria-labelledby={`${id}-annotations`}>
-          <div className="flex items-center justify-between gap-3 border-b border-rule pb-2">
+        <section
+          className="flex flex-col gap-3"
+          aria-labelledby={`${id}-annotations`}
+        >
+          <div className="flex items-center gap-3">
             <h3
               id={`${id}-annotations`}
-              className="font-heading text-base font-bold"
+              aria-label={`Annotations · ${annotations.length}`}
+              className="flex flex-1 items-center gap-2.5 font-serif text-[20px] italic text-ink"
             >
-              Annotations · {annotations.length}
+              <Tick />
+              Annotations
+              <span className="font-sans text-[13px] not-italic text-mute">
+                {annotations.length}
+              </span>
             </h3>
-            <Button size="sm" variant="primary" onPress={openAnnotationEditor}>
+            <Button size="sm" onPress={openAnnotationEditor}>
               Add annotation
             </Button>
           </div>
-          {annotationQuery.isPending ? (
-            <p className="cl-marg py-4">Loading annotations…</p>
-          ) : annotationQuery.error ? (
-            <p role="alert" className="py-4 text-sm text-destructive">
-              {formatError(
-                annotationQuery.error,
-                "Annotations could not be loaded.",
-              )}
-            </p>
-          ) : annotations.length === 0 ? (
-            <p className="cl-marg py-4">No annotations for this work.</p>
-          ) : (
-            <ul className="divide-y divide-rule-soft">
-              {annotations.map((annotation) => {
-                const label = annotation.body || annotation.path;
-                return (
-                  <li key={annotation.id} className="py-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="whitespace-pre-wrap text-sm text-ink-2">
+          <div className="pl-[17px]">
+            {annotationQuery.isPending ? (
+              <p className="text-[13.5px] text-mute">Loading annotations…</p>
+            ) : annotationQuery.error ? (
+              <p role="alert" className="text-[13.5px] text-hot">
+                {formatError(
+                  annotationQuery.error,
+                  "Annotations could not be loaded.",
+                )}
+              </p>
+            ) : annotations.length === 0 ? (
+              <p className="text-[13.5px] text-mute">
+                No annotations for this work.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-4">
+                {annotations.map((annotation) => {
+                  const label = annotation.body || annotation.path;
+                  return (
+                    <li key={annotation.id} className="flex items-start gap-5">
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <p className="whitespace-pre-wrap text-[15px] leading-[1.55] text-ink-2">
                           {label}
                         </p>
-                        <p className="cl-mono mt-1 text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-                          {annotation.annotation_type ?? "annotation"}
+                        <p className="text-[12.5px] text-mute">
+                          {sentence(annotation.annotation_type ?? "annotation")}
                           {annotation.source_location?.page
                             ? ` · page ${annotation.source_location.page}`
                             : ""}
@@ -297,20 +333,23 @@ export function WorkDetail({ workId }: { workId: string }) {
                       <button
                         type="button"
                         aria-label={`Open annotation ${label}`}
-                        className="cl-mono flex-shrink-0 text-[10px] uppercase tracking-wider text-accent hover:underline"
+                        className={cn(
+                          "flex-shrink-0 cursor-pointer rounded-sm pt-0.5 text-[13px] text-accent hover:underline",
+                          FOCUS_RING_NATIVE,
+                        )}
                         onClick={() => openPage("page", annotation.path, label)}
                       >
                         Open page
                       </button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <p className="cl-marg mt-3">
-            Open an annotation page to edit it or use previewed page deletion.
-          </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <p className="mt-3 text-[12.5px] text-mute">
+              Open an annotation page to edit it or use previewed page deletion.
+            </p>
+          </div>
         </section>
       </div>
 
@@ -397,7 +436,7 @@ export function WorkDetail({ workId }: { workId: string }) {
             className="md:col-span-2"
           />
           {error ? (
-            <p role="alert" className="text-sm text-destructive md:col-span-2">
+            <p role="alert" className="text-[13.5px] text-hot md:col-span-2">
               {error}
             </p>
           ) : null}
@@ -443,10 +482,10 @@ export function WorkDetail({ workId }: { workId: string }) {
             <SelectItem id="highlight">Highlight</SelectItem>
             <SelectItem id="note">Note</SelectItem>
           </Select>
-          <div>
+          <div className="flex flex-col">
             <label
               htmlFor={`${id}-annotation-body`}
-              className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
+              className="text-[12.5px] text-mute"
             >
               Annotation body
             </label>
@@ -455,7 +494,10 @@ export function WorkDetail({ workId }: { workId: string }) {
               value={annotationBody}
               onChange={(event) => setAnnotationBody(event.target.value)}
               rows={5}
-              className="mt-2 w-full resize-y border border-input bg-background px-3 py-2 text-sm outline-none focus:border-ring"
+              className={cn(
+                "mt-1.5 w-full resize-y rounded-xl bg-sink px-4 py-3 text-[14px] leading-[1.55] text-ink",
+                FOCUS_RING_NATIVE,
+              )}
             />
           </div>
           <div className="grid gap-3 md:grid-cols-2">
@@ -483,7 +525,7 @@ export function WorkDetail({ workId }: { workId: string }) {
             description="Separate tags with commas."
           />
           {error ? (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-[13.5px] text-hot">
               {error}
             </p>
           ) : null}

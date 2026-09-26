@@ -1,10 +1,10 @@
 import { ChevronRight, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Button,
   Disclosure,
   DisclosurePanel,
   Heading,
+  Button as RACButton,
 } from "react-aria-components";
 import { toast } from "sonner";
 import {
@@ -17,7 +17,11 @@ import {
   useSubscribeFeed,
   useUpdateFeed,
 } from "#/api/feeds";
+import { Button, buttonStyles } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
+import { TextField } from "#/components/ui/text-field";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 import { formatRelativeTime } from "#/lib/time";
 import {
   type FeedDisclosurePreferences,
@@ -30,6 +34,7 @@ import {
 import { CodexModalShell } from "./CodexModalShell";
 import { canonicalFeedGroups, FeedGroupComboBox } from "./FeedGroupComboBox";
 import { Section } from "./Section";
+import { Tick } from "./Tick";
 
 export function FeedManagement() {
   const feedsQuery = useFeeds();
@@ -145,157 +150,178 @@ export function FeedManagement() {
     });
   };
 
-  return (
-    <div className="space-y-3.5">
-      {surfaceError ? (
-        <MutationAlert
-          error={surfaceError}
-          fallback="The feed operation could not be completed."
-        />
-      ) : null}
-      <Section
-        label="Subscriptions"
-        wrapHeader
-        caption={
-          feedsQuery.data
-            ? `${feedsQuery.data.groups.reduce((count, group) => count + group.feeds.length, 0)} SOURCES`
-            : "MANIFEST"
-        }
-        pip={feedsQuery.data?.diagnostics.length ? "hot" : "dim"}
-        action={
-          <>
-            <Button
-              className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              onPress={() => {
-                subscribeFeed.reset();
-                setIsSubscribeOpen(true);
-              }}
-            >
-              Subscribe
-            </Button>
-            <Button
-              className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              isDisabled={refreshFeeds.isPending}
-              onPress={() => refreshFeeds.mutate(undefined)}
-            >
-              {refreshFeeds.isPending ? "Refreshing…" : "Refresh feeds"}
-            </Button>
-          </>
-        }
-      >
-        <ManifestState query={feedsQuery} />
+  const diagnostics = feedsQuery.data?.diagnostics ?? [];
+  const sourceCount =
+    feedsQuery.data?.groups.reduce(
+      (count, group) => count + group.feeds.length,
+      0,
+    ) ?? null;
 
-        {feedsQuery.data?.diagnostics.length ? (
-          <div
-            role="alert"
-            className="mb-3 border-l-2 border-hot bg-paper px-3 py-2 text-[11px] text-hot"
-          >
-            <p className="cl-mono mb-1 text-[9px] uppercase tracking-[0.18em]">
-              Manifest diagnostics
-            </p>
-            <ul className="space-y-1">
-              {feedsQuery.data.diagnostics.map((diagnostic) => (
+  return (
+    <div className="grid min-w-0 gap-10 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-16">
+      <div className="flex min-w-0 flex-col gap-5">
+        {surfaceError ? (
+          <MutationAlert
+            error={surfaceError}
+            fallback="The feed operation could not be completed."
+          />
+        ) : null}
+        <Section
+          label="Subscriptions"
+          wrapHeader
+          caption={
+            sourceCount === null
+              ? undefined
+              : `${sourceCount} ${sourceCount === 1 ? "source" : "sources"}`
+          }
+          pip={diagnostics.length ? "hot" : "cool"}
+          action={
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                className={ACTION_BUTTON}
+                isDisabled={refreshFeeds.isPending}
+                onPress={() => refreshFeeds.mutate(undefined)}
+              >
+                {refreshFeeds.isPending ? "Refreshing…" : "Refresh feeds"}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                className={ACTION_BUTTON}
+                onPress={() => {
+                  subscribeFeed.reset();
+                  setIsSubscribeOpen(true);
+                }}
+              >
+                Subscribe
+              </Button>
+            </>
+          }
+        >
+          <ManifestState query={feedsQuery} />
+
+          {feedsQuery.data && feedsQuery.data.groups.length === 0 ? (
+            <div className="rounded-xl bg-sink px-4 py-8 text-center">
+              <p className="text-[15px] font-medium text-ink">
+                No subscriptions yet
+              </p>
+              <p className="mt-1 text-[13.5px] text-mute">
+                Subscribe to a feed or import an OPML file to start the river.
+              </p>
+            </div>
+          ) : null}
+
+          {feedsQuery.data?.groups.length ? (
+            <ul aria-label="Subscriptions" className="flex flex-col gap-[22px]">
+              {feedsQuery.data.groups.map((group) => {
+                const groupName = group.name || "Ungrouped";
+                const groupIdentity = normalizeFeedGroupIdentity(group.name);
+                const feedCount = `${group.feeds.length} ${group.feeds.length === 1 ? "feed" : "feeds"}`;
+                const isExpanded =
+                  activeDisclosure?.namespace !==
+                    feedsQuery.data?.preference_namespace ||
+                  !activeDisclosure.preferences.groups.has(groupIdentity);
+                return (
+                  <li key={group.name}>
+                    <Disclosure
+                      isExpanded={isExpanded}
+                      onExpandedChange={(expanded) =>
+                        setDisclosureExpanded("groups", groupIdentity, expanded)
+                      }
+                      className="flex flex-col gap-2"
+                    >
+                      <Heading level={3} className="m-0 font-normal">
+                        <RACButton
+                          slot="trigger"
+                          aria-label={`${groupName} group, ${feedCount}`}
+                          className={cn(
+                            "flex min-h-[30px] max-w-full items-center gap-2.5 rounded-full text-left text-ink",
+                            FOCUS_RING,
+                          )}
+                        >
+                          <ChevronRight
+                            aria-hidden="true"
+                            className={cn(
+                              "h-3 w-3 shrink-0 text-mute motion-safe:transition-transform",
+                              isExpanded && "rotate-90",
+                            )}
+                          />
+                          <span className="min-w-0 truncate font-serif text-[20px] italic leading-none">
+                            {groupName}
+                          </span>
+                          <span className="shrink-0 text-[13px] text-mute">
+                            {feedCount}
+                          </span>
+                        </RACButton>
+                      </Heading>
+                      <DisclosurePanel>
+                        <ul
+                          aria-label={`${groupName} feeds`}
+                          className="overflow-hidden rounded-[14px] bg-raise"
+                        >
+                          {group.feeds.map((feed) => (
+                            <FeedRow
+                              key={feed.id}
+                              feed={feed}
+                              isExpanded={
+                                activeDisclosure?.namespace !==
+                                  feedsQuery.data?.preference_namespace ||
+                                !activeDisclosure.preferences.feeds.has(feed.id)
+                              }
+                              onExpandedChange={(expanded) =>
+                                setDisclosureExpanded(
+                                  "feeds",
+                                  feed.id,
+                                  expanded,
+                                )
+                              }
+                              onEdit={() => {
+                                updateFeed.reset();
+                                setEditingFeed(feed);
+                              }}
+                              onDelete={() => {
+                                deleteFeed.reset();
+                                setDeletingFeed(feed);
+                              }}
+                            />
+                          ))}
+                        </ul>
+                      </DisclosurePanel>
+                    </Disclosure>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </Section>
+      </div>
+
+      <aside className="flex min-w-0 flex-col gap-10 lg:pt-1">
+        {diagnostics.length ? (
+          <section role="alert" className="flex flex-col gap-3">
+            <AsideEyebrow tone="hot">Manifest diagnostics</AsideEyebrow>
+            <ul className="list-disc rounded-xl bg-hot/5 py-3.5 pr-4 pl-[34px] text-[13px] leading-[1.55] text-hot">
+              {diagnostics.map((diagnostic) => (
                 <li key={`${diagnostic.line}:${diagnostic.message}`}>
                   Line {diagnostic.line} · {diagnostic.message}
                 </li>
               ))}
             </ul>
-          </div>
+          </section>
         ) : null}
-
-        {feedsQuery.data && feedsQuery.data.groups.length === 0 ? (
-          <div className="border border-dashed border-rule px-4 py-6 text-center">
-            <p className="font-sans text-[14px] font-semibold text-ink">
-              No subscriptions yet
-            </p>
-            <p className="cl-marg mt-1">
-              Subscribe to a feed or import an OPML file to start the river.
-            </p>
-          </div>
-        ) : null}
-
-        {feedsQuery.data?.groups.length ? (
-          <ul aria-label="Subscriptions" className="space-y-4">
-            {feedsQuery.data.groups.map((group) => {
-              const groupName = group.name || "Ungrouped";
-              const groupIdentity = normalizeFeedGroupIdentity(group.name);
-              const isExpanded =
-                activeDisclosure?.namespace !==
-                  feedsQuery.data?.preference_namespace ||
-                !activeDisclosure.preferences.groups.has(groupIdentity);
-              return (
-                <li key={group.name}>
-                  <Disclosure
-                    isExpanded={isExpanded}
-                    onExpandedChange={(expanded) =>
-                      setDisclosureExpanded("groups", groupIdentity, expanded)
-                    }
-                  >
-                    <Heading
-                      level={3}
-                      className="mb-1.5 text-[9px] font-medium uppercase tracking-[0.2em] text-ink-mute"
-                    >
-                      <Button
-                        slot="trigger"
-                        aria-label={`${groupName} group, ${group.feeds.length} ${group.feeds.length === 1 ? "feed" : "feeds"}`}
-                        className="cl-mono flex w-full items-center gap-2 bg-transparent text-left outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                      >
-                        <ChevronRight
-                          aria-hidden="true"
-                          className={`h-3 w-3 shrink-0 motion-safe:transition-transform ${isExpanded ? "rotate-90" : ""}`}
-                        />
-                        <span className="shrink-0">{groupName}</span>
-                        <span className="shrink-0">
-                          {group.feeds.length}{" "}
-                          {group.feeds.length === 1 ? "feed" : "feeds"}
-                        </span>
-                        <span
-                          aria-hidden="true"
-                          className="h-px min-w-0 flex-1 bg-rule"
-                        />
-                      </Button>
-                    </Heading>
-                    <DisclosurePanel>
-                      <ul
-                        aria-label={`${groupName} feeds`}
-                        className="border-t border-rule"
-                      >
-                        {group.feeds.map((feed) => (
-                          <FeedRow
-                            key={feed.id}
-                            feed={feed}
-                            isExpanded={
-                              activeDisclosure?.namespace !==
-                                feedsQuery.data?.preference_namespace ||
-                              !activeDisclosure.preferences.feeds.has(feed.id)
-                            }
-                            onExpandedChange={(expanded) =>
-                              setDisclosureExpanded("feeds", feed.id, expanded)
-                            }
-                            onEdit={() => {
-                              updateFeed.reset();
-                              setEditingFeed(feed);
-                            }}
-                            onDelete={() => {
-                              deleteFeed.reset();
-                              setDeletingFeed(feed);
-                            }}
-                          />
-                        ))}
-                      </ul>
-                    </DisclosurePanel>
-                  </Disclosure>
-                </li>
-              );
-            })}
-          </ul>
-        ) : null}
-
+        <section className="flex flex-col gap-3">
+          <AsideEyebrow>Manifest</AsideEyebrow>
+          <p className="pl-[17px] text-[14px] leading-[1.6] text-ink-2">
+            Subscriptions live in feeds.md. Edits here rewrite that page.
+          </p>
+        </section>
         <OpmlActions
           isImporting={importOpml.isPending}
           onImport={(opml) => importOpml.mutate({ opml })}
         />
-      </Section>
+      </aside>
 
       {isSubscribeOpen ? (
         <SubscribeFeedDialog
@@ -354,6 +380,29 @@ export function FeedManagement() {
   );
 }
 
+/** Header actions: 36px pills per the subscriptions mockup. */
+const ACTION_BUTTON = "h-9 px-4 text-[13.5px]";
+/** Dialog footer actions: 40px pills. */
+const DIALOG_BUTTON = "h-10 px-5 text-[14px]";
+
+/** A rail eyebrow: tick + muted italic serif label (hot tick for trouble). */
+function AsideEyebrow({
+  tone = "live",
+  children,
+}: {
+  tone?: "live" | "hot";
+  children: string;
+}) {
+  return (
+    <h2 className="m-0 flex items-center gap-2.5 font-normal">
+      <Tick className={tone === "hot" ? "bg-hot" : undefined} />
+      <span className="font-serif text-[19px] italic leading-none text-mute">
+        {children}
+      </span>
+    </h2>
+  );
+}
+
 /** Subscription entry. The draft lives here, so dismissing drops it and a
  * failed mutation — which keeps the dialog mounted — retains it. */
 function SubscribeFeedDialog({
@@ -374,12 +423,11 @@ function SubscribeFeedDialog({
   return (
     <CodexModalShell
       ariaLabel="Subscribe to a feed"
-      maxWidthClassName="max-w-lg"
+      maxWidthClassName="max-w-[520px]"
       onDismiss={onDismiss}
     >
-      <DialogHeader eyebrow="Manifest · feeds.md" title="Subscribe to a feed" />
       <form
-        className="grid gap-3 px-4 py-4"
+        className={DIALOG_BODY}
         onSubmit={async (event) => {
           event.preventDefault();
           const normalizedUrl = url.trim();
@@ -391,44 +439,48 @@ function SubscribeFeedDialog({
           }
         }}
       >
-        <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-          Feed or site URL
-          <input
-            // biome-ignore lint/a11y/noAutofocus: the dialog opens for this one value, so focus starts in it
-            autoFocus
-            disabled={isPending}
-            required
-            inputMode="url"
-            autoComplete="url"
-            value={url}
-            onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://example.com/feed.xml"
-            className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-2 text-[12px] normal-case tracking-normal text-ink outline-none placeholder:text-ink-mute focus:border-accent"
-          />
-        </label>
-        <div className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-          <span>Group</span>
-          <FeedGroupComboBox
-            value={group}
-            groups={groups}
-            ariaLabel="Group"
-            disabled={isPending}
-            onChange={setGroup}
-          />
-        </div>
+        <DialogHeader
+          eyebrow="Manifest · feeds.md"
+          title="Subscribe to a feed"
+        />
+        <TextField
+          label="Feed or site URL"
+          autoFocus
+          isDisabled={isPending}
+          isRequired
+          inputMode="url"
+          autoComplete="url"
+          value={url}
+          onChange={setUrl}
+          placeholder="https://example.com/feed.xml"
+        />
+        <GroupField
+          value={group}
+          groups={groups}
+          disabled={isPending}
+          onChange={setGroup}
+        />
         {error ? (
           <MutationAlert
             error={error}
             fallback="The subscription could not be saved."
           />
         ) : null}
-        <div className="flex flex-wrap justify-end gap-2 border-t border-rule pt-3">
-          <Button type="button" className="cl-btn" onPress={onDismiss}>
+        <div className={DIALOG_FOOTER}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className={DIALOG_BUTTON}
+            onPress={onDismiss}
+          >
             Cancel
           </Button>
           <Button
             type="submit"
-            className="cl-btn cl-btn-hot"
+            variant="primary"
+            size="sm"
+            className={DIALOG_BUTTON}
             isDisabled={isPending}
           >
             {isPending ? "Subscribing…" : "Subscribe"}
@@ -454,7 +506,7 @@ function ManifestState({
       <div
         role="status"
         aria-label="Loading subscriptions"
-        className="cl-mono py-6 text-center text-[10px] uppercase tracking-[0.18em] text-ink-mute"
+        className="py-6 text-center text-[13.5px] text-mute"
       >
         Loading subscriptions…
       </div>
@@ -462,10 +514,7 @@ function ManifestState({
   }
   if (query.isError) {
     return (
-      <div
-        role="alert"
-        className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
-      >
+      <div role="alert" className={cn(ALERT, "mb-3")}>
         {query.error instanceof Error
           ? query.error.message
           : "The subscription manifest could not be loaded."}
@@ -508,44 +557,57 @@ function FeedRow({
     .join(". ");
 
   return (
-    <li className="border-b border-rule">
+    <li>
       <Disclosure isExpanded={isExpanded} onExpandedChange={onExpandedChange}>
-        <div className="flex min-w-0 items-stretch">
-          <Heading level={4} className="m-0 min-w-0 flex-1">
-            <Button
+        <div className="flex min-w-0 items-start gap-1 py-2 pr-2 pl-2.5 md:pl-3">
+          <Heading level={4} className="m-0 min-w-0 flex-1 font-normal">
+            <RACButton
               slot="trigger"
               aria-label={summaryLabel}
-              className="flex h-full w-full min-w-0 items-start gap-1.5 bg-transparent px-2 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent md:px-3"
+              className={cn(
+                "flex w-full min-w-0 items-start gap-2 rounded-[10px] px-1.5 py-1 text-left",
+                FOCUS_RING,
+              )}
             >
               <ChevronRight
                 aria-hidden="true"
-                className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-mute motion-safe:transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                className={cn(
+                  "mt-[3px] h-3.5 w-3.5 shrink-0 text-mute motion-safe:transition-transform",
+                  isExpanded && "rotate-90",
+                )}
               />
               <span
                 aria-hidden="true"
-                className={`mt-1.5 h-[7px] w-[7px] shrink-0 ${unhealthy ? "bg-hot" : "bg-cool"}`}
+                className={cn(
+                  "mt-[7px] h-[7px] w-[7px] shrink-0 rounded-full",
+                  unhealthy ? "bg-hot" : "bg-faint",
+                )}
               />
-              <span className="min-w-0 flex-1">
-                <span className="block break-words font-sans text-[14px] font-semibold leading-[1.3] text-ink">
-                  {title}
+              <span className="flex min-w-0 flex-1 flex-col gap-[3px] pl-1">
+                <span className="flex min-w-0 flex-wrap items-baseline gap-x-3">
+                  <span className="min-w-0 break-words text-[14.5px] font-medium leading-[1.35] text-ink">
+                    {title}
+                  </span>
+                  <span className="min-w-0 max-w-full truncate text-[12.5px] text-mute">
+                    {feed.url}
+                  </span>
                 </span>
-                <span className="cl-mono mt-0.5 block break-all text-[9px] tracking-[0.08em] text-ink-mute">
-                  {feed.url}
-                </span>
-                <span className="cl-mono mt-1.5 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[9px] uppercase tracking-[0.1em] text-ink-mute">
-                  <span>Last fetch · {lastFetch}</span>
-                  <span>Next fetch · {nextFetch}</span>
-                  <span className={unhealthy ? "text-hot" : "text-cool"}>
+                <span className="mt-[3px] flex flex-wrap gap-x-3.5 gap-y-1 text-[12.5px] text-mute">
+                  <span>Last fetch {lastFetch}</span>
+                  <span>Next fetch {nextFetch}</span>
+                  <span className={unhealthy ? "text-hot" : undefined}>
                     {errorSummary}
                   </span>
                   {feed.tags.map((tag) => (
-                    <span key={tag}>#{tag}</span>
+                    <span key={tag} className="text-accent">
+                      #{tag}
+                    </span>
                   ))}
                 </span>
               </span>
-            </Button>
+            </RACButton>
           </Heading>
-          <div className="flex shrink-0 items-start gap-0.5 py-1.5 pr-1.5 md:pr-2.5">
+          <div className="flex shrink-0 items-start gap-0.5">
             <IconButton
               variant="ghost"
               aria-label={`Edit ${title}`}
@@ -557,7 +619,7 @@ function FeedRow({
             <IconButton
               variant="ghost"
               aria-label={`Unsubscribe ${title}`}
-              className="min-h-11 min-w-11 text-hot hover:bg-hot/10 hover:text-hot data-[hovered]:bg-hot/10 data-[hovered]:text-hot md:min-h-0 md:min-w-0"
+              className="min-h-11 min-w-11 text-hot data-[hovered]:bg-hot/10 data-[hovered]:text-hot md:min-h-0 md:min-w-0"
               onPress={onDelete}
             >
               <Trash2 aria-hidden="true" />
@@ -565,10 +627,10 @@ function FeedRow({
           </div>
         </div>
         <DisclosurePanel
-          className={feed.last_error ? "px-8 pb-2 md:px-10" : undefined}
+          className={feed.last_error ? "pr-3 pb-3 pl-[52px]" : undefined}
         >
           {feed.last_error ? (
-            <p className="border-l-2 border-hot pl-2 text-[11px] text-hot">
+            <p className="rounded-[10px] bg-hot/5 px-3 py-2 text-[13px] text-hot">
               {feed.last_error}
             </p>
           ) : null}
@@ -608,39 +670,54 @@ function OpmlActions({
   };
 
   return (
-    <div className="mt-4 flex min-w-0 flex-wrap items-center gap-2 border-t border-rule pt-3">
-      <label className="cl-btn cursor-pointer outline-none focus-within:ring-2 focus-within:ring-accent">
-        {isImporting ? "Importing…" : "Import OPML"}
-        <input
-          type="file"
-          accept=".opml,.xml,text/x-opml,application/xml,text/xml"
-          aria-label="Import OPML"
-          disabled={isImporting}
-          className="sr-only"
-          onChange={async (event) => {
-            const input = event.currentTarget;
-            const file = input.files?.[0];
-            if (!file) return;
-            try {
-              onImport(await file.text());
-            } catch {
-              toast.error("Could not read the selected OPML file");
-            } finally {
-              input.value = "";
-            }
-          }}
-        />
-      </label>
-      <Button
-        className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        onPress={exportSubscriptions}
-      >
-        Export OPML
-      </Button>
-      <span className="cl-marg basis-full sm:basis-auto">
+    <section className="flex flex-col gap-3.5">
+      <AsideEyebrow>OPML</AsideEyebrow>
+      <div className="flex min-w-0 flex-wrap gap-2 pl-[17px]">
+        <label
+          className={buttonStyles(
+            "secondary",
+            "sm",
+            cn(
+              ACTION_BUTTON,
+              "focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-ground",
+              isImporting && "cursor-not-allowed opacity-45",
+            ),
+          )}
+        >
+          {isImporting ? "Importing…" : "Import OPML"}
+          <input
+            type="file"
+            accept=".opml,.xml,text/x-opml,application/xml,text/xml"
+            aria-label="Import OPML"
+            disabled={isImporting}
+            className="sr-only"
+            onChange={async (event) => {
+              const input = event.currentTarget;
+              const file = input.files?.[0];
+              if (!file) return;
+              try {
+                onImport(await file.text());
+              } catch {
+                toast.error("Could not read the selected OPML file");
+              } finally {
+                input.value = "";
+              }
+            }}
+          />
+        </label>
+        <Button
+          variant="secondary"
+          size="sm"
+          className={ACTION_BUTTON}
+          onPress={exportSubscriptions}
+        >
+          Export OPML
+        </Button>
+      </div>
+      <p className="pl-[17px] text-[13px] text-mute">
         Folders import as feed groups.
-      </span>
-    </div>
+      </p>
+    </section>
   );
 }
 
@@ -668,12 +745,11 @@ function EditFeedDialog({
   return (
     <CodexModalShell
       ariaLabel={`Edit ${displayTitle}`}
-      maxWidthClassName="max-w-lg"
+      maxWidthClassName="max-w-[520px]"
       onDismiss={onDismiss}
     >
-      <DialogHeader eyebrow="Subscription" title={`Edit ${displayTitle}`} />
       <form
-        className="grid gap-3 px-4 py-4"
+        className={DIALOG_BODY}
         onSubmit={(event) => {
           event.preventDefault();
           onSave({
@@ -682,35 +758,40 @@ function EditFeedDialog({
           });
         }}
       >
-        <DialogField
+        <DialogHeader eyebrow="Subscription" title={`Edit ${displayTitle}`} />
+        <TextField
           label="Title"
           value={nextTitle}
           isDisabled={isPending}
           onChange={setNextTitle}
         />
-        <div className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-          <span>Group</span>
-          <FeedGroupComboBox
-            value={nextGroup}
-            groups={groups}
-            ariaLabel="Group"
-            disabled={isPending}
-            onChange={setNextGroup}
-          />
-        </div>
+        <GroupField
+          value={nextGroup}
+          groups={groups}
+          disabled={isPending}
+          onChange={setNextGroup}
+        />
         {error ? (
           <MutationAlert
             error={error}
             fallback="The subscription edit could not be saved."
           />
         ) : null}
-        <div className="flex flex-wrap justify-end gap-2 border-t border-rule pt-3">
-          <Button type="button" className="cl-btn" onPress={onDismiss}>
+        <div className={DIALOG_FOOTER}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className={DIALOG_BUTTON}
+            onPress={onDismiss}
+          >
             Cancel
           </Button>
           <Button
             type="submit"
-            className="cl-btn cl-btn-hot"
+            variant="primary"
+            size="sm"
+            className={DIALOG_BUTTON}
             isDisabled={isPending}
           >
             {isPending ? "Saving…" : "Save changes"}
@@ -738,15 +819,16 @@ function DeleteFeedDialog({
   return (
     <CodexModalShell
       ariaLabel={`Unsubscribe ${title}`}
-      maxWidthClassName="max-w-lg"
+      maxWidthClassName="max-w-[520px]"
       onDismiss={onDismiss}
     >
-      <DialogHeader
-        eyebrow="Destructive action"
-        title={`Unsubscribe ${title}`}
-      />
-      <div className="px-4 py-4">
-        <p className="font-sans text-[13px] leading-relaxed text-ink-2">
+      <div className={DIALOG_BODY}>
+        <DialogHeader
+          eyebrow="Destructive action"
+          title={`Unsubscribe ${title}`}
+          tone="hot"
+        />
+        <p className="text-[14px] leading-relaxed text-ink-2">
           This removes the subscription from feeds.md. Saved entries remain
           available.
         </p>
@@ -756,12 +838,19 @@ function DeleteFeedDialog({
             fallback="The subscription could not be removed."
           />
         ) : null}
-        <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-rule pt-3">
-          <Button className="cl-btn" onPress={onDismiss}>
+        <div className={DIALOG_FOOTER}>
+          <Button
+            variant="secondary"
+            size="sm"
+            className={DIALOG_BUTTON}
+            onPress={onDismiss}
+          >
             Cancel
           </Button>
           <Button
-            className="cl-btn border-hot text-hot"
+            variant="danger"
+            size="sm"
+            className={DIALOG_BUTTON}
             isDisabled={isPending}
             onPress={onConfirm}
           >
@@ -773,38 +862,59 @@ function DeleteFeedDialog({
   );
 }
 
-function DialogHeader({ eyebrow, title }: { eyebrow: string; title: string }) {
+const DIALOG_BODY =
+  "flex flex-col gap-[22px] px-6 pt-7 pb-6 md:px-8 md:pt-[30px] md:pb-7";
+const DIALOG_FOOTER = "flex flex-wrap justify-end gap-2 pt-1";
+const ALERT = "rounded-xl bg-hot/5 px-4 py-3 text-[13.5px] text-hot";
+
+function DialogHeader({
+  eyebrow,
+  title,
+  tone = "live",
+}: {
+  eyebrow: string;
+  title: string;
+  tone?: "live" | "hot";
+}) {
   return (
-    <header className="border-b border-rule bg-paper-2 px-4 py-3">
-      <p className="cl-mono text-[9px] uppercase tracking-[0.2em] text-accent">
-        {eyebrow}
+    <header className="flex flex-col gap-2">
+      <p className="m-0 flex items-center gap-2.5">
+        <Tick className={tone === "hot" ? "bg-hot" : undefined} />
+        <span className="font-serif text-[19px] italic leading-none text-mute">
+          {eyebrow}
+        </span>
       </p>
-      <h2 className="mt-1 font-sans text-[18px] font-bold text-ink">{title}</h2>
+      <h2 className="m-0 font-serif text-[32px] font-normal leading-[1.1] text-ink">
+        {title}
+      </h2>
     </header>
   );
 }
 
-function DialogField({
-  label,
+/** The group combobox under a sentence-case label; the combobox carries its
+ *  own accessible name. */
+function GroupField({
   value,
-  isDisabled,
+  groups,
+  disabled,
   onChange,
 }: {
-  label: string;
-  isDisabled: boolean;
   value: string;
+  groups: string[];
+  disabled: boolean;
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-      {label}
-      <input
-        disabled={isDisabled}
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <span className="text-[12.5px] text-mute">Group</span>
+      <FeedGroupComboBox
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-2 text-[12px] normal-case tracking-normal text-ink outline-none focus:border-accent"
+        groups={groups}
+        ariaLabel="Group"
+        disabled={disabled}
+        onChange={onChange}
       />
-    </label>
+    </div>
   );
 }
 
@@ -816,10 +926,7 @@ function MutationAlert({
   fallback: string;
 }) {
   return (
-    <div
-      role="alert"
-      className="border border-hot px-3 py-2 text-[12px] text-hot"
-    >
+    <div role="alert" className={ALERT}>
       {error instanceof Error
         ? error.message
         : typeof error === "object" && error !== null && "message" in error

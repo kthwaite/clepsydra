@@ -41,13 +41,17 @@ function SaveState() {
   );
 }
 
+/** Screens that publish footer context. Folio stays mounted behind other
+ *  screens, so published parts show only on a screen that owns them. */
+const CONTEXT_VIEWS: ReadonlySet<CodexView> = new Set(["folio", "feeds"]);
+
 function Context({ view }: { view: CodexView }) {
   useTick();
   const parts = useFooterParts();
   const { progress } = useReadingProgress();
   const { data: stats } = useStats();
   const all = [
-    ...(view === "folio" ? parts : []),
+    ...(CONTEXT_VIEWS.has(view) ? parts : []),
     ...(view === "folio"
       ? [`${Math.round(Math.max(0, Math.min(1, progress)) * 100)}% read`]
       : []),

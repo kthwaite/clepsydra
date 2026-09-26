@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "#/components/ui/button";
+import { cn } from "#/lib/cn";
 import { normalizeIsbn } from "#/lib/isbn";
 import {
   type BookBarcodeScannerControls,
@@ -71,11 +73,11 @@ export function BookBarcodeScanner({
   }, [stop]);
 
   return (
-    <div className="mt-3 border border-rule bg-paper-2 p-2">
+    <div className="flex flex-col gap-3 rounded-[14px] bg-sink p-3">
       <video
         aria-label="Book barcode camera preview"
         autoPlay
-        className="aspect-[4/3] w-full bg-ink object-cover"
+        className="aspect-[4/3] w-full rounded-[10px] bg-ink object-cover"
         data-testid="book-barcode-video"
         muted
         playsInline
@@ -83,25 +85,21 @@ export function BookBarcodeScanner({
       />
       <p
         aria-live="polite"
-        className={
-          isError
-            ? "cl-mono mt-2 text-[10px] text-hot"
-            : "cl-mono mt-2 text-[10px] text-ink-mute"
-        }
+        className={cn("text-[13px]", isError ? "text-hot" : "text-mute")}
       >
         {message}
       </p>
-      <div className="mt-2 flex justify-end">
-        <button
-          className="cl-btn"
-          onClick={() => {
+      <div className="flex justify-end">
+        <Button
+          onPress={() => {
             stop();
             onCancel();
           }}
           type="button"
+          variant="ghost"
         >
           Cancel scanning
-        </button>
+        </Button>
       </div>
     </div>
   );

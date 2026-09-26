@@ -1,7 +1,11 @@
+import { ScanBarcode } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useImportIsbn } from "#/api/academic";
 import { formatApiError } from "#/api/error";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
+import { Tick } from "#/components/codex/Tick";
+import { Button } from "#/components/ui/button";
+import { TextField } from "#/components/ui/text-field";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { normalizeIsbn } from "#/lib/isbn";
 import { useUiStore } from "#/store/ui";
@@ -66,104 +70,99 @@ export function BookImportModal() {
     <CodexModalShell
       ariaLabel="Add book"
       maxWidthClassName="max-w-[480px]"
+      panelClassName="rounded-[18px]"
       onDismiss={dismiss}
     >
-      <form onSubmit={submit}>
-        <div className="flex items-baseline justify-between border-b border-ink bg-paper-2 px-3 py-1.5">
-          <span className="cl-mono text-[10px] uppercase tracking-[0.18em] text-ink">
-            ▣ Add book
+      <form
+        onSubmit={submit}
+        className="flex flex-col gap-5 px-6 py-7 md:px-8 md:pt-[30px] md:pb-7"
+      >
+        <div className="flex flex-col gap-2">
+          <span className="flex items-center gap-2.5">
+            <Tick />
+            <span className="font-serif text-[19px] italic leading-none text-mute">
+              ISBN · Open Library
+            </span>
           </span>
-          <span className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-            ISBN / OPEN LIBRARY
-          </span>
+          <h2 className="font-serif text-[32px] font-normal leading-[1.1] text-ink">
+            Add book
+          </h2>
         </div>
 
-        <div className="px-4 py-3">
-          <label
-            className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute"
-            htmlFor="book-import-isbn"
-          >
-            ISBN-10 or ISBN-13
-          </label>
-          <input
+        <div className="flex flex-col gap-2">
+          <TextField
             id="book-import-isbn"
-            aria-label="ISBN"
-            aria-invalid={error ? true : undefined}
             autoComplete="off"
-            className="cl-mono mt-1 w-full border border-rule bg-transparent p-1.5 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+            description="Metadata is retrieved from Open Library. Review the book page after import."
             inputMode="text"
-            onChange={(event) => {
-              setIsbn(event.target.value);
+            inputRef={inputRef}
+            isInvalid={error ? true : undefined}
+            label="ISBN-10 or ISBN-13"
+            onChange={(value) => {
+              setIsbn(value);
               if (error) setError(null);
               if (scanMessage) setScanMessage(null);
             }}
             placeholder="978-0-262-01153-2"
-            ref={inputRef}
             value={isbn}
           />
-          <p className="cl-mono mt-1.5 text-[9px] leading-relaxed text-ink-mute">
-            Metadata is retrieved from Open Library. Review the book page after
-            import.
-          </p>
 
-          {isScanning ? (
-            <BookBarcodeScanner
-              onCancel={() => {
-                setIsScanning(false);
-                inputRef.current?.focus();
-              }}
-              onCapture={(normalized) => {
-                setIsbn(normalized);
-                setError(null);
-                setIsScanning(false);
-                setScanMessage(
-                  "Barcode captured. Choose Add book to import it.",
-                );
-                inputRef.current?.focus();
-              }}
-            />
-          ) : (
-            <button
-              className="cl-btn mt-2"
-              disabled={importIsbn.isPending}
-              onClick={() => {
+          {scanMessage ? (
+            <p className="text-[13px] text-mute" role="status">
+              {scanMessage}
+            </p>
+          ) : null}
+
+          {error ? (
+            <p className="text-[13.5px] text-hot" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </div>
+
+        {isScanning ? (
+          <BookBarcodeScanner
+            onCancel={() => {
+              setIsScanning(false);
+              inputRef.current?.focus();
+            }}
+            onCapture={(normalized) => {
+              setIsbn(normalized);
+              setError(null);
+              setIsScanning(false);
+              setScanMessage("Barcode captured. Choose Add book to import it.");
+              inputRef.current?.focus();
+            }}
+          />
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {isScanning ? null : (
+            <Button
+              isDisabled={importIsbn.isPending}
+              onPress={() => {
                 setError(null);
                 setScanMessage(null);
                 setIsScanning(true);
               }}
               type="button"
+              variant="secondary"
             >
+              <ScanBarcode aria-hidden className="size-4" strokeWidth={1.7} />
               Scan barcode
-            </button>
+            </Button>
           )}
-
-          {scanMessage ? (
-            <div
-              className="cl-mono mt-2 text-[10px] text-ink-mute"
-              role="status"
-            >
-              {scanMessage}
-            </div>
-          ) : null}
-
-          {error ? (
-            <div className="cl-mono mt-2 text-[11px] text-hot" role="alert">
-              ⁂ {error}
-            </div>
-          ) : null}
-
-          <div className="mt-3 flex justify-end gap-2">
-            <button className="cl-btn" onClick={dismiss} type="button">
-              cancel
-            </button>
-            <button
-              className="cl-btn cl-btn-hot"
-              disabled={importIsbn.isPending}
-              type="submit"
-            >
-              {importIsbn.isPending ? "Adding book…" : "Add book"}
-            </button>
-          </div>
+          <span className="grow" />
+          <Button onPress={dismiss} type="button" variant="ghost">
+            Cancel
+          </Button>
+          <Button
+            isDisabled={importIsbn.isPending}
+            type="submit"
+            variant="primary"
+          >
+            {importIsbn.isPending ? "Adding book…" : "Add book"}
+          </Button>
         </div>
       </form>
     </CodexModalShell>

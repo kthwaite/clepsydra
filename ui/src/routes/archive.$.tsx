@@ -2,6 +2,9 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { usePage } from "#/api/pages";
 import { ArchiveBanner } from "#/components/codex/ArchiveBanner";
+import { Button } from "#/components/ui/button";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 export const Route = createFileRoute("/archive/$")({
   staticData: { codexView: "archive" },
@@ -165,7 +168,7 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
     return (
       <div
         role="status"
-        className="cl-mono flex h-full items-center justify-center px-4 text-[10px] uppercase tracking-[0.18em] text-ink-mute"
+        className="flex h-full items-center justify-center bg-ground px-4 text-[13px] text-mute"
       >
         Retrieving archive record…
       </div>
@@ -177,30 +180,28 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
 
   if (!archive || !snapshotHash) {
     return (
-      <div className="flex h-full items-center justify-center bg-paper p-4 text-ink">
-        <section
-          aria-labelledby="no-archive-title"
-          className="w-full max-w-xl border-y border-rule py-6"
-        >
-          <p className="cl-mono mb-2 text-[9px] uppercase tracking-[0.2em] text-accent">
-            Archive viewer / no record
-          </p>
+      <div className="flex h-full items-center justify-center bg-ground p-4 text-ink">
+        <section aria-labelledby="no-archive-title" className="w-full max-w-xl">
           <h1
             id="no-archive-title"
-            className="font-sans text-2xl font-black tracking-tight"
+            className="text-[20px] font-semibold leading-tight tracking-[-0.01em]"
           >
             No archived snapshot
           </h1>
-          <p className="cl-marg mt-3 text-sm leading-relaxed text-ink-2">
+          <p className="mt-2 text-[14px] leading-relaxed text-ink-2">
             This vault page does not contain archive metadata, so there is no
             captured page to display.
           </p>
           <Link
             to="/pages/$"
             params={{ _splat: path }}
-            className="cl-mono mt-5 inline-block text-[10px] uppercase tracking-[0.16em] text-accent underline underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
+            className={cn(
+              "mt-4 inline-flex items-center gap-1.5 rounded-sm text-[13px] text-accent hover:underline hover:underline-offset-4",
+              FOCUS_RING_NATIVE,
+            )}
           >
-            ← Back to vault page
+            <span aria-hidden="true">←</span>
+            Back to vault page
           </Link>
         </section>
       </div>
@@ -214,26 +215,30 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
       ? probe
       : { hash: snapshotHash, path, attempt: retryKey, status: "pending" };
   const retryButton = (
-    <button
-      type="button"
-      onClick={() => setRetryKey((key) => key + 1)}
-      className="mt-4 border border-rule px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-ink hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
+    <Button
+      size="sm"
+      onPress={() => setRetryKey((key) => key + 1)}
+      className="mt-4"
     >
       Retry
-    </button>
+    </Button>
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-paper text-ink">
+    <div className="flex h-full min-h-0 flex-col bg-ground text-ink">
       <ArchiveBanner title={title} path={path} archive={archive} />
       {currentProbe.status === "ready" ? (
         <>
           {currentProbe.uncapturedResourceCount > 0 ? (
             <section
               role="alert"
-              className="shrink-0 border-b border-rule bg-paper-2 px-4 py-3"
+              className="flex shrink-0 items-center gap-2.5 bg-hot/5 px-6 py-2"
             >
-              <p className="cl-mono text-[10px] leading-relaxed text-hot">
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-1.5 shrink-0 rounded-[1px] bg-hot"
+              />
+              <p className="text-[13px] leading-snug text-hot">
                 Legacy or incomplete snapshot omitted{" "}
                 {currentProbe.uncapturedResourceCount} styles or images.
                 Recapture this page with the current extension for complete
@@ -245,67 +250,58 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
             title={`Archived snapshot: ${title}`}
             src={snapshotUrl(snapshotHash)}
             sandbox=""
-            className="min-h-0 w-full flex-1 border-0 bg-paper"
+            className="min-h-0 w-full flex-1 border-0 bg-raise"
           />
         </>
       ) : currentProbe.status === "pending" ? (
-        <SnapshotStatus status="status" eyebrow="Snapshot preflight">
+        <SnapshotStatus status="status" heading="Checking snapshot">
           Locating captured snapshot…
         </SnapshotStatus>
       ) : currentProbe.status === "outdated-backend" ? (
-        <SnapshotStatus
-          status="alert"
-          eyebrow="Snapshot preflight / outdated backend"
-        >
+        <SnapshotStatus status="alert" heading="Outdated backend">
           <p>
             Outdated backend detected. Restart or upgrade Clepsydra before
             checking this snapshot.
           </p>
-          <code className="mt-3 block break-all text-[11px] text-hot">
+          <code className="mt-3 block break-all text-[12px] text-hot">
             {snapshotHash}
           </code>
           {retryButton}
         </SnapshotStatus>
       ) : currentProbe.status === "missing" ? (
-        <SnapshotStatus status="status" eyebrow="Content store / missing">
+        <SnapshotStatus status="status" heading="Snapshot missing">
           <p>Snapshot is no longer in the content store.</p>
-          <code className="mt-3 block break-all text-[11px] text-hot">
+          <code className="mt-3 block break-all text-[12px] text-hot">
             {snapshotHash}
           </code>
           {retryButton}
         </SnapshotStatus>
       ) : currentProbe.status === "unsupported" ? (
-        <SnapshotStatus status="alert" eyebrow="Content store / unsupported">
+        <SnapshotStatus status="alert" heading="Unsupported snapshot">
           <p>The stored snapshot cannot be framed as HTML.</p>
-          <code className="mt-3 block break-all text-[11px] text-hot">
+          <code className="mt-3 block break-all text-[12px] text-hot">
             {currentProbe.contentType}
           </code>
-          <code className="mt-3 block break-all text-[11px] text-hot">
+          <code className="mt-3 block break-all text-[12px] text-hot">
             {snapshotHash}
           </code>
           {retryButton}
         </SnapshotStatus>
       ) : currentProbe.status === "backend-error" ? (
-        <SnapshotStatus
-          status="alert"
-          eyebrow="Snapshot preflight / validation failed"
-        >
+        <SnapshotStatus status="alert" heading="Snapshot validation failed">
           <p>Snapshot validation failed with HTTP {currentProbe.httpStatus}.</p>
-          <code className="mt-3 block break-all text-[11px] text-hot">
+          <code className="mt-3 block break-all text-[12px] text-hot">
             {currentProbe.diagnostic}
           </code>
-          <code className="mt-3 block break-all text-[11px] text-hot">
+          <code className="mt-3 block break-all text-[12px] text-hot">
             {snapshotHash}
           </code>
           {retryButton}
         </SnapshotStatus>
       ) : (
-        <SnapshotStatus
-          status="alert"
-          eyebrow="Snapshot preflight / unavailable"
-        >
+        <SnapshotStatus status="alert" heading="Snapshot unavailable">
           <p>Snapshot availability could not be checked.</p>
-          <code className="mt-3 block break-all text-[11px] text-hot">
+          <code className="mt-3 block break-all text-[12px] text-hot">
             {snapshotHash}
           </code>
           {retryButton}
@@ -317,11 +313,11 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
 
 function SnapshotStatus({
   children,
-  eyebrow,
+  heading,
   status,
 }: {
   children: React.ReactNode;
-  eyebrow: string;
+  heading: string;
   status?: "status" | "alert";
 }) {
   return (
@@ -330,11 +326,9 @@ function SnapshotStatus({
       role={status}
       className="flex min-h-0 flex-1 items-center justify-center p-4"
     >
-      <div className="w-full max-w-xl border-y border-rule py-6">
-        <p className="cl-mono mb-2 text-[9px] uppercase tracking-[0.2em] text-accent">
-          {eyebrow}
-        </p>
-        <div className="cl-mono text-sm text-ink-2">{children}</div>
+      <div className="w-full max-w-xl">
+        <h2 className="mb-2 text-[16px] font-semibold text-ink">{heading}</h2>
+        <div className="text-[14px] leading-relaxed text-ink-2">{children}</div>
       </div>
     </section>
   );

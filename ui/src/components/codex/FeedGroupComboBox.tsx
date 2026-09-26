@@ -7,6 +7,7 @@ import {
   Popover,
 } from "react-aria-components";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 
 export interface FeedGroupComboBoxProps {
   value: string;
@@ -115,25 +116,23 @@ export function FeedGroupComboBox({
         }}
         onBlur={commitDraft}
         className={cn(
-          "mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-2 text-[12px] normal-case tracking-normal text-ink outline-none transition-colors",
-          "placeholder:text-ink-mute",
-          "data-[hovered]:border-accent",
-          "data-[focused]:border-accent",
-          "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-60",
+          "h-10 w-full min-w-0 rounded-full bg-sink px-4 text-[14px] text-ink placeholder:text-mute",
+          "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-45",
+          FOCUS_RING,
         )}
       />
-      <Popover className="border border-rule bg-paper outline-none">
-        <ListBox className="cl-mono max-h-[280px] overflow-auto p-0.5 outline-none">
+      <Popover className="min-w-[var(--trigger-width)] rounded-2xl bg-raise p-1.5 shadow-xl outline-none">
+        <ListBox className="max-h-[280px] overflow-auto outline-none">
           {options.map((group) => (
             <ListBoxItem
               key={group}
               id={group}
               textValue={group}
               className={cn(
-                "cursor-pointer px-2 py-1 text-[11px] tracking-[0.04em] text-ink-2 outline-none",
-                "data-[hovered]:bg-highlight data-[hovered]:text-ink",
-                "data-[focused]:bg-highlight data-[focused]:text-ink",
-                "data-[selected]:font-bold data-[selected]:text-ink",
+                "cursor-pointer rounded-[10px] px-3 py-2 text-[13.5px] text-ink-2 outline-none",
+                "data-[hovered]:bg-sink data-[hovered]:text-ink",
+                "data-[focused]:bg-sink data-[focused]:text-ink",
+                "data-[selected]:font-medium data-[selected]:text-ink",
               )}
             >
               {group}

@@ -975,14 +975,14 @@ samp.cl-mono {
 }
 
 /* Sanitized feed prose. Every descendant rule is intentionally scoped to the
-   river body so syndicated markup cannot alter the surrounding Vessel shell. */
+   reader body so syndicated markup cannot alter the surrounding shell. */
 .feed-entry-content {
     min-width: 0;
     overflow-wrap: anywhere;
     color: var(--ink-2);
     font-family: var(--font-sans);
-    font-size: 14px;
-    line-height: 1.65;
+    font-size: 17px;
+    line-height: 1.7;
 }
 
 .feed-entry-content>*+* {
@@ -991,28 +991,27 @@ samp.cl-mono {
 
 .feed-entry-content :is(h1, h2, h3, h4, h5, h6) {
     color: var(--ink);
-    font-family: var(--font-sans);
-    font-weight: 700;
+    font-family: var(--font-serif);
+    font-weight: 400;
     line-height: 1.2;
 }
 
 .feed-entry-content :is(h1, h2) {
-    font-size: 1.35em;
+    font-size: 1.55em;
 }
 
 .feed-entry-content :is(h3, h4, h5, h6) {
-    font-size: 1.1em;
+    font-size: 1.25em;
 }
 
 .feed-entry-content a {
     color: var(--accent);
     text-decoration: underline;
-    text-decoration-color: var(--accent-deep);
     text-underline-offset: 0.18em;
 }
 
 .feed-entry-content a:is(:hover, :focus-visible) {
-    background: var(--highlight);
+    background: var(--accent-tint);
     outline: none;
 }
 
@@ -1041,9 +1040,13 @@ samp.cl-mono {
 
 .feed-entry-content blockquote {
     margin-inline: 0;
-    border-inline-start: 2px solid var(--accent);
-    padding-inline-start: 1em;
-    color: var(--ink-mute);
+    border-radius: 12px;
+    background: var(--ground);
+    padding: 16px 22px;
+    color: var(--ink);
+    font-family: var(--font-serif);
+    font-size: 1.25em;
+    line-height: 1.45;
     font-style: italic;
 }
 
@@ -1054,14 +1057,15 @@ samp.cl-mono {
 }
 
 .feed-entry-content code {
-    background: var(--paper-edge);
+    background: var(--sink);
     padding: 0.1em 0.3em;
+    border-radius: 6px;
 }
 
 .feed-entry-content pre {
     overflow-x: auto;
-    border: 1px solid var(--rule);
-    background: var(--paper);
+    border-radius: 12px;
+    background: var(--sink);
     padding: 1em;
 }
 
@@ -1078,14 +1082,18 @@ samp.cl-mono {
 }
 
 .feed-entry-content :is(th, td) {
-    border: 1px solid var(--rule);
     padding: 0.4em 0.6em;
     text-align: start;
 }
 
 .feed-entry-content hr {
     border: 0;
-    border-top: 1px solid var(--rule);
+    border-top: 1px solid var(--faint);
+}
+
+.feed-entry-content th {
+    color: var(--mute);
+    font-weight: 500;
 }
 
 /* Respect reduced motion across the app. */

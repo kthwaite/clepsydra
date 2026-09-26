@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   dayOfYear,
   formatAbsoluteDate,
+  formatCapturedAt,
   formatClock,
   formatDayMonth,
+  formatDayMonthYear,
   formatDurationHM,
   formatRelativeTime,
   formatTimeHM,
@@ -165,5 +167,36 @@ describe("formatDayMonth", () => {
 
   it("returns anything that is not an ISO day unchanged", () => {
     expect(formatDayMonth("soon")).toBe("soon");
+  });
+});
+
+describe("formatCapturedAt", () => {
+  it("formats an instant as local day, fixed short month, year and HH:MM", () => {
+    const iso = new Date(2026, 8, 18, 14, 2, 11).toISOString();
+    expect(formatCapturedAt(iso)).toBe("18 Sep 2026, 14:02");
+  });
+
+  it("pads single-digit hours and minutes", () => {
+    const iso = new Date(2026, 0, 5, 7, 4).toISOString();
+    expect(formatCapturedAt(iso)).toBe("5 Jan 2026, 07:04");
+  });
+
+  it("returns invalid input unchanged", () => {
+    expect(formatCapturedAt("not a date")).toBe("not a date");
+  });
+});
+
+describe("formatDayMonthYear", () => {
+  it("formats an ISO day with fixed short months and the year", () => {
+    expect(formatDayMonthYear("2026-09-17")).toBe("17 Sep 2026");
+  });
+
+  it("formats a full timestamp as its local calendar day", () => {
+    const iso = new Date(2026, 9, 4, 23, 30).toISOString();
+    expect(formatDayMonthYear(iso)).toBe("4 Oct 2026");
+  });
+
+  it("returns invalid input unchanged", () => {
+    expect(formatDayMonthYear("sometime")).toBe("sometime");
   });
 });
