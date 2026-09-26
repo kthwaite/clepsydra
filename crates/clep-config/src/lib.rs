@@ -412,6 +412,8 @@ mod tests {
         assert!(features.feeds);
     }
 
+    // Serial: a sibling sets CLEPSYDRA__FEATURES__FEEDS=false process-wide.
+    #[serial_test::serial]
     #[test]
     fn settings_without_features_use_enabled_defaults() {
         let tmp = tempfile::TempDir::new().unwrap();
