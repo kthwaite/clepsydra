@@ -1,6 +1,7 @@
 import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useStats } from "#/api/index";
+import { FooterControlsHost } from "#/components/codex/FooterControls";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import type { CodexView } from "#/components/codex/useCodexView";
 import { SyncIndicator } from "#/components/SyncIndicator";
@@ -66,6 +67,7 @@ export function ShellFooter({ view }: { view: CodexView }) {
       <SaveState />
       <span className="flex-1" />
       <Context view={view} />
+      <FooterControlsHost />
     </footer>
   );
 }

@@ -59,6 +59,9 @@ vi.mock("#/api/index", () => ({
 vi.mock("#/api/pages", () => ({
   useAssignBulk: () => ({ isPending: false, mutate: bulkMutateMock }),
 }));
+vi.mock("#/hooks/useElementHeight", () => ({
+  useElementHeight: () => [() => {}, 0],
+}));
 vi.mock("#/hooks/useMobileLayout", () => ({
   useMobileLayout: () => layoutState.mobile,
 }));
@@ -204,7 +207,7 @@ describe("Gazetteer controller", () => {
     expect(within(restored).getByTestId("filter-bar-input")).toHaveValue("Al");
     expect(
       within(restored).getByTestId("filter-bar-chip-tags"),
-    ).toHaveTextContent("TAG: research");
+    ).toHaveTextContent("Tag: research");
     expect(
       within(restored).getByRole("radio", { name: "Title" }),
     ).toBeChecked();
@@ -283,14 +286,17 @@ describe("Gazetteer controller", () => {
 
     const view = render(createElement(Gazetteer, { filters }));
 
-    expect(useContentIndexMock).toHaveBeenLastCalledWith({
-      q: undefined,
-      tags: undefined,
-      kind: undefined,
-      project: undefined,
-      limit: 20,
-      offset: 20,
-    });
+    expect(useContentIndexMock).toHaveBeenLastCalledWith(
+      {
+        q: undefined,
+        tags: undefined,
+        kind: undefined,
+        project: undefined,
+        limit: 20,
+        offset: 20,
+      },
+      { enabled: true },
+    );
     expect(onPageChange).not.toHaveBeenCalled();
 
     contentState.items = [];
@@ -300,7 +306,7 @@ describe("Gazetteer controller", () => {
     view.rerender(createElement(Gazetteer, { filters }));
 
     expect(onPageChange).toHaveBeenCalledOnce();
-    expect(onPageChange).toHaveBeenCalledWith(1);
+    expect(onPageChange).toHaveBeenCalledWith(1, true);
   });
 
   it("offers the shared Kind and Project vocabularies through the desktop FilterBar", async () => {
@@ -370,9 +376,9 @@ describe("Gazetteer controller", () => {
     );
 
     expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent(
-      "TAG: legacy-url-tag",
+      "Tag: legacy-url-tag",
     );
-    await user.click(screen.getByRole("button", { name: "Clear TAG filter" }));
+    await user.click(screen.getByRole("button", { name: "Clear Tag filter" }));
     expect(onFilterChange).toHaveBeenCalledWith({ text: "", facets: {} });
   });
 
@@ -426,7 +432,7 @@ describe("Gazetteer controller", () => {
     render(createElement(Gazetteer));
 
     await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
-    expect(screen.getByRole("button", { name: "✕ 1 selected" })).toBeVisible();
+    expect(screen.getByText("1 selected")).toBeVisible();
 
     await user.type(
       screen.getByRole("combobox", { name: "Project" }),
@@ -443,8 +449,6 @@ describe("Gazetteer controller", () => {
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
-    expect(
-      screen.queryByRole("button", { name: "✕ 1 selected" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
   });
 });

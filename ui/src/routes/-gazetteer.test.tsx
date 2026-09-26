@@ -129,35 +129,49 @@ describe("Gazetteer route filters", () => {
     });
 
     routeMocks.search.kind = "RECIPE";
-    routeMocks.useContentIndex.mockReturnValueOnce({
+    // Persistent, not Once: the screen renders again after measuring its
+    // table; mockReset in the finally restores the default result.
+    routeMocks.useContentIndex.mockReturnValue({
       error: new Error("Unknown Kind: RECIPE"),
       isError: true,
       isSuccess: false,
     });
-    render(<GazetteerPage />);
+    try {
+      render(<GazetteerPage />);
 
-    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
-      q: "atlas",
-      tags: ["research"],
-      kind: "RECIPE",
-      project: "clepsydra",
-      limit: 20,
-      offset: 20,
-    });
-    expect(screen.getByRole("alert")).toHaveTextContent("Unknown Kind: RECIPE");
+      expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith(
+        {
+          q: "atlas",
+          tags: ["research"],
+          kind: "RECIPE",
+          project: "clepsydra",
+          limit: 20,
+          offset: 20,
+        },
+        { enabled: true },
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Unknown Kind: RECIPE",
+      );
+    } finally {
+      routeMocks.useContentIndex.mockReset();
+    }
   });
 
   it("keeps quotation available as a backend-facing kind filter", () => {
     routeMocks.search.kind = "QUOTE";
     render(<GazetteerPage />);
-    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
-      q: "atlas",
-      tags: ["research"],
-      kind: "QUOTE",
-      project: "clepsydra",
-      limit: 20,
-      offset: 20,
-    });
+    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith(
+      {
+        q: "atlas",
+        tags: ["research"],
+        kind: "QUOTE",
+        project: "clepsydra",
+        limit: 20,
+        offset: 20,
+      },
+      { enabled: true },
+    );
   });
 
   it("renders an unknown URL Kind as a raw-value FilterBar chip and still queries by it", () => {
@@ -165,16 +179,19 @@ describe("Gazetteer route filters", () => {
     render(<GazetteerPage />);
 
     expect(screen.getByTestId("filter-bar-chip-kind")).toHaveTextContent(
-      "KIND: WIDGET",
+      "Kind: WIDGET",
     );
-    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
-      q: "atlas",
-      tags: ["research"],
-      kind: "WIDGET",
-      project: "clepsydra",
-      limit: 20,
-      offset: 20,
-    });
+    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith(
+      {
+        q: "atlas",
+        tags: ["research"],
+        kind: "WIDGET",
+        project: "clepsydra",
+        limit: 20,
+        offset: 20,
+      },
+      { enabled: true },
+    );
   });
 
   it("gives the text filter an accessible name of Search pages", () => {
@@ -187,14 +204,17 @@ describe("Gazetteer route filters", () => {
   it("combines route filters in the authoritative paged query and follows history changes", () => {
     const view = render(<GazetteerPage />);
 
-    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
-      q: "atlas",
-      tags: ["research"],
-      kind: "PROJECT",
-      project: "clepsydra",
-      limit: 20,
-      offset: 20,
-    });
+    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith(
+      {
+        q: "atlas",
+        tags: ["research"],
+        kind: "PROJECT",
+        project: "clepsydra",
+        limit: 20,
+        offset: 20,
+      },
+      { enabled: true },
+    );
     expect(screen.getByTestId("filter-bar-input")).toHaveValue("atlas");
 
     Object.assign(routeMocks.search, {
@@ -206,25 +226,31 @@ describe("Gazetteer route filters", () => {
       page: 1,
     });
     view.rerender(<GazetteerPage />);
-    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
-      q: "beta",
-      tags: ["active"],
-      kind: "NOTE",
-      project: "atlas",
-      limit: 20,
-      offset: 0,
-    });
+    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith(
+      {
+        q: "beta",
+        tags: ["active"],
+        kind: "NOTE",
+        project: "atlas",
+        limit: 20,
+        offset: 0,
+      },
+      { enabled: true },
+    );
 
     Object.assign(routeMocks.search, completeSearch);
     view.rerender(<GazetteerPage />);
-    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
-      q: "atlas",
-      tags: ["research"],
-      kind: "PROJECT",
-      project: "clepsydra",
-      limit: 20,
-      offset: 20,
-    });
+    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith(
+      {
+        q: "atlas",
+        tags: ["research"],
+        kind: "PROJECT",
+        project: "clepsydra",
+        limit: 20,
+        offset: 20,
+      },
+      { enabled: true },
+    );
   });
 
   it("updates route state for Kind and Project without dropping text or tags", async () => {
@@ -243,10 +269,10 @@ describe("Gazetteer route filters", () => {
 
     routeMocks.navigate.mockClear();
     expect(screen.getByTestId("filter-bar-chip-project")).toHaveTextContent(
-      "PROJECT: clepsydra",
+      "Project: clepsydra",
     );
     await user.click(
-      screen.getByRole("button", { name: "Clear PROJECT filter" }),
+      screen.getByRole("button", { name: "Clear Project filter" }),
     );
     expect(resolvedSearch()).toEqual({
       ...completeSearch,

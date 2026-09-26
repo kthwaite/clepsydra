@@ -3,16 +3,23 @@ import { formatApiError } from "#/api/error";
 import { useContentIndex, useTags } from "#/api/index";
 import { useAssignBulk } from "#/api/pages";
 import type { BulkAssignResponse } from "#/api/types";
+import { FooterControls } from "#/components/codex/FooterControls";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { MobileGazetteer } from "#/components/codex/MobileGazetteer";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { Tick } from "#/components/codex/Tick";
 import { FilterBar } from "#/components/filters/FilterBar";
 import { KindIcon } from "#/components/KindIcon";
+import { Radio, RadioGroup } from "#/components/ui/radio-group";
+import { Switch } from "#/components/ui/switch";
+import { useElementHeight } from "#/hooks/useElementHeight";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useTableCompact } from "#/hooks/useTableCompact";
 import { cn } from "#/lib/cn";
 import type { FilterField, FilterState } from "#/lib/filters/model";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import {
   KINDS,
   type Kind,
@@ -28,6 +35,7 @@ import {
   filterAndSortRows,
   type GazetteerSort,
 } from "./gazetteer-filter";
+import { pageItems, rangeLabel, repage, rowsThatFit } from "./gazetteer-paging";
 
 /** Pure: returns a NEW Set with `value` toggled (added if absent, removed if present). */
 export function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
@@ -39,13 +47,29 @@ export function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
 
 export const MOBILE_GAZETTEER_PAGE_SIZE = 20;
 
+const SORT_OPTIONS: Array<{ value: GazetteerSort; label: string }> = [
+  { value: "ts", label: "Edited" },
+  { value: "id", label: "Code" },
+  { value: "title", label: "Title" },
+  { value: "words", label: "Words" },
+];
+
+const fmt = (n: number) => n.toLocaleString("en-US");
+
+const SORT_DIRECTION: Record<GazetteerSort, "ascending" | "descending"> = {
+  ts: "descending",
+  words: "descending",
+  title: "ascending",
+  id: "ascending",
+};
+
 export interface GazetteerFilters {
   filterState: FilterState;
   sort: GazetteerSort;
   page: number;
   onFilterChange: (next: FilterState) => void;
   onSortChange: (sort: GazetteerSort) => void;
-  onPageChange: (page: number) => void;
+  onPageChange: (page: number, replace?: boolean) => void;
 }
 
 type Props = {
@@ -78,8 +102,10 @@ export function Gazetteer({ initialTag, filters }: Props) {
   const sort = filters?.sort ?? store.sort;
   const page = filters?.page ?? store.page;
   const setSort = filters?.onSortChange ?? store.setSort;
-  const setPage = filters?.onPageChange ?? store.setPage;
+  const setPage: (page: number, replace?: boolean) => void =
+    filters?.onPageChange ?? store.setPage;
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [compact, setCompact] = useTableCompact("gazetteer", true);
 
   useLayoutEffect(() => {
     if (!filters) store.enter(initialTag);
@@ -88,6 +114,36 @@ export function Gazetteer({ initialTag, filters }: Props) {
   const tagsQuery = useTags();
   const tags = tagsQuery.data ?? [];
   const requestedPage = Math.max(1, Math.floor(page));
+  const isMobile = useMobileLayout();
+  const [tableRef, tableHeight, remeasure] = useElementHeight<HTMLDivElement>();
+  // The density the page size was sized for. Compact also resizes the
+  // header, so a toggle re-measures before the page size follows it:
+  // one resize, not a stale size and then the settled one.
+  const [sizedCompact, setSizedCompact] = useState(compact);
+  useLayoutEffect(() => {
+    if (sizedCompact === compact) return;
+    remeasure();
+    setSizedCompact(compact);
+  }, [compact, sizedCompact, remeasure]);
+  const pageSize = isMobile
+    ? MOBILE_GAZETTEER_PAGE_SIZE
+    : rowsThatFit(tableHeight ?? 0, sizedCompact);
+  // Desktop waits one layout pass for the table's height so the first fetch
+  // already has the right page size.
+  const measured = isMobile || tableHeight !== null;
+  // The page size the URL's page was last shown at. When the size changes,
+  // the page holding the same first row is shown at once — before the URL
+  // catches up — so the old page is never fetched at the new size.
+  const [basis, setBasis] = useState<{ size: number; page: number } | null>(
+    null,
+  );
+  const shownPage =
+    !isMobile &&
+    basis !== null &&
+    basis.page === requestedPage &&
+    basis.size !== pageSize
+      ? repage(requestedPage, basis.size, pageSize)
+      : requestedPage;
   const contentQuery = useContentIndex(
     filters
       ? {
@@ -95,13 +151,13 @@ export function Gazetteer({ initialTag, filters }: Props) {
           tags: selectedTags.length > 0 ? selectedTags : undefined,
           kind,
           project,
-          limit: MOBILE_GAZETTEER_PAGE_SIZE,
-          offset: (requestedPage - 1) * MOBILE_GAZETTEER_PAGE_SIZE,
+          limit: pageSize,
+          offset: (shownPage - 1) * pageSize,
         }
       : { kind, project, limit: 500 },
+    { enabled: measured },
   );
   const { data: content } = contentQuery;
-  const isMobile = useMobileLayout();
   const openTab = useOpenTab();
   const bulk = useAssignBulk();
   // Assign offers declared projects; the filter keeps orphan slugs findable.
@@ -112,7 +168,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
       {
         id: "kind",
         kind: "single",
-        label: "KIND",
+        label: "Kind",
         options: sortKindsByLabel(KINDS).map((k) => ({
           value: k,
           label: kindLabel(k),
@@ -121,13 +177,13 @@ export function Gazetteer({ initialTag, filters }: Props) {
       {
         id: "project",
         kind: "single",
-        label: "PROJECT",
+        label: "Project",
         options: projectValues.map((p) => ({ value: p })),
       },
       {
         id: "tags",
         kind: "multi",
-        label: "TAG",
+        label: "Tag",
         options: tags.map((t) => ({ value: t.tag })),
       },
     ],
@@ -148,23 +204,51 @@ export function Gazetteer({ initialTag, filters }: Props) {
   const totalCount = filters
     ? (content?.total ?? 0)
     : Math.max(content?.total ?? 0, items.length);
-  const pageCount = Math.max(
-    1,
-    Math.ceil(filteredCount / MOBILE_GAZETTEER_PAGE_SIZE),
-  );
+  const pageCount = Math.max(1, Math.ceil(filteredCount / pageSize));
   const currentPage = contentQuery.isSuccess
-    ? Math.min(requestedPage, pageCount)
-    : requestedPage;
+    ? Math.min(shownPage, pageCount)
+    : shownPage;
   const rows = useMemo(() => {
     if (filters) return rowsForPage;
-    const start = (currentPage - 1) * MOBILE_GAZETTEER_PAGE_SIZE;
-    return rowsForPage.slice(start, start + MOBILE_GAZETTEER_PAGE_SIZE);
-  }, [currentPage, filters, rowsForPage]);
+    const start = (currentPage - 1) * pageSize;
+    return rowsForPage.slice(start, start + pageSize);
+  }, [currentPage, filters, pageSize, rowsForPage]);
 
   useLayoutEffect(() => {
-    if (contentQuery.isSuccess && currentPage !== page) setPage(currentPage);
-  }, [contentQuery.isSuccess, currentPage, page, setPage]);
+    if (
+      measured &&
+      contentQuery.isSuccess &&
+      !contentQuery.isPlaceholderData &&
+      currentPage !== page
+    )
+      setPage(currentPage, true);
+  }, [
+    measured,
+    contentQuery.isSuccess,
+    contentQuery.isPlaceholderData,
+    currentPage,
+    page,
+    setPage,
+  ]);
+
+  useLayoutEffect(() => {
+    if (isMobile || !measured) return;
+    if (shownPage !== requestedPage) {
+      setPage(shownPage, true);
+      return;
+    }
+    setBasis((prev) =>
+      prev?.size === pageSize && prev.page === requestedPage
+        ? prev
+        : { size: pageSize, page: requestedPage },
+    );
+  }, [isMobile, measured, pageSize, requestedPage, shownPage, setPage]);
   const selected = [...selectedPaths];
+  // A gap is keyed by the page before it: stable, unlike its index.
+  const pageLinks = pageItems(currentPage, pageCount).map((item, i, all) => ({
+    item,
+    key: item === "gap" ? `gap-after-${all[i - 1]}` : `page-${item}`,
+  }));
 
   const applyResultTag = (tag: string) => {
     const nextTags = appendUniqueTag(selectedTags, tag);
@@ -222,13 +306,9 @@ export function Gazetteer({ initialTag, filters }: Props) {
     );
   };
 
-  if (contentQuery.error) {
-    return (
-      <p role="alert" className="p-4 text-sm text-destructive">
-        {formatApiError(contentQuery.error, "Gazetteer could not be loaded.")}
-      </p>
-    );
-  }
+  const loadError = contentQuery.error
+    ? formatApiError(contentQuery.error, "Gazetteer could not be loaded.")
+    : null;
 
   const tagSummary =
     selectedTags.length > 0
@@ -236,6 +316,13 @@ export function Gazetteer({ initialTag, filters }: Props) {
       : "";
 
   if (isMobile) {
+    if (loadError) {
+      return (
+        <p role="alert" className="p-4 text-sm text-destructive">
+          {loadError}
+        </p>
+      );
+    }
     return (
       <MobileGazetteer
         filterState={filterState}
@@ -256,242 +343,365 @@ export function Gazetteer({ initialTag, filters }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* header */}
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-rule px-5 py-3">
-        <h1 className="font-sans text-[20px] font-black uppercase tracking-[0.04em] text-ink">
-          Gazetteer<span className="text-accent"> / </span>Index
-        </h1>
-        <span className="cl-mono text-[10px] uppercase tracking-[0.16em] text-ink-mute">
-          {filteredCount} entries{tagSummary}
+      <div
+        className={cn(
+          "flex flex-shrink-0 flex-wrap items-end gap-x-7 gap-y-4 px-10",
+          compact ? "pt-7" : "pt-10",
+        )}
+      >
+        <div className="flex flex-col gap-2">
+          <span className="flex items-center gap-2.5">
+            <Tick />
+            <span className="font-serif text-[19px] italic text-mute">
+              Index
+            </span>
+          </span>
+          <h1
+            className={cn(
+              "font-serif leading-none tracking-[-0.015em] text-ink",
+              compact ? "text-[44px]" : "text-[52px]",
+            )}
+          >
+            Gazetteer
+          </h1>
+        </div>
+        <span className="pb-1.5 text-[14px] text-mute">
+          {filteredCount === totalCount
+            ? `${fmt(totalCount)} ${totalCount === 1 ? "page" : "pages"}`
+            : `${fmt(filteredCount)} of ${fmt(totalCount)} pages`}
+          {tagSummary}
         </span>
         <div className="flex-1" />
-        <div className="cl-mono flex items-stretch border border-rule-soft text-[9px] uppercase tracking-[0.12em]">
-          {(["ts", "id", "title", "words"] as GazetteerSort[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setSort(s)}
-              className={cn(
-                "cursor-pointer border-r border-rule-soft px-2 py-1 last:border-r-0",
-                sort === s
-                  ? "bg-accent text-black"
-                  : "text-ink-mute hover:text-ink",
-              )}
-            >
-              {s}
-            </button>
+        <Switch isSelected={compact} onChange={setCompact}>
+          Compact
+        </Switch>
+        <RadioGroup
+          segmented
+          aria-label="Sort"
+          orientation="horizontal"
+          value={sort}
+          onChange={(value) => setSort(value as GazetteerSort)}
+        >
+          {SORT_OPTIONS.map((option) => (
+            <Radio key={option.value} value={option.value}>
+              {option.label}
+            </Radio>
           ))}
-        </div>
+        </RadioGroup>
       </div>
 
-      <div className="flex flex-shrink-0 items-center border-b border-rule-soft px-5 py-2">
+      <div
+        className={cn(
+          "flex flex-shrink-0 flex-wrap items-center gap-x-2.5 gap-y-2 px-10",
+          compact ? "pt-[18px]" : "pt-6",
+        )}
+      >
         <FilterBar
           fields={filterFields}
           primaryFieldIds={["kind", "project", "tags"]}
           state={filterState}
           onChange={onFilterChange}
-          textPlaceholder="grep…"
+          textPlaceholder="Filter pages"
           textAriaLabel="Search pages"
           filteredCount={filteredCount}
           totalCount={totalCount}
-          className="flex-wrap"
+          className="min-w-0 flex-1 flex-wrap"
         />
+        {selected.length > 0 && (
+          <div className="flex items-center gap-3.5 text-[13.5px]">
+            <span className="font-medium text-accent">
+              {selected.length} selected
+            </span>
+            <div className="w-[150px]">
+              <KindSelect
+                value={null}
+                inferred={false}
+                ariaLabel="Set kind for selection"
+                placeholder="Set kind…"
+                isDisabled={bulk.isPending}
+                onAssign={applyKind}
+              />
+            </div>
+            <div className="w-[180px]">
+              <ProjectCombo
+                value={null}
+                options={projects}
+                onAssign={applyProject}
+                onClear={applyClearProject}
+              />
+            </div>
+            <button
+              type="button"
+              aria-label="Clear selection"
+              onClick={clearSelection}
+              className={cn(
+                "h-8 cursor-pointer rounded-full px-2 text-mute hover:text-ink",
+                FOCUS_RING_NATIVE,
+              )}
+            >
+              Clear
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* bulk action bar — only when rows are selected */}
-      {selected.length > 0 && (
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-rule bg-paper-2 px-5 py-2">
-          <button
-            type="button"
-            onClick={clearSelection}
-            className="cl-mono cursor-pointer text-[10px] uppercase tracking-[0.12em] text-ink-mute transition-colors hover:text-hot"
+      <div
+        ref={tableRef}
+        className={cn(
+          "cl-noscroll min-h-0 flex-1 overflow-auto px-7",
+          compact ? "pt-3.5" : "pt-5",
+        )}
+      >
+        {/* Errors stay inside the screen: the header and filters remain,
+            so a rejected filter can be cleared, and the table area stays
+            mounted for the height that enables the query. */}
+        {loadError ? (
+          <p role="alert" className="px-3 py-6 text-[13.5px] text-hot">
+            {loadError}
+          </p>
+        ) : (
+          <table
+            data-density={compact ? "compact" : "comfortable"}
+            className="w-full table-fixed border-collapse text-left"
           >
-            ✕ {selected.length} selected
-          </button>
-          <span className="cl-mono text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-            ↦ assign
-          </span>
-          <div className="w-[140px]">
-            <KindSelect
-              value={null}
-              inferred={false}
-              ariaLabel="Set kind for selection"
-              placeholder="Set kind…"
-              isDisabled={bulk.isPending}
-              onAssign={applyKind}
-            />
-          </div>
-          <div className="w-[180px]">
-            <ProjectCombo
-              value={null}
-              options={projects}
-              onAssign={applyProject}
-              onClear={applyClearProject}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* table */}
-      <div className="cl-noscroll min-h-0 flex-1 overflow-auto">
-        <table className="w-full border-collapse text-left">
-          <thead className="sticky top-0 z-10 bg-paper">
-            <tr className="cl-mono border-b border-rule text-xs uppercase tracking-[0.14em] text-ink-mute">
-              <th className="w-[36px] px-3 py-2">
-                <input
-                  type="checkbox"
-                  aria-label="Select all visible rows"
-                  checked={allVisibleSelected}
-                  onChange={toggleAllVisible}
-                  disabled={rows.length === 0}
-                  className="cursor-pointer accent-accent"
-                />
-              </th>
-              <Th w="48px">No</Th>
-              <Th w="150px">File-ID</Th>
-              <Th>Title · excerpt</Th>
-              <Th w="200px">Tags</Th>
-              <Th w="64px" right>
-                Words
-              </Th>
-              <Th w="110px" right>
-                Edited
-              </Th>
-            </tr>
-          </thead>
-          <tbody className="">
-            {rows.map((n, i) => {
-              const kind = resolveKind({ path: n.path, kind: n.kind });
-              return (
-                <tr
-                  key={n.path}
-                  onClick={() => openTab("page", n.path, n.title || n.path)}
-                  className="cursor-pointer border-b border-dotted border-rule-soft align-baseline hover:bg-paper-2"
+            <thead className="sticky top-0 z-10 bg-ground">
+              <tr
+                className={cn(
+                  "text-[12.5px] text-mute",
+                  compact ? "h-[34px]" : "h-10",
+                )}
+              >
+                <th className="w-[44px] px-3 font-normal">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all visible rows"
+                    checked={allVisibleSelected}
+                    onChange={toggleAllVisible}
+                    disabled={rows.length === 0}
+                    className="cursor-pointer accent-accent"
+                  />
+                </th>
+                <Th w="52px">No.</Th>
+                <Th
+                  w="250px"
+                  sorted={sort === "id" ? SORT_DIRECTION.id : undefined}
                 >
-                  <td
-                    className="px-3 py-1.5"
-                    onClick={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => e.stopPropagation()}
+                  Code
+                </Th>
+                <Th
+                  sorted={sort === "title" ? SORT_DIRECTION.title : undefined}
+                >
+                  Title
+                </Th>
+                <Th w="210px">Tags</Th>
+                <Th
+                  w="76px"
+                  right
+                  sorted={sort === "words" ? SORT_DIRECTION.words : undefined}
+                >
+                  Words
+                </Th>
+                <Th
+                  w="110px"
+                  right
+                  sorted={sort === "ts" ? SORT_DIRECTION.ts : undefined}
+                >
+                  Edited
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((n, i) => {
+                const kind = resolveKind({ path: n.path, kind: n.kind });
+                const isSelected = selectedPaths.has(n.path);
+                const meta = compact ? "text-[12.5px]" : "text-[13px]";
+                return (
+                  <tr
+                    key={n.path}
+                    onClick={() => openTab("page", n.path, n.title || n.path)}
+                    className={cn(
+                      "cursor-pointer",
+                      compact ? "h-8" : "h-[42px]",
+                      isSelected
+                        ? "[&>td]:bg-accent-tint"
+                        : "hover:[&>td]:bg-sink",
+                    )}
                   >
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${n.title || n.path}`}
-                      checked={selectedPaths.has(n.path)}
+                    <td
+                      className="rounded-l-[10px] px-3"
                       onClick={(e) => e.stopPropagation()}
-                      onChange={() => toggleRow(n.path)}
-                      className="cursor-pointer accent-accent"
-                    />
-                  </td>
-                  <td className="cl-mono px-3 py-1.5 text-xs tabular-nums text-ink-mute">
-                    {String(
-                      (currentPage - 1) * MOBILE_GAZETTEER_PAGE_SIZE + i + 1,
-                    ).padStart(3, "0")}
-                  </td>
-                  <td className="cl-mono px-3 py-1.5">
-                    <span className="flex items-center gap-1.5">
-                      <KindIcon
-                        kind={kind}
-                        size={11}
-                        className="flex-shrink-0"
-                        title={kindLabel(kind)}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${n.title || n.path}`}
+                        checked={isSelected}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleRow(n.path)}
+                        className="cursor-pointer accent-accent"
                       />
-                      <span className="text-xs text-ink-2">
+                    </td>
+                    <td className={cn("px-3 tabular-nums text-faint", meta)}>
+                      {String((currentPage - 1) * pageSize + i + 1).padStart(
+                        3,
+                        "0",
+                      )}
+                    </td>
+                    <td className={cn("truncate px-3 text-mute", meta)}>
+                      <span className="inline-flex items-center gap-2 align-middle">
+                        <KindIcon
+                          kind={kind}
+                          size={14}
+                          className="flex-shrink-0"
+                          title={kindLabel(kind)}
+                        />
                         {shortFolio(n.path)}
                       </span>
-                    </span>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <span className="font-sans text-sm text-ink">
-                      {n.title || n.path}
-                    </span>
-                    {n.description && (
-                      <span className="cl-mono ml-2 text-xs text-ink-mute">
-                        {n.description.slice(0, 80)}
-                        {n.description.length > 80 ? "…" : ""}
+                    </td>
+                    <td className="truncate px-3">
+                      <span
+                        className={cn(
+                          "text-ink",
+                          compact ? "text-[13.5px]" : "text-[14.5px]",
+                        )}
+                      >
+                        {n.title || n.path}
                       </span>
-                    )}
-                  </td>
-                  <td className="cl-mono max-w-[200px] overflow-hidden px-3 py-1.5 text-xs text-accent">
-                    {(n.tags ?? []).length > 0 ? (
-                      <div className="flex gap-1 overflow-hidden whitespace-nowrap">
-                        {(n.tags ?? []).map((tag) => {
-                          const isSelected = selectedTags.includes(tag);
-                          return (
-                            <button
-                              key={tag}
-                              type="button"
-                              aria-label={`Filter by tag ${tag}`}
-                              aria-pressed={isSelected}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                applyResultTag(tag);
-                              }}
-                              className={cn(
-                                "cl-mono shrink-0 text-xs outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-accent",
-                                isSelected
-                                  ? "cursor-default text-ink-mute"
-                                  : "cursor-pointer text-accent hover:text-hot",
-                              )}
-                            >
-                              #{tag}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="cl-mono px-3 py-1.5 text-right text-xs tabular-nums text-ink-mute">
-                    {n.word_count ?? "—"}
-                  </td>
-                  <td className="cl-mono px-3 py-1.5 text-right text-xs text-ink-mute">
-                    {formatRelativeTime(n.updated_at)}
+                      {n.description && (
+                        <span className={cn("ml-2.5 text-mute", meta)}>
+                          {n.description}
+                        </span>
+                      )}
+                    </td>
+                    <td className={cn("truncate px-3", meta)}>
+                      {(n.tags ?? []).length > 0 ? (
+                        <span className="flex gap-1.5 overflow-hidden whitespace-nowrap">
+                          {(n.tags ?? []).map((tag) => {
+                            const tagSelected = selectedTags.includes(tag);
+                            return (
+                              <button
+                                key={tag}
+                                type="button"
+                                aria-label={`Filter by tag ${tag}`}
+                                aria-pressed={tagSelected}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  applyResultTag(tag);
+                                }}
+                                className={cn(
+                                  "shrink-0 rounded-sm",
+                                  FOCUS_RING_NATIVE,
+                                  tagSelected
+                                    ? "cursor-default text-mute"
+                                    : "cursor-pointer text-accent hover:text-hot",
+                                )}
+                              >
+                                #{tag}
+                              </button>
+                            );
+                          })}
+                        </span>
+                      ) : (
+                        <span className="text-faint">—</span>
+                      )}
+                    </td>
+                    <td
+                      className={cn(
+                        "px-3 text-right tabular-nums text-mute",
+                        meta,
+                      )}
+                    >
+                      {n.word_count != null ? fmt(n.word_count) : "—"}
+                    </td>
+                    <td
+                      className={cn(
+                        "rounded-r-[10px] px-3 text-right text-mute",
+                        meta,
+                      )}
+                    >
+                      {formatRelativeTime(n.updated_at)}
+                    </td>
+                  </tr>
+                );
+              })}
+              {rows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="px-3 py-6 text-center text-[13.5px] text-mute"
+                  >
+                    {selectedTags.length === 0 && !query
+                      ? "No pages match."
+                      : `No pages${
+                          selectedTags.length > 0
+                            ? ` under ${selectedTags.map((t) => `#${t}`).join(" ")}`
+                            : ""
+                        }${query ? ` match “${query}”` : ""}.`}
                   </td>
                 </tr>
-              );
-            })}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={7} className="cl-marg px-3 py-6 text-center">
-                  ∅ no folios
-                  {selectedTags.length > 0
-                    ? ` under ${selectedTags.map((t) => `#${t}`).join(" ")}`
-                    : ""}
-                  {query ? ` matching “${query}”` : ""}.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
-      <nav
-        aria-label="Gazetteer pagination"
-        className="cl-mono flex shrink-0 items-center justify-end gap-3 border-t border-rule px-5 py-2 text-[10px] uppercase tracking-[0.1em] text-ink-mute"
-      >
-        <button
-          type="button"
-          aria-label="Previous page"
-          disabled={currentPage <= 1}
-          onClick={() => setPage(currentPage - 1)}
-          className="cursor-pointer disabled:cursor-default disabled:opacity-40"
-        >
-          Previous
-        </button>
+      <FooterControls>
         <span role="status">
-          Page {currentPage} of {pageCount} · {filteredCount}{" "}
-          {filteredCount === 1 ? "match" : "matches"}
+          {rangeLabel(currentPage, pageSize, rows.length, filteredCount)}
         </span>
-        <button
-          type="button"
-          aria-label="Next page"
-          disabled={currentPage >= pageCount}
-          onClick={() => setPage(currentPage + 1)}
-          className="cursor-pointer disabled:cursor-default disabled:opacity-40"
+        <nav
+          aria-label="Gazetteer pagination"
+          className="flex items-center gap-3 text-ink"
         >
-          Next
-        </button>
-      </nav>
+          <button
+            type="button"
+            aria-label="Previous page"
+            disabled={currentPage <= 1}
+            onClick={() => setPage(currentPage - 1)}
+            className={cn(
+              "cursor-pointer rounded-sm disabled:cursor-default disabled:text-faint",
+              FOCUS_RING_NATIVE,
+            )}
+          >
+            ‹
+          </button>
+          {pageLinks.map(({ item, key }) =>
+            item === "gap" ? (
+              <span key={key} aria-hidden>
+                …
+              </span>
+            ) : (
+              <button
+                key={item}
+                type="button"
+                aria-label={`Page ${item}`}
+                aria-current={item === currentPage ? "page" : undefined}
+                onClick={() => setPage(item)}
+                className={cn(
+                  "cursor-pointer rounded-sm tabular-nums",
+                  FOCUS_RING_NATIVE,
+                  item === currentPage
+                    ? "font-medium text-accent"
+                    : "hover:text-accent",
+                )}
+              >
+                {item}
+              </button>
+            ),
+          )}
+          <button
+            type="button"
+            aria-label="Next page"
+            disabled={currentPage >= pageCount}
+            onClick={() => setPage(currentPage + 1)}
+            className={cn(
+              "cursor-pointer rounded-sm disabled:cursor-default disabled:text-faint",
+              FOCUS_RING_NATIVE,
+            )}
+          >
+            ›
+          </button>
+        </nav>
+      </FooterControls>
     </div>
   );
 }
@@ -500,20 +710,27 @@ function Th({
   children,
   w,
   right,
+  sorted,
 }: {
   children: React.ReactNode;
   w?: string;
   right?: boolean;
+  sorted?: "ascending" | "descending";
 }) {
   return (
     <th
+      aria-sort={sorted}
       className={cn(
-        "px-3 py-2 font-medium",
+        "px-3 font-normal",
         right ? "text-right" : "text-left",
+        sorted && "text-ink",
       )}
       style={w ? { width: w } : undefined}
     >
       {children}
+      {sorted && (
+        <span aria-hidden>{sorted === "descending" ? " ↓" : " ↑"}</span>
+      )}
     </th>
   );
 }

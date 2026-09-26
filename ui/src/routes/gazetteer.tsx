@@ -126,7 +126,8 @@ function GazetteerPage() {
     page: search.page,
     onFilterChange,
     onSortChange: (sort) => updateSearch({ sort }),
-    onPageChange: (page) => updateSearch({ page }, false),
+    onPageChange: (page, replace = false) =>
+      updateSearch({ page }, false, replace),
   };
 
   return <Gazetteer filters={filters} />;

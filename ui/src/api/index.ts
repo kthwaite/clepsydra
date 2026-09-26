@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   type QueryClient,
   type UseMutationResult,
   type UseQueryResult,
@@ -396,14 +397,10 @@ export interface ContentIndexOptions {
   offset?: number;
 }
 
-export function useContentIndex({
-  q,
-  tags,
-  kind,
-  project,
-  limit,
-  offset,
-}: ContentIndexOptions = {}) {
+export function useContentIndex(
+  { q, tags, kind, project, limit, offset }: ContentIndexOptions = {},
+  { enabled = true }: { enabled?: boolean } = {},
+) {
   const query = {
     q,
     tags: tags && tags.length > 0 ? tags.join(",") : undefined,
@@ -412,9 +409,14 @@ export function useContentIndex({
     limit,
     offset,
   };
-  return $api.useQuery("get", "/api/vault/index/content-index", {
-    params: { query },
-  });
+  return $api.useQuery(
+    "get",
+    "/api/vault/index/content-index",
+    { params: { query } },
+    // A new page or page size keeps the old rows up until the new ones land,
+    // rather than flashing an empty table.
+    { enabled, placeholderData: keepPreviousData },
+  );
 }
 
 export { useOutlinks } from "./outlinks";

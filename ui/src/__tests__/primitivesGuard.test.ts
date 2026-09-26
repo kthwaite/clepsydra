@@ -55,6 +55,7 @@ const SCREEN_FILES = [
   "../codex/MoonDisc.tsx",
   "../codex/DayArc.tsx",
   "../codex/FeedRiver.tsx",
+  "../codex/Gazetteer.tsx",
 ];
 
 const FORBIDDEN: Array<[string, RegExp]> = [
