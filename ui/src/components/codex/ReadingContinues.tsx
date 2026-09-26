@@ -118,22 +118,26 @@ function toText(value: unknown): string | null {
  * `progress` property patches. Renders nothing when the vault carries no
  * reading base (the query 404s) or nothing is in flight.
  */
-export function ReadingContinuesPanel() {
+/** Rows of the reading base's `Continues` view; empty when the base is
+ *  missing or not flat. */
+export function useReadingRows(): ReadingRow[] {
   const view = useBaseView("reading", "Continues");
+  return view.data?.shape === "flat"
+    ? view.data.rows.map((row) => ({
+        id: row.id,
+        path: row.path,
+        title: row.title,
+        author: toText(row.columns.author),
+        progress: toNumber(row.columns.progress),
+        pages: toNumber(row.columns.pages),
+      }))
+    : [];
+}
+
+export function ReadingContinuesPanel() {
+  const rows = useReadingRows();
   const commit = usePropertyCommit();
   const openTab = useOpenTab();
-
-  const rows: ReadingRow[] =
-    view.data?.shape === "flat"
-      ? view.data.rows.map((row) => ({
-          id: row.id,
-          path: row.path,
-          title: row.title,
-          author: toText(row.columns.author),
-          progress: toNumber(row.columns.progress),
-          pages: toNumber(row.columns.pages),
-        }))
-      : [];
 
   return (
     <ReadingContinues
