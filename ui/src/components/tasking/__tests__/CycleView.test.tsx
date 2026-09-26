@@ -537,6 +537,20 @@ describe("CycleView — lanes", () => {
     expect(screen.queryByTestId("cv-lane-REVIEW")).not.toBeInTheDocument();
   });
 
+  // Two lanes side by side overflowed at 1024–1280px (review I2).
+  it("stacks lanes in one column below 1400px", () => {
+    renderCycleView(ACTIVE_CYCLE, C01_TASKS);
+    const grid = screen.getByTestId("cv-lane-FIELD").parentElement;
+    expect(grid?.className).toContain("min-[1400px]:grid-cols-2");
+    expect(grid?.className).not.toMatch(/(^|\s)grid-cols-2/);
+  });
+
+  it("lets the code cell shrink so the title keeps room", () => {
+    renderCycleView(ACTIVE_CYCLE, C01_TASKS);
+    const code = screen.getByText(C01_TASKS[0].code);
+    expect(code.className).not.toContain("flex-shrink-0");
+  });
+
   it("lane header shows the lane count", () => {
     renderCycleView(ACTIVE_CYCLE, [T_FIELD]);
     // 1 task in FIELD

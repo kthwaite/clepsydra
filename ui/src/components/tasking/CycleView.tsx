@@ -326,7 +326,7 @@ export function CycleView({
           <Button onPress={handleCommitTask}>New task</Button>
         </div>
       ) : (
-        <div className="mt-[34px] grid grid-cols-2 items-start gap-x-12 gap-y-[30px]">
+        <div className="mt-[34px] grid grid-cols-1 items-start gap-x-12 gap-y-[30px] min-[1400px]:grid-cols-2">
           {byCol.map((g) => (
             <section
               key={g.cid}
@@ -376,7 +376,7 @@ export function CycleView({
                       </InlineEditPopover>
                     </span>
 
-                    <span className="w-[124px] min-w-0 flex-shrink-0 truncate text-[13px] tabular-nums text-ink-2">
+                    <span className="w-[168px] min-w-[72px] shrink truncate text-[13px] tabular-nums text-ink-2">
                       {t.code}
                     </span>
 
@@ -413,11 +413,11 @@ export function CycleView({
                       </span>
                     </span>
 
-                    <span className="flex-shrink-0 text-[12.5px] text-mute">
+                    <span className="min-w-0 max-w-[112px] shrink truncate text-[12.5px] text-mute">
                       {t.project ?? "—"}
                     </span>
 
-                    <span className="flex-shrink-0 text-[12.5px] text-mute">
+                    <span className="min-w-0 max-w-[96px] shrink truncate text-[12.5px] text-mute">
                       {t.assignee ?? "—"}
                     </span>
 
