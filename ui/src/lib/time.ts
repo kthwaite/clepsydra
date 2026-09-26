@@ -152,3 +152,27 @@ export function formatDayMonth(iso: string): string {
   if (!m || !month) return iso;
   return `${Number(m[3])} ${month}`;
 }
+
+/** Day plus fixed short month and year ("18 Sep 2026"). */
+function dayMonthYear(d: Date): string {
+  return `${d.getDate()} ${SHORT_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/** Capture instant → local "18 Sep 2026, 14:02" with fixed month names.
+ *  Unparseable input comes back unchanged. */
+export function formatCapturedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${dayMonthYear(d)}, ${formatTimeHM(d)}`;
+}
+
+/** ISO day ("2026-09-17") or timestamp → local "17 Sep 2026" with fixed
+ *  month names. A bare day is not shifted by timezone. Unparseable input
+ *  comes back unchanged. */
+export function formatDayMonthYear(iso: string): string {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(iso)
+    ? parseLocalDate(iso)
+    : new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return dayMonthYear(d);
+}
