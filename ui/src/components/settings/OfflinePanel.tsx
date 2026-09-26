@@ -1,3 +1,4 @@
+import { Section } from "#/components/codex/Section";
 import { Button } from "#/components/ui/button";
 import { formatRelativeTime } from "#/lib/time";
 import { useOfflineStore } from "#/offline/offlineStore";
@@ -16,37 +17,31 @@ export function OfflinePanel() {
     : "No offline copy yet.";
 
   return (
-    <div className="border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="text-xs font-bold uppercase tracking-wider">
-            Offline copy
-          </h4>
-          <p className="mt-1 text-sm text-muted-foreground">
+    <Section label="Offline copy" compact className="[&_h2]:text-[21px]">
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <div className="min-w-0 max-w-2xl flex-1 basis-64">
+          <p className="text-[14px] text-mute">
             The whole vault is kept readable on this device without a
             connection.
           </p>
-          <p className="mt-2 text-sm">{summary}</p>
+          <p className="mt-2 text-[14px] text-ink tabular-nums">{summary}</p>
           {running && (
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1 text-[14px] text-mute tabular-nums">
               Syncing {progress.done} / {progress.total}
             </p>
           )}
           {lastError && (
-            <p className="mt-1 text-sm text-destructive">
-              Last sync: {lastError}
-            </p>
+            <p className="mt-1 text-[14px] text-hot">Last sync: {lastError}</p>
           )}
         </div>
         <Button
           variant="secondary"
-          size="sm"
           isDisabled={running}
           onPress={() => requestOfflineSyncNow()}
         >
           {running ? "Syncing…" : "Sync now"}
         </Button>
       </div>
-    </div>
+    </Section>
   );
 }
