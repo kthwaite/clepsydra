@@ -10,6 +10,8 @@ import {
 } from "#/api/attachments";
 import { formatApiError } from "#/api/error";
 import { CopyButton } from "#/components/ui/CopyButton";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import {
   attachmentReferences,
   canonicalAttachmentPath,
@@ -152,20 +154,20 @@ export function AttachmentManager({
   };
 
   return (
-    <section aria-label="Attachments" className="cl-mono text-[10px]">
+    <section aria-label="Attachments" className="text-[13.5px] text-ink-2">
       {protectedPage ? (
-        <p className="mb-2 border-l-2 border-warning pl-2 text-warning">
+        <p className="mb-3 rounded-[12px] bg-hot/5 px-3 py-2 text-warn">
           Attachments are not encrypted. Only the note body is protected.
         </p>
       ) : null}
       {missingReferences.length ? (
         <section
           aria-label="Plaintext attachment references"
-          className="mb-2 border-l-2 border-warning pl-2 text-warning"
+          className="mb-3 rounded-[12px] bg-hot/5 px-3 py-2 text-warn"
         >
-          <p className="font-semibold">Plaintext attachment references</p>
+          <p className="font-medium">Plaintext attachment references</p>
           <p>These references do not match the current attachment inventory:</p>
-          <ul className="m-0 list-disc pl-4">
+          <ul className="m-0 mt-1 list-disc break-all pl-4">
             {missingReferences.map((reference) => (
               <li key={reference.path}>{reference.path}</li>
             ))}
@@ -173,9 +175,9 @@ export function AttachmentManager({
         </section>
       ) : null}
 
-      <div className="mb-2">
-        <label className="inline-flex cursor-pointer items-center gap-1.5 border border-rule px-2 py-1 uppercase tracking-[0.1em] text-ink-mute hover:border-accent hover:text-accent">
-          <Upload aria-hidden size={12} />
+      <div className="mb-3">
+        <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-full bg-sink px-4 text-[13.5px] text-ink transition-colors hover:text-accent focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-ground">
+          <Upload aria-hidden size={14} />
           {upload.isPending ? "Uploading…" : "Upload"}
           <input
             type="file"
@@ -186,7 +188,7 @@ export function AttachmentManager({
           />
         </label>
         {!protectedPage ? (
-          <p className="mt-1 text-ink-mute">
+          <p className="mt-2 text-[13px] text-mute">
             Attachment bytes, filename, path, MIME type, and size are stored as
             plaintext and are not encrypted.
           </p>
@@ -194,7 +196,7 @@ export function AttachmentManager({
       </div>
 
       {actionError ? (
-        <p role="alert" className="mb-2 text-danger">
+        <p role="alert" className="mb-2 text-[13px] text-hot">
           {actionError}
         </p>
       ) : null}
@@ -202,7 +204,10 @@ export function AttachmentManager({
         <button
           type="button"
           onClick={() => setShowAll((current) => !current)}
-          className="mb-1.5 cursor-pointer uppercase tracking-[0.08em] text-ink-mute hover:text-accent"
+          className={cn(
+            "mb-2 cursor-pointer rounded text-[13px] text-accent hover:underline",
+            FOCUS_RING_NATIVE,
+          )}
         >
           {showAll
             ? `Show referenced attachments (${referencedAttachments.length})`
@@ -210,15 +215,17 @@ export function AttachmentManager({
         </button>
       ) : null}
       {error ? (
-        <p role="alert" className="text-danger">
+        <p role="alert" className="text-[13px] text-hot">
           {formatApiError(error, "Could not load attachments.")}
         </p>
       ) : isLoading ? (
-        <p className="text-ink-mute">Loading attachments…</p>
+        <p className="text-[13px] text-mute">Loading attachments…</p>
       ) : !attachments?.length ? (
-        <p className="text-ink-mute">No attachments in this vault.</p>
+        <p className="text-[13px] text-mute">No attachments in this vault.</p>
       ) : !visibleAttachments?.length ? (
-        <p className="text-ink-mute">No attachments referenced by this page.</p>
+        <p className="text-[13px] text-mute">
+          No attachments referenced by this page.
+        </p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
           {visibleAttachments.map((attachment) => {
@@ -228,24 +235,27 @@ export function AttachmentManager({
             return (
               <li
                 key={attachment.path}
-                className="border border-rule-soft px-2 py-1.5"
+                className="rounded-[12px] bg-raise px-3 py-2"
               >
-                <div className="flex min-w-0 items-start gap-1.5">
+                <div className="flex min-w-0 items-start gap-2">
                   <Icon
                     aria-hidden
-                    size={12}
-                    className="mt-0.5 shrink-0 text-accent"
+                    size={14}
+                    className="mt-[3px] shrink-0 text-accent"
                   />
                   <div className="min-w-0 flex-1">
                     <a
                       href={attachmentUrl(attachment.path)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="block truncate text-ink hover:underline"
+                      className={cn(
+                        "block truncate rounded text-ink hover:underline",
+                        FOCUS_RING_NATIVE,
+                      )}
                     >
                       {attachment.name}
                     </a>
-                    <span className="text-[9px] text-ink-mute">
+                    <span className="text-[12px] text-mute">
                       {formatSize(attachment.size)}
                     </span>
                   </div>
@@ -254,11 +264,14 @@ export function AttachmentManager({
                     label={`Copy Markdown for ${attachment.name}`}
                   />
                 </div>
-                <div className="mt-1 flex items-center gap-2 border-t border-rule-soft pt-1">
+                <div className="mt-1.5 flex items-center gap-3">
                   {onInsertMarkdown ? (
                     <button
                       type="button"
-                      className="cursor-pointer uppercase tracking-[0.08em] text-accent hover:underline"
+                      className={cn(
+                        "inline-flex cursor-pointer items-center gap-1 rounded text-[13px] text-accent hover:underline",
+                        FOCUS_RING_NATIVE,
+                      )}
                       onClick={() => {
                         if (protectedPage) {
                           setPendingAction({
@@ -271,11 +284,7 @@ export function AttachmentManager({
                         }
                       }}
                     >
-                      <Paperclip
-                        aria-hidden
-                        className="mr-1 inline"
-                        size={10}
-                      />
+                      <Paperclip aria-hidden size={13} />
                       <span className="sr-only">Insert {attachment.name}</span>
                       <span aria-hidden>Insert</span>
                     </button>
@@ -284,7 +293,10 @@ export function AttachmentManager({
                     <>
                       <button
                         type="button"
-                        className="cursor-pointer uppercase tracking-[0.08em] text-danger hover:underline"
+                        className={cn(
+                          "cursor-pointer rounded text-[13px] text-hot hover:underline",
+                          FOCUS_RING_NATIVE,
+                        )}
                         disabled={remove.isPending}
                         onClick={() => void confirmDelete(attachment)}
                       >
@@ -292,7 +304,10 @@ export function AttachmentManager({
                       </button>
                       <button
                         type="button"
-                        className="cursor-pointer text-ink-mute hover:text-ink"
+                        className={cn(
+                          "cursor-pointer rounded text-[13px] text-mute hover:text-ink",
+                          FOCUS_RING_NATIVE,
+                        )}
                         onClick={() => setDeletePath(null)}
                       >
                         Cancel
@@ -302,10 +317,13 @@ export function AttachmentManager({
                     <button
                       type="button"
                       aria-label={`Delete ${attachment.name}`}
-                      className="ml-auto cursor-pointer text-ink-mute hover:text-danger"
+                      className={cn(
+                        "ml-auto inline-flex cursor-pointer items-center rounded text-mute transition-colors hover:text-hot",
+                        FOCUS_RING_NATIVE,
+                      )}
                       onClick={() => setDeletePath(attachment.path)}
                     >
-                      <Trash2 aria-hidden size={11} />
+                      <Trash2 aria-hidden size={14} />
                     </button>
                   )}
                 </div>

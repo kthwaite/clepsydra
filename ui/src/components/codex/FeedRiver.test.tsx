@@ -659,9 +659,64 @@ describe("FeedRiver", () => {
   it("keeps the compact full-reader continuation", () => {
     renderRiver({ view: "all" }, true);
 
+    const continuation = screen.getByRole("link", {
+      name: /continue in feeds/i,
+    });
+    expect(continuation).toHaveAttribute("href", "/feeds?view=all");
+    expect(continuation).toHaveClass("bg-accent", "rounded-full");
+  });
+
+  it("draws river actions with the ui button looks", () => {
+    setEntries([entry()], "2026-08-08T12:00:00Z|88");
+    renderRiver({ view: "unread" });
+
+    expect(screen.getByRole("button", { name: /mark all read/i })).toHaveClass(
+      "bg-accent",
+      "rounded-full",
+    );
+    expect(screen.getByRole("button", { name: /load more/i })).toHaveClass(
+      "bg-sink",
+      "rounded-[14px]",
+    );
+  });
+
+  it("draws compact row actions as small ui buttons", () => {
+    renderRiver({ view: "all" }, true);
+
+    const row = screen.getByRole("article", { name: /cache semantics/i });
     expect(
+      within(row).getByRole("link", {
+        name: /open original: cache semantics/i,
+      }),
+    ).toHaveClass("bg-accent", "rounded-full", "h-8");
+    for (const name of [
+      /mark cache semantics read/i,
+      /bookmark cache semantics/i,
+      /edit tags for cache semantics/i,
+    ]) {
+      expect(within(row).getByRole("button", { name })).toHaveClass(
+        "bg-sink",
+        "h-8",
+      );
+    }
+  });
+
+  it("shows keyboard focus and hover on the native button-look links", () => {
+    renderRiver({ view: "all" }, true);
+
+    const row = screen.getByRole("article", { name: /cache semantics/i });
+    for (const link of [
       screen.getByRole("link", { name: /continue in feeds/i }),
-    ).toHaveAttribute("href", "/feeds?view=all");
+      within(row).getByRole("link", {
+        name: /open original: cache semantics/i,
+      }),
+    ]) {
+      expect(link).toHaveClass(
+        "focus-visible:ring-2",
+        "focus-visible:ring-accent",
+        "hover:bg-accent/90",
+      );
+    }
   });
 
   it("opens the original from the compact title and marks the entry read", async () => {

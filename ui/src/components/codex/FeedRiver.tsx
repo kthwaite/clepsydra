@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "react-aria-components";
+import { Button as AriaButton } from "react-aria-components";
 import {
   type EntryView,
   type FeedEntry,
@@ -10,7 +10,9 @@ import {
   useMarkFeedEntriesRead,
   usePatchFeedEntry,
 } from "#/api/feeds";
+import { Button, buttonStyles } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { feedEntryBoundary, formatFeedDay, formatFeedTime } from "#/lib/time";
 import { normalizeFeedEntryTags, safeFeedEntryUrl } from "./FeedReaderPane";
 
@@ -21,6 +23,10 @@ import { normalizeFeedEntryTags, safeFeedEntryUrl } from "./FeedReaderPane";
  * over the rest, so the list never reorders under the pointer.
  */
 const READ_ROW_EXIT_MS = 700;
+
+/** Native <a> links never get React Aria's data attributes, so they take
+ *  the native focus ring and a plain hover. */
+const NATIVE_LINK_BUTTON = cn(FOCUS_RING_NATIVE, "hover:bg-accent/90");
 
 export type FeedRiverFilters = {
   view: EntryView;
@@ -271,7 +277,8 @@ export function FeedRiver({
       {filters.view === "unread" && riverEntries.length > 0 ? (
         <div className="mb-3 flex justify-end">
           <Button
-            className="cl-btn cl-btn-hot"
+            variant="primary"
+            size="sm"
             isDisabled={markEntriesRead.isPending}
             onPressStart={() => markEntriesRead.reset()}
             onPress={() => {
@@ -411,12 +418,19 @@ export function FeedRiver({
       </div>
 
       {compact && riverEntries.length > 0 ? (
-        <a className="cl-btn cl-btn-hot mt-6" href={fullReaderHref(filters)}>
+        <a
+          className={buttonStyles(
+            "primary",
+            "sm",
+            cn(NATIVE_LINK_BUTTON, "mt-6 w-fit"),
+          )}
+          href={fullReaderHref(filters)}
+        >
           Continue in Feeds →
         </a>
       ) : !compact && entriesQuery.hasNextPage ? (
         <Button
-          className="cl-btn mt-4 w-full justify-center"
+          className="mt-4 w-full"
           isDisabled={entriesQuery.isFetchingNextPage}
           onPress={() => entriesQuery.fetchNextPage()}
         >
@@ -454,7 +468,7 @@ function EntrySelectionRow({
       )}
     >
       <h3 id={titleId} className="m-0">
-        <Button
+        <AriaButton
           data-feed-entry-id={entry.id}
           className="group grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)_auto] items-start gap-3 rounded-xl px-3 py-3 text-left outline-none hover:bg-sink focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent md:px-3.5"
           onPress={onSelect}
@@ -491,7 +505,7 @@ function EntrySelectionRow({
           >
             →
           </span>
-        </Button>
+        </AriaButton>
       </h3>
     </article>
   );
@@ -589,14 +603,14 @@ function EntryRow({
               rel="noreferrer"
               aria-label={`Open original: ${entry.title}`}
               onClick={onOpenOriginal}
-              className="cl-btn cl-btn-hot"
+              className={buttonStyles("primary", "sm", NATIVE_LINK_BUTTON)}
             >
               Open ↗
             </a>
           ) : null}
           <Button
             aria-label={`Mark ${entry.title} ${entry.read ? "unread" : "read"}`}
-            className="cl-btn"
+            size="sm"
             isDisabled={isPatchPending}
             onPress={onToggleRead}
           >
@@ -604,7 +618,7 @@ function EntryRow({
           </Button>
           <Button
             aria-label={`${entry.bookmarked ? "Remove bookmark from" : "Bookmark"} ${entry.title}`}
-            className="cl-btn"
+            size="sm"
             isDisabled={isPatchPending}
             onPress={onToggleBookmark}
           >
@@ -612,7 +626,7 @@ function EntryRow({
           </Button>
           <Button
             aria-label={`Edit tags for ${entry.title}`}
-            className="cl-btn"
+            size="sm"
             isDisabled={isPatchPending}
             onPress={onEditTags}
           >
@@ -669,14 +683,15 @@ function TagEditor({
         <Button
           type="submit"
           isDisabled={isPending}
-          className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          variant="primary"
+          size="sm"
         >
           {isPending ? "Saving…" : "Save tags"}
         </Button>
         <Button
           type="button"
           isDisabled={isPending}
-          className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          size="sm"
           onPress={onCancel}
         >
           Cancel

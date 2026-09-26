@@ -3,11 +3,15 @@ import { useGraph } from "#/api/index";
 import type { GraphNode } from "#/api/types";
 import { applyFilters } from "#/components/codex/constellation-filters";
 import { MobileConstellation } from "#/components/codex/MobileConstellation";
-import { ForceGraph } from "#/components/ForceGraph";
-import { Checkbox } from "#/components/ui/checkbox";
+import { Section } from "#/components/codex/Section";
+import { Tick } from "#/components/codex/Tick";
+import { ForceGraph, KindGlyph } from "#/components/ForceGraph";
+import { Switch } from "#/components/ui/switch";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import { type Kind, kindColorVar } from "#/lib/kind";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { type Kind, kindDisplayLabel } from "#/lib/kind";
 import { pluralize } from "#/lib/string";
 import { useConstellationStore } from "#/store/constellation";
 import { useWorkspaceStore } from "#/store/workspace";
@@ -65,13 +69,15 @@ export function Constellation() {
   );
 
   if (isLoading || !graph) {
-    return <div className="cl-marg p-6">… plotting the constellation …</div>;
+    return (
+      <p className="p-10 text-[14px] text-mute">Plotting the constellation…</p>
+    );
   }
   if (graph.nodes.length === 0) {
     return (
-      <div className="cl-marg p-6">
-        ⁂ no folios to plot. Inscribe a folio first.
-      </div>
+      <p className="p-10 text-[14px] text-mute">
+        No folios to plot. Inscribe a folio first.
+      </p>
     );
   }
 
@@ -102,132 +108,156 @@ export function Constellation() {
     .map((n) => ({ ...n, degree: degrees.get(n.id) ?? 0 }))
     .sort((a, b) => b.degree - a.degree)
     .slice(0, 6);
+  const anchorNode = anchorId
+    ? graph.nodes.find((node) => node.id === anchorId)
+    : undefined;
 
   return (
-    <div className="grid h-full grid-cols-[1fr_240px] gap-[18px] px-5 py-[14px]">
-      {/* CHART */}
-      <div className="flex min-h-0 flex-col">
-        <div className="mb-1 flex items-baseline justify-between">
-          <div>
-            <div className="cl-serif cl-cap cl-cap-wide text-[14px]">
-              CONSTELLATION
-            </div>
-          </div>
-          <div className="cl-mono text-[10px] text-ink-mute">
-            {filtered.nodes.length} {pluralize(filtered.nodes.length, "node")} |{" "}
-            {filtered.edges.length} {pluralize(filtered.edges.length, "edge")}
-          </div>
+    <div className="flex h-full min-h-0 flex-col bg-ground text-ink">
+      <div className="flex shrink-0 items-end gap-7 px-10 pt-10">
+        <div className="flex flex-col gap-2.5">
+          <span className="flex items-center gap-2.5">
+            <Tick />
+            <span className="font-serif text-[19px] text-mute italic">Map</span>
+          </span>
+          <h1 className="m-0 font-serif text-[56px] leading-none tracking-[-0.015em]">
+            Constellation
+          </h1>
         </div>
-        <hr className="cl-rule-double" />
+        <span className="pb-1.5 text-[14px] text-mute">
+          {filtered.nodes.length} {pluralize(filtered.nodes.length, "node")} ·{" "}
+          {filtered.edges.length} {pluralize(filtered.edges.length, "edge")}
+        </span>
+      </div>
 
-        {/* the chart */}
-        <div className="cl-frame cl-grid-fine relative min-h-0 flex-1 bg-paper">
-          {/* registration corners */}
-          <div className="absolute left-2 top-2 h-3 w-3 border-l border-t border-rule" />
-          <div className="absolute right-2 top-2 h-3 w-3 border-r border-t border-rule" />
-          <div className="absolute bottom-2 left-2 h-3 w-3 border-b border-l border-rule" />
-          <div className="absolute bottom-2 right-2 h-3 w-3 border-b border-r border-rule" />
-
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_272px] grid-rows-[minmax(0,1fr)] gap-12 px-10 pt-7 pb-8">
+        <div className="relative min-h-0 min-w-0 overflow-hidden rounded-2xl bg-raise px-[22px] py-[18px]">
           <ForceGraph
             nodes={filtered.nodes}
             edges={filtered.edges}
             onNodeClick={handle}
           />
         </div>
-      </div>
 
-      {/* SIDEBAR */}
-      <aside className="cl-noscroll overflow-auto border-l border-rule-soft pl-4">
-        <div className="cl-cap mb-1">Hubs</div>
-        <hr className="cl-rule-soft" />
-        <div className="cl-serif mt-1 ">
-          {hubs.map((h) => (
-            <button
-              key={h.id}
-              type="button"
-              onClick={() => handle(h)}
-              className="cl-leader mb-[2px] w-full cursor-pointer border-0 bg-transparent p-0 text-left"
-            >
-              <span className="italic">{h.title || h.path}</span>
-              <span className="cl-leader-dots" />
-              <span className="cl-mono text-[10px]">{h.degree}</span>
-            </button>
-          ))}
-          {hubs.length === 0 && (
-            <p className="cl-marg m-0">No connexions yet.</p>
-          )}
-        </div>
-        <div className="cl-cap mb-1 mt-4">Filters</div>
-        <hr className="cl-rule-soft" />
-        <div className="cl-serif mt-1 ">
-          <Checkbox
-            isSelected={orphansVisible}
-            onChange={(checked) => setOrphansVisible(checked)}
-          >
-            orphans visible
-          </Checkbox>
-          <Checkbox
-            isSelected={hideDaily}
-            onChange={(checked) => setHideDaily(checked)}
-          >
-            daily nodes hidden
-          </Checkbox>
-          <Checkbox
-            isSelected={hideTasks}
-            onChange={(checked) => setHideTasks(checked)}
-          >
-            tasks hidden
-          </Checkbox>
-          <div style={{ marginTop: 4 }}>
-            depth ·{" "}
-            {([1, 2, null] as const).map((d) => (
-              <button
-                key={String(d)}
-                type="button"
-                onClick={() => setDepth(d)}
-                style={{
-                  marginRight: 4,
-                  padding: "0 4px",
-                  background: depth === d ? "var(--accent)" : "transparent",
-                  color: depth === d ? "var(--paper)" : "var(--ink)",
-                  border: "1px solid var(--rule-soft)",
-                  cursor: anchorId || d == null ? "pointer" : "not-allowed",
-                  opacity: d != null && !anchorId ? 0.4 : 1,
-                }}
-                disabled={d != null && !anchorId}
-                title={
-                  d != null && !anchorId
-                    ? "open a page tab to use depth"
-                    : undefined
-                }
+        <aside className="cl-noscroll flex min-h-0 min-w-0 flex-col gap-7 overflow-auto">
+          <Section compact label="Hubs">
+            {hubs.length > 0 ? (
+              <div className="flex flex-col">
+                {hubs.map((h) => (
+                  <button
+                    key={h.id}
+                    type="button"
+                    onClick={() => handle(h)}
+                    className={cn(
+                      "flex h-8 w-full cursor-pointer items-center gap-3 rounded-md border-0 bg-transparent p-0 text-left text-[14px] text-ink hover:text-accent",
+                      FOCUS_RING_NATIVE,
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {h.title || h.path}
+                    </span>
+                    <span className="text-[13px] text-mute tabular-nums">
+                      {h.degree}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="m-0 text-[14px] text-mute">No connexions yet.</p>
+            )}
+          </Section>
+
+          <Section compact label="Filters">
+            <div className="flex flex-col gap-1">
+              <Switch
+                className="bg-transparent px-0 text-[14px]"
+                isSelected={orphansVisible}
+                onChange={setOrphansVisible}
               >
-                {d ?? "all"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="cl-cap mb-1 mt-4">Legend</div>
-        <hr className="cl-rule-soft" />
-        <div className="cl-serif mt-1 flex flex-col gap-[3px] text-ink-mute">
-          {(
-            [
-              ["▪", "PROJECT", "project"],
-              ["▲", "TODO", "todo"],
-              ["◦", "JOURNAL", "journal"],
-              ["•", "NOTE", "other"],
-            ] as [string, Kind, string][]
-          ).map(([glyph, kind, label]) => (
-            <div key={kind} className="flex items-center gap-2">
-              <span style={{ color: kindColorVar(kind) }}>{glyph}</span>
-              <span>{label}</span>
+                Show orphans
+              </Switch>
+              <Switch
+                className="bg-transparent px-0 text-[14px]"
+                isSelected={hideDaily}
+                onChange={setHideDaily}
+              >
+                Hide journals
+              </Switch>
+              <Switch
+                className="bg-transparent px-0 text-[14px]"
+                isSelected={hideTasks}
+                onChange={setHideTasks}
+              >
+                Hide tasks
+              </Switch>
+              <div className="mt-2.5 flex items-center gap-3 text-[14px]">
+                <span id="constellation-depth-label">Depth</span>
+                <fieldset
+                  aria-labelledby="constellation-depth-label"
+                  className="m-0 flex min-w-0 gap-0.5 rounded-full border-0 bg-sink p-[3px]"
+                >
+                  {([1, 2, null] as const).map((d) => {
+                    const needsAnchor = d != null && !anchorId;
+                    const selected = depth === d;
+                    return (
+                      <button
+                        key={String(d)}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setDepth(d)}
+                        disabled={needsAnchor}
+                        title={
+                          needsAnchor
+                            ? "Open a page tab to use depth"
+                            : undefined
+                        }
+                        className={cn(
+                          "h-[30px] min-w-11 rounded-full border-0 px-3 text-[13px] disabled:cursor-not-allowed disabled:opacity-40",
+                          selected
+                            ? "bg-raise font-medium text-ink shadow-sm"
+                            : "bg-transparent text-mute enabled:hover:text-ink",
+                          FOCUS_RING_NATIVE,
+                        )}
+                      >
+                        {d ?? "All"}
+                      </button>
+                    );
+                  })}
+                </fieldset>
+              </div>
+              {anchorNode ? (
+                <span className="mt-1.5 text-[12.5px] leading-normal text-mute">
+                  From{" "}
+                  <span className="text-ink">
+                    {anchorNode.title || anchorNode.path}
+                  </span>
+                  {anchorId === activeAnchorId ? ", the open page" : null}
+                </span>
+              ) : null}
             </div>
-          ))}
-        </div>
-      </aside>
+          </Section>
+
+          <Section compact pip="dim" label="Legend">
+            <div className="flex flex-col gap-2.5">
+              {LEGEND_KINDS.map((kind) => (
+                <span
+                  key={kind}
+                  className="flex items-center gap-3 text-[13.5px] text-ink-2"
+                >
+                  <KindGlyph kind={kind} />
+                  {kindDisplayLabel(kind)}
+                </span>
+              ))}
+            </div>
+          </Section>
+        </aside>
+      </div>
     </div>
   );
 }
+
+/** The node shapes the map draws, as the legend names them. */
+const LEGEND_KINDS: readonly Kind[] = ["PROJECT", "TASK", "JOURNAL", "NOTE"];
 
 function countDegrees(
   edges: { source: string; target: string }[],

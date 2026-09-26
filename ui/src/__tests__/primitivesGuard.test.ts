@@ -198,6 +198,40 @@ const MAINTAIN_FILES = [
   "../../routes/stats.tsx",
 ];
 
+/** The rest: docs, constellation, mobile gazetteer, errors, Folio menus, agenda (phase 5.6). */
+const REST_FILES = [
+  "../docs/DocsArticle.tsx",
+  "../docs/DocsLayout.tsx",
+  "../docs/DocsMdxComponents.tsx",
+  "../docs/DocsScreen.tsx",
+  "../docs/DocsSidebar.tsx",
+  "../docs/DocsToc.tsx",
+  "../codex/Constellation.tsx",
+  "../codex/MobileConstellation.tsx",
+  "../ForceGraph.tsx",
+  "../../routes/graph.tsx",
+  "../codex/MobileGazetteer.tsx",
+  "../codex/LocationModal.tsx",
+  "../codex/BootSequence.tsx",
+  "../../routes/__root.tsx",
+  "../FeatureFlagsProvider.tsx",
+  "../FeatureGate.tsx",
+  "../OfflineUnavailable.tsx",
+  "../RouteError.tsx",
+  "../../routes/pages/$.tsx",
+  "../page-tree/FolderActionsMenu.tsx",
+  "../page-tree/PageActionsMenu.tsx",
+  "../page-tree/MutationPreviewDialog.tsx",
+  "../attachments/AttachmentManager.tsx",
+  "../attachments/PlaintextAttachmentDialog.tsx",
+  "../blocks/BlockTransclusion.tsx",
+  "../FileTree.tsx",
+  "../MarkdownRenderer.tsx",
+  "../agenda/AgendaItemList.tsx",
+  "../../routes/agenda.tsx",
+  "../TabContent.tsx",
+];
+
 /** Mobile companion shell (phase 4b-1). */
 const MOBILE_FILES = [
   "../codex/MobileCodexFrame.tsx",
@@ -233,6 +267,12 @@ const FORBIDDEN: Array<[string, RegExp]> = [
   ["paper-2", /\bpaper-2\b/],
   ["ink-mute", /\bink-mute\b/],
   ["muted-foreground", /\bmuted-foreground\b/],
+  // Phase 5.6: the .cl-btn stopgap CSS is gone, and Vessel-only variables
+  // (cool = accent, paper, bar-*, ink-3, bg) have Stone & Lamp role names.
+  ["cl-btn", /\bcl-btn\b/],
+  ["cl-marg", /\bcl-marg\b/],
+  ["Vessel var", /var\(--(ink-3|bg|paper|cool|bar-)/],
+  ["cool", /\b(bg|text|border|fill|stroke)-cool\b/],
 ];
 
 const files = [
@@ -253,6 +293,7 @@ const files = [
   ...FOLIO_5_3_FILES,
   ...GATHER_FILES,
   ...MAINTAIN_FILES,
+  ...REST_FILES,
 ].filter((f) => {
   try {
     readFileSync(path.join(uiDir, f));

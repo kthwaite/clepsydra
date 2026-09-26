@@ -26,4 +26,12 @@ describe("ReadingContinues", () => {
     expect(track).toHaveClass("bg-sink");
     expect(container.innerHTML).not.toMatch(/border-rule|uppercase/);
   });
+
+  it("advances progress with a quiet ui button", () => {
+    render(
+      <ReadingContinues rows={[ROW]} onOpen={vi.fn()} onAdvance={vi.fn()} />,
+    );
+    const advance = screen.getByRole("button", { name: /advance ctesibius/i });
+    expect(advance).toHaveClass("bg-sink", "rounded-[14px]", "h-8");
+  });
 });

@@ -76,14 +76,14 @@ describe("PageActionsMenu page archival", () => {
     const user = userEvent.setup();
     renderMenu();
 
-    expect(screen.getByRole("button", { name: "Archive Page" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Archive page" })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: /delete page/i }),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Archive Page" }));
+    await user.click(screen.getByRole("button", { name: "Archive page" }));
 
-    const dialog = screen.getByRole("dialog", { name: "Archive Page" });
+    const dialog = screen.getByRole("dialog", { name: "Archive page" });
     expect(
       within(dialog).getByText(/removed from normal views/i),
     ).toBeVisible();
@@ -110,7 +110,7 @@ describe("PageActionsMenu page archival", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Archive Page" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Archive page" })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: /move or rename page/i }),
     ).not.toBeInTheDocument();
@@ -128,7 +128,7 @@ describe("PageActionsMenu page archival", () => {
     });
     const { onArchived } = renderMenu({ beforeMutation });
 
-    await user.click(screen.getByRole("button", { name: "Archive Page" }));
+    await user.click(screen.getByRole("button", { name: "Archive page" }));
     await user.click(screen.getByRole("button", { name: "Confirm archive" }));
 
     await waitFor(() => expect(onArchived).toHaveBeenCalledWith(archivedPage));
@@ -145,7 +145,7 @@ describe("PageActionsMenu page archival", () => {
       beforeMutation: vi.fn().mockRejectedValue(new Error("Save failed")),
     });
 
-    await user.click(screen.getByRole("button", { name: "Archive Page" }));
+    await user.click(screen.getByRole("button", { name: "Archive page" }));
     await user.click(screen.getByRole("button", { name: "Confirm archive" }));
 
     expect(await screen.findByText("Save failed")).toBeVisible();
@@ -173,7 +173,7 @@ describe("PageActionsMenu page archival", () => {
     });
     renderMenu({ onArchived });
 
-    await user.click(screen.getByRole("button", { name: "Archive Page" }));
+    await user.click(screen.getByRole("button", { name: "Archive page" }));
     await user.click(screen.getByRole("button", { name: "Confirm archive" }));
 
     expect(await screen.findByText("Archive conflict")).toBeVisible();

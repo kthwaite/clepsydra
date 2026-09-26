@@ -14,7 +14,7 @@ export function Spark({
   data: number[];
   width: number;
   height: number;
-  /** Stroke color — pass a Vessel token, e.g. "var(--cool)". */
+  /** Stroke color — pass a colour token, e.g. "var(--accent)". */
   accent: string;
 }) {
   if (data.length < 2) return null;

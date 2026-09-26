@@ -1,7 +1,9 @@
 import type { ErrorComponentProps } from "@tanstack/react-router";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
+import { Tick } from "#/components/codex/Tick";
 import { OfflineUnavailable } from "#/components/OfflineUnavailable";
 import { Button } from "#/components/ui/button";
+import { cn } from "#/lib/cn";
 import { isOfflineUncached } from "#/offline/swPolicy";
 
 type ResponseDetails = {
@@ -155,119 +157,138 @@ export function RouteError({
     return <OfflineUnavailable onRetry={reset} />;
   }
 
+  const metaParts = [
+    errorName,
+    response && response.status !== null
+      ? `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`
+      : null,
+  ].filter((part): part is string => Boolean(part));
+
   return (
-    <div className="mx-auto max-w-3xl px-8 py-6">
-      <section className="border border-destructive bg-background p-5 shadow-md">
-        <p className="text-xs font-bold uppercase tracking-widest text-destructive">
-          Application error
-        </p>
-        <h1 className="mt-2 font-heading text-2xl font-bold">
+    <div className="mx-auto flex max-w-3xl flex-col gap-8 px-4 py-8 md:px-10 md:py-12">
+      <section className="flex flex-col rounded-2xl bg-raise px-6 pt-6 pb-7 md:px-8 md:pt-7 md:pb-[30px]">
+        <span className="flex items-center gap-2.5">
+          <Tick className="bg-hot" />
+          <span className="font-serif text-[19px] italic text-hot">
+            Application error
+          </span>
+        </span>
+        <h1 className="mt-3 font-serif text-[36px] leading-[1.05] tracking-[-0.01em] text-ink md:text-[44px]">
           Something went wrong
         </h1>
 
-        {errorName && (
-          <p className="mt-3 text-sm text-muted-foreground">
-            Type: {errorName}
+        <p className="mt-4 text-[17px] leading-[1.6] text-ink-2">{message}</p>
+
+        {metaParts.length > 0 && (
+          <p className="mt-1.5 text-[13px] text-mute">
+            {metaParts.join(" · ")}
           </p>
         )}
 
-        <p className="mt-2 text-sm">{message}</p>
-
-        {response && response.status !== null && (
-          <p className="mt-2 text-sm text-muted-foreground">
-            HTTP {response.status}
-            {response.statusText ? ` ${response.statusText}` : ""}
-          </p>
-        )}
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button variant="secondary" size="sm" onPress={reset}>
+        <div className="mt-[22px] flex flex-wrap items-center gap-2.5">
+          <Button variant="primary" onPress={reset}>
             Try again
           </Button>
           <Button
-            variant="secondary"
-            size="sm"
+            aria-expanded={showDetails}
             onPress={() => setShowDetails((prev) => !prev)}
           >
             {showDetails ? "Hide technical details" : "Show technical details"}
           </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onPress={() => window.location.reload()}
-          >
-            Reload app
-          </Button>
+          <Button onPress={() => window.location.reload()}>Reload app</Button>
         </div>
       </section>
 
       {showDetails && (
-        <div className="mt-6 space-y-4">
+        <div className="flex flex-col gap-[22px] pl-1">
           {response && (
-            <section className="border border-border bg-card p-4 shadow-sm">
-              <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-                Response
-              </h2>
-              <dl className="mt-3 space-y-1 text-sm">
+            <DetailSection label="Response">
+              <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-[13.5px]">
                 {response.status !== null && (
-                  <div>
-                    <dt className="inline font-semibold">Status:</dt>{" "}
-                    <dd className="inline">{response.status}</dd>
-                  </div>
+                  <>
+                    <dt className="text-mute">Status</dt>
+                    <dd className="m-0 text-ink">{response.status}</dd>
+                  </>
                 )}
                 {response.statusText && (
-                  <div>
-                    <dt className="inline font-semibold">Status Text:</dt>{" "}
-                    <dd className="inline">{response.statusText}</dd>
-                  </div>
+                  <>
+                    <dt className="text-mute">Status text</dt>
+                    <dd className="m-0 text-ink">{response.statusText}</dd>
+                  </>
                 )}
                 {response.url && (
-                  <div>
-                    <dt className="inline font-semibold">URL:</dt>{" "}
-                    <dd className="inline break-all">{response.url}</dd>
-                  </div>
+                  <>
+                    <dt className="text-mute">URL</dt>
+                    <dd className="m-0 break-all text-ink">{response.url}</dd>
+                  </>
                 )}
               </dl>
               {response.payload !== null && (
-                <pre className="mt-3 overflow-x-auto border border-border bg-muted p-3 text-xs">
+                <CodeBlock className="mt-2.5">
                   {formatUnknown(response.payload)}
-                </pre>
+                </CodeBlock>
               )}
-            </section>
+            </DetailSection>
           )}
 
           {stack && (
-            <section className="border border-border bg-card p-4 shadow-sm">
-              <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-                Stack trace
-              </h2>
-              <pre className="mt-3 overflow-x-auto border border-border bg-muted p-3 text-xs">
-                {stack}
-              </pre>
-            </section>
+            <DetailSection label="Stack trace">
+              <CodeBlock>{stack}</CodeBlock>
+            </DetailSection>
           )}
 
           {info?.componentStack && (
-            <section className="border border-border bg-card p-4 shadow-sm">
-              <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-                React component stack
-              </h2>
-              <pre className="mt-3 overflow-x-auto border border-border bg-muted p-3 text-xs">
-                {info.componentStack}
-              </pre>
-            </section>
+            <DetailSection label="React component stack">
+              <CodeBlock>{info.componentStack}</CodeBlock>
+            </DetailSection>
           )}
 
-          <section className="border border-border bg-card p-4 shadow-sm">
-            <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-              Raw error
-            </h2>
-            <pre className="mt-3 overflow-x-auto border border-border bg-muted p-3 text-xs">
-              {formatUnknown(error)}
-            </pre>
-          </section>
+          <DetailSection label="Raw error">
+            <CodeBlock>{formatUnknown(error)}</CodeBlock>
+          </DetailSection>
         </div>
       )}
     </div>
+  );
+}
+
+/** A faint-ticked technical-details block: italic serif eyebrow, body
+ *  indented to the eyebrow text. */
+function DetailSection({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="flex min-w-0 flex-col gap-2.5">
+      <div className="flex items-center gap-2.5">
+        <Tick variant="faint" />
+        <h2 className="font-serif text-[18px] italic leading-none text-mute">
+          {label}
+        </h2>
+      </div>
+      <div className="min-w-0 pl-[17px]">{children}</div>
+    </section>
+  );
+}
+
+function CodeBlock({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <pre
+      className={cn(
+        "m-0 overflow-x-auto rounded-[10px] bg-sink px-4 py-3 text-[12px] leading-[1.6] text-ink-2",
+        className,
+      )}
+    >
+      {children}
+    </pre>
   );
 }

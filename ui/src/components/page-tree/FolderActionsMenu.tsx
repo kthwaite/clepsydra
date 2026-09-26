@@ -10,12 +10,19 @@ import {
   type MutationPreviewRequest,
   usePreviewMutation,
 } from "#/api/index";
+import { Tick } from "#/components/codex/Tick";
 import { MutationPreviewDialog } from "#/components/page-tree/MutationPreviewDialog";
 import { Button } from "#/components/ui/button";
 import { Checkbox } from "#/components/ui/checkbox";
 import { Dialog } from "#/components/ui/dialog";
 import { Select, SelectItem } from "#/components/ui/select";
 import { TextField } from "#/components/ui/text-field";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+
+/** Rail eyebrow: tick + 18px italic serif, as in Section compact. */
+const EYEBROW =
+  "flex items-center gap-2.5 font-serif text-[18px] font-normal italic leading-none text-mute";
 
 function mutationError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -195,7 +202,10 @@ export function FolderActionsMenu({
     <>
       <button
         type="button"
-        className="cl-mono cursor-pointer text-left text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+        className={cn(
+          "cursor-pointer rounded text-left text-[13.5px] text-mute transition-colors hover:text-ink",
+          FOCUS_RING_NATIVE,
+        )}
         onClick={() => setIsOpen(true)}
       >
         Manage folders
@@ -219,15 +229,13 @@ export function FolderActionsMenu({
           </Button>
         }
       >
-        <div className="space-y-5">
+        <div className="space-y-7">
           <section
-            className="space-y-2"
+            className="space-y-3"
             aria-labelledby={`${id}-create-folder-heading`}
           >
-            <h3
-              id={`${id}-create-folder-heading`}
-              className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-            >
+            <h3 id={`${id}-create-folder-heading`} className={EYEBROW}>
+              <Tick />
               Create
             </h3>
             <TextField
@@ -250,13 +258,11 @@ export function FolderActionsMenu({
           </section>
 
           <section
-            className="space-y-2 border-t border-border pt-4"
+            className="space-y-3"
             aria-labelledby={`${id}-move-folder-heading`}
           >
-            <h3
-              id={`${id}-move-folder-heading`}
-              className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-            >
+            <h3 id={`${id}-move-folder-heading`} className={EYEBROW}>
+              <Tick />
               Move or rename
             </h3>
             <FolderSelect
@@ -292,13 +298,11 @@ export function FolderActionsMenu({
           </section>
 
           <section
-            className="space-y-2 border-t border-border pt-4"
+            className="space-y-3"
             aria-labelledby={`${id}-delete-folder-heading`}
           >
-            <h3
-              id={`${id}-delete-folder-heading`}
-              className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-            >
+            <h3 id={`${id}-delete-folder-heading`} className={EYEBROW}>
+              <Tick />
               Delete
             </h3>
             <FolderSelect
@@ -322,11 +326,11 @@ export function FolderActionsMenu({
           </section>
 
           {treeError ? (
-            <p className="text-xs text-destructive">
+            <p className="text-[13px] text-hot">
               Folder list failed to load: {mutationError(treeError)}
             </p>
           ) : null}
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          {error ? <p className="text-[13px] text-hot">{error}</p> : null}
         </div>
       </Dialog>
 
@@ -378,7 +382,7 @@ export function FolderActionsMenu({
         }
       >
         <div className="space-y-4">
-          <p className="text-sm text-destructive">
+          <p className="text-[14px] text-hot">
             Folder deletion is permanent: its pages do not enter the Rubbish
             Bin. The backend cannot preview folder deletion, so verify the exact
             folder name before continuing.
@@ -398,7 +402,7 @@ export function FolderActionsMenu({
           >
             Delete contents recursively
           </Checkbox>
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          {error ? <p className="text-[13px] text-hot">{error}</p> : null}
         </div>
       </Dialog>
     </>

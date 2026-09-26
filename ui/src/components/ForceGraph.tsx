@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { GraphEdge, GraphNode } from "#/api/types";
 import { type Kind, kindColorVar, resolveKindFromPath } from "#/lib/kind";
 
-/** Kind-coded node glyph: square=PROJECT, triangle=TODO, ring=JOURNAL,
+/** Kind-coded node glyph: square=PROJECT, triangle=TODO/TASK, ring=JOURNAL,
  *  dashed ring=AI_JOURNAL, dot=other. */
 function nodeShape(kind: Kind): {
   d: string;
@@ -24,7 +24,7 @@ function nodeShape(kind: Kind): {
   const s = 6;
   if (kind === "PROJECT")
     return { d: `M${-s} ${-s}h${2 * s}v${2 * s}h${-2 * s}Z`, filled: true };
-  if (kind === "TODO")
+  if (kind === "TODO" || kind === "TASK")
     return { d: `M0 ${-s}L${s} ${s}L${-s} ${s}Z`, filled: true };
   if (kind === "JOURNAL")
     return {
@@ -42,6 +42,37 @@ function nodeShape(kind: Kind): {
     d: `M${-r} 0a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`,
     filled: true,
   };
+}
+
+/** Resolve a colour token (`--accent` or `var(--accent)`) to its computed
+ *  value on <html>, so SVG attributes follow the active theme. Falls back to
+ *  the `var()` reference where the computed value is unavailable. */
+function resolveToken(token: string): string {
+  const name = token.match(/^var\((--[\w-]+)\)$/)?.[1] ?? token;
+  if (!name.startsWith("--")) return token;
+  const value = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  return value || `var(${name})`;
+}
+
+/** The glyph used for a kind, sized for the rail legend. */
+export function KindGlyph({ kind }: { kind: Kind }) {
+  const shape = nodeShape(kind);
+  const color = kindColorVar(kind);
+  return (
+    <svg width="14" height="14" viewBox="-7 -7 14 14" aria-hidden="true">
+      <path
+        d={shape.d}
+        style={{
+          fill: shape.filled ? color : "none",
+          stroke: color,
+          strokeWidth: shape.filled ? 0 : 1.5,
+        }}
+        strokeDasharray={shape.dashed ? "2,2" : undefined}
+      />
+    </svg>
+  );
 }
 
 interface SimNode extends SimulationNodeDatum, GraphNode {}
@@ -64,6 +95,7 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
   const simRef = useRef<Simulation<SimNode, undefined> | null>(null);
+  const paintRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -166,9 +198,8 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .selectAll("line")
       .data(simLinks)
       .join("line")
-      .attr("class", "stroke-accent")
       .attr("stroke-width", 1)
-      .attr("stroke-opacity", 0.3);
+      .attr("stroke-opacity", 0.35);
 
     // Nodes — a transparent 44×44 interaction surface owns click/drag while
     // the visible kind glyph remains pointer-transparent.
@@ -192,16 +223,11 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
         onNodeClick?.(d);
       });
 
-    nodeSel
+    const glyphSel = nodeSel
       .append("path")
       .attr("class", "node-glyph")
       .attr("pointer-events", "none")
       .attr("d", (d) => nodeShape(resolveKindFromPath(d.path)).d)
-      .attr("fill", (d) => {
-        const k = resolveKindFromPath(d.path);
-        return nodeShape(k).filled ? kindColorVar(k) : "none";
-      })
-      .attr("stroke", (d) => kindColorVar(resolveKindFromPath(d.path)))
       .attr("stroke-width", (d) =>
         nodeShape(resolveKindFromPath(d.path)).filled ? 0 : 1.5,
       )
@@ -215,10 +241,28 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .data(simNodes)
       .join("text")
       .text((d) => d.title || d.path)
-      .attr("class", "cl-mono fill-muted-foreground text-[9px]")
+      .attr("class", "font-sans")
+      .attr("font-size", 12)
       .attr("pointer-events", "none")
       .attr("dx", 10)
       .attr("dy", 4);
+
+    // Colours come from the theme tokens at paint time, so bone and
+    // charcoal both read; the observer below repaints on a theme switch.
+    const paint = () => {
+      linkSel.attr("stroke", resolveToken("--accent"));
+      glyphSel
+        .attr("fill", (d) => {
+          const k = resolveKindFromPath(d.path);
+          return nodeShape(k).filled ? resolveToken(kindColorVar(k)) : "none";
+        })
+        .attr("stroke", (d) =>
+          resolveToken(kindColorVar(resolveKindFromPath(d.path))),
+        );
+      labelSel.attr("fill", resolveToken("--ink-2"));
+    };
+    paint();
+    paintRef.current = paint;
 
     // Drag
     const dragBehavior = drag<SVGGElement, PositionedSimNode>()
@@ -260,6 +304,16 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
   }, [initGraph]);
 
   useEffect(() => {
+    if (typeof MutationObserver === "undefined") return;
+    const observer = new MutationObserver(() => paintRef.current?.());
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme"],
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     if (viewport.width <= 0 || viewport.height <= 0) return;
     const simulation = simRef.current;
     if (!simulation) return;
@@ -274,15 +328,12 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
   const viewBoxHeight = Math.max(viewport.height, 1);
 
   return (
-    <div
-      ref={containerRef}
-      className="h-full w-full overflow-hidden bg-background"
-    >
+    <div ref={containerRef} className="h-full w-full overflow-hidden">
       <svg
         ref={svgRef}
         role="img"
         aria-label="Constellation graph"
-        className="block h-full w-full touch-none bg-background"
+        className="block h-full w-full touch-none"
         viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
       >
         <g ref={gRef} />

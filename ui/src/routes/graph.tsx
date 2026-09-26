@@ -18,5 +18,5 @@ function GraphRedirect() {
     });
   }, [openTab, navigate]);
 
-  return <div className="p-8 text-muted-foreground">Redirecting...</div>;
+  return <p className="p-8 text-[14px] text-mute">Redirecting…</p>;
 }

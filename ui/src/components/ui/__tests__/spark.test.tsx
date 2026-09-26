@@ -5,7 +5,12 @@ import { Spark } from "../spark";
 describe("Spark", () => {
   it("renders an svg polyline with one point per datum", () => {
     const { container } = render(
-      <Spark data={[1, 3, 2, 5]} width={96} height={26} accent="var(--cool)" />,
+      <Spark
+        data={[1, 3, 2, 5]}
+        width={96}
+        height={26}
+        accent="var(--accent)"
+      />,
     );
     const svg = container.querySelector("svg");
     expect(svg).toBeInTheDocument();
@@ -14,13 +19,13 @@ describe("Spark", () => {
 
     const polyline = container.querySelector("polyline");
     expect(polyline).toBeInTheDocument();
-    expect(polyline).toHaveAttribute("stroke", "var(--cool)");
+    expect(polyline).toHaveAttribute("stroke", "var(--accent)");
     expect(polyline?.getAttribute("points")?.split(" ")).toHaveLength(4);
   });
 
   it("renders nothing for fewer than two data points", () => {
     const { container } = render(
-      <Spark data={[7]} width={96} height={26} accent="var(--cool)" />,
+      <Spark data={[7]} width={96} height={26} accent="var(--accent)" />,
     );
     expect(container.querySelector("svg")).not.toBeInTheDocument();
   });

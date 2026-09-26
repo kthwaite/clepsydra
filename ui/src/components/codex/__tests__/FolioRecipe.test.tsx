@@ -370,6 +370,9 @@ describe("Folio recipe presentation", () => {
     renderFolio(editor);
 
     const alert = screen.getByRole("alert");
+    // Stone & Lamp note: a soft hot wash, not the Vessel mono rule band.
+    expect(alert).toHaveClass("bg-hot/5");
+    expect(alert).not.toHaveClass("ai-conversation-warning");
     expect(alert).toHaveTextContent("original Markdown is preserved");
     expect(alert).toHaveTextContent(
       "Ingredients, Steps, and Notes once and in that order",

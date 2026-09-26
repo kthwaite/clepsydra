@@ -121,10 +121,10 @@ export const MODES = [
 
 /**
  * Returns the CSS color variable for a health status.
- * GREEN → var(--cool), AMBER → var(--warn), RED → var(--hot), else → var(--mute).
+ * GREEN → var(--accent), AMBER → var(--warn), RED → var(--hot), else → var(--mute).
  */
 export function healthColor(health: string): string {
-  if (health === "GREEN") return "var(--cool)";
+  if (health === "GREEN") return "var(--accent)";
   if (health === "AMBER") return "var(--warn)";
   if (health === "RED") return "var(--hot)";
   return "var(--mute)";

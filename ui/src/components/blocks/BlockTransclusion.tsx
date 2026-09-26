@@ -25,7 +25,7 @@ function UnavailableBlock({
       role="group"
       aria-label="Referenced block"
       className={cn(
-        "inline-flex min-w-0 items-baseline gap-1 text-muted-foreground",
+        "inline-flex min-w-0 items-baseline gap-1 text-mute",
         className,
       )}
     >
@@ -53,7 +53,7 @@ export function BlockTransclusion({
 
   if (isPending) {
     return (
-      <span role="status" className={cn("text-muted-foreground", className)}>
+      <span role="status" className={cn("text-mute", className)}>
         Loading referenced block
       </span>
     );
@@ -94,7 +94,7 @@ export function BlockTransclusion({
         type="button"
         contentEditable={false}
         aria-label={`Open referenced block in ${sourceName}`}
-        className="shrink-0 cursor-pointer text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground hover:decoration-solid"
+        className="shrink-0 cursor-pointer text-mute underline decoration-dotted underline-offset-2 hover:text-ink hover:decoration-solid"
         onClick={() => onOpenSource(data)}
       >
         Source

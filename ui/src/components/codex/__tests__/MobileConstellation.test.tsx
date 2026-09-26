@@ -69,6 +69,23 @@ async function graphTitles(): Promise<string[]> {
 }
 
 describe("MobileConstellation", () => {
+  it("titles the map with a serif heading and a sentence-case count", () => {
+    render(<Harness />);
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Constellation" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Map · 5 pages · 3 links")).toBeInTheDocument();
+  });
+
+  it("says so when no page matches the controls", async () => {
+    const user = userEvent.setup();
+    render(<Harness sourceGraph={{ nodes: [], edges: [] }} />);
+    await user.click(screen.getByRole("button", { name: "List view" }));
+    expect(
+      screen.getByText("No pages match these controls."),
+    ).toBeInTheDocument();
+  });
+
   it("limits the chart to the selected anchor and depth", async () => {
     const user = userEvent.setup();
     render(<Harness />);
@@ -216,6 +233,12 @@ describe("MobileConstellation", () => {
     const sheet = screen.getByRole("dialog", {
       name: "Constellation details",
     });
+    expect(
+      within(sheet).getByRole("heading", { name: "Hubs and orphans" }),
+    ).toBeVisible();
+    expect(
+      within(sheet).getByRole("heading", { name: "Hubs by degree" }),
+    ).toBeVisible();
     expect(
       within(sheet).getByRole("list", { name: "Hubs by degree" }),
     ).toBeVisible();

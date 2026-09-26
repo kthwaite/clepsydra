@@ -101,7 +101,8 @@ describe("MobileGazetteer", () => {
     const alpha = within(list).getAllByRole("listitem")[0];
     expect(alpha).toHaveTextContent("Alpha");
     expect(alpha).toHaveTextContent("notes/alpha.md");
-    expect(alpha).toHaveTextContent("NOTE");
+    expect(alpha).toHaveTextContent("Note");
+    expect(alpha).not.toHaveTextContent(/NOTE/);
     expect(alpha).toHaveTextContent("Atlas");
     expect(alpha).toHaveTextContent("#research");
     expect(alpha).toHaveTextContent("#active");
@@ -112,6 +113,36 @@ describe("MobileGazetteer", () => {
 
     await user.click(screen.getByRole("button", { name: "Open Alpha" }));
     expect(onOpen).toHaveBeenCalledWith("notes/alpha.md", "Alpha");
+  });
+
+  it("heads the screen with a tick eyebrow count and a serif title", () => {
+    renderGazetteer({ totalCount: 1204, filteredCount: 38, pageCount: 4 });
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Gazetteer" }),
+    ).toBeVisible();
+    expect(screen.getByText("Index · 38 of 1,204")).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Page 1 of 4 · 38 matches",
+    );
+  });
+
+  it("shows sentence-case kinds and fixed month names for older edits", () => {
+    renderGazetteer({
+      rows: [
+        {
+          ...rows[0],
+          kind: "AI_JOURNAL",
+          updated_at: "2020-01-15T12:00:00Z",
+          word_count: 1284,
+        },
+      ],
+    });
+
+    const [row] = screen.getAllByRole("listitem");
+    expect(row).toHaveTextContent("AI journal");
+    expect(row).toHaveTextContent("1,284 words");
+    expect(row).toHaveTextContent("Edited 15 Jan 2020");
   });
 
   it("appends a result tag through the controlled callback and makes it keyboard reachable", async () => {
@@ -168,6 +199,15 @@ describe("MobileGazetteer", () => {
     await user.click(screen.getByRole("button", { name: "Filters" }));
     const dialog = screen.getByRole("dialog", { name: "Gazetteer filters" });
     expect(dialog).toBeVisible();
+    expect(
+      within(dialog).getByRole("heading", { name: "Gazetteer filters" }),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByRole("heading", { name: "Filter by" }),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByRole("radiogroup", { name: "Sort pages" }),
+    ).toBeVisible();
     expect(within(dialog).getByTestId("filter-bar-input")).toHaveAccessibleName(
       "Search pages",
     );

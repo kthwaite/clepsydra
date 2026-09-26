@@ -1,15 +1,16 @@
 import { useMemo, useState } from "react";
-import {
-  Button as AriaButton,
-  Dialog,
-  Heading,
-  Modal,
-  ModalOverlay,
-} from "react-aria-components";
+import { Button as AriaButton } from "react-aria-components";
 import type { GraphEdge, GraphNode } from "#/api/types";
+import { Section } from "#/components/codex/Section";
+import { Tick } from "#/components/codex/Tick";
 import { ForceGraph } from "#/components/ForceGraph";
 import { Button } from "#/components/ui/button";
 import { Select, SelectItem } from "#/components/ui/select";
+import { BottomSheet } from "#/components/ui/sheet";
+import { Switch } from "#/components/ui/switch";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
+import { pluralize } from "#/lib/string";
 import type { ConstellationViewMode } from "#/store/constellation";
 import { applyFilters } from "./constellation-filters";
 
@@ -34,8 +35,18 @@ export interface MobileConstellationProps {
   onOpen: (node: GraphNode) => void;
 }
 
-const sheetButtonClass =
-  "cl-mono inline-flex min-h-11 items-center justify-center px-4 text-[10px] uppercase tracking-[0.12em] text-ink-2 outline-none transition-colors data-[hovered]:bg-highlight data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent";
+const segmentTrack =
+  "m-0 flex min-w-0 gap-0.5 rounded-full border-0 bg-sink p-[3px]";
+
+function segmentClass(selected: boolean): string {
+  return cn(
+    "h-[38px] min-w-11 rounded-full px-3.5 text-[14px]",
+    selected
+      ? "bg-raise font-medium text-ink shadow-sm"
+      : "text-mute data-[hovered]:text-ink",
+    FOCUS_RING,
+  );
+}
 
 function nodeLabel(node: GraphNode): string {
   return node.title || node.path;
@@ -116,143 +127,145 @@ export function MobileConstellation({
     visibleGraph.nodes.length > MOBILE_GRAPH_DENSITY_THRESHOLD;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-paper text-ink">
-      <header className="flex min-h-11 shrink-0 items-center justify-between gap-3 border-b border-rule px-4 py-2">
-        <h1 className="font-sans text-[17px] font-black uppercase tracking-[0.04em]">
-          Constellation<span className="text-accent"> / </span>Map
-        </h1>
-        <span className="cl-mono text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-          {visibleGraph.nodes.length} pages · {visibleGraph.edges.length} links
-        </span>
+    <div className="flex h-full min-h-0 flex-col bg-ground text-ink">
+      <header className="flex shrink-0 items-end gap-3 px-5 pt-1.5">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <span className="flex items-center gap-2.5">
+            <Tick />
+            <span className="truncate font-serif text-[18px] text-mute italic">
+              Map · {visibleGraph.nodes.length}{" "}
+              {pluralize(visibleGraph.nodes.length, "page")} ·{" "}
+              {visibleGraph.edges.length}{" "}
+              {pluralize(visibleGraph.edges.length, "link")}
+            </span>
+          </span>
+          <h1 className="m-0 font-serif text-[44px] leading-none">
+            Constellation
+          </h1>
+        </div>
+        <Button
+          aria-label="Hubs and orphans"
+          aria-haspopup="dialog"
+          className="min-h-11 shrink-0"
+          onPress={() => setDetailsOpen(true)}
+        >
+          Details
+        </Button>
       </header>
 
       <section
         aria-label="Constellation controls"
-        className="shrink-0 space-y-3 border-b border-rule-soft px-4 py-3"
+        className="flex shrink-0 flex-col gap-2.5 px-4 pt-[18px]"
       >
-        <div className="block">
-          <span className="cl-mono mb-1 block text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-            Anchor page
-          </span>
-          <Select
-            aria-label="Anchor page"
-            className="[&>button]:min-h-11"
-            value={anchorId ?? ""}
-            onChange={(key) =>
-              onAnchorChange(key === null || key === "" ? null : String(key))
-            }
-          >
-            <SelectItem id="" isDisabled>
-              Choose a page to focus the map
+        <Select
+          aria-label="Anchor page"
+          className="[&>button]:min-h-11"
+          value={anchorId ?? ""}
+          onChange={(key) =>
+            onAnchorChange(key === null || key === "" ? null : String(key))
+          }
+        >
+          <SelectItem id="" isDisabled>
+            Choose a page to focus the map
+          </SelectItem>
+          {anchorOptions.map((node) => (
+            <SelectItem
+              key={node.id}
+              id={node.id}
+              textValue={`${nodeLabel(node)} · ${node.path}`}
+            >
+              {nodeLabel(node)} · {node.path}
             </SelectItem>
-            {anchorOptions.map((node) => (
-              <SelectItem
-                key={node.id}
-                id={node.id}
-                textValue={`${nodeLabel(node)} · ${node.path}`}
-              >
-                {nodeLabel(node)} · {node.path}
-              </SelectItem>
-            ))}
-          </Select>
-        </div>
+          ))}
+        </Select>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="cl-mono mr-1 text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span
+            id="mobile-constellation-depth"
+            className="text-[13.5px] text-mute"
+          >
             Depth
           </span>
-          {([1, 2] as const).map((value) => (
-            <Button
-              key={value}
-              aria-label={`Depth ${value}`}
-              aria-pressed={depth === value}
-              className="min-h-11 min-w-11"
-              variant={depth === value ? "primary" : "secondary"}
-              onPress={() => onDepthChange(value)}
+          <fieldset
+            aria-labelledby="mobile-constellation-depth"
+            className={segmentTrack}
+          >
+            {([1, 2] as const).map((value) => (
+              <AriaButton
+                key={value}
+                aria-label={`Depth ${value}`}
+                aria-pressed={depth === value}
+                className={segmentClass(depth === value)}
+                onPress={() => onDepthChange(value)}
+              >
+                {value}
+              </AriaButton>
+            ))}
+          </fieldset>
+          <span className="flex-1" />
+          <fieldset aria-label="View" className={segmentTrack}>
+            <AriaButton
+              aria-label="Graph view"
+              aria-pressed={mode === "graph"}
+              className={segmentClass(mode === "graph")}
+              onPress={() => onModeChange("graph")}
             >
-              {value}
-            </Button>
-          ))}
-          <label className="cl-mono ml-auto inline-flex min-h-11 items-center gap-2 text-[10px] text-ink-2">
-            <input
-              type="checkbox"
-              role="switch"
-              aria-checked={hideDaily}
-              checked={hideDaily}
-              onChange={(event) => onHideDailyChange(event.target.checked)}
-            />
-            Hide journals
-          </label>
-          {onHideTasksChange ? (
-            <label className="cl-mono inline-flex min-h-11 items-center gap-2 text-[10px] text-ink-2">
-              <input
-                type="checkbox"
-                role="switch"
-                aria-checked={hideTasks}
-                checked={hideTasks}
-                onChange={(event) => onHideTasksChange(event.target.checked)}
-              />
-              Hide tasks
-            </label>
-          ) : null}
-          <label className="cl-mono inline-flex min-h-11 items-center gap-2 text-[10px] text-ink-2">
-            <input
-              type="checkbox"
-              role="switch"
-              aria-checked={orphansVisible}
-              checked={orphansVisible}
-              onChange={(event) => onOrphansVisibleChange(event.target.checked)}
-            />
-            Show orphans
-          </label>
+              Graph
+            </AriaButton>
+            <AriaButton
+              aria-label="List view"
+              aria-pressed={mode === "list"}
+              className={segmentClass(mode === "list")}
+              onPress={() => onModeChange("list")}
+            >
+              List
+            </AriaButton>
+          </fieldset>
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
-          <Button
-            aria-label="Graph view"
-            aria-pressed={mode === "graph"}
-            className="min-h-11"
-            variant={mode === "graph" ? "primary" : "secondary"}
-            onPress={() => onModeChange("graph")}
+        <div className="flex flex-wrap gap-2">
+          <Switch
+            className="h-11"
+            isSelected={hideDaily}
+            onChange={onHideDailyChange}
           >
-            Graph
-          </Button>
-          <Button
-            aria-label="List view"
-            aria-pressed={mode === "list"}
-            className="min-h-11"
-            variant={mode === "list" ? "primary" : "secondary"}
-            onPress={() => onModeChange("list")}
+            Hide journals
+          </Switch>
+          {onHideTasksChange ? (
+            <Switch
+              className="h-11"
+              isSelected={hideTasks}
+              onChange={onHideTasksChange}
+            >
+              Hide tasks
+            </Switch>
+          ) : null}
+          <Switch
+            className="h-11"
+            isSelected={orphansVisible}
+            onChange={onOrphansVisibleChange}
           >
-            List
-          </Button>
-          <Button
-            aria-label="Hubs and orphans"
-            aria-haspopup="dialog"
-            className="min-h-11"
-            onPress={() => setDetailsOpen(true)}
-          >
-            Details
-          </Button>
+            Show orphans
+          </Switch>
         </div>
       </section>
 
-      <div className="cl-noscroll min-h-0 flex-1 overflow-y-auto">
+      <div className="cl-noscroll min-h-0 flex-1 overflow-y-auto px-4 pt-3.5 pb-4">
         {mode === "graph" ? (
           needsAnchor ? (
-            <div className="flex min-h-full items-center justify-center px-6 py-12 text-center">
-              <div className="max-w-sm border-y border-rule py-6">
-                <p className="font-sans text-base font-semibold text-ink">
+            <div className="flex min-h-full items-center justify-center rounded-2xl bg-raise px-6 py-12 text-center">
+              <div className="max-w-sm">
+                <p className="m-0 font-serif text-[22px] leading-tight text-ink">
                   Select an anchor to plot this constellation.
                 </p>
-                <p className="cl-mono mt-2 text-[10px] leading-relaxed text-ink-mute">
+                <p className="mt-2 mb-0 text-[14px] leading-relaxed text-mute">
                   All {graph.nodes.length} pages remain available. Choose an
                   anchor above, or use List view to browse every visible page.
                 </p>
               </div>
             </div>
           ) : (
-            <div className="h-full min-h-[18rem] touch-none bg-paper-2">
+            <div className="h-full min-h-[18rem] touch-none overflow-hidden rounded-2xl bg-raise p-2">
               <ForceGraph
                 nodes={visibleGraph.nodes}
                 edges={visibleGraph.edges}
@@ -263,30 +276,33 @@ export function MobileConstellation({
         ) : (
           <div>
             {sortedVisibleNodes.length === 0 ? (
-              <p className="cl-marg px-6 py-12 text-center">
-                ∅ no pages match these controls.
+              <p className="m-0 px-6 py-12 text-center text-[14px] text-mute">
+                No pages match these controls.
               </p>
             ) : null}
             <ul
               aria-label="Visible constellation pages"
-              className="divide-y divide-rule-soft"
+              className="m-0 flex list-none flex-col gap-2 p-0"
             >
               {sortedVisibleNodes.map((node) => {
                 const title = nodeLabel(node);
                 return (
-                  <li key={node.id} className="px-4 py-3">
-                    <article className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
-                      <div className="min-w-0">
-                        <h2 className="font-sans text-[15px] font-semibold leading-snug text-ink">
+                  <li
+                    key={node.id}
+                    className="rounded-[14px] bg-raise py-3 pr-3.5 pl-4"
+                  >
+                    <article className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+                      <div className="flex min-w-0 flex-col gap-[3px]">
+                        <h2 className="m-0 text-[15.5px] font-normal leading-snug text-ink">
                           {title}
                         </h2>
-                        <p className="cl-mono mt-1 break-all text-[10px] leading-relaxed text-ink-mute">
+                        <p className="m-0 truncate text-[12.5px] text-mute">
                           {node.path}
                         </p>
                       </div>
                       <Button
                         aria-label={`Open ${title}`}
-                        className="min-h-11 self-start"
+                        className="min-h-11"
                         onPress={() => onOpen(node)}
                       >
                         Open
@@ -300,93 +316,81 @@ export function MobileConstellation({
         )}
       </div>
 
-      <ModalOverlay
+      <BottomSheet
         isOpen={detailsOpen}
-        isDismissable
         onOpenChange={setDetailsOpen}
-        className="fixed inset-0 z-50 flex justify-end bg-foreground/30"
+        aria-label="Constellation details"
       >
-        <Modal className="h-dvh w-full max-w-md bg-paper-2 shadow-lg outline-none">
-          <Dialog
-            aria-label="Constellation details"
-            className="flex h-full min-h-0 flex-col outline-none"
-          >
-            <div className="flex min-h-11 shrink-0 items-stretch border-b border-rule pl-4">
-              <Heading
-                slot="title"
-                className="cl-mono flex min-w-0 flex-1 items-center text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-2"
-              >
-                Hubs and orphans
-              </Heading>
-              <AriaButton
-                aria-label="Close details"
-                className={sheetButtonClass}
-                onPress={() => setDetailsOpen(false)}
-              >
-                Close
-              </AriaButton>
-            </div>
+        <div className="flex flex-col gap-[18px]">
+          <div className="flex items-center gap-3">
+            <h2 className="m-0 min-w-0 flex-1 font-serif text-[28px] font-normal leading-tight">
+              Hubs and orphans
+            </h2>
+            <Button
+              aria-label="Close details"
+              className="min-h-11"
+              onPress={() => setDetailsOpen(false)}
+            >
+              Close
+            </Button>
+          </div>
 
-            <div className="cl-noscroll min-h-0 flex-1 space-y-6 overflow-y-auto px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              <section>
-                <h2 className="cl-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-2">
-                  Hubs by degree
-                </h2>
-                {hubs.length > 0 ? (
-                  <ol
-                    aria-label="Hubs by degree"
-                    className="mt-2 divide-y divide-rule-soft border-y border-rule-soft"
-                  >
-                    {hubs.map(({ node, degree }) => (
-                      <li key={node.id}>
-                        <AriaButton
-                          className="grid min-h-11 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-2 text-left outline-none data-[hovered]:bg-highlight data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent"
-                          onPress={() => onOpen(node)}
-                        >
-                          <span className="truncate font-sans text-sm font-semibold">
-                            {nodeLabel(node)}
-                          </span>
-                          <span className="cl-mono text-[10px] text-ink-mute">
-                            {degree} {degree === 1 ? "link" : "links"}
-                          </span>
-                        </AriaButton>
-                      </li>
-                    ))}
-                  </ol>
-                ) : (
-                  <p className="cl-marg mt-2">No connexions yet.</p>
-                )}
-              </section>
-
-              <section>
-                <h2 className="cl-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-2">
-                  Orphans · {orphans.length}
-                </h2>
-                <ul
-                  aria-label="Orphan pages"
-                  className="mt-2 divide-y divide-rule-soft border-y border-rule-soft"
-                >
-                  {orphans.map((node) => (
-                    <li key={node.id}>
-                      <AriaButton
-                        className="min-h-11 w-full px-2 text-left font-sans text-sm font-semibold outline-none data-[hovered]:bg-highlight data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent"
-                        onPress={() => onOpen(node)}
-                      >
+          <Section compact headingLevel={3} label="Hubs by degree">
+            {hubs.length > 0 ? (
+              <ol aria-label="Hubs by degree" className="m-0 list-none p-0">
+                {hubs.map(({ node, degree }) => (
+                  <li key={node.id}>
+                    <AriaButton
+                      className={cn(
+                        "flex min-h-11 w-full items-center gap-3 rounded-md text-left text-[15.5px] text-ink data-[hovered]:text-accent",
+                        FOCUS_RING,
+                      )}
+                      onPress={() => onOpen(node)}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
                         {nodeLabel(node)}
-                      </AriaButton>
-                    </li>
-                  ))}
-                </ul>
-                {orphans.length === 0 ? (
-                  <p className="cl-marg mt-2">
-                    All visible pages connect to the body of work.
-                  </p>
-                ) : null}
-              </section>
-            </div>
-          </Dialog>
-        </Modal>
-      </ModalOverlay>
+                      </span>
+                      <span className="text-[12.5px] text-mute tabular-nums">
+                        {degree} {degree === 1 ? "link" : "links"}
+                      </span>
+                    </AriaButton>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="m-0 text-[14.5px] text-mute">No connexions yet.</p>
+            )}
+          </Section>
+
+          <Section
+            compact
+            pip="dim"
+            headingLevel={3}
+            label={`Orphans · ${orphans.length}`}
+          >
+            <ul aria-label="Orphan pages" className="m-0 list-none p-0">
+              {orphans.map((node) => (
+                <li key={node.id}>
+                  <AriaButton
+                    className={cn(
+                      "flex min-h-11 w-full items-center rounded-md text-left text-[15.5px] text-ink data-[hovered]:text-accent",
+                      FOCUS_RING,
+                    )}
+                    onPress={() => onOpen(node)}
+                  >
+                    {nodeLabel(node)}
+                  </AriaButton>
+                </li>
+              ))}
+            </ul>
+            {orphans.length === 0 ? (
+              <p className="m-0 text-[14.5px] leading-normal text-mute">
+                All visible pages connect to the body of work.
+              </p>
+            ) : null}
+          </Section>
+        </div>
+      </BottomSheet>
     </div>
   );
 }

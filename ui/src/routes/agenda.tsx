@@ -29,7 +29,7 @@ import {
   parseFilterSearch,
   shouldReplaceFilterHistory,
 } from "#/lib/filters/url";
-import { localDateKey, parseLocalDate } from "#/lib/time";
+import { formatDayMonth, localDateKey, parseLocalDate } from "#/lib/time";
 import { useProjectValues } from "#/lib/useProjects";
 
 const AGENDA_ROUTE_PATH = "/agenda" as const;
@@ -192,7 +192,7 @@ export function AgendaScreen({
       {
         id: "type",
         kind: "single",
-        label: "TYPE",
+        label: "Type",
         options: [
           { value: "todo", label: "Todo" },
           { value: "task", label: "Task" },
@@ -201,7 +201,7 @@ export function AgendaScreen({
       {
         id: "todoStatus",
         kind: "single",
-        label: "TODO STATUS",
+        label: "Todo status",
         options: TODO_STATUS_VALUES.map((value) => ({
           value,
           label: value === "open" ? "Open" : "Doing",
@@ -210,7 +210,7 @@ export function AgendaScreen({
       {
         id: "todoPriority",
         kind: "single",
-        label: "TODO PRIORITY",
+        label: "Todo priority",
         options: TODO_PRIORITY_VALUES.map((value) => ({
           value,
           label: `${TODO_PRIORITY_LABELS[value]} (${value})`,
@@ -219,7 +219,7 @@ export function AgendaScreen({
       {
         id: "taskStatus",
         kind: "single",
-        label: "TASK STATUS",
+        label: "Task status",
         options: TASK_STATUS_VALUES.map((value) => ({
           value,
           label: taskStatusLabel(value),
@@ -228,7 +228,7 @@ export function AgendaScreen({
       {
         id: "taskPriority",
         kind: "single",
-        label: "TASK PRIORITY",
+        label: "Task priority",
         options: PRI_ORDER.map((value) => ({
           value,
           label: `${PRI_LABEL[value]} (${value})`,
@@ -237,13 +237,13 @@ export function AgendaScreen({
       {
         id: "project",
         kind: "single",
-        label: "PROJECT",
+        label: "Project",
         options: projects.map((value) => ({ value })),
       },
       {
         id: "blocked",
         kind: "flag",
-        label: "BLOCKED",
+        label: "Blocked",
         options: [],
       },
     ],
@@ -267,24 +267,25 @@ export function AgendaScreen({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-border px-4 py-2">
-        <h1 className="font-heading text-lg font-bold">Agenda</h1>
+      <header className="flex flex-col gap-4 px-4 pt-8 md:px-10 md:pt-10">
+        <h1 className="m-0 font-serif text-[40px] font-normal leading-none tracking-[-0.015em] text-ink md:text-[56px]">
+          Agenda
+        </h1>
         <FilterBar
           fields={filterFields}
           primaryFieldIds={["type", "todoStatus", "taskStatus"]}
           state={filterState}
           onChange={onFilterChange}
           textPlaceholder="Filter Agenda…"
-          className="mt-2"
         />
-      </div>
+      </header>
 
       {agenda.isLoading ? (
-        <p role="status" className="px-8 py-6 text-xs text-muted-foreground">
+        <p role="status" className="px-4 py-6 text-[14px] text-mute md:px-10">
           Loading Agenda…
         </p>
       ) : agenda.isError || !agenda.data || !filtered ? (
-        <p role="alert" className="px-8 py-6 text-xs text-muted-foreground">
+        <p role="alert" className="px-4 py-6 text-[14px] text-hot md:px-10">
           Couldn’t load Agenda.
         </p>
       ) : (
@@ -334,7 +335,7 @@ function AgendaTabs({
 
   return (
     <Tabs defaultSelectedKey="today" className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b border-border px-4 py-2">
+      <div className="px-4 pt-5 pb-2 md:px-10">
         <TabList aria-label="Agenda sections">
           <Tab id="today">Today</Tab>
           <Tab id="upcoming">Upcoming</Tab>
@@ -343,7 +344,7 @@ function AgendaTabs({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-8 py-6">
+        <div className="mx-auto max-w-3xl px-4 py-6 md:px-8">
           <TabPanel id="today">
             <div className="space-y-6">
               <section>
@@ -358,7 +359,7 @@ function AgendaTabs({
                 />
               </section>
               <section>
-                <SectionHeading>Due Today</SectionHeading>
+                <SectionHeading>Due today</SectionHeading>
                 <AgendaItemList
                   items={filtered.today}
                   emptyMessage={emptyMessage(
@@ -372,7 +373,7 @@ function AgendaTabs({
           </TabPanel>
           <TabPanel id="upcoming">
             {filtered.upcoming.length === 0 ? (
-              <p className="py-4 text-xs text-muted-foreground">
+              <p className="m-0 py-2 text-[14px] text-mute">
                 {filterActive &&
                 upcomingSourceCount > 0 &&
                 upcomingFilteredCount === 0
@@ -411,11 +412,10 @@ function AgendaTabs({
   );
 }
 
-/** Format a YYYY-MM-DD calendar key without applying a UTC offset. */
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** Format a YYYY-MM-DD calendar key ("Tue 1 Sep") without applying a UTC
+ *  offset, with fixed weekday and month names. */
 function formatAgendaDate(date: string): string {
-  return parseLocalDate(date).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
+  return `${WEEKDAYS[parseLocalDate(date).getDay()]} ${formatDayMonth(date)}`;
 }

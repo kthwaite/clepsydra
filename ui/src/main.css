@@ -439,15 +439,6 @@ samp.cl-mono {
     color: var(--ink-mute);
 }
 
-/* Margin notes — sans italic */
-.cl-marg {
-    font-family: var(--font-sans);
-    font-style: italic;
-    font-size: 13px;
-    color: var(--ink-mute);
-    line-height: 1.4;
-}
-
 /* Underlined link */
 .cl-link {
     color: var(--accent);
@@ -564,49 +555,6 @@ samp.cl-mono {
 
 [data-link-resource="image"] {
     --link-resource-mask: url("./assets/link-marks/image.svg");
-}
-
-/* Stopgap (spec §6 phase 3): .cl-btn reads as Button's quiet look and
-   .cl-btn-hot as the primary pill until phase 5 migrates call sites. */
-.cl-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 32px;
-    padding: 0 14px;
-    border: 0;
-    border-radius: 14px;
-    background: var(--sink);
-    color: var(--ink);
-    font-family: var(--font-sans);
-    text-transform: none;
-    letter-spacing: normal;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition:
-        background 0.1s,
-        filter 0.1s;
-}
-
-.cl-btn:hover {
-    background: color-mix(in srgb, var(--sink) 88%, var(--ink));
-}
-
-.cl-btn:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-}
-
-.cl-btn-hot {
-    background: var(--accent);
-    color: var(--raise);
-    border-radius: 9999px;
-}
-
-.cl-btn-hot:hover {
-    background: var(--accent);
-    filter: brightness(0.94);
 }
 
 /* Scrollbar suppression */
@@ -843,7 +791,7 @@ samp.cl-mono {
 }
 
 .ai-conversation-turn[data-role="assistant"] .ai-conversation-turn__content {
-    border-inline-start: 2px solid var(--cool);
+    border-inline-start: 2px solid var(--accent);
 }
 
 .ai-conversation--read .ai-conversation-turn {

@@ -986,9 +986,27 @@ describe("ViewsEditor", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /unsupported layout.*board.*only table/i,
     );
+    // Hot text keeps AA only over a faint hot wash, never on sink.
+    expect(screen.getByRole("alert")).toHaveClass("bg-hot/5");
     expect(
       screen.getByRole("button", { name: selectTriggerName("Layout") }),
     ).toHaveTextContent("board");
+  });
+
+  it("lists view diagnostics on a hot wash, never warn text on sink", () => {
+    renderViews({
+      diagnostics: [
+        {
+          slug: "reading-log",
+          severity: "warning",
+          path: "views[0].columns",
+          message: "column drift",
+        },
+      ],
+    });
+    const list = screen.getAllByText("column drift")[0].closest("ul");
+    expect(list).toHaveClass("bg-hot/5", "text-warn");
+    expect(list).not.toHaveClass("bg-sink");
   });
 
   it("registers unsupported layout and nested diagnostics to exact controls", () => {
