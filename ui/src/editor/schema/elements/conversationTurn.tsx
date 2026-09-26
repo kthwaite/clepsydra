@@ -1,5 +1,8 @@
 import { ReactEditor, useReadOnly, useSlateStatic } from "slate-react";
+import { Tick } from "#/components/codex/Tick";
 import { Select, SelectItem } from "#/components/ui/select";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import {
   type ConversationMarker,
   type ConversationRole,
@@ -31,6 +34,11 @@ function assistantDisplayLabel(provider: string | null): string {
     .join(" ");
 }
 
+const TURN_ACTION = cn(
+  "inline-flex size-7 cursor-pointer items-center justify-center rounded-full text-[14px] text-mute transition-colors hover:bg-sink hover:text-ink",
+  FOCUS_RING_NATIVE,
+);
+
 function ConversationTurn({
   attributes,
   children,
@@ -52,11 +60,11 @@ function ConversationTurn({
     return (
       <blockquote
         {...attributes}
-        className="my-4 border-l-2 border-accent bg-paper-2 py-2 pl-4 pr-3 text-[0.97em] italic text-ink-2"
+        className="my-4 rounded-[12px] bg-sink px-5 py-4 text-ink-2"
       >
         <span
           contentEditable={false}
-          className="cl-mono mb-2 block text-[0.8em] not-italic text-ink-mute"
+          className="mb-2 block text-[12.5px] text-mute"
         >
           {formatConversationMarker(marker)}
         </span>
@@ -71,20 +79,27 @@ function ConversationTurn({
   return (
     <article
       {...attributes}
-      className="ai-conversation-turn"
+      // An editorial speaker gutter, not chat bubbles: turns part by space.
+      className={cn(
+        "grid grid-cols-[7.5rem_minmax(0,1fr)] items-start gap-6 py-3 max-md:grid-cols-1 max-md:gap-2",
+        presentation.mode === "read" && "py-4",
+      )}
       data-role={element.role}
     >
       <aside
         contentEditable={false}
-        className="ai-conversation-turn__participant"
+        className="flex min-w-0 flex-col gap-2 pt-1 text-[13px] text-mute"
       >
         {presentation.mode === "read" || readOnly ? (
-          participantLabel
+          <span className="flex items-center gap-2.5">
+            <Tick variant={element.role === "user" ? "faint" : "live"} />
+            {participantLabel}
+          </span>
         ) : (
           <>
             <Select
               aria-label="Change participant"
-              className="ai-conversation-turn__participant-select"
+              className="[&>button]:h-8 [&>button]:px-3 [&>button]:text-[13px]"
               value={element.role}
               onChange={(key) => {
                 if (key === null) return;
@@ -100,9 +115,10 @@ function ConversationTurn({
                 {assistantLabel}
               </SelectItem>
             </Select>
-            <div className="ai-conversation-turn__actions">
+            <div className="flex items-center gap-0.5">
               <button
                 type="button"
+                className={TURN_ACTION}
                 aria-label="Move turn up"
                 onClick={() =>
                   moveConversationTurn(
@@ -116,6 +132,7 @@ function ConversationTurn({
               </button>
               <button
                 type="button"
+                className={TURN_ACTION}
                 aria-label="Move turn down"
                 onClick={() =>
                   moveConversationTurn(
@@ -129,6 +146,7 @@ function ConversationTurn({
               </button>
               <button
                 type="button"
+                className={TURN_ACTION}
                 aria-label="Add turn after"
                 onClick={() =>
                   insertConversationTurn(editor, {
@@ -140,6 +158,7 @@ function ConversationTurn({
               </button>
               <button
                 type="button"
+                className={TURN_ACTION}
                 aria-label="Remove turn"
                 onClick={() =>
                   removeConversationTurn(
@@ -154,7 +173,7 @@ function ConversationTurn({
           </>
         )}
       </aside>
-      <div className="ai-conversation-turn__content">{children}</div>
+      <div className="min-w-0">{children}</div>
     </article>
   );
 }

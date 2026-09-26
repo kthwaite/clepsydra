@@ -15,6 +15,10 @@ import {
 
 const HOVER_DELAY = 220;
 
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 export type CLinkPayload = {
   title?: string;
   folio?: string;
@@ -106,26 +110,25 @@ export function CLink({
     >
       {children}
       {hover && note && (
-        <span className="absolute left-0 top-full z-40 mt-[6px] block w-[320px] cursor-default border-[1.5px] border-ink bg-paper px-[10px] py-2 text-left text-[12px] not-italic leading-[1.4] text-ink shadow-[4px_4px_0_0_var(--color-ink)] font-body">
-          <span className="mb-1 flex items-baseline justify-between border-b border-rule-soft pb-[3px]">
-            <span className="cl-cap text-[9px] text-ink-mute">
-              § {note.folio || "Folio"}
-            </span>
-            <span className="cl-mono text-[9px] text-ink-mute">
-              {note.words ?? "—"} wd · ↗{note.backlinks ?? 0}
+        <span className="absolute top-full left-0 z-40 mt-1.5 block w-[320px] cursor-default rounded-2xl bg-raise px-4 pt-3.5 pb-4 text-left not-italic text-ink shadow-lg">
+          <span className="flex items-baseline justify-between gap-3 text-[12.5px] text-mute">
+            <span>{note.folio || "Folio"}</span>
+            <span>
+              {note.words === undefined ? "—" : plural(note.words, "word")} ·{" "}
+              {plural(note.backlinks ?? 0, "backlink")}
             </span>
           </span>
-          <span className="mb-[3px] block font-serif text-[17px] leading-[1.15]">
+          <span className="mt-1.5 mb-2 block font-serif text-[22px] leading-[1.15]">
             {note.title}
           </span>
           {note.excerpt && (
-            <span className="block font-body text-[11.5px] italic leading-[1.45] text-ink-mute">
+            <span className="block text-[14px] leading-[1.55] text-ink-2">
               {note.excerpt.slice(0, 180)}
               {note.excerpt.length > 180 ? "…" : ""}
             </span>
           )}
           {note.tags && note.tags.length > 0 && (
-            <span className="cl-mono mt-[5px] block border-t border-dotted border-rule-soft pt-1 text-[9px] text-accent-deep">
+            <span className="mt-2.5 block text-[12.5px] text-accent">
               {note.tags.map((t) => `#${t}`).join(" · ")}
             </span>
           )}

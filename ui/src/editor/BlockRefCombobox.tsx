@@ -33,12 +33,12 @@ export function BlockRefCombobox({
       renderItem={(block) => (
         <>
           <div className="truncate font-medium">{block.content}</div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-[12.5px] text-mute">
             {block.page_title ?? block.page_path}
             {block.block_id ? (
-              <span className="ml-1 opacity-50">^{block.block_id}</span>
+              <span className="ml-1">^{block.block_id}</span>
             ) : (
-              <span className="ml-1 italic opacity-50">no id</span>
+              <span className="ml-1 italic">no id</span>
             )}
           </div>
         </>

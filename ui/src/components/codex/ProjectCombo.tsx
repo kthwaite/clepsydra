@@ -123,7 +123,7 @@ export function ProjectCombo({
         >
           <Input
             ref={inputRef}
-            placeholder="∅ none"
+            placeholder="None"
             onKeyDown={(event) => {
               if (
                 event.key === "Enter" &&
@@ -136,7 +136,7 @@ export function ProjectCombo({
             onBlur={settleDraft}
             className={cn(
               "h-8 w-full rounded-lg bg-sink px-2.5 text-[13.5px] outline-none transition-colors",
-              "placeholder:text-faint",
+              "placeholder:text-mute",
               "data-[focused]:bg-raise data-[focused]:text-ink data-[focused]:ring-2 data-[focused]:ring-accent",
               "text-ink",
             )}

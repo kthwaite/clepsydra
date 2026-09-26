@@ -43,7 +43,7 @@ const ALIGN_CLASS: Record<TableAlign, string> = {
 type TableRendererProps = RenderElementProps & { element: TableElement };
 
 const APPEND_BUTTON_CLASS =
-  "pointer-events-none z-10 flex size-6 cursor-pointer items-center justify-center rounded-full border border-rule bg-paper text-ink-mute opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:border-accent hover:text-accent focus:pointer-events-auto focus:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent max-md:size-11 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:size-11 [@media(hover:none)]:opacity-100";
+  "pointer-events-none z-10 flex size-6 cursor-pointer items-center justify-center rounded-full bg-sink text-mute opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:text-accent focus:pointer-events-auto focus:opacity-100 outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:size-11 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:size-11 [@media(hover:none)]:opacity-100";
 
 const TOUCH_CONTROL_TRACK_CLASS =
   "max-md:h-11 max-md:min-w-11 [@media(hover:none)]:h-11 [@media(hover:none)]:min-w-11";
@@ -109,7 +109,9 @@ function TableRenderer({ attributes, children, element }: TableRendererProps) {
             : "pl-6 pt-6 max-md:pl-11 max-md:pt-11 [@media(hover:none)]:pl-11 [@media(hover:none)]:pt-11",
         )}
       >
-        <table className="w-full border-collapse border border-rule text-[0.95em]">
+        {/* Separated by tone and space (spec decision 5): a raised panel,
+            the header row on sink, no cell borders. */}
+        <table className="w-full border-separate border-spacing-0 rounded-[14px] bg-raise text-[0.9em] leading-[1.5]">
           <tbody>{children}</tbody>
         </table>
       </div>
@@ -238,7 +240,7 @@ function TableCellRenderer({
       {...attributes}
       scope="col"
       className={cn(
-        "relative border border-rule bg-paper-2 px-3 py-1.5 font-bold text-ink",
+        "relative bg-sink px-4 py-2.5 align-bottom text-[13px] font-normal text-mute first:rounded-tl-[14px] last:rounded-tr-[14px]",
         readOnly ? null : TOUCH_CONTROL_TRACK_CLASS,
         element.align ? ALIGN_CLASS[element.align] : "text-left",
       )}
@@ -250,7 +252,7 @@ function TableCellRenderer({
     <td
       {...attributes}
       className={cn(
-        "relative border border-rule px-3 py-1.5 align-top text-ink-2",
+        "relative px-4 py-2.5 align-top text-ink-2",
         readOnly ? null : TOUCH_CONTROL_TRACK_CLASS,
         element.align && ALIGN_CLASS[element.align],
       )}

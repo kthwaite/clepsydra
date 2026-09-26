@@ -23,7 +23,7 @@ import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import {
   KINDS,
   type Kind,
-  kindLabel,
+  kindDisplayLabel,
   resolveKind,
   sortKindsByLabel,
 } from "#/lib/kind";
@@ -171,7 +171,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
         label: "Kind",
         options: sortKindsByLabel(KINDS).map((k) => ({
           value: k,
-          label: kindLabel(k),
+          label: kindDisplayLabel(k),
         })),
       },
       {
@@ -553,7 +553,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
                           kind={kind}
                           size={14}
                           className="flex-shrink-0"
-                          title={kindLabel(kind)}
+                          title={kindDisplayLabel(kind)}
                         />
                         {shortFolio(n.path)}
                       </span>

@@ -7,7 +7,7 @@ export function renderLeaf({ attributes, children, leaf }: RenderLeafProps) {
     children = (
       <code
         spellCheck={false}
-        className="bg-muted px-1 py-0.5 font-mono text-sm"
+        className="rounded-[5px] bg-sink px-[5px] py-px text-[0.8em] text-ink"
       >
         {children}
       </code>

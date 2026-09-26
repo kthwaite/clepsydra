@@ -264,8 +264,8 @@ describe("BaseMemberDraft", () => {
     await user.click(
       screen.getByRole("combobox", { name: "New member — Kind" }),
     );
-    expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
-    expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "Quote" })).toBeNull();
+    expect(screen.getByRole("option", { name: "Note" })).toBeVisible();
   });
 
   it("renders and submits canonical keys for simultaneous system and shadow properties", async () => {
@@ -344,7 +344,7 @@ describe("BaseMemberDraft", () => {
     await user.click(
       screen.getByRole("combobox", { name: "New member — Kind" }),
     );
-    await user.click(screen.getByRole("option", { name: "BOOK" }));
+    await user.click(screen.getByRole("option", { name: "Book" }));
     await user.click(
       screen.getByRole("button", { name: "Edit New member — Kind" }),
     );

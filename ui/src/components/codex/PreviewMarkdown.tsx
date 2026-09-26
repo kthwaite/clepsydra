@@ -31,7 +31,7 @@ const remarkPlugins: PluggableList = [
 ];
 
 // Compact element styling scaled for the ~340px preview card: tight headings,
-// no top margin on the first block, small mono code. Images are dropped to a
+// no top margin on the first block; code keeps mono via <pre>/<code>. Images are dropped to a
 // label — a hover preview should not trigger network loads.
 const components: Components = {
   span: ({ children, node, ...props }) => {
@@ -59,41 +59,41 @@ const components: Components = {
     return <div {...props}>{children}</div>;
   },
   p: ({ children }) => (
-    <p className="my-1 font-sans text-[11.5px] leading-[1.5] text-ink-mute first:mt-0">
+    <p className="my-1.5 text-[14px] leading-[1.55] text-ink-2 first:mt-0">
       {children}
     </p>
   ),
   h1: ({ children }) => (
-    <h1 className="mt-2 mb-1 font-sans text-[13px] font-bold leading-tight text-ink first:mt-0">
+    <h1 className="mt-3 mb-1 font-serif text-[19px] font-normal leading-tight text-ink first:mt-0">
       {children}
     </h1>
   ),
   h2: ({ children }) => (
-    <h2 className="mt-2 mb-1 font-sans text-[12px] font-bold leading-tight text-ink first:mt-0">
+    <h2 className="mt-3 mb-1 font-serif text-[17px] font-normal leading-tight text-ink first:mt-0">
       {children}
     </h2>
   ),
   h3: ({ children }) => (
-    <h3 className="cl-mono mt-2 mb-[2px] text-[9px] font-bold uppercase tracking-[0.1em] text-ink-mute first:mt-0">
+    <h3 className="mt-2.5 mb-0.5 text-[14px] font-medium leading-snug text-ink first:mt-0">
       {children}
     </h3>
   ),
   h4: ({ children }) => (
-    <h4 className="cl-mono mt-2 mb-[2px] text-[9px] font-bold uppercase tracking-[0.1em] text-ink-mute first:mt-0">
+    <h4 className="mt-2.5 mb-0.5 text-[14px] font-medium leading-snug text-ink-2 first:mt-0">
       {children}
     </h4>
   ),
   ul: ({ children }) => (
-    <ul className="my-1 ml-3 list-disc font-sans text-[11.5px] leading-[1.5] text-ink-mute marker:text-ink-faint">
+    <ul className="my-1.5 ml-4 list-disc text-[14px] leading-[1.55] text-ink-2 marker:text-faint">
       {children}
     </ul>
   ),
   ol: ({ children }) => (
-    <ol className="my-1 ml-3 list-decimal font-sans text-[11.5px] leading-[1.5] text-ink-mute marker:text-ink-faint">
+    <ol className="my-1.5 ml-4 list-decimal text-[14px] leading-[1.55] text-ink-2 marker:text-mute">
       {children}
     </ol>
   ),
-  li: ({ children }) => <li className="my-[1px]">{children}</li>,
+  li: ({ children }) => <li className="my-0.5">{children}</li>,
   a: ({ href, children }) => {
     const resource = href ? classifyLinkResource(href) : null;
     return (
@@ -106,47 +106,43 @@ const components: Components = {
     );
   },
   strong: ({ children }) => (
-    <strong className="font-bold text-ink">{children}</strong>
+    <strong className="font-semibold text-ink">{children}</strong>
   ),
   em: ({ children }) => <em className="italic">{children}</em>,
   del: ({ children }) => <del className="opacity-60">{children}</del>,
   code: ({ children }) => (
-    <code className="cl-mono bg-paper-2 px-[3px] py-[1px] text-[10.5px] text-ink">
+    <code className="rounded-[4px] bg-sink px-1 py-px text-[12.5px] text-ink">
       {children}
     </code>
   ),
   pre: ({ children }) => (
-    <pre className="cl-mono my-1 overflow-hidden whitespace-pre-wrap border border-rule-soft bg-paper-2 p-[6px] text-[10px] leading-[1.4] text-ink-mute">
+    <pre className="my-1.5 overflow-hidden whitespace-pre-wrap rounded-lg bg-sink px-3 py-2 text-[12.5px] leading-[1.55] text-ink-2 [&_code]:bg-transparent [&_code]:p-0">
       {children}
     </pre>
   ),
   blockquote: ({ children }) => (
-    <blockquote className="my-1 border-l-2 border-rule pl-2 font-sans text-[11.5px] italic leading-[1.5] text-ink-faint">
+    <blockquote className="my-1.5 font-serif text-[16px] italic leading-[1.4] text-ink">
       {children}
     </blockquote>
   ),
-  hr: () => <hr className="my-1.5 border-0 border-t border-rule-soft" />,
+  hr: () => <hr className="my-2 h-px border-0 bg-sink" />,
   table: ({ children }) => (
     <div className="my-1 overflow-x-auto">
-      <table className="w-full border-collapse border border-rule-soft font-sans text-[10.5px] leading-[1.4]">
+      <table className="w-full border-collapse text-[13px] leading-[1.45]">
         {children}
       </table>
     </div>
   ),
   th: ({ children }) => (
-    <th className="border border-rule-soft bg-paper-2 px-1.5 py-[2px] text-left font-bold text-ink">
+    <th className="bg-sink px-2 py-1 text-left font-medium text-ink first:rounded-l-md last:rounded-r-md">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td className="border border-rule-soft px-1.5 py-[2px] align-top text-ink-mute">
-      {children}
-    </td>
+    <td className="px-2 py-1 align-top text-ink-2">{children}</td>
   ),
   img: ({ alt }) => (
-    <span className="cl-mono text-[9px] text-ink-faint">
-      🖼 {alt || "image"}
-    </span>
+    <span className="text-[12.5px] text-mute">🖼 {alt || "image"}</span>
   ),
 };
 

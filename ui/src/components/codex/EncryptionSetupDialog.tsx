@@ -1,9 +1,11 @@
+import { Download } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import {
   useEncryptionConfig,
   useRewrapIdentity,
   useSetupEncryption,
 } from "#/api/encryption";
+import { Button } from "#/components/ui/button";
 import { Checkbox } from "#/components/ui/checkbox";
 import {
   createVaultIdentity,
@@ -12,7 +14,9 @@ import {
 } from "#/crypto/age";
 import { useEncryptionActions } from "#/crypto/EncryptionProvider";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { CodexModalShell } from "./CodexModalShell";
+import { DialogHeading } from "./NoteProtectionDialog";
 
 type SetupMethod = "password" | "import";
 
@@ -216,167 +220,174 @@ export function EncryptionSetupDialog({
         mode === "setup" ? "Encryption setup" : "Change encryption password"
       }
       maxWidthClassName="max-w-[620px]"
+      panelClassName="rounded-[18px]"
       onDismiss={onDismiss}
     >
-      <div className="flex items-baseline justify-between border-b border-ink bg-paper-2 px-3 py-1.5">
-        <span className="cl-mono text-[10px] uppercase tracking-[0.18em]">
-          ▣ Vault encryption
-        </span>
-        <span className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-          age / local session only
-        </span>
-      </div>
+      <div className="flex flex-col gap-6 px-6 py-7 md:px-9 md:py-8">
+        <DialogHeading
+          title="Vault encryption"
+          subtitle="age · this browser session only"
+          onClose={onDismiss}
+          closeDisabled={busy}
+        />
 
-      {mode === "change-password" ? (
-        <form className="space-y-3 px-4 py-4" onSubmit={changePassword}>
-          <p className="text-sm text-ink-mute">
-            This replaces only the password-wrapped identity. Existing note
-            ciphertext is not rewritten.
-          </p>
-          <LabeledInput
-            label="Current password"
-            type="password"
-            value={importedIdentity}
-            onChange={setImportedIdentity}
-            disabled={busy}
-          />
-          <LabeledInput
-            label="New encryption password"
-            type="password"
-            value={password}
-            onChange={setPassword}
-            disabled={busy}
-          />
-          <LabeledInput
-            label="Confirm new encryption password"
-            type="password"
-            value={confirmation}
-            onChange={setConfirmation}
-            disabled={busy}
-          />
-          <ErrorNotice error={error} />
-          <DialogActions onCancel={onDismiss} busy={busy}>
-            <button type="submit" className="cl-btn cl-btn-hot" disabled={busy}>
-              {busy ? "changing…" : "Change password"}
-            </button>
-          </DialogActions>
-        </form>
-      ) : (
-        <div className="space-y-4 px-4 py-4">
-          <fieldset className="m-0 flex min-w-0 border border-rule p-0">
-            <legend className="sr-only">Identity method</legend>
-            <MethodButton
-              selected={method === "password"}
-              onClick={() => selectMethod("password")}
-            >
-              Create with password
-            </MethodButton>
-            <MethodButton
-              selected={method === "import"}
-              onClick={() => selectMethod("import")}
-            >
-              Import existing identity
-            </MethodButton>
-          </fieldset>
-
-          {!prepared && method === "password" ? (
-            <div className="space-y-3">
-              <p className="text-sm text-ink-mute">
-                Generate a new age identity. Its recovery identity never leaves
-                this browser unless you export it.
-              </p>
-              <LabeledInput
-                label="Encryption password"
-                type="password"
-                value={password}
-                onChange={setPassword}
-                disabled={busy}
-              />
-              <LabeledInput
-                label="Confirm encryption password"
-                type="password"
-                value={confirmation}
-                onChange={setConfirmation}
-                disabled={busy}
-              />
-              <button
-                type="button"
-                className="cl-btn cl-btn-hot"
-                disabled={busy}
-                onClick={() => void preparePasswordIdentity()}
+        {mode === "change-password" ? (
+          <form className="flex flex-col gap-4" onSubmit={changePassword}>
+            <p className="text-[14.5px] leading-[1.55] text-mute">
+              This replaces only the password-wrapped identity. Existing note
+              ciphertext is not rewritten.
+            </p>
+            <LabeledInput
+              label="Current password"
+              type="password"
+              value={importedIdentity}
+              onChange={setImportedIdentity}
+              disabled={busy}
+            />
+            <LabeledInput
+              label="New encryption password"
+              type="password"
+              value={password}
+              onChange={setPassword}
+              disabled={busy}
+            />
+            <LabeledInput
+              label="Confirm new encryption password"
+              type="password"
+              value={confirmation}
+              onChange={setConfirmation}
+              disabled={busy}
+            />
+            <ErrorNotice error={error} />
+            <DialogActions onCancel={onDismiss} busy={busy}>
+              <Button type="submit" variant="primary" isDisabled={busy}>
+                {busy ? "Changing…" : "Change password"}
+              </Button>
+            </DialogActions>
+          </form>
+        ) : (
+          <>
+            <fieldset className="m-0 flex min-w-0 gap-1 rounded-full border-0 bg-sink p-1">
+              <legend className="sr-only">Identity method</legend>
+              <MethodButton
+                selected={method === "password"}
+                onClick={() => selectMethod("password")}
               >
-                {busy ? "generating…" : "Generate recovery identity"}
-              </button>
-            </div>
-          ) : null}
+                Create with password
+              </MethodButton>
+              <MethodButton
+                selected={method === "import"}
+                onClick={() => selectMethod("import")}
+              >
+                Import existing identity
+              </MethodButton>
+            </fieldset>
 
-          {!prepared && method === "import" ? (
-            <div className="space-y-3">
-              <label className="block">
-                <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-                  Age identity
-                </span>
-                <textarea
-                  aria-label="Age identity"
-                  value={importedIdentity}
-                  onChange={(event) => setImportedIdentity(event.target.value)}
+            {!prepared && method === "password" ? (
+              <div className="flex flex-col gap-4">
+                <p className="text-[14.5px] leading-[1.55] text-mute">
+                  Generate a new age identity. Its recovery identity never
+                  leaves this browser unless you export it.
+                </p>
+                <LabeledInput
+                  label="Encryption password"
+                  type="password"
+                  value={password}
+                  onChange={setPassword}
                   disabled={busy}
-                  rows={4}
-                  spellCheck={false}
-                  className="cl-mono mt-1 w-full resize-y border border-rule bg-transparent p-2 text-[11px] outline-none focus:border-accent"
                 />
-              </label>
-              <button
-                type="button"
-                className="cl-btn cl-btn-hot"
-                disabled={busy}
-                onClick={() => void validateImportedIdentity()}
-              >
-                {busy ? "validating…" : "Validate imported identity"}
-              </button>
-            </div>
-          ) : null}
-
-          {prepared ? (
-            <div className="space-y-3 border border-rule bg-paper-2 p-3">
-              <div>
-                <div className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-                  Recipient
-                </div>
-                <div className="cl-mono mt-1 break-all text-[11px]">
-                  {prepared.recipient}
+                <LabeledInput
+                  label="Confirm encryption password"
+                  type="password"
+                  value={confirmation}
+                  onChange={setConfirmation}
+                  disabled={busy}
+                />
+                <div>
+                  <Button
+                    variant="secondary"
+                    isDisabled={busy}
+                    onPress={() => void preparePasswordIdentity()}
+                  >
+                    {busy ? "Generating…" : "Generate recovery identity"}
+                  </Button>
                 </div>
               </div>
-              {method === "password" ? (
-                <button
-                  type="button"
-                  className="cl-btn"
-                  onClick={downloadRecoveryIdentity}
-                >
-                  Download recovery identity
-                </button>
-              ) : null}
-              <Checkbox isSelected={acknowledged} onChange={setAcknowledged}>
-                {method === "password"
-                  ? "I understand that losing both my password and recovery identity is unrecoverable."
-                  : "I understand that losing this recovery identity is unrecoverable."}
-              </Checkbox>
-            </div>
-          ) : null}
+            ) : null}
 
-          <ErrorNotice error={error} />
-          <DialogActions onCancel={onDismiss} busy={busy}>
-            <button
-              type="button"
-              className="cl-btn cl-btn-hot"
-              disabled={!prepared || !acknowledged || busy}
-              onClick={() => void finishSetup()}
-            >
-              {busy ? "saving…" : "Finish encryption setup"}
-            </button>
-          </DialogActions>
-        </div>
-      )}
+            {!prepared && method === "import" ? (
+              <div className="flex flex-col gap-4">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[13px] text-mute">Age identity</span>
+                  <textarea
+                    aria-label="Age identity"
+                    data-code-editor=""
+                    value={importedIdentity}
+                    onChange={(event) =>
+                      setImportedIdentity(event.target.value)
+                    }
+                    disabled={busy}
+                    rows={4}
+                    spellCheck={false}
+                    className={cn(
+                      "w-full shrink-0 resize-y rounded-[10px] bg-sink px-3.5 py-3 text-[12.5px] leading-[1.55] text-ink disabled:opacity-45",
+                      FOCUS_RING_NATIVE,
+                    )}
+                  />
+                </label>
+                <div>
+                  <Button
+                    variant="secondary"
+                    isDisabled={busy}
+                    onPress={() => void validateImportedIdentity()}
+                  >
+                    {busy ? "Validating…" : "Validate imported identity"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {prepared ? (
+              <div className="flex flex-col gap-4 rounded-[14px] bg-sink px-[22px] py-5">
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[13px] text-mute">Recipient</span>
+                  <code className="break-all text-[12.5px] leading-[1.55] text-ink">
+                    {prepared.recipient}
+                  </code>
+                </div>
+                {method === "password" ? (
+                  <div>
+                    <Button
+                      variant="secondary"
+                      className="bg-raise"
+                      onPress={downloadRecoveryIdentity}
+                    >
+                      <Download aria-hidden className="size-[15px]" />
+                      Download recovery identity
+                    </Button>
+                  </div>
+                ) : null}
+                <Checkbox isSelected={acknowledged} onChange={setAcknowledged}>
+                  {method === "password"
+                    ? "I understand that losing both my password and recovery identity is unrecoverable."
+                    : "I understand that losing this recovery identity is unrecoverable."}
+                </Checkbox>
+              </div>
+            ) : null}
+
+            <ErrorNotice error={error} />
+            <DialogActions onCancel={onDismiss} busy={busy}>
+              <Button
+                variant="primary"
+                isDisabled={!prepared || !acknowledged || busy}
+                onPress={() => void finishSetup()}
+              >
+                {busy ? "Saving…" : "Finish encryption setup"}
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </div>
     </CodexModalShell>
   );
 }
@@ -395,10 +406,8 @@ function LabeledInput({
   disabled: boolean;
 }) {
   return (
-    <label className="block">
-      <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-        {label}
-      </span>
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[13px] text-mute">{label}</span>
       <input
         aria-label={label}
         type={type}
@@ -406,7 +415,10 @@ function LabeledInput({
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
         autoComplete="off"
-        className="cl-mono mt-1 w-full border border-rule bg-transparent p-2 text-[12px] outline-none focus:border-accent"
+        className={cn(
+          "h-11 w-full shrink-0 rounded-[10px] bg-sink px-3.5 text-[15px] text-ink disabled:opacity-45",
+          FOCUS_RING_NATIVE,
+        )}
       />
     </label>
   );
@@ -426,8 +438,11 @@ function MethodButton({
       type="button"
       aria-pressed={selected}
       className={cn(
-        "flex-1 px-3 py-2 text-xs uppercase tracking-wider",
-        selected ? "bg-ink text-paper" : "text-ink-mute hover:bg-paper-2",
+        "h-9 flex-1 cursor-pointer rounded-full px-3 text-[14px] transition-colors",
+        selected
+          ? "bg-raise font-medium text-ink shadow-sm"
+          : "text-mute hover:text-ink",
+        FOCUS_RING_NATIVE,
       )}
       onClick={onClick}
     >
@@ -438,8 +453,8 @@ function MethodButton({
 
 function ErrorNotice({ error }: { error: string | null }) {
   return error ? (
-    <p role="alert" aria-live="assertive" className="text-sm text-hot">
-      ⁂ {error}
+    <p role="alert" aria-live="assertive" className="text-[13.5px] text-hot">
+      {error}
     </p>
   ) : null;
 }
@@ -455,14 +470,9 @@ function DialogActions({
 }) {
   return (
     <div className="flex justify-end gap-2">
-      <button
-        type="button"
-        className="cl-btn"
-        onClick={onCancel}
-        disabled={busy}
-      >
-        cancel
-      </button>
+      <Button variant="secondary" onPress={onCancel} isDisabled={busy}>
+        Cancel
+      </Button>
       {children}
     </div>
   );

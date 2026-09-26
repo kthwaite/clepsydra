@@ -259,7 +259,7 @@ describe("Gazetteer route filters", () => {
 
     routeMocks.navigate.mockClear();
     await user.click(screen.getByTestId("filter-bar-chip-kind"));
-    await user.click(screen.getByRole("option", { name: "NOTE" }));
+    await user.click(screen.getByRole("option", { name: "Note" }));
     expect(routeMocks.navigate).toHaveBeenCalledOnce();
     expect(resolvedSearch()).toEqual({
       ...completeSearch,
@@ -293,7 +293,7 @@ describe("Gazetteer route filters", () => {
 
     routeMocks.navigate.mockClear();
     await user.click(screen.getByTestId("filter-bar-chip-kind"));
-    await user.click(screen.getByRole("option", { name: "NOTE" }));
+    await user.click(screen.getByRole("option", { name: "Note" }));
     expect(routeMocks.navigate).toHaveBeenCalledOnce();
     const call = routeMocks.navigate.mock.calls.at(-1)?.[0];
     expect(call.replace).not.toBe(true);

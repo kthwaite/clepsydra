@@ -128,14 +128,14 @@ describe("Stone & Lamp palette", () => {
     }
   });
 
-  it.each([
-    "::selection",
-    ".cl-root *::selection",
-  ])("paints %s with the accent tint, keeping text colour", (sel) => {
-    const r = rule(sel);
-    expect(prop(r, "background")).toBe("var(--accent-tint)");
-    expect(prop(r, "color")).toBe("inherit");
-  });
+  it.each(["::selection", ".cl-root *::selection"])(
+    "paints %s with the accent tint, keeping text colour",
+    (sel) => {
+      const r = rule(sel);
+      expect(prop(r, "background")).toBe("var(--accent-tint)");
+      expect(prop(r, "color")).toBe("inherit");
+    },
+  );
 
   it.each([
     ["charcoal", NIGHT],
@@ -146,5 +146,22 @@ describe("Stone & Lamp palette", () => {
     }
     expect(contrast(t["--accent"], t["--paper"])).toBeGreaterThanOrEqual(4.5);
     expect(contrast(t["--ink"], t["--paper"])).toBeGreaterThanOrEqual(7);
+  });
+});
+
+describe("code token colours", () => {
+  // Strings and literals sit on the code block's sink; the quire hues are too
+  // light for 13px text there in bone (5.3 review I1).
+  it("reads at AA on sink in both themes", () => {
+    for (const vars of [night, bone]) {
+      const sink = vars["--paper-edge"] as string;
+      for (const token of ["--code-string", "--code-literal"]) {
+        expect(vars[token], token).toBeDefined();
+        expect(
+          contrast(vars[token] as string, sink),
+          token,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
   });
 });

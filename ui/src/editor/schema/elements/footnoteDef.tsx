@@ -13,9 +13,12 @@ export const footnoteDefDescriptor: ElementDescriptor<FootnoteDefElement> = {
   render: ({ attributes, children, element }) => (
     <div
       {...attributes}
-      className="cl-footnote-def mt-1 flex gap-2 border-t border-rule-soft pt-1 text-[0.85em] text-ink-mute"
+      className="mt-2 flex gap-2.5 text-[14px] leading-[1.6] text-mute"
     >
-      <span contentEditable={false} className="cl-mono text-accent select-none">
+      <span
+        contentEditable={false}
+        className="shrink-0 select-none tabular-nums text-accent"
+      >
         [{element.identifier}]
       </span>
       <div className="min-w-0 flex-1">{children}</div>

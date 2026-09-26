@@ -295,7 +295,7 @@ export function SheafContextMenu({
             </>
           }
         >
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[14px] leading-[1.55] text-ink-2">
             This closes every tab and dissolves all quires.
           </p>
         </Dialog>

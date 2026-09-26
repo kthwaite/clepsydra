@@ -1,3 +1,4 @@
+import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ComboBox,
@@ -145,7 +146,7 @@ export function PersonCombo({
       >
         <Input
           ref={inputRef}
-          placeholder="person"
+          placeholder="Person"
           onKeyDown={(event) => {
             // A focused option belongs to react-aria; only a bare Enter on a
             // typed name is ours.
@@ -158,33 +159,35 @@ export function PersonCombo({
             }
           }}
           className={cn(
-            "cl-mono w-full border border-rule bg-transparent p-1 text-[12px] text-ink outline-none transition-colors",
-            "placeholder:text-ink-mute",
-            "data-[hovered]:border-accent",
-            "data-[focused]:border-accent",
-            "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-60",
+            "h-9 w-full rounded-[10px] bg-sink px-3 text-[14px] text-ink outline-none transition-shadow",
+            "placeholder:text-mute",
+            "data-[focused]:ring-[1.5px] data-[focused]:ring-accent data-[focused]:ring-inset",
+            "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-45",
           )}
         />
-        <Popover className="min-w-(--trigger-width) border border-rule bg-paper outline-none">
-          <ListBox<Suggestion> className="cl-mono max-h-[280px] overflow-auto p-0.5 outline-none">
+        <Popover className="w-[280px] min-w-(--trigger-width) rounded-[14px] bg-raise p-1.5 shadow-lg outline-none">
+          <ListBox<Suggestion> className="max-h-[280px] overflow-auto outline-none">
             {(item) => (
               <ListBoxItem
                 id={item.id}
                 textValue={item.name}
                 className={cn(
-                  "cursor-pointer px-2 py-1 text-[11px] tracking-[0.04em] text-ink-2 outline-none",
-                  "data-[hovered]:bg-highlight data-[hovered]:text-ink",
-                  "data-[focused]:bg-highlight data-[focused]:text-ink",
-                  "data-[selected]:font-bold data-[selected]:text-ink",
+                  "flex min-h-9 cursor-pointer items-center gap-2 rounded-[9px] px-3 py-1.5 text-[14px] text-ink-2 outline-none",
+                  "data-[hovered]:bg-sink data-[hovered]:text-ink",
+                  "data-[focused]:bg-sink data-[focused]:text-ink",
+                  "data-[selected]:text-ink",
                 )}
               >
                 {item.kind === "create" ? (
-                  <span className="text-accent">Create “{item.name}”</span>
+                  <span className="flex items-center gap-2 text-accent">
+                    <Plus size={12} strokeWidth={2} aria-hidden />
+                    Create “{item.name}”
+                  </span>
                 ) : (
                   <>
                     <span>{item.name}</span>
                     {item.aliases.length > 0 && (
-                      <span className="ml-1.5 text-[10px] text-ink-mute">
+                      <span className="text-[12.5px] text-mute">
                         {item.aliases.join(" · ")}
                       </span>
                     )}
@@ -195,10 +198,8 @@ export function PersonCombo({
           </ListBox>
         </Popover>
       </ComboBox>
-      {creating && (
-        <div className="cl-mono text-[10px] text-ink-mute">creating…</div>
-      )}
-      {error && <div className="cl-mono text-[10px] text-hot">⁂ {error}</div>}
+      {creating && <div className="text-[12.5px] text-mute">Creating…</div>}
+      {error && <div className="text-[12.5px] text-hot">{error}</div>}
     </div>
   );
 }

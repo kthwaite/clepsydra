@@ -4,15 +4,18 @@ import { useCreatePage } from "#/api/pages";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { Button } from "#/components/ui/button";
 import { TagInput } from "#/components/ui/tag-input";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { generateShortId, intakePath } from "#/lib/intake";
 import type { Kind } from "#/lib/kind";
 import { isOneOnOne, withOneOnOne } from "#/lib/meeting";
 import { useProjects } from "#/lib/useProjects";
 import { useUiStore } from "#/store/ui";
 
-/** Quick-capture "INTAKE" terminal — mounted globally, opened via ⌘N / palette.
+/** Quick-capture Inscribe modal — mounted globally, opened via ⌘N / palette.
  * Kind + project drive the destination via the same projection rules as the
  * folio META rail (ADR 0001/0002); the path is derived, never typed. */
 export function InscribeModal() {
@@ -106,7 +109,8 @@ export function InscribeModal() {
   return (
     <CodexModalShell
       ariaLabel="Intake"
-      maxWidthClassName="max-w-[520px]"
+      maxWidthClassName="max-w-[560px]"
+      panelClassName="rounded-[18px]"
       onDismiss={dismiss}
     >
       <form
@@ -119,94 +123,105 @@ export function InscribeModal() {
             event.preventDefault();
           }
         }}
+        className="flex flex-col gap-[22px] px-6 py-7 md:px-9 md:py-8"
       >
-        {/* terminal header */}
-        <div className="flex items-baseline justify-between border-b border-ink bg-paper-2 px-3 py-1.5">
-          <span className="cl-serif text-[10px] uppercase tracking-[0.18em] text-ink">
-            ▣ Intake
+        <div className="flex items-start gap-4">
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <h2 className="font-serif text-[34px] font-normal leading-[1.05] text-ink">
+              Inscribe <span className="italic">a new folio</span>
+            </h2>
+            <span className="text-[13px] text-mute">
+              Kind and project decide where it is filed
+            </span>
+          </div>
+          <span className="mt-1.5 shrink-0 rounded-md bg-sink px-2 py-0.5 text-[12.5px] text-mute">
+            ⌘N
           </span>
         </div>
 
-        <div className="px-4 py-3">
-          <div className="mb-2.5 grid grid-cols-2 gap-3">
-            <Field label="01 · Kind">
-              <div className="mt-1">
-                <KindSelect value={kind} inferred={false} onAssign={setKind} />
-              </div>
-            </Field>
-            <Field label="02 · Project · optional">
-              {/* Enter commits the combobox draft; keep it from also
-                  submitting the form before the state lands. */}
-              <div ref={projectComboRef} className="mt-1">
-                <ProjectCombo
-                  key={project ?? ""}
-                  value={project}
-                  options={projects}
-                  onAssign={setProject}
-                  onClear={() => setProject(null)}
-                />
-              </div>
-            </Field>
-          </div>
-          <Field label="03 · Title">
-            <input
-              aria-label="Title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              // biome-ignore lint/a11y/noAutofocus: the intake modal intentionally starts focus at its primary title field
-              autoFocus
-              placeholder="new folio title"
-              className="cl-serif mt-1 w-full border border-rule bg-transparent p-1 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
-            />
+        <div className="grid grid-cols-2 gap-3.5">
+          <Field label="Kind">
+            <KindSelect value={kind} inferred={false} onAssign={setKind} />
           </Field>
-          <Field label="04 · Tags">
-            <TagInput
-              label="Tags"
-              ariaLabel="Tags"
-              values={tags}
-              suggestions={(tagIndex ?? []).map((tag) => tag.tag)}
-              onChange={updateTags}
-              placeholder="⇥ to complete"
-              variant="codex"
-              valuePrefix="#"
-              maxSuggestions={8}
-            />
-            {/* TODO: we'll probably want more than one of these, with better semantics */}
-            {kind === "MEETING" && (
-              // A 1:1 is a MEETING tagged `1:1` (ADR 0006): the box edits the
-              // same tag list the chips above show.
-              <label className="cl-mono mt-1.5 flex cursor-pointer items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-ink-mute">
-                <input
-                  type="checkbox"
-                  checked={isOneOnOne(tags)}
-                  onChange={(event) =>
-                    updateTags(
-                      withOneOnOne(tagsRef.current, event.target.checked),
-                    )
-                  }
-                />
-                1:1
-              </label>
+          <Field
+            label={
+              <>
+                Project <span className="text-mute">· optional</span>
+              </>
+            }
+          >
+            {/* Enter commits the combobox draft; keep it from also
+                submitting the form before the state lands. */}
+            <div ref={projectComboRef}>
+              <ProjectCombo
+                key={project ?? ""}
+                value={project}
+                options={projects}
+                onAssign={setProject}
+                onClear={() => setProject(null)}
+              />
+            </div>
+          </Field>
+        </div>
+        <Field label="Title">
+          <input
+            aria-label="Title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            // biome-ignore lint/a11y/noAutofocus: the intake modal intentionally starts focus at its primary title field
+            autoFocus
+            placeholder="New folio title"
+            className={cn(
+              "h-[54px] w-full shrink-0 rounded-xl bg-sink px-4 font-serif text-[26px] text-ink placeholder:text-mute",
+              FOCUS_RING_NATIVE,
             )}
-          </Field>
-          <div className="cl-mono mb-2.5 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-            DESTINATION · <span className="normal-case">{destination}</span>
-          </div>
-          {error && (
-            <div className="cl-mono mb-2 text-[11px] text-hot">⁂ {error}</div>
+          />
+        </Field>
+        <div className="flex flex-col gap-2">
+          <TagInput
+            label="Tags"
+            ariaLabel="Tags"
+            values={tags}
+            suggestions={(tagIndex ?? []).map((tag) => tag.tag)}
+            onChange={updateTags}
+            placeholder="Tab to complete"
+            variant="codex"
+            valuePrefix="#"
+            maxSuggestions={8}
+          />
+          {/* TODO: we'll probably want more than one of these, with better semantics */}
+          {kind === "MEETING" && (
+            // A 1:1 is a MEETING tagged `1:1` (ADR 0006): the box edits the
+            // same tag list the chips above show.
+            <label className="flex cursor-pointer items-center gap-2.5 text-[14px] text-ink-2">
+              <input
+                type="checkbox"
+                checked={isOneOnOne(tags)}
+                onChange={(event) =>
+                  updateTags(
+                    withOneOnOne(tagsRef.current, event.target.checked),
+                  )
+                }
+                className={cn("size-4 accent-accent", FOCUS_RING_NATIVE)}
+              />
+              1:1
+            </label>
           )}
-          <div className="flex justify-end gap-2">
-            <button type="button" className="cl-btn" onClick={dismiss}>
-              cancel
-            </button>
-            <button
-              type="submit"
-              className="cl-btn cl-btn-hot"
-              disabled={create.isPending}
-            >
-              {create.isPending ? "committing…" : "▣ commit to archive"}
-            </button>
-          </div>
+        </div>
+        <div className="flex flex-col gap-[3px] rounded-xl bg-ground px-4 py-3">
+          <span className="text-[12.5px] text-mute">Destination</span>
+          <span className="break-all text-[13.5px] text-ink-2">
+            {destination}
+          </span>
+        </div>
+        {error && <div className="text-[13.5px] text-hot">{error}</div>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onPress={dismiss}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" isDisabled={create.isPending}>
+            {create.isPending ? "Inscribing…" : "Inscribe"}
+          </Button>
         </div>
       </form>
     </CodexModalShell>
@@ -217,14 +232,12 @@ function Field({
   label,
   children,
 }: {
-  label: string;
+  label: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <div className="mb-2.5 block">
-      <span className="cl-serif text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-        {label}
-      </span>
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <span className="text-[13px] text-mute">{label}</span>
       {children}
     </div>
   );

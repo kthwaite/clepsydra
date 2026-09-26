@@ -3,18 +3,12 @@ import {
   COMMON_LANGUAGES,
   CURATED_ALIASES,
   DIAGRAM_LANGUAGES,
-  displayLabel,
   filterLanguages,
   listLanguageIds,
 } from "#/editor/code-languages";
 import { refractor } from "#/editor/refractor-languages";
 
 describe("code-languages", () => {
-  it("displayLabel uppercases the id", () => {
-    expect(displayLabel("rust")).toBe("RUST");
-    expect(displayLabel("tsx")).toBe("TSX");
-  });
-
   it("listLanguageIds pins registered common languages first, in order", () => {
     const ids = listLanguageIds(refractor);
     const expectedCommon = COMMON_LANGUAGES.filter((id) => ids.includes(id));

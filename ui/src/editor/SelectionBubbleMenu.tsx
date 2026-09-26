@@ -48,6 +48,7 @@ import { makeLink } from "#/editor/schema/elements/link";
 import { makeWikilink } from "#/editor/schema/elements/wikilink";
 import type { CustomText } from "#/editor/schema/types";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { createRangeReference } from "./floatingSelectionReference";
 
 const BOOLEAN_CONTROLS = [
@@ -236,9 +237,9 @@ function TooltipIconButton({
         aria-pressed={pressed}
         variant="ghost"
         className={cn(
-          "h-7 w-7 border-transparent text-ink-mute hover:text-ink",
-          pressed === true && "bg-accent/15 text-accent",
-          pressed === "mixed" && "bg-accent/10 text-accent/80",
+          "h-8 w-8 text-mute",
+          pressed === true && "bg-accent-tint text-accent",
+          pressed === "mixed" && "bg-accent-tint text-accent/80",
         )}
         onPointerDown={preserveEditorSelection}
         onPress={onPress}
@@ -264,7 +265,7 @@ function ColourPanel({
   return (
     <fieldset
       id={id}
-      className="flex items-center gap-1 border-t border-rule px-1 py-1"
+      className="m-0 flex items-center gap-1 rounded-full bg-sink p-1"
     >
       <legend className="sr-only">{paletteName}</legend>
       {swatches.map((swatch) => (
@@ -273,13 +274,13 @@ function ColourPanel({
             aria-label={swatch.name}
             aria-pressed={swatchState(textNodes, mark, swatch.value)}
             variant="ghost"
-            className="h-6 w-6 border-transparent p-1 data-[focus-visible]:outline-accent"
+            className="h-7 w-7 p-1"
             onPointerDown={preserveEditorSelection}
             onPress={() => onApply(swatch.value)}
           >
             <span
               aria-hidden="true"
-              className="h-3.5 w-3.5 border border-black/20"
+              className="h-4 w-4 rounded-full shadow-[inset_0_0_0_1px_var(--color-rule)]"
               style={{ backgroundColor: swatch.value }}
             />
           </IconButton>
@@ -291,7 +292,10 @@ function ColourPanel({
         title={customName}
         type="color"
         value={nativeColourValue(textNodes, mark, customDefault)}
-        className="h-6 w-6 cursor-pointer border border-rule bg-paper p-0"
+        className={cn(
+          "h-7 w-7 cursor-pointer rounded-full bg-transparent p-0.5",
+          FOCUS_RING_NATIVE,
+        )}
         onChange={(event) => onApply(event.currentTarget.value)}
       />
       <TooltipIconButton label={clearName} onPress={() => onApply(undefined)}>
@@ -498,10 +502,10 @@ export function SelectionBubbleMenu({
       ref={refs.setFloating}
       role="toolbar"
       aria-label="Text formatting"
-      className="fixed z-50 flex flex-col border border-rule bg-paper-2 text-ink shadow-md"
+      className="fixed z-50 flex flex-col gap-1 rounded-2xl bg-raise p-1 text-ink shadow-lg"
       style={floatingStyles}
     >
-      <div className="flex items-center gap-0.5 p-1">
+      <div className="flex items-center gap-0.5">
         {BOOLEAN_CONTROLS.map(({ label, mark, Icon }) => {
           const state = booleanMarkState(inspection.textNodes, mark);
           return (
@@ -530,7 +534,7 @@ export function SelectionBubbleMenu({
             <Link2 />
           </TooltipIconButton>
         )}
-        <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-rule" />
+        <span aria-hidden="true" className="mx-1 h-4 w-px bg-sink" />
         <TooltipIconButton
           label="Highlight colour"
           controls={highlightPanelId}
@@ -557,7 +561,7 @@ export function SelectionBubbleMenu({
       {linkOpen && (
         <div
           id={linkPanelId}
-          className="w-72 border-t border-rule p-2"
+          className="w-72 p-1"
           onPointerDown={(event) => event.stopPropagation()}
         >
           <input
@@ -603,7 +607,7 @@ export function SelectionBubbleMenu({
                 else if (externalUrl) insertLink(externalUrl, "url");
               }
             }}
-            className="w-full border border-rule bg-paper px-2 py-1 text-sm text-ink outline-accent"
+            className="h-9 w-full rounded-full bg-sink px-4 text-[14px] text-ink outline-none placeholder:text-mute focus:ring-2 focus:ring-accent"
           />
           {matches.length > 0 || externalUrl ? (
             <div
@@ -625,12 +629,13 @@ export function SelectionBubbleMenu({
                     insertLink(page.title ?? page.canonical_name, "page");
                   }}
                   className={cn(
-                    "cursor-pointer px-2 py-1 text-sm hover:bg-accent/20",
-                    linkIndex === index && "bg-accent/20",
+                    "cursor-pointer rounded-[10px] px-3 py-1.5 text-[14px] text-ink hover:bg-sink",
+                    linkIndex === index &&
+                      "bg-accent-tint hover:bg-accent-tint",
                   )}
                 >
                   <div>{page.title ?? page.canonical_name}</div>
-                  <div className="truncate text-xs text-ink-mute">
+                  <div className="truncate text-[12.5px] text-mute">
                     {page.path}
                   </div>
                 </div>
@@ -647,8 +652,9 @@ export function SelectionBubbleMenu({
                     insertLink(externalUrl, "url");
                   }}
                   className={cn(
-                    "cursor-pointer px-2 py-1 text-sm hover:bg-accent/20",
-                    linkIndex === matches.length && "bg-accent/20",
+                    "cursor-pointer rounded-[10px] px-3 py-1.5 text-[14px] text-ink hover:bg-sink",
+                    linkIndex === matches.length &&
+                      "bg-accent-tint hover:bg-accent-tint",
                   )}
                 >
                   Link to URL
@@ -656,7 +662,9 @@ export function SelectionBubbleMenu({
               )}
             </div>
           ) : (
-            <p className="pt-2 text-xs text-ink-mute">No matching pages</p>
+            <p className="px-3 pt-2 pb-1 text-[13px] text-mute">
+              No matching pages
+            </p>
           )}
         </div>
       )}

@@ -19,6 +19,8 @@ import {
 import { MathExpression, renderMathToHtml } from "#/components/MathExpression";
 import { useMathEditing } from "#/editor/mathEditing";
 import type { InlineMathElement, MathBlockElement } from "#/editor/types";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 interface MathSourceEditorProps {
   display: boolean;
@@ -94,10 +96,16 @@ function MathSourceEditor({
   };
 
   const label = display ? "Edit display math" : "Edit inline math";
-  const className = `cl-mono border bg-paper px-1.5 py-0.5 text-ink outline-none focus:border-accent ${
-    valid ? "border-border" : "border-destructive"
-  } ${display ? "min-h-20 w-full resize-y" : "w-[min(28rem,80vw)] align-baseline"}`;
+  const className = cn(
+    "rounded-[10px] bg-sink px-2.5 py-1 text-[0.9em] text-ink outline-none focus:ring-2",
+    valid ? "focus:ring-accent" : "ring-2 ring-hot",
+    display
+      ? "min-h-20 w-full resize-y leading-[1.65]"
+      : "w-[min(28rem,80vw)] align-baseline",
+  );
   const fieldProps = {
+    // LaTeX source is code: main.css sets `[data-code-editor]` in mono.
+    "data-code-editor": "",
     "aria-describedby": valid ? undefined : descriptionId,
     "aria-invalid": valid ? undefined : (true as const),
     "aria-label": label,
@@ -149,6 +157,7 @@ function ActivatableMath({
       data-testid={testId}
       role="button"
       tabIndex={0}
+      className={cn("cursor-pointer rounded-[6px]", FOCUS_RING_NATIVE)}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onActivate}
       onKeyDown={(event) => {

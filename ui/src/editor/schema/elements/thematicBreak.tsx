@@ -8,8 +8,22 @@ export const thematicBreakDescriptor: ElementDescriptor<ThematicBreakElement> =
     kind: "void-block",
     create: () => ({ type: "thematic-break", children: [{ text: "" }] }),
     render: ({ attributes, children }) => (
-      <div {...attributes} contentEditable={false}>
-        <hr className="my-6 border-border" />
+      // A faint decorative mark (spec decision 5: no rule lines); the hidden
+      // <hr> keeps the separator for assistive tech.
+      <div
+        {...attributes}
+        contentEditable={false}
+        className="my-10 flex select-none items-center justify-center gap-3"
+      >
+        <hr className="sr-only" />
+        {[0, 1, 2].map((mark) => (
+          <span
+            key={mark}
+            aria-hidden="true"
+            data-break-mark=""
+            className="size-[5px] rounded-[1px] bg-faint"
+          />
+        ))}
         {children}
       </div>
     ),

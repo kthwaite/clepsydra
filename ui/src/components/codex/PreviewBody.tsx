@@ -4,7 +4,7 @@ import {
   countWords,
   previewMarkdownSource,
 } from "#/components/codex/folio-utils";
-import { kindLabel, resolveKind } from "#/lib/kind";
+import { kindDisplayLabel, resolveKind } from "#/lib/kind";
 
 // react-markdown drags the whole unified/micromark pipeline (~130 kB minified)
 // with it — far too heavy for the eager entry chunk when it only renders hover
@@ -45,6 +45,10 @@ function unboundedPreviewValue(value: unknown): string {
     return JSON.stringify(canonicalizePreviewValue(value)) ?? String(value);
   }
   return String(value);
+}
+
+function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
 function formatPreviewValue(value: unknown): string {
@@ -94,22 +98,21 @@ export function PreviewBody({
   const markdown = page && !encrypted ? previewMarkdownSource(page.body) : "";
   const words = page && !encrypted ? countWords(page.body) : 0;
   const tags = page?.meta.tags ?? [];
+  const backlinkCount = count(backlinks?.length ?? 0, "backlink");
 
   return (
-    <div className="px-[10px] py-2">
-      <div className="mb-1 flex items-baseline justify-between border-b border-rule-soft pb-[3px]">
-        <span className="cl-mono text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-          {kindLabel(kind)}
-        </span>
-        <span className="cl-mono text-[9px] text-ink-mute">
-          {encrypted ? "locked" : `${words} wd`} · ↘{backlinks?.length ?? 0}
+    <div className="px-4 pt-3.5 pb-4">
+      <div className="flex items-baseline justify-between gap-3 text-[12.5px] text-mute">
+        <span>{kindDisplayLabel(kind)}</span>
+        <span>
+          {encrypted ? "Locked" : count(words, "word")} · {backlinkCount}
         </span>
       </div>
-      <div className="mb-[3px] font-sans text-[14px] font-bold leading-[1.2]">
+      <div className="mt-1.5 mb-2 font-serif text-[22px] leading-[1.15] text-ink">
         {title}
       </div>
       {encrypted ? (
-        <div className="cl-mono my-3 border border-rule-soft bg-paper-2 px-2 py-3 text-center text-[10px] uppercase tracking-[0.12em] text-ink-mute">
+        <div className="my-3 rounded-xl bg-sink px-3 py-3 text-center text-[13px] text-mute">
           Protected note · open to unlock
         </div>
       ) : null}
@@ -124,7 +127,7 @@ export function PreviewBody({
         </div>
       )}
       {!encrypted && previewError ? (
-        <div className="cl-mono mt-[5px] border-t border-dotted border-rule-soft pt-1 text-[9px] text-ink-mute">
+        <div className="mt-2.5 text-[12.5px] text-mute">
           Properties unavailable
         </div>
       ) : null}
@@ -132,12 +135,12 @@ export function PreviewBody({
       !previewError &&
       preview &&
       (preview.fields.length > 0 || preview.remaining_count > 0) ? (
-        <dl className="cl-mono mt-[5px] grid min-w-0 grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] gap-x-2 gap-y-1 border-t border-dotted border-rule-soft pt-1 text-[9px]">
+        <dl className="mt-3 grid min-w-0 grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] gap-x-3 gap-y-1.5 rounded-xl bg-sink px-3 py-2.5 text-[12.5px] leading-snug">
           {preview.fields.map((field) => {
             const body = field.key === "body";
             const labelClass = body
-              ? "col-span-2 min-w-0 break-words text-ink-mute"
-              : "min-w-0 break-words text-ink-mute";
+              ? "col-span-2 min-w-0 break-words text-mute"
+              : "min-w-0 break-words text-mute";
             const valueClass = body
               ? "col-span-2 line-clamp-2 min-w-0 whitespace-normal break-words text-left text-ink-2"
               : "min-w-0 break-words text-right text-ink-2";
@@ -150,7 +153,7 @@ export function PreviewBody({
                       role="img"
                       aria-label={LABEL_CONFLICT_DESCRIPTION}
                       title={LABEL_CONFLICT_DESCRIPTION}
-                      className="ml-1 font-bold text-hot"
+                      className="ml-1 font-semibold text-hot"
                     >
                       !
                     </span>
@@ -160,7 +163,7 @@ export function PreviewBody({
                       role="img"
                       aria-label={SCHEMA_CONFLICT_DESCRIPTION}
                       title={SCHEMA_CONFLICT_DESCRIPTION}
-                      className="ml-1 font-bold text-hot"
+                      className="ml-1 font-semibold text-hot"
                     >
                       ≠
                     </span>
@@ -175,7 +178,7 @@ export function PreviewBody({
           {preview.remaining_count > 0 ? (
             <>
               <dt className="sr-only">Additional projected fields</dt>
-              <dd className="col-span-2 text-right text-ink-mute">
+              <dd className="col-span-2 text-right text-mute">
                 +{preview.remaining_count} more
               </dd>
             </>
@@ -183,7 +186,7 @@ export function PreviewBody({
         </dl>
       ) : null}
       {showTags && tags.length > 0 && (
-        <div className="cl-mono mt-[5px] border-t border-dotted border-rule-soft pt-1 text-[9px] text-accent">
+        <div className="mt-2.5 text-[12.5px] text-accent">
           {tags.map((t) => `#${t}`).join(" ")}
         </div>
       )}

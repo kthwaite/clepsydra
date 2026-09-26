@@ -46,9 +46,7 @@ export function SlashCombobox({
       renderItem={(command) => (
         <>
           <div className="font-medium">{command.label}</div>
-          <div className="text-xs text-muted-foreground">
-            {command.description}
-          </div>
+          <div className="text-[12.5px] text-mute">{command.description}</div>
         </>
       )}
     />

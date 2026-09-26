@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Editor, Transforms } from "slate";
 import {
@@ -14,11 +15,14 @@ import {
   useMermaidRender,
 } from "#/components/MermaidDiagram";
 import { CopyButton } from "#/components/ui/CopyButton";
-import { displayLabel } from "#/editor/code-languages";
-import { CodeLangPicker } from "#/editor/elements/CodeLangPicker";
+import {
+  CodeLangPicker,
+  languageLabel,
+} from "#/editor/elements/CodeLangPicker";
 import { setCodeBlockLanguage } from "#/editor/elements/codeBlockLanguage";
 import type { CodeBlockElement as CodeBlockElementType } from "#/editor/types";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { MERMAID_LANGUAGE } from "#/lib/markdown/mermaidFence";
 
 type Props = RenderElementProps & { element: CodeBlockElementType };
@@ -47,7 +51,7 @@ function ActivatableDiagram({
         aria-label="Edit diagram source"
         onMouseDown={(event) => event.preventDefault()}
         onClick={onActivate}
-        className="absolute inset-0 cursor-text bg-transparent outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        className="absolute inset-0 cursor-text rounded-[12px] bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-accent"
       />
     </div>
   );
@@ -64,7 +68,7 @@ export function CodeBlockElement({ attributes, children, element }: Props) {
   const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null);
 
   const lang = element.language ?? null;
-  const label = lang ? displayLabel(lang) : "TXT";
+  const label = languageLabel(lang);
   const code = element.children.map((c) => c.text).join("");
 
   // Editing always wins over the diagram: with the caret inside the block the
@@ -112,55 +116,54 @@ export function CodeBlockElement({ attributes, children, element }: Props) {
   return (
     <div
       {...attributes}
-      className="cl-codeblock group border border-rule bg-paper-2"
+      className="cl-codeblock group rounded-[12px] bg-sink px-2 pb-4 pt-1.5"
     >
       <div
         contentEditable={false}
-        className="cl-mono flex select-none items-center justify-between border-b border-rule bg-paper px-3 py-1 text-[9px] uppercase tracking-[0.18em] text-ink-mute"
+        className="flex select-none items-center gap-1 text-[13px]"
       >
-        <span>Code</span>
-        <div className="flex items-center gap-2.5">
-          <CopyButton
-            getText={() => code}
-            label="Copy code"
-            className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-          />
-          {lang === MERMAID_LANGUAGE && (
-            <>
-              {/* Both controls stand down while the source is what's on
-                  screen: there is no picture to expand. */}
-              <MermaidExpandButton
-                svg={
-                  wantsDiagram && state.status === "ready" ? state.svg : null
-                }
-              />
-              {/* Pressed when the diagram is what's on screen — while the
-                  caret is in the block that is never true, so the control
-                  always reads as "show the diagram now". */}
-              <MermaidViewToggle
-                isDiagram={wantsDiagram}
-                onChange={handleDiagramToggle}
-              />
-            </>
-          )}
-          {readOnly ? (
-            <span className="cl-mono uppercase tracking-[0.18em] text-accent">
-              {label}
-            </span>
-          ) : (
-            <button
-              type="button"
-              ref={setTrigger}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => setOpen((o) => !o)}
-              aria-haspopup="listbox"
-              aria-expanded={open}
-              className="cl-mono cursor-pointer uppercase tracking-[0.18em] text-accent hover:text-accent-deep"
-            >
-              {label}
-            </button>
-          )}
-        </div>
+        {readOnly ? (
+          <span className="flex h-7 items-center px-3 text-ink-2">{label}</span>
+        ) : (
+          <button
+            type="button"
+            ref={setTrigger}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setOpen((o) => !o)}
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            aria-label={`Code language: ${label}`}
+            className={cn(
+              "flex h-7 cursor-pointer items-center gap-1.5 rounded-full pl-3 pr-2.5 text-ink-2 transition-colors hover:bg-ground/60 hover:text-ink",
+              FOCUS_RING_NATIVE,
+            )}
+          >
+            {label}
+            <ChevronDown aria-hidden size={11} strokeWidth={2} />
+          </button>
+        )}
+        <span className="flex-1" />
+        <CopyButton
+          getText={() => code}
+          label="Copy code"
+          className="size-[30px] rounded-full hover:bg-ground/60 [&_svg]:size-[15px]"
+        />
+        {lang === MERMAID_LANGUAGE && (
+          <>
+            {/* Both controls stand down while the source is what's on
+                screen: there is no picture to expand. */}
+            <MermaidExpandButton
+              svg={wantsDiagram && state.status === "ready" ? state.svg : null}
+            />
+            {/* Pressed when the diagram is what's on screen — while the
+                caret is in the block that is never true, so the control
+                always reads as "show the diagram now". */}
+            <MermaidViewToggle
+              isDiagram={wantsDiagram}
+              onChange={handleDiagramToggle}
+            />
+          </>
+        )}
       </div>
       {wantsDiagram && (
         <ActivatableDiagram onActivate={readOnly ? undefined : editSource}>
@@ -172,7 +175,7 @@ export function CodeBlockElement({ attributes, children, element }: Props) {
           place of the (aria-hidden) picture. */}
       <pre
         className={cn(
-          "cl-noscroll overflow-x-auto px-4 py-3 font-mono text-[12.5px] leading-[1.5] text-ink",
+          "cl-noscroll mt-1 overflow-x-auto px-3.5 text-[13px] leading-[1.65] text-ink-2",
           !showSource && "sr-only",
         )}
         spellCheck="false"

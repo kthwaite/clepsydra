@@ -41,6 +41,12 @@ const combobox = () => screen.getByRole("combobox", { name: "Project" });
 const hint = () => screen.findByRole("status");
 
 describe("ProjectCombo", () => {
+  it("reads None when no project is set, without a glyph", () => {
+    renderCombo();
+
+    expect(combobox()).toHaveAttribute("placeholder", "None");
+  });
+
   it("filters the listed projects by contains, ignoring case", async () => {
     const user = userEvent.setup();
     renderCombo();

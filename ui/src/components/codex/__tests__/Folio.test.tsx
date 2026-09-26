@@ -1483,7 +1483,7 @@ describe("Folio kind assignment", () => {
 
     const kind = screen.getByRole("combobox", { name: "Kind" });
     expect(kind).toBeDisabled();
-    expect(kind).toHaveValue("JOURNAL");
+    expect(kind).toHaveValue("Journal");
     expect(screen.getByText("· fixed")).toBeInTheDocument();
     expect(kind).toHaveAccessibleDescription("Journal kind cannot be changed.");
   });
@@ -1505,10 +1505,10 @@ describe("Folio kind assignment", () => {
     render(<Folio tabId="t1" path="quotes/example.md" />);
 
     const kind = screen.getByRole("combobox", { name: "Kind" });
-    expect(kind).toHaveValue("QUOTE");
+    expect(kind).toHaveValue("Quote");
     await user.click(kind);
-    expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
-    expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "Quote" })).toBeNull();
+    expect(screen.getByRole("option", { name: "Note" })).toBeVisible();
   });
 });
 
@@ -1547,6 +1547,27 @@ describe("Folio property placement", () => {
       locked: false,
       readOnly: false,
     });
+  });
+
+  // The read-only Kind read "NOTE" beside an editable KindSelect reading
+  // "Note" (5.3 review I2).
+  it("shows a read-only kind in sentence case", () => {
+    mobileLayoutState.matches = false;
+    usePageEditorMock.mockReturnValue({ ...editableEditor(), offline: true });
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const properties = screen.getByRole("complementary", {
+      name: "Page details",
+    });
+    expect(within(properties).getByText("Note")).toBeVisible();
+    expect(within(properties).queryByText("NOTE")).toBeNull();
   });
 
   it("places projected properties between the read-only header and body", () => {

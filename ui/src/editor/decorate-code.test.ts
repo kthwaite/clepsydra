@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeDecorateCode } from "./decorate-code";
+import { makeDecorateCode, TOKEN_COLOR } from "./decorate-code";
 import { refractor } from "./refractor-languages";
 
 // Tests exercise the loaded state directly with the registered singleton.
@@ -49,5 +49,18 @@ describe("decorateCode", () => {
     const kw = ranges.find((r) => r.anchor.offset === 0);
     expect(kw?.token).toBe("keyword");
     expect(kw?.focus.offset).toBe(5);
+  });
+});
+
+describe("TOKEN_COLOR", () => {
+  it("colours tokens from Stone & Lamp tokens only (no Vessel aliases)", () => {
+    const vessel = /--(cool|warn|ink-mute|accent-deep)\b/;
+    for (const [token, colour] of Object.entries(TOKEN_COLOR)) {
+      expect(colour, token).not.toMatch(vessel);
+    }
+    expect(TOKEN_COLOR.keyword).toBe("var(--accent)");
+    expect(TOKEN_COLOR.comment).toBe("var(--mute)");
+    expect(TOKEN_COLOR.number).toBe("var(--code-literal)");
+    expect(TOKEN_COLOR.string).toBe("var(--code-string)");
   });
 });

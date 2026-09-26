@@ -18,6 +18,8 @@ import {
 import { TASK_PROPERTY_KEYS, type TaskPropertyKey } from "#/editor/properties";
 import { useTaskPropertyPopover } from "#/editor/taskPropertyContext";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { formatDayMonth } from "#/lib/time";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type {
   BulletedListElement,
@@ -27,47 +29,56 @@ import type {
 import { makeParagraph } from "./paragraph";
 
 // ---------------------------------------------------------------------------
-// Task property chips — read-only ledger stamps for due / scheduled / priority
+// Task property chips — pills for due / scheduled / priority
 // ---------------------------------------------------------------------------
 
-/** Mirrors Agenda Todo priority labels so the row and editor agree. */
+/** Matches the todo-properties popover's High / Medium / Low segments. */
 function priorityLabel(value: string): string {
   switch (value) {
     case "A":
-      return "HIGH";
+      return "High";
     case "B":
-      return "MED";
+      return "Medium";
     case "C":
-      return "LOW";
+      return "Low";
     default:
       return value.toUpperCase();
   }
 }
 
 interface ChipSpec {
-  /** Ledger prefix shown before the value; empty for self-describing values. */
-  prefix: string;
-  /** Word that opens the accessible name. */
+  /** Word shown before a date and opening the accessible name. */
   name: string;
-  display: (value: string) => string;
+  /** Dates read as "30 Sep" on the chip; the name keeps the ISO day. */
+  isDate: boolean;
 }
 
 const CHIP_SPECS: Record<TaskPropertyKey, ChipSpec> = {
-  due: { prefix: "DUE", name: "Due", display: (value) => value },
-  scheduled: { prefix: "SCHED", name: "Scheduled", display: (value) => value },
-  priority: { prefix: "", name: "Priority", display: priorityLabel },
+  due: { name: "Due", isDate: true },
+  scheduled: { name: "Scheduled", isDate: true },
+  priority: { name: "Priority", isDate: false },
 };
 
 const CHIP_CLASS =
-  "cl-mono inline-flex items-center border border-rule px-1 py-px text-[10px] uppercase leading-none tracking-wider text-ink-mute";
+  "inline-flex h-6 items-center rounded-full px-2.5 align-middle text-[12.5px] leading-none no-underline";
 
-const CHIP_INTERACTIVE =
-  "cursor-pointer hover:border-ink-mute hover:text-ink focus-visible:border-accent focus-visible:text-accent focus-visible:outline-none";
+/** Dates carry the accent tint (they are the actionable part of a todo);
+ *  priority sits quiet on sink. */
+const CHIP_TONE: Record<"date" | "plain", string> = {
+  date: "bg-accent-tint text-accent",
+  plain: "bg-sink text-mute",
+};
+
+const CHIP_INTERACTIVE = cn(
+  "cursor-pointer transition-colors hover:text-ink",
+  FOCUS_RING_NATIVE,
+);
 
 interface TaskPropertyChip {
   key: string;
   text: string;
   name: string;
+  tone: "date" | "plain";
 }
 
 function taskPropertyChips(
@@ -79,12 +90,22 @@ function taskPropertyChips(
     const value = properties[key];
     if (!value) continue;
     const spec = CHIP_SPECS[key];
-    const display = spec.display(value);
-    chips.push({
-      key,
-      text: spec.prefix ? `${spec.prefix} ${display}` : display,
-      name: `${spec.name} ${display}`,
-    });
+    if (spec.isDate) {
+      chips.push({
+        key,
+        text: `${spec.name} ${formatDayMonth(value)}`,
+        name: `${spec.name} ${value}`,
+        tone: "date",
+      });
+    } else {
+      const display = priorityLabel(value);
+      chips.push({
+        key,
+        text: display,
+        name: `${spec.name} ${display}`,
+        tone: "plain",
+      });
+    }
   }
   return chips;
 }
@@ -113,7 +134,7 @@ function TaskPropertyControls({ element }: { element: ListItemElement }) {
       contentEditable={false}
       data-task-properties=""
       className={cn(
-        "ml-2 shrink-0 select-none space-x-1 whitespace-nowrap",
+        "ml-2 shrink-0 select-none space-x-1.5 whitespace-nowrap",
         chips.length === 0 && "max-md:hidden",
       )}
     >
@@ -124,7 +145,11 @@ function TaskPropertyControls({ element }: { element: ListItemElement }) {
             type="button"
             aria-label={chip.name}
             disabled={readOnly}
-            className={cn(CHIP_CLASS, !readOnly && CHIP_INTERACTIVE)}
+            className={cn(
+              CHIP_CLASS,
+              CHIP_TONE[chip.tone],
+              !readOnly && CHIP_INTERACTIVE,
+            )}
             onMouseDown={keepSelection}
             onClick={open}
           >
@@ -137,6 +162,7 @@ function TaskPropertyControls({ element }: { element: ListItemElement }) {
           aria-label="Todo properties"
           className={cn(
             CHIP_CLASS,
+            CHIP_TONE.plain,
             CHIP_INTERACTIVE,
             "opacity-0 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100",
           )}
@@ -193,12 +219,12 @@ function ListItem({
       data-block-id={element.blockId}
       className={cn(
         "group flex items-baseline max-md:items-start",
-        checked === true && "line-through text-muted-foreground",
+        checked === true && "text-mute line-through",
       )}
     >
       <label
         contentEditable={false}
-        className="mr-2 inline-flex size-4 shrink-0 cursor-pointer select-none max-md:-ml-3.5 max-md:min-h-11 max-md:min-w-11 max-md:items-start max-md:justify-start max-md:pt-1 max-md:pl-3.5"
+        className="mr-3 inline-flex size-4 shrink-0 cursor-pointer select-none max-md:-ml-3.5 max-md:min-h-11 max-md:min-w-11 max-md:items-start max-md:justify-start max-md:pt-1 max-md:pl-3.5"
       >
         <input
           type="checkbox"
@@ -216,7 +242,7 @@ function ListItem({
               );
             });
           }}
-          className="accent-foreground"
+          className="size-4 cursor-pointer accent-accent disabled:cursor-default"
         />
       </label>
       {/* Chips sit outside the content column so they stay on the first line
@@ -290,7 +316,7 @@ export const numberedListDescriptor: ElementDescriptor<NumberedListElement> = {
     children,
   }),
   render: ({ attributes, children }) => (
-    <ol {...attributes} className="list-decimal pl-6">
+    <ol {...attributes} className="list-decimal pl-6 marker:text-mute">
       {children}
     </ol>
   ),

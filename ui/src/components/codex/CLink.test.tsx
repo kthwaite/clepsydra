@@ -57,3 +57,28 @@ describe("CLink navigation", () => {
     expect(openTabMock).toHaveBeenCalledWith("page", "notes/target.md");
   });
 });
+
+describe("CLink payload card", () => {
+  it("shows the folio and counts in sentence case", async () => {
+    const user = userEvent.setup();
+    render(
+      <CLink
+        payload={{
+          title: "The float valve",
+          folio: "k3Qz8mTa",
+          words: 412,
+          backlinks: 1,
+          tags: ["horology", "design"],
+        }}
+      >
+        Valve
+      </CLink>,
+    );
+
+    await user.hover(screen.getByRole("link", { name: /Valve/ }));
+
+    expect(screen.getByText("k3Qz8mTa")).toBeInTheDocument();
+    expect(screen.getByText("412 words · 1 backlink")).toBeInTheDocument();
+    expect(screen.getByText("#horology · #design")).toBeInTheDocument();
+  });
+});

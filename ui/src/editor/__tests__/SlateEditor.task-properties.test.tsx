@@ -107,10 +107,10 @@ describe("SlateEditor task property popover", () => {
     );
     expect(within(popover).getByLabelText("Scheduled")).toHaveValue("");
     expect(
-      within(popover).getByRole("button", { name: "MED" }),
+      within(popover).getByRole("button", { name: "Medium" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(
-      within(popover).getByRole("button", { name: "HIGH" }),
+      within(popover).getByRole("button", { name: "High" }),
     ).toHaveAttribute("aria-pressed", "false");
   });
 
@@ -123,7 +123,7 @@ describe("SlateEditor task property popover", () => {
     const popover = dialog();
     expect(within(popover).getByLabelText("Due")).toHaveValue("");
     expect(within(popover).getByLabelText("Scheduled")).toHaveValue("");
-    for (const level of ["HIGH", "MED", "LOW"]) {
+    for (const level of ["High", "Medium", "Low"]) {
       expect(
         within(popover).getByRole("button", { name: level }),
       ).toHaveAttribute("aria-pressed", "false");
@@ -185,7 +185,7 @@ describe("SlateEditor task property popover", () => {
     await user.click(screen.getByRole("button", { name: "Todo properties" }));
     const due = within(dialog()).getByLabelText("Due");
     fireEvent.change(due, { target: { value: "2026-09-01" } });
-    await user.click(within(dialog()).getByRole("button", { name: "HIGH" }));
+    await user.click(within(dialog()).getByRole("button", { name: "High" }));
     fireEvent.keyDown(due, { key: "Enter" });
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -215,7 +215,7 @@ describe("SlateEditor task property popover", () => {
       within(dialog()).getByRole("button", { name: "Clear due" }),
     );
     // A second press on the active level clears priority.
-    await user.click(within(dialog()).getByRole("button", { name: "HIGH" }));
+    await user.click(within(dialog()).getByRole("button", { name: "High" }));
     fireEvent.keyDown(within(dialog()).getByLabelText("Scheduled"), {
       key: "Enter",
     });

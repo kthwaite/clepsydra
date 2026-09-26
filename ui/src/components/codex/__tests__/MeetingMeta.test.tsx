@@ -93,6 +93,13 @@ describe("MeetingMeta", () => {
     ).toBeInTheDocument();
   });
 
+  it("says so in sentence case when nobody is named", () => {
+    usePageMock.mockReturnValue(page(undefined));
+    renderMeta();
+
+    expect(screen.getByText("No attendees")).toBeInTheDocument();
+  });
+
   it("lists the people a meeting names", () => {
     usePageMock.mockReturnValue(page(["[[Ada]]", "[[Grace]]"]));
     renderMeta();

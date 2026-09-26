@@ -4,27 +4,36 @@ import { describe, expect, it, vi } from "vitest";
 import { KindSelect } from "#/components/codex/KindSelect";
 
 const ALPHABETICAL_LABELS = [
-  "AI CONVERSATION",
-  "AI JOURNAL",
-  "ARCHIVE",
-  "BOOK",
-  "CAPTURE",
-  "CODE",
-  "CYCLE",
-  "JOURNAL",
-  "MEETING",
-  "NOTE",
-  "PERSON",
-  "PROJECT",
-  "RECIPE",
-  "TASK",
-  "TODO",
+  "AI conversation",
+  "AI journal",
+  "Archive",
+  "Book",
+  "Capture",
+  "Code",
+  "Cycle",
+  "Journal",
+  "Meeting",
+  "Note",
+  "Person",
+  "Project",
+  "Recipe",
+  "Task",
+  "Todo",
 ];
 
 describe("KindSelect", () => {
-  it("renders the current kind in a combobox input", () => {
+  it("renders the current kind in sentence case in a combobox input", () => {
     render(<KindSelect value="NOTE" inferred={false} onAssign={() => {}} />);
-    expect(screen.getByRole("combobox", { name: "Kind" })).toHaveValue("NOTE");
+    expect(screen.getByRole("combobox", { name: "Kind" })).toHaveValue("Note");
+  });
+
+  it("keeps AI capitalised in the sentence-case kind label", () => {
+    render(
+      <KindSelect value="AI_JOURNAL" inferred={false} onAssign={() => {}} />,
+    );
+    expect(screen.getByRole("combobox", { name: "Kind" })).toHaveValue(
+      "AI journal",
+    );
   });
 
   it("lists assignable kinds alphabetically by label, without quotation", async () => {
@@ -32,7 +41,7 @@ describe("KindSelect", () => {
     render(<KindSelect value="QUOTE" inferred={false} onAssign={() => {}} />);
 
     const input = screen.getByRole("combobox", { name: "Kind" });
-    expect(input).toHaveValue("QUOTE");
+    expect(input).toHaveValue("Quote");
 
     await user.click(input);
     const options = await screen.findAllByRole("option");
@@ -45,7 +54,7 @@ describe("KindSelect", () => {
     render(<KindSelect value="NOTE" inferred={false} onAssign={onAssign} />);
 
     await user.click(screen.getByRole("combobox", { name: "Kind" }));
-    await user.click(await screen.findByRole("option", { name: "BOOK" }));
+    await user.click(await screen.findByRole("option", { name: "Book" }));
     expect(onAssign).toHaveBeenCalledWith("BOOK");
   });
 
@@ -58,10 +67,10 @@ describe("KindSelect", () => {
     await user.clear(input);
     await user.type(input, "bo");
 
-    expect(await screen.findByRole("option", { name: "BOOK" })).toBeVisible();
-    expect(screen.queryByRole("option", { name: "NOTE" })).toBeNull();
+    expect(await screen.findByRole("option", { name: "Book" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "Note" })).toBeNull();
 
-    await user.click(screen.getByRole("option", { name: "BOOK" }));
+    await user.click(screen.getByRole("option", { name: "Book" }));
     expect(onAssign).toHaveBeenCalledWith("BOOK");
   });
 
@@ -80,7 +89,7 @@ describe("KindSelect", () => {
     await user.type(input, "zzz");
     await user.click(screen.getByRole("button", { name: "Outside" }));
 
-    expect(input).toHaveValue("NOTE");
+    expect(input).toHaveValue("Note");
     expect(onAssign).not.toHaveBeenCalled();
   });
 
@@ -98,7 +107,7 @@ describe("KindSelect", () => {
 
     const input = screen.getByRole("combobox", { name: "Kind" });
     expect(input).toBeDisabled();
-    expect(input).toHaveValue("JOURNAL");
+    expect(input).toHaveValue("Journal");
     expect(input).toHaveAccessibleDescription(
       "Journal kind cannot be changed.",
     );
@@ -131,7 +140,7 @@ describe("KindSelect", () => {
     expect(input).toHaveAttribute("placeholder", "Set kind…");
 
     await user.click(input);
-    await user.click(await screen.findByRole("option", { name: "BOOK" }));
+    await user.click(await screen.findByRole("option", { name: "Book" }));
 
     expect(onAssign).toHaveBeenCalledWith("BOOK");
     expect(input).toHaveValue("");

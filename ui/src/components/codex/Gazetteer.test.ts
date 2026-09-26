@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ASSIGNABLE_KINDS,
   KINDS,
-  kindLabel,
+  kindDisplayLabel,
   sortKindsByLabel,
 } from "#/lib/kind";
 import { useGazetteerStore } from "#/store/gazetteer";
@@ -319,7 +319,9 @@ describe("Gazetteer controller", () => {
 
     await user.click(screen.getByTestId("filter-bar-chip-kind"));
     for (const kind of KINDS) {
-      const option = screen.getByRole("option", { name: kindLabel(kind) });
+      const option = screen.getByRole("option", {
+        name: kindDisplayLabel(kind),
+      });
       expect(option).toBeVisible();
       expect(option).toHaveAttribute("aria-selected", "false");
     }
@@ -327,7 +329,7 @@ describe("Gazetteer controller", () => {
       .getAllByRole("option")
       .map((option) => option.textContent);
     expect(kindOptionLabels).toEqual(
-      sortKindsByLabel(KINDS).map((kind) => kindLabel(kind)),
+      sortKindsByLabel(KINDS).map((kind) => kindDisplayLabel(kind)),
     );
     await user.click(screen.getByTestId("filter-bar-option-kind-PROJECT"));
     expect(onFilterChange).toHaveBeenCalledWith({
@@ -392,13 +394,13 @@ describe("Gazetteer controller", () => {
       screen.getByRole("combobox", { name: "Set kind for selection" }),
     );
 
-    expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Quote" })).toBeNull();
     const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual(
-      sortKindsByLabel(ASSIGNABLE_KINDS).map((k) => kindLabel(k)),
+      sortKindsByLabel(ASSIGNABLE_KINDS).map((k) => kindDisplayLabel(k)),
     );
 
-    await user.click(screen.getByRole("option", { name: "BOOK" }));
+    await user.click(screen.getByRole("option", { name: "Book" }));
     expect(bulkMutateMock).toHaveBeenCalledWith(
       {
         body: {

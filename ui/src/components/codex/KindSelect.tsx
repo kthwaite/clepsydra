@@ -10,7 +10,7 @@ import { cn } from "#/lib/cn";
 import {
   ASSIGNABLE_KINDS,
   type Kind,
-  kindLabel,
+  kindDisplayLabel,
   sortKindsByLabel,
 } from "#/lib/kind";
 
@@ -51,10 +51,14 @@ export function KindSelect({
 
   // The input is a filter draft, not the source of truth; the closed kind set
   // means any text that isn't a committed pick reverts to `value` on blur.
-  const [draft, setDraft] = useState(value !== null ? kindLabel(value) : "");
+  // Trigger and options both read in sentence case ("Note"); the filter
+  // ignores case.
+  const [draft, setDraft] = useState(
+    value !== null ? kindDisplayLabel(value) : "",
+  );
 
   useEffect(() => {
-    setDraft(value !== null ? kindLabel(value) : "");
+    setDraft(value !== null ? kindDisplayLabel(value) : "");
   }, [value]);
 
   return (
@@ -74,17 +78,17 @@ export function KindSelect({
           // arrives here again after an abandoned edit; assigning it would be
           // a redundant mutation.
           if (!k || k === value) return;
-          setDraft(value === null ? "" : kindLabel(k as Kind));
+          setDraft(value === null ? "" : kindDisplayLabel(k as Kind));
           onAssign(k as Kind);
         }}
         className="min-w-0 flex-1"
       >
         <Input
           placeholder={placeholder}
-          onBlur={() => setDraft(value !== null ? kindLabel(value) : "")}
+          onBlur={() => setDraft(value !== null ? kindDisplayLabel(value) : "")}
           className={cn(
             "h-8 w-full rounded-lg bg-sink px-2.5 text-[13.5px] outline-none transition-colors",
-            "placeholder:text-faint",
+            "placeholder:text-mute",
             "data-[focused]:bg-raise data-[focused]:text-ink data-[focused]:ring-2 data-[focused]:ring-accent",
             "data-[disabled]:cursor-not-allowed data-[disabled]:bg-transparent data-[disabled]:px-0 data-[disabled]:text-mute",
             inferred ? "text-mute" : "text-ink",
@@ -96,7 +100,7 @@ export function KindSelect({
               <ListBoxItem
                 key={k}
                 id={k}
-                textValue={kindLabel(k)}
+                textValue={kindDisplayLabel(k)}
                 className={cn(
                   "cursor-pointer rounded-lg px-2.5 py-1.5 text-[13.5px] text-ink-2 outline-none",
                   "data-[hovered]:bg-sink data-[hovered]:text-ink",
@@ -104,7 +108,7 @@ export function KindSelect({
                   "data-[selected]:bg-accent-tint data-[selected]:text-ink",
                 )}
               >
-                {kindLabel(k)}
+                {kindDisplayLabel(k)}
               </ListBoxItem>
             ))}
           </ListBox>

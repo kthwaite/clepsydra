@@ -24,7 +24,7 @@ export const imageDescriptor: ElementDescriptor<ImageElement> = {
           src={resolveResourceUrl(element.url)}
           alt={element.alt}
           title={element.title}
-          className="max-h-[32rem] max-w-full border border-border object-contain"
+          className="max-h-[32rem] max-w-full rounded-[12px] object-contain"
         />
       </span>
       {children}

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { shortFolio } from "#/components/codex/folio-utils";
 import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
 import { usePreviewStore } from "#/store/preview";
 
@@ -170,4 +171,18 @@ it("persists a dragged preview only when the pointer is released", () => {
   expect(titlebar?.parentElement).toHaveStyle({
     transform: "translate3d(140px, 170px, 0)",
   });
+});
+
+it("labels the titlebar and tray chip with the plain folio id", () => {
+  const folio = shortFolio("notes/target.md");
+  const view = render(<LinkPreviewLayer />);
+  const titlebar = document.querySelector<HTMLElement>(".cursor-grab");
+  expect(titlebar).toHaveTextContent(folio);
+  expect(titlebar?.textContent).not.toMatch(/[⟦⟧]/);
+
+  usePreviewStore.setState({
+    windows: [{ ...previewWindow(), minimized: true }],
+  });
+  view.rerender(<LinkPreviewLayer />);
+  expect(screen.getByRole("button", { name: folio })).toBeInTheDocument();
 });

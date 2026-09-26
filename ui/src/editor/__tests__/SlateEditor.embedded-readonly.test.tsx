@@ -163,7 +163,7 @@ describe("SlateEditor embedded read-only contract", () => {
       { blockId: "abc123DEF0" },
     );
 
-    expect(screen.queryByRole("button", { name: "RUST" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Code language/ })).toBeNull();
     expect(screen.queryByPlaceholderText("Search language…")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Copy code" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("fn main() {}"));

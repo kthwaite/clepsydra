@@ -43,13 +43,28 @@ describe("InscribeModal", () => {
     expect(screen.queryByPlaceholderText("ideas/new-page")).toBeNull();
   });
 
+  it("titles the modal and names its commit button Inscribe", () => {
+    render(<InscribeModal />);
+    expect(
+      screen.getByRole("heading", { name: "Inscribe a new folio" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Kind and project decide where it is filed"),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Inscribe" })).toHaveAttribute(
+      "type",
+      "submit",
+    );
+    expect(screen.queryByText(/commit to archive/)).toBeNull();
+  });
+
   it("does not offer quotation as a creation kind", async () => {
     const user = userEvent.setup();
     render(<InscribeModal />);
 
     await user.click(screen.getByRole("combobox", { name: "Kind" }));
     expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
-    expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Note" })).toBeVisible();
   });
 
   it("dismisses on Escape", async () => {
@@ -64,7 +79,7 @@ describe("InscribeModal", () => {
     const user = userEvent.setup();
     render(<InscribeModal />);
 
-    await user.click(screen.getByRole("button", { name: "cancel" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(useUiStore.getState().isInscribeOpen).toBe(false);
     expect(createMutate).not.toHaveBeenCalled();
@@ -94,7 +109,7 @@ describe("InscribeModal", () => {
       screen.getByRole("textbox", { name: "Title" }),
       "Redesign Retro",
     );
-    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+    await user.click(screen.getByRole("button", { name: "Inscribe" }));
     expect(createMutate).toHaveBeenCalledTimes(1);
     const [vars] = createMutate.mock.calls[0];
     expect(vars.params.path.path).toMatch(
@@ -110,9 +125,9 @@ describe("InscribeModal", () => {
     );
     render(<InscribeModal />);
     await user.click(screen.getByRole("combobox", { name: "Kind" }));
-    await user.click(screen.getByRole("option", { name: "RECIPE" }));
+    await user.click(screen.getByRole("option", { name: "Recipe" }));
     await user.type(screen.getByRole("textbox", { name: "Title" }), "Soup");
-    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+    await user.click(screen.getByRole("button", { name: "Inscribe" }));
 
     const [createVars] = createMutate.mock.calls[0];
     expect(createVars.body.kind).toBe("RECIPE");
@@ -133,7 +148,7 @@ describe("InscribeModal", () => {
     render(<InscribeModal />);
 
     await user.type(screen.getByRole("textbox", { name: "Title" }), "Hello");
-    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+    await user.click(screen.getByRole("button", { name: "Inscribe" }));
 
     expect(useUiStore.getState().isInscribeOpen).toBe(true);
     expect(screen.getByText(/page already exists/)).toBeInTheDocument();
@@ -143,7 +158,7 @@ describe("InscribeModal", () => {
   it("requires a title", async () => {
     const user = userEvent.setup();
     render(<InscribeModal />);
-    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+    await user.click(screen.getByRole("button", { name: "Inscribe" }));
     expect(createMutate).not.toHaveBeenCalled();
     expect(screen.getByText(/title is required/)).toBeInTheDocument();
   });
@@ -154,13 +169,13 @@ describe("InscribeModal", () => {
     expect(screen.queryByRole("checkbox", { name: "1:1" })).toBeNull();
 
     await user.click(screen.getByRole("combobox", { name: "Kind" }));
-    await user.click(screen.getByRole("option", { name: "MEETING" }));
+    await user.click(screen.getByRole("option", { name: "Meeting" }));
     expect(screen.getByRole("checkbox", { name: "1:1" })).not.toBeChecked();
 
     // The kind field filters on its text; clear it to reach NOTE again.
     await user.clear(screen.getByRole("combobox", { name: "Kind" }));
     await user.type(screen.getByRole("combobox", { name: "Kind" }), "no");
-    await user.click(await screen.findByRole("option", { name: "NOTE" }));
+    await user.click(await screen.findByRole("option", { name: "Note" }));
     expect(screen.queryByRole("checkbox", { name: "1:1" })).toBeNull();
   });
 
@@ -168,7 +183,7 @@ describe("InscribeModal", () => {
     const user = userEvent.setup();
     render(<InscribeModal />);
     await user.click(screen.getByRole("combobox", { name: "Kind" }));
-    await user.click(screen.getByRole("option", { name: "MEETING" }));
+    await user.click(screen.getByRole("option", { name: "Meeting" }));
 
     await user.click(screen.getByRole("checkbox", { name: "1:1" }));
     expect(screen.getByRole("checkbox", { name: "1:1" })).toBeChecked();
@@ -183,14 +198,14 @@ describe("InscribeModal", () => {
     const user = userEvent.setup();
     render(<InscribeModal />);
     await user.click(screen.getByRole("combobox", { name: "Kind" }));
-    await user.click(screen.getByRole("option", { name: "MEETING" }));
+    await user.click(screen.getByRole("option", { name: "Meeting" }));
     await user.type(screen.getByRole("textbox", { name: "Title" }), "Ada");
     await user.click(screen.getByRole("checkbox", { name: "1:1" }));
     // Ticking twice more toggles off and on; the tag must not duplicate.
     await user.click(screen.getByRole("checkbox", { name: "1:1" }));
     await user.click(screen.getByRole("checkbox", { name: "1:1" }));
 
-    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+    await user.click(screen.getByRole("button", { name: "Inscribe" }));
 
     const [vars] = createMutate.mock.calls[0];
     expect(vars.body.kind).toBe("MEETING");
@@ -214,7 +229,7 @@ describe("InscribeModal", () => {
     expect(createMutate).not.toHaveBeenCalled();
 
     await user.type(screen.getByRole("textbox", { name: "Title" }), "Orphan");
-    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+    await user.click(screen.getByRole("button", { name: "Inscribe" }));
 
     expect(createMutate).toHaveBeenCalledTimes(1);
     const [vars] = createMutate.mock.calls[0];
@@ -228,7 +243,7 @@ describe("InscribeModal", () => {
     await user.type(screen.getByRole("combobox", { name: "Project" }), "al");
     await user.click(await screen.findByRole("option", { name: "aleph" }));
     await user.type(screen.getByRole("textbox", { name: "Title" }), "Filed");
-    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+    await user.click(screen.getByRole("button", { name: "Inscribe" }));
 
     const [vars] = createMutate.mock.calls[0];
     expect(vars.body.project).toBe("aleph");
@@ -245,7 +260,7 @@ describe("InscribeModal", () => {
     ).toBeVisible();
     await user.keyboard("{Tab}");
     expect(screen.getByText("#rust")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+    await user.click(screen.getByRole("button", { name: "Inscribe" }));
     const [vars] = createMutate.mock.calls[0];
     expect(vars.body.tags).toEqual(["rust"]);
   });

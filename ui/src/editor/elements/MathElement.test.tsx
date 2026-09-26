@@ -288,6 +288,26 @@ describe("MathElement", () => {
     expect(source).toHaveAttribute("spellcheck", "false");
   });
 
+  it("marks the display source textarea as a code editor so it sets in mono", async () => {
+    const user = userEvent.setup();
+    renderMathEditor("display");
+
+    await user.click(screen.getByTestId("math-block"));
+    const source = screen.getByRole("textbox", { name: "Edit display math" });
+
+    expect(source).toHaveAttribute("data-code-editor", "");
+  });
+
+  it("marks the inline source input as a code editor too", async () => {
+    const user = userEvent.setup();
+    renderMathEditor();
+
+    await user.click(screen.getByTestId("inline-math"));
+    const source = screen.getByRole("textbox", { name: "Edit inline math" });
+
+    expect(source).toHaveAttribute("data-code-editor", "");
+  });
+
   it("keeps display textarea keys local while allowing Enter to insert a newline", async () => {
     const user = userEvent.setup();
     const onSlateKeyDown = vi.fn();

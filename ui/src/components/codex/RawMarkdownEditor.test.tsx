@@ -71,6 +71,8 @@ describe("RawMarkdownEditor", () => {
       "Raw Markdown could not be applied. Fix line 2 and try again.",
     );
     expect(textarea).toHaveClass("w-full");
+    // Mono is opt-in for source editors: main.css keys it off this attribute.
+    expect(textarea).toHaveAttribute("data-code-editor", "");
     expect(screen.getByRole("button", { name: "Apply" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeVisible();
   });

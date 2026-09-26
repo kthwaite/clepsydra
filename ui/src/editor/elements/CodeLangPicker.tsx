@@ -13,12 +13,47 @@ import {
   useRef,
   useState,
 } from "react";
-import { displayLabel, filterLanguages } from "#/editor/code-languages";
+import { filterLanguages } from "#/editor/code-languages";
 import { loadRefractor, useRefractor } from "#/editor/refractor-lazy";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 /** Sentinel row id for the "Plain text" reset entry (never a real lang id). */
 const PLAIN = " plain";
+
+/** Languages whose written name is not just the id with a capital. */
+const LANGUAGE_NAMES: Record<string, string> = {
+  typescript: "TypeScript",
+  javascript: "JavaScript",
+  tsx: "TSX",
+  jsx: "JSX",
+  json: "JSON",
+  html: "HTML",
+  css: "CSS",
+  scss: "SCSS",
+  sql: "SQL",
+  yaml: "YAML",
+  toml: "TOML",
+  xml: "XML",
+  csv: "CSV",
+  ini: "INI",
+  http: "HTTP",
+  php: "PHP",
+  cpp: "C++",
+  csharp: "C#",
+  fsharp: "F#",
+  graphql: "GraphQL",
+  latex: "LaTeX",
+  objectivec: "Objective-C",
+  powershell: "PowerShell",
+};
+
+/** Sentence-case name for a language id ("python" → "Python"), or
+ *  "Plain text" for none. Shared by the code-block header and this list. */
+export function languageLabel(id: string | null): string {
+  if (!id) return "Plain text";
+  return LANGUAGE_NAMES[id] ?? `${id.charAt(0).toUpperCase()}${id.slice(1)}`;
+}
 
 export interface CodeLangPickerProps {
   /** Current language, or null for plain text. */
@@ -119,7 +154,7 @@ export function CodeLangPicker({
     <div
       ref={refs.setFloating}
       contentEditable={false}
-      className="fixed z-50 w-56 border border-border bg-popover shadow-md"
+      className="fixed z-50 w-60 rounded-[16px] bg-raise p-1.5 text-ink shadow-lg"
       style={floatingStyles}
     >
       <input
@@ -136,13 +171,16 @@ export function CodeLangPicker({
         aria-autocomplete="list"
         aria-controls={listboxId}
         aria-activedescendant={activeOptionId}
-        className="cl-mono w-full border-b border-rule bg-paper px-3 py-1.5 text-xs text-ink outline-none placeholder:text-ink-mute"
+        className={cn(
+          "h-9 w-full rounded-full bg-sink px-3.5 text-[14px] text-ink placeholder:text-mute",
+          FOCUS_RING_NATIVE,
+        )}
       />
       <div
         role="listbox"
         id={listboxId}
         aria-label="Language"
-        className="cl-noscroll max-h-64 overflow-y-auto"
+        className="cl-noscroll mt-1.5 max-h-64 overflow-y-auto"
       >
         {rows.map((row, index) => {
           const isActive = index === selectedIndex;
@@ -161,18 +199,18 @@ export function CodeLangPicker({
               }}
               onMouseEnter={() => setSelectedIndex(index)}
               className={cn(
-                "cl-mono flex cursor-pointer items-center justify-between px-3 py-1 text-xs",
-                isPlain && "border-t border-rule",
-                isActive
-                  ? "bg-accent text-accent-foreground"
-                  : "text-popover-foreground hover:bg-accent/50",
+                "flex h-8 cursor-pointer items-center justify-between rounded-[9px] px-3 text-[14px]",
+                isPlain && "mt-1",
+                isActive ? "bg-sink text-ink" : "text-ink-2",
               )}
             >
-              <span>{isPlain ? "Plain text" : displayLabel(row)}</span>
+              <span>{languageLabel(isPlain ? null : row)}</span>
               {isCurrent && (
                 <>
                   <span className="sr-only">selected</span>
-                  <span aria-hidden="true">✓</span>
+                  <span aria-hidden="true" className="text-accent">
+                    ✓
+                  </span>
                 </>
               )}
             </div>

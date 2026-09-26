@@ -67,19 +67,37 @@ describe("CodeBlockElement", () => {
   it("opens the picker when the label is clicked", () => {
     renderInEditor("rust");
     expect(screen.queryByPlaceholderText("Search language…")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "RUST" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Code language: Rust" }),
+    );
     expect(screen.getByPlaceholderText("Search language…")).toBeDefined();
   });
 
   it("selecting a language updates the code block's language", () => {
     const { editor } = renderInEditor("rust");
-    fireEvent.click(screen.getByRole("button", { name: "RUST" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Code language: Rust" }),
+    );
     const input = screen.getByPlaceholderText("Search language…");
     fireEvent.change(input, { target: { value: "python" } });
-    fireEvent.mouseDown(screen.getByText("PYTHON"));
+    fireEvent.mouseDown(screen.getByText("Python"));
     expect((editor.children[0] as { language?: string }).language).toBe(
       "python",
     );
+  });
+
+  it("labels the language in sentence case, and a bare fence as Plain text", () => {
+    renderInEditor();
+    expect(
+      screen.getByRole("button", { name: "Code language: Plain text" }),
+    ).toHaveTextContent("Plain text");
+  });
+
+  it("names well-known languages the way they are written", () => {
+    renderInEditor("typescript");
+    expect(
+      screen.getByRole("button", { name: "Code language: TypeScript" }),
+    ).toHaveTextContent("TypeScript");
   });
 
   it("copies the code text when the copy button is pressed", async () => {
@@ -94,7 +112,9 @@ describe("CodeBlockElement", () => {
 
   it("selecting Plain text clears the code block's language", () => {
     const { editor } = renderInEditor("rust");
-    fireEvent.click(screen.getByRole("button", { name: "RUST" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Code language: Rust" }),
+    );
     fireEvent.mouseDown(screen.getByText("Plain text"));
     expect(
       (editor.children[0] as { language?: string }).language,
@@ -234,8 +254,8 @@ describe("CodeBlockElement", () => {
     const { editor } = renderInEditor("rust", true);
     const before = JSON.parse(JSON.stringify(editor.children));
 
-    expect(screen.getByText("RUST")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "RUST" })).toBeNull();
+    expect(screen.getByText("Rust")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Code language/ })).toBeNull();
     expect(screen.queryByPlaceholderText("Search language…")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Copy code" }));

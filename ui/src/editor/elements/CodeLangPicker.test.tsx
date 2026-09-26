@@ -42,15 +42,15 @@ describe("CodeLangPicker", () => {
     renderPicker();
     const input = screen.getByPlaceholderText("Search language…");
     fireEvent.change(input, { target: { value: "rust" } });
-    expect(screen.getByText("RUST")).toBeDefined();
-    expect(screen.queryByText("JAVASCRIPT")).toBeNull();
+    expect(screen.getByText("Rust")).toBeDefined();
+    expect(screen.queryByText("JavaScript")).toBeNull();
   });
 
   it("clicking a language calls onSelect with its id", () => {
     const { onSelect } = renderPicker();
     const input = screen.getByPlaceholderText("Search language…");
     fireEvent.change(input, { target: { value: "rust" } });
-    fireEvent.mouseDown(screen.getByText("RUST"));
+    fireEvent.mouseDown(screen.getByText("Rust"));
     expect(onSelect).toHaveBeenCalledWith("rust");
   });
 
@@ -92,7 +92,7 @@ describe("CodeLangPicker", () => {
     renderPicker({ value: "rust" });
     const input = screen.getByPlaceholderText("Search language…");
     fireEvent.change(input, { target: { value: "rust" } });
-    const option = screen.getByText("RUST").closest('[role="option"]');
+    const option = screen.getByText("Rust").closest('[role="option"]');
     expect(option?.textContent).toContain("✓");
   });
 });

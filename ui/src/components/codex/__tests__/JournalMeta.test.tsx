@@ -110,9 +110,9 @@ describe("JournalMeta", () => {
         onTagsChange={noop}
       />,
     );
-    const skipped = screen.getByRole("button", { name: /6\/8/ });
+    const skipped = screen.getByRole("button", { name: /^6 Aug/ });
     expect(skipped).toBeDisabled();
-    const written = screen.getByRole("button", { name: /5\/8/ });
+    const written = screen.getByRole("button", { name: /^5 Aug/ });
     fireEvent.click(written);
     expect(updateTabPathMock).toHaveBeenCalledWith(
       "t1",
@@ -135,9 +135,11 @@ describe("JournalMeta", () => {
     // Scoped to the State row: today's cross-link row can also read
     // "unwritten" when the AI counterpart has no entry yet.
     expect(screen.getByText("State").nextElementSibling).toHaveTextContent(
-      "unwritten",
+      /^Unwritten$/,
     );
-    expect(screen.getByText("219 / 365")).toBeInTheDocument();
+    expect(screen.getByText("Day").nextElementSibling).toHaveTextContent(
+      /^219 of 365$/,
+    );
   });
 
   it("shows an 'AI journal' cross-link row that opens the written counterpart", () => {
@@ -155,7 +157,7 @@ describe("JournalMeta", () => {
       />,
     );
     expect(screen.getByText("AI journal")).toBeInTheDocument();
-    const row = screen.getByRole("button", { name: /written/ });
+    const row = screen.getByRole("button", { name: "Written · open" });
     expect(row).not.toBeDisabled();
     fireEvent.click(row);
     expect(openTabMock).toHaveBeenCalledWith(
@@ -177,7 +179,7 @@ describe("JournalMeta", () => {
         onTagsChange={noop}
       />,
     );
-    const row = screen.getByRole("button", { name: /unwritten/ });
+    const row = screen.getByRole("button", { name: "Unwritten" });
     expect(row).toBeDisabled();
   });
 
@@ -193,7 +195,7 @@ describe("JournalMeta", () => {
         onTagsChange={noop}
       />,
     );
-    const row = screen.getByRole("button", { name: /unwritten/ });
+    const row = screen.getByRole("button", { name: "Unwritten" });
     expect(row).not.toBeDisabled();
     fireEvent.click(row);
     expect(openTabMock).toHaveBeenCalledWith(
@@ -224,7 +226,9 @@ describe("AiJournalMeta", () => {
       "ai-journals/2026-08-04.md",
       "2026-08-04",
     );
-    expect(screen.getByText("219 / 365")).toBeInTheDocument();
+    expect(screen.getByText("Day").nextElementSibling).toHaveTextContent(
+      /^219 of 365$/,
+    );
   });
 
   it("day nav prefers the real indexed path over the draft shape", () => {
@@ -278,7 +282,7 @@ describe("AiJournalMeta", () => {
       />,
     );
     expect(screen.getByText("Journal")).toBeInTheDocument();
-    const row = screen.getByRole("button", { name: /written/ });
+    const row = screen.getByRole("button", { name: "Written · open" });
     expect(row).not.toBeDisabled();
     fireEvent.click(row);
     expect(openTabMock).toHaveBeenCalledWith(
