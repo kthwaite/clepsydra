@@ -38,16 +38,18 @@ import { QuickAddRow } from "./QuickAddRow";
 
 /** Shared grid tracks for the header row and task rows. Narrower screens
  *  drop columns (display:none cells take no track) so the title keeps room:
- *  below 1400px Assignee and Estimate go, below xl Project and Checklist. */
+ *  below 1400px Assignee and Estimate go, below 1280px Project and Checklist.
+ *  Arbitrary min-[…] variants only: Tailwind sorts those among themselves by
+ *  width, but puts named breakpoints (xl:) after them. */
 const BK_COLS = cn(
   "grid items-center gap-x-4 px-3",
   "grid-cols-[168px_minmax(0,1fr)_132px_64px]",
-  "xl:grid-cols-[168px_minmax(0,1fr)_110px_132px_64px_86px]",
+  "min-[1280px]:grid-cols-[168px_minmax(0,1fr)_110px_132px_64px_86px]",
   "min-[1400px]:grid-cols-[168px_minmax(0,1fr)_110px_132px_90px_76px_64px_86px]",
 );
 
-/** Cells shown from xl (Project, Checklist). */
-const XL_ONLY = "max-xl:hidden";
+/** Cells shown from 1280px (Project, Checklist). */
+const MID_ONLY = "max-[1279px]:hidden";
 
 /** Cells shown from 1400px (Assignee, Estimate). */
 const WIDE_ONLY = "max-[1399px]:hidden";
@@ -131,12 +133,12 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
         >
           <span>Code</span>
           <span>Task</span>
-          <span className={XL_ONLY}>Project</span>
+          <span className={MID_ONLY}>Project</span>
           <span>Status</span>
           <span className={WIDE_ONLY}>Assignee</span>
           <span className={WIDE_ONLY}>Estimate</span>
           <span className="text-right">Due</span>
-          <span className={XL_ONLY}>Checklist</span>
+          <span className={MID_ONLY}>Checklist</span>
         </div>
       </div>
 
@@ -239,7 +241,7 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
 
                   {/* Project */}
                   <span
-                    className={cn("truncate text-[13px] text-mute", XL_ONLY)}
+                    className={cn("truncate text-[13px] text-mute", MID_ONLY)}
                   >
                     {t.project ?? "—"}
                   </span>
@@ -292,7 +294,7 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                   </span>
 
                   {/* Checklist — mini dots */}
-                  <span className={cn("flex gap-[3px]", XL_ONLY)}>
+                  <span className={cn("flex gap-[3px]", MID_ONLY)}>
                     {Array.from(
                       { length: total },
                       (_, position) => position + 1,

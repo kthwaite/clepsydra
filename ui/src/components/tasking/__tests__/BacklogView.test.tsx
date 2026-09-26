@@ -408,7 +408,7 @@ describe("BacklogView — row rendering", () => {
       expect(screen.getByText(name).className).toContain("max-[1399px]:hidden");
     }
     for (const name of ["Project", "Checklist"]) {
-      expect(screen.getByText(name).className).toContain("max-xl:hidden");
+      expect(screen.getByText(name).className).toContain("max-[1279px]:hidden");
     }
   });
 
