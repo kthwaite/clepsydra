@@ -1,5 +1,6 @@
 import { useBaseView, usePropertyCommit } from "#/api/bases";
 import { Tick } from "#/components/codex/Tick";
+import { Button } from "#/components/ui/button";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
@@ -89,14 +90,13 @@ export function ReadingContinues({
                   {pages > 0 ? `${progress}/${pages}` : `p.${progress}`}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => onAdvance(row, next)}
-                className="cl-btn"
+              <Button
+                size="sm"
+                onPress={() => onAdvance(row, next)}
                 aria-label={`Advance ${row.title ?? row.path} by ${PROGRESS_STEP} pages`}
               >
                 +{PROGRESS_STEP}
-              </button>
+              </Button>
             </div>
           );
         })}

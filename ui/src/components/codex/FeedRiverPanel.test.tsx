@@ -114,7 +114,9 @@ describe("FeedRiverPanel", () => {
     expect(screen.getByText(/no feed subscriptions/i)).toBeInTheDocument();
     expect(screen.queryByTestId("feed-river")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /set up feeds/i }));
+    const setUp = screen.getByRole("button", { name: /set up feeds/i });
+    expect(setUp).toHaveClass("bg-accent", "rounded-full");
+    await user.click(setUp);
 
     expect(panelMocks.navigate).toHaveBeenCalledWith(
       expect.objectContaining({

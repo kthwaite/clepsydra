@@ -1,9 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { Button } from "react-aria-components";
+import { Button as AriaButton } from "react-aria-components";
 import { type EntryView, useFeeds } from "#/api/feeds";
 import { FeedRiver } from "#/components/codex/FeedRiver";
 import { Section } from "#/components/codex/Section";
+import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING } from "#/lib/focusRing";
 
@@ -65,7 +66,7 @@ export function FeedRiverPanel() {
         }
         action={
           subscriptionCount > 0 ? (
-            <Button
+            <AriaButton
               className={cn(
                 "shrink-0 cursor-pointer rounded-sm text-[14px] text-accent hover:underline",
                 FOCUS_RING,
@@ -78,7 +79,7 @@ export function FeedRiverPanel() {
               }
             >
               Open feed reader
-            </Button>
+            </AriaButton>
           ) : null
         }
       >
@@ -116,7 +117,8 @@ export function FeedRiverPanel() {
               Add a source or import an OPML file to start your river.
             </p>
             <Button
-              className="cl-btn cl-btn-hot mt-4"
+              variant="primary"
+              className="mt-4"
               onPress={() =>
                 navigate({
                   to: "/feeds",
@@ -131,7 +133,7 @@ export function FeedRiverPanel() {
           <>
             <fieldset className="mb-6 flex w-fit min-w-0 gap-0.5 rounded-full border-0 bg-sink p-1">
               <legend className="sr-only">Feed river view</legend>
-              <Button
+              <AriaButton
                 aria-pressed={view === "unread"}
                 onPress={() =>
                   setView((current) =>
@@ -147,8 +149,8 @@ export function FeedRiverPanel() {
                 )}
               >
                 Hide read ({feedsQuery.data.counts.unread})
-              </Button>
-              <Button
+              </AriaButton>
+              <AriaButton
                 aria-pressed={view === "saved"}
                 onPress={() =>
                   setView((current) => (current === "saved" ? "all" : "saved"))
@@ -162,7 +164,7 @@ export function FeedRiverPanel() {
                 )}
               >
                 Saved ({feedsQuery.data.counts.saved})
-              </Button>
+              </AriaButton>
             </fieldset>
             <FeedRiver compact filters={{ view }} />
           </>
