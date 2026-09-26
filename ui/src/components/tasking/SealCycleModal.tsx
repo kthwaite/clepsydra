@@ -1,8 +1,9 @@
 /**
  * SealCycleModal — confirm closing (sealing) a cycle.
  *
- * Design source: docs/pkm-redesign/project/board-panels.jsx lines 421-495
- * (EndSprintModal) + styles-board.css .board-modal-sm / .sp-confirm*.
+ * Design source: Stone & Lamp mockup TaskingSealCycle (spec §5.5/§5.6):
+ * tick + italic serif eyebrow, serif title and figures, a segmented
+ * radio group for the incomplete-task move, primary commit button.
  *
  * Opened by openCycleModal({ kind: "seal", cycleId }).
  * On success: closeCycleModal (caller stays on current view).
@@ -16,16 +17,40 @@
 import { useEffect, useState } from "react";
 import type { BoardCycle, BoardTask } from "#/api/board";
 import { usePatchCycle } from "#/api/board";
+import { Tick } from "#/components/codex/Tick";
+import { Button } from "#/components/ui/button";
+import { Radio, RadioGroup } from "#/components/ui/radio-group";
 import { useBoardStore } from "#/store/board";
-import {
-  BOARD_MODAL_WIDTHS,
-  BoardModalFrame,
-  ModalEscChip,
-} from "./BoardModalFrame";
+import { BoardModalFrame, ModalEscChip } from "./BoardModalFrame";
 import { fmtCycleWindow } from "./board-constants";
-import { CycleMetric } from "./board-presentation";
 import { sealStats } from "./board-stats";
-import { EdField, RADIO_CLS_BASE, RADIO_CLS_ON } from "./fields";
+
+// ── shared pieces ─────────────────────────────────────────────────────────────
+
+/** One summary figure: mute label under a serif tabular numeral. */
+function SealStat({
+  label,
+  value,
+  tone = "text-ink",
+  testId,
+}: {
+  label: string;
+  value: number | string;
+  tone?: string;
+  testId: string;
+}) {
+  return (
+    <div className="flex flex-col-reverse gap-1.5">
+      <dt className="text-[12.5px] text-mute">{label}</dt>
+      <dd
+        className={`m-0 font-serif text-[36px] leading-none tabular-nums ${tone}`}
+        data-testid={testId}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
 
 // ── SealCycleModal ────────────────────────────────────────────────────────────
 
@@ -98,133 +123,135 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
   return (
     <BoardModalFrame
       ariaLabel="Close cycle"
-      widthClassName={BOARD_MODAL_WIDTHS.confirm}
+      widthClassName="w-[540px]"
       backdropTestId="seal-cycle-modal-backdrop"
       modalTestId="seal-cycle-modal"
       onClose={closeCycleModal}
     >
-      {/* Header */}
-      <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
-        <span className="cl-display text-[16px] font-extrabold text-[var(--ink)]">
-          ■
-        </span>
-        <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
-          Close cycle
-        </span>
-        <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-          {cycle.code} · {windowLabel}
-        </span>
+      {/* Header: tick eyebrow + serif title */}
+      <div className="flex items-start gap-3 pt-[26px] pr-[22px] pl-8">
+        <div className="flex flex-col gap-2">
+          <span className="flex items-center gap-2.5">
+            <Tick />
+            <span className="font-serif text-[19px] italic text-mute">
+              Cycle
+            </span>
+          </span>
+          <h2 className="m-0 font-serif text-[36px] font-normal leading-none tracking-[-0.01em] text-ink">
+            Close cycle
+          </h2>
+        </div>
         <ModalEscChip onClose={closeCycleModal} testId="seal-cycle-close-btn" />
       </div>
 
       {/* Body */}
-      <div className="flex flex-col gap-[12px] p-[14px]">
-        {/* Cycle label */}
-        <div
-          className="cl-display text-[18px] font-black uppercase leading-none tracking-[0.04em] text-[var(--ink)]"
-          data-testid="seal-cycle-label"
-        >
-          {cycle.label}
-        </div>
+      <div className="flex flex-col gap-[22px] px-8 pt-[22px] pb-[30px]">
+        <p className="m-0 text-[15px] leading-normal text-mute">
+          <span className="text-ink" data-testid="seal-cycle-label">
+            {cycle.label}
+          </span>{" "}
+          · {cycle.code} · {windowLabel}
+        </p>
 
-        {/* Stats row */}
-        <div className="flex gap-[20px]" data-testid="seal-cycle-stats">
-          <CycleMetric
+        {/* Summary figures */}
+        <dl className="m-0 flex gap-9" data-testid="seal-cycle-stats">
+          <SealStat
             label="Tasks"
             value={committed}
             testId="seal-cycle-committed"
           />
-          <CycleMetric
+          <SealStat
             label="Done"
             value={sealed}
-            color="var(--cool)"
+            tone="text-accent"
             testId="seal-cycle-sealed"
           />
-          <CycleMetric
+          <SealStat
             label="Incomplete tasks"
             value={carryover}
-            color={carryover > 0 ? "var(--hot)" : undefined}
+            tone={carryover > 0 ? "text-hot" : "text-ink"}
             testId="seal-cycle-carryover"
           />
-          <CycleMetric
+          <SealStat
             label="Completion"
             value={`${pct}%`}
             testId="seal-cycle-rate"
           />
-        </div>
+        </dl>
 
         {/* Progress bar */}
-        <div className="flex items-center gap-[12px]">
-          <div className="h-[8px] flex-1 border border-[var(--rule)] bg-[var(--bg-3)]">
-            <i
-              className="block h-full transition-[width] duration-[240ms]"
-              style={{ width: `${pct}%`, background: "var(--cool)" }}
-              data-testid="seal-cycle-progress-bar"
-            />
-          </div>
-        </div>
+        <span className="block h-1.5 overflow-hidden rounded-full bg-sink">
+          <i
+            className="block h-full rounded-full bg-accent transition-[width] duration-[240ms]"
+            style={{ width: `${pct}%` }}
+            data-testid="seal-cycle-progress-bar"
+          />
+        </span>
 
-        {/* Carryover routing OR clean-close callout */}
+        {/* Carryover routing OR clean-close note */}
         {carryover > 0 ? (
-          <EdField
-            label="Incomplete tasks"
-            hint={`${carryover} task${carryover === 1 ? "" : "s"}`}
-          >
-            <fieldset
-              className="flex gap-[6px]"
+          <div className="mt-2 flex flex-col gap-2.5">
+            <div className="flex items-baseline justify-between">
+              <span className="text-[14px] font-medium text-ink">
+                Incomplete tasks
+              </span>
+              <span className="text-[12.5px] text-mute">
+                {`${carryover} task${carryover === 1 ? "" : "s"}`}
+              </span>
+            </div>
+            <RadioGroup
               aria-label="Incomplete tasks"
+              value={carry}
+              onChange={setCarry}
+              segmented
+              optionsClassName="w-full rounded-xl p-[3px]"
               data-testid="seal-cycle-carry-opts"
             >
               {carryOpts.map((o) => (
-                <button
+                <Radio
                   key={o.v}
-                  type="button"
-                  className={`${RADIO_CLS_BASE} ${carry === o.v ? RADIO_CLS_ON : "hover:text-[var(--ink)] hover:border-[var(--ink-3)]"}`}
-                  onClick={() => setCarry(o.v)}
+                  value={o.v}
+                  className="h-[34px] flex-1 justify-center rounded-[9px] text-[13.5px]"
                   data-testid={`seal-cycle-carry-${o.v}`}
                 >
                   {o.label}
-                </button>
+                </Radio>
               ))}
-            </fieldset>
-          </EdField>
+            </RadioGroup>
+          </div>
         ) : (
-          <div
-            className="flex gap-[10px] border border-[var(--rule)] bg-[var(--bg-2)] p-[10px]"
+          <p
+            className="m-0 flex items-center gap-2.5 rounded-xl bg-sink px-4 py-3 text-[13.5px] leading-snug text-ink-2"
             data-testid="seal-cycle-clean-callout"
           >
-            <div className="w-[3px] flex-shrink-0 bg-[var(--cool)]" />
-            <div className="cl-mono text-[var(--fs-s)] leading-snug text-[var(--ink-2)]">
-              All tasks are done. This cycle is ready to close.
-            </div>
-          </div>
+            <Tick />
+            All tasks are done. This cycle is ready to close.
+          </p>
         )}
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
-        <div className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-3)]">
+      <div className="flex items-center gap-2.5 bg-ground pt-4 pr-[22px] pb-[18px] pl-8">
+        <span className="mr-auto text-[12.5px] text-mute">
           {cycle.code} → Closed
-        </div>
-        <div className="flex gap-[8px]">
-          <button
-            type="button"
-            className="cl-btn"
-            onClick={closeCycleModal}
-            data-testid="seal-cycle-cancel"
-          >
-            CANCEL
-          </button>
-          <button
-            type="button"
-            className="cl-btn cl-btn-hot"
-            onClick={commit}
-            disabled={patch.isPending}
-            data-testid="seal-cycle-commit"
-          >
-            {patch.isPending ? "Closing…" : "Close cycle"}
-          </button>
-        </div>
+        </span>
+        <Button
+          variant="secondary"
+          className="h-10 rounded-full"
+          onPress={closeCycleModal}
+          data-testid="seal-cycle-cancel"
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          className="h-10"
+          onPress={commit}
+          isDisabled={patch.isPending}
+          data-testid="seal-cycle-commit"
+        >
+          {patch.isPending ? "Closing…" : "Close cycle"}
+        </Button>
       </div>
     </BoardModalFrame>
   );

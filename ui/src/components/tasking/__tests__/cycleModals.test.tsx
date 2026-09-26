@@ -292,7 +292,9 @@ describe("NewCycleModal — render", () => {
     expect(
       screen.getByRole("dialog", { name: "New cycle" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("New cycle")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "New cycle" }),
+    ).toBeInTheDocument();
     for (const field of [
       "Name",
       "ID",
@@ -306,7 +308,9 @@ describe("NewCycleModal — render", () => {
     for (const field of ["Name", "ID", "Start date", "End date", "Goal"]) {
       expect(screen.getByLabelText(field, { exact: true })).toBeInTheDocument();
     }
-    expect(screen.getByRole("group", { name: "Status" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("radiogroup", { name: "Status" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByPlaceholderText("What this cycle should achieve"),
     ).toBeInTheDocument();
@@ -358,23 +362,47 @@ describe("NewCycleModal — render", () => {
     expect(end.value).toBe("2026-06-29");
   });
 
-  it("renders title-case initial state buttons while keeping PLANNED selected", () => {
+  it("renders sentence-case initial state radios while keeping PLANNED selected", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
     wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
 
-    const planned = screen.getByRole("button", { name: "Planned" });
-    expect(planned).toHaveAttribute("aria-label", "Planned");
-    expect(planned).toHaveAttribute("data-testid", "new-cycle-state-PLANNED");
-    expect(planned.className).toContain("bg-[var(--ink)]");
-    const active = screen.getByRole("button", { name: "Active" });
-    expect(active).toHaveAttribute("aria-label", "Active");
-    expect(active).toHaveAttribute("data-testid", "new-cycle-state-ACTIVE");
+    const planned = screen.getByRole("radio", { name: "Planned" });
+    expect(planned).toBeChecked();
+    expect(screen.getByTestId("new-cycle-state-PLANNED")).toHaveTextContent(
+      "Planned",
+    );
+    const active = screen.getByRole("radio", { name: "Active" });
+    expect(active).not.toBeChecked();
+    expect(screen.getByTestId("new-cycle-state-ACTIVE")).toHaveTextContent(
+      "Active",
+    );
     expect(
-      screen.queryByRole("button", { name: "PLANNED" }),
+      screen.queryByRole("radio", { name: "PLANNED" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "ACTIVE" }),
+      screen.queryByRole("radio", { name: "ACTIVE" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("sends the state picked in the Status radios", async () => {
+    const stub = makeCreateStub();
+    vi.stubGlobal("fetch", stub);
+    useBoardStore.setState({ cycleModal: { kind: "new" } });
+    wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
+
+    await userEvent.click(screen.getByTestId("new-cycle-state-ACTIVE"));
+    expect(screen.getByRole("radio", { name: "Active" })).toBeChecked();
+    await userEvent.click(screen.getByTestId("new-cycle-commit"));
+
+    await waitFor(() => {
+      const postCalls = stub.mock.calls.filter(
+        ([, opts]) => (opts as RequestInit)?.method === "POST",
+      );
+      const body = JSON.parse(
+        (postCalls[0][1] as RequestInit).body as string,
+      ) as Record<string, unknown>;
+      expect(body.state).toBe("ACTIVE");
+    });
   });
   it("shows only the formatted cycle window in the sub-header", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
@@ -582,7 +610,9 @@ describe("OpenCycleModal — render", () => {
     expect(
       screen.getByRole("dialog", { name: "Start cycle" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("Start cycle")).toHaveLength(2);
+    expect(
+      screen.getByRole("heading", { name: "Start cycle" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Target state")).toBeInTheDocument();
     expect(screen.getByTestId("open-cycle-state")).toHaveTextContent("Active");
     expect(
@@ -607,7 +637,7 @@ describe("OpenCycleModal — render", () => {
     wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={TASKS} />);
     // t3 has cycle "C-02"
     expect(screen.getByText("Tasks", { exact: true })).toBeInTheDocument();
-    expect(screen.getByTestId("open-cycle-committed")).toHaveTextContent("01");
+    expect(screen.getByTestId("open-cycle-committed")).toHaveTextContent(/^1$/);
   });
 
   it("shows Checklist items total from cycle tasks", () => {
@@ -619,7 +649,7 @@ describe("OpenCycleModal — render", () => {
     expect(
       screen.getByText("Checklist items", { exact: true }),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("open-cycle-checks")).toHaveTextContent("05");
+    expect(screen.getByTestId("open-cycle-checks")).toHaveTextContent(/^5$/);
   });
 
   it("shows the target state as Active in cool colour", () => {
@@ -674,7 +704,7 @@ describe("OpenCycleModal — render", () => {
     wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={[]} />);
 
     const modal = screen.getByTestId("open-cycle-modal");
-    expect(modal).toHaveTextContent("sets active Cycle to C-02");
+    expect(modal).toHaveTextContent("Sets active cycle to C-02");
     expect(modal).not.toHaveTextContent(/cadence/i);
   });
 
@@ -807,7 +837,9 @@ describe("SealCycleModal — render", () => {
     expect(
       screen.getByRole("dialog", { name: "Close cycle" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("Close cycle")).toHaveLength(2);
+    expect(
+      screen.getByRole("heading", { name: "Close cycle" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("C-01 → Closed")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Close cycle" }),
@@ -834,9 +866,9 @@ describe("SealCycleModal — render", () => {
     expect(screen.getByText("Done", { exact: true })).toBeInTheDocument();
     expect(screen.getAllByText("Incomplete tasks")).toHaveLength(2);
     expect(screen.getByText("Completion", { exact: true })).toBeInTheDocument();
-    expect(screen.getByTestId("seal-cycle-committed")).toHaveTextContent("02");
-    expect(screen.getByTestId("seal-cycle-sealed")).toHaveTextContent("01");
-    expect(screen.getByTestId("seal-cycle-carryover")).toHaveTextContent("01");
+    expect(screen.getByTestId("seal-cycle-committed")).toHaveTextContent(/^2$/);
+    expect(screen.getByTestId("seal-cycle-sealed")).toHaveTextContent(/^1$/);
+    expect(screen.getByTestId("seal-cycle-carryover")).toHaveTextContent(/^1$/);
     expect(screen.getByTestId("seal-cycle-rate")).toHaveTextContent("50%");
   });
 
@@ -874,14 +906,14 @@ describe("SealCycleModal — render", () => {
 
     expect(screen.getAllByText("Incomplete tasks")).toHaveLength(2);
     expect(
-      screen.getByRole("group", { name: "Incomplete tasks" }),
+      screen.getByRole("radiogroup", { name: "Incomplete tasks" }),
     ).toBeInTheDocument();
     for (const choice of [
       "Move to Backlog",
       `Move to ${CYCLE_PLANNED.code}`,
       "Keep in this cycle",
     ]) {
-      expect(screen.getByRole("button", { name: choice })).toBeInTheDocument();
+      expect(screen.getByRole("radio", { name: choice })).toBeInTheDocument();
     }
   });
 
@@ -923,8 +955,45 @@ describe("SealCycleModal — render", () => {
       cycleModal: { kind: "seal", cycleId: "cyc-111" },
     });
     wrapQC(<SealCycleModal cycle={CYCLE_ACTIVE} cycles={[]} tasks={TASKS} />);
-    const backlog = screen.getByTestId("seal-cycle-carry-BACKLOG");
-    expect(backlog.className).toContain("bg-[var(--ink)]");
+    expect(
+      screen.getByRole("radio", { name: "Move to Backlog" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("radio", { name: "Keep in this cycle" }),
+    ).not.toBeChecked();
+  });
+
+  it("arrow keys move the incomplete-task choice", async () => {
+    const stub = makePatchStub({ ...CYCLE_ACTIVE, state: "CLOSED" });
+    vi.stubGlobal("fetch", stub);
+    useBoardStore.setState({
+      cycleModal: { kind: "seal", cycleId: "cyc-111" },
+    });
+    wrapQC(
+      <SealCycleModal
+        cycle={CYCLE_ACTIVE}
+        cycles={[CYCLE_PLANNED]}
+        tasks={TASKS}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("seal-cycle-carry-BACKLOG"));
+    await user.keyboard("{ArrowRight}");
+    expect(
+      screen.getByRole("radio", { name: `Move to ${CYCLE_PLANNED.code}` }),
+    ).toBeChecked();
+    await user.click(screen.getByTestId("seal-cycle-commit"));
+
+    await waitFor(() => {
+      const patchCalls = stub.mock.calls.filter(
+        ([, opts]) => (opts as RequestInit)?.method === "PATCH",
+      );
+      const body = JSON.parse(
+        (patchCalls[0][1] as RequestInit).body as string,
+      ) as Record<string, unknown>;
+      expect(body.carry_to).toBe(CYCLE_PLANNED.code);
+    });
   });
 });
 
