@@ -241,7 +241,7 @@ describe("TimelineView — headings", () => {
         cycles={TL_CYCLES}
       />,
     );
-    expect(screen.getByText("Project / Task")).toBeInTheDocument();
+    expect(screen.getByText("Project / task")).toBeInTheDocument();
   });
 });
 
@@ -302,6 +302,23 @@ describe("TimelineView — axis bands", () => {
     expect(band.className).toContain("PLANNED");
   });
 
+  it("band shows the cycle start day and state in words", () => {
+    wrap(
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[TL_TASK_ALPHA]}
+        projects={TL_SCOPES}
+        cycles={TL_CYCLES}
+      />,
+    );
+    expect(screen.getByTestId("tl-band-C-01")).toHaveTextContent(
+      "26 May · Active",
+    );
+    expect(screen.getByTestId("tl-band-C-02")).toHaveTextContent(
+      "9 Jun · Planned",
+    );
+  });
+
   it("bands with undated cycles are skipped", () => {
     const mixedCycles: BoardCycle[] = [
       ...TL_CYCLES,
@@ -346,6 +363,20 @@ describe("TimelineView — operation groups", () => {
     expect(screen.getByTestId("tl-grp-alpha")).toBeInTheDocument();
     // beta has no scheduled tasks
     expect(screen.queryByTestId("tl-grp-beta")).not.toBeInTheDocument();
+  });
+
+  it("renders each group header as a level-2 heading with name and count", () => {
+    wrap(
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[TL_TASK_ALPHA]}
+        projects={TL_SCOPES}
+        cycles={TL_CYCLES}
+      />,
+    );
+    const heading = screen.getByRole("heading", { level: 2 });
+    expect(heading).toHaveTextContent("Operation Alpha");
+    expect(heading).toHaveTextContent("1 scheduled");
   });
 
   it("renders group header with op code and name", () => {
@@ -402,7 +433,9 @@ describe("TimelineView — UNFILED group", () => {
         cycles={TL_CYCLES}
       />,
     );
-    expect(screen.getByText("Tasks with no project")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: /No project/ }),
+    ).toBeInTheDocument();
   });
 
   it("does not render UNFILED group when there are no unfiled scheduled tasks", () => {
@@ -511,7 +544,7 @@ describe("TimelineView — bar positioning", () => {
     expect(Number.parseFloat(bar.style.width)).toBeGreaterThanOrEqual(2.5);
   });
 
-  it("bar shows code and canonical status label text", () => {
+  it("bar shows the canonical status label and names the task", () => {
     wrap(
       <TimelineView
         colLabel={(id) => (id === "FIELD" ? "In Progress" : id)}
@@ -521,8 +554,48 @@ describe("TimelineView — bar positioning", () => {
       />,
     );
     const bar = screen.getByTestId("tl-bar-t-alpha-1");
-    expect(bar.textContent).toContain("TSK-0010");
     expect(bar.textContent).toContain("In Progress");
+    expect(bar).toHaveAccessibleName(
+      "Edit TSK-0010: Alpha Scheduled, In Progress",
+    );
+  });
+
+  it("a held task's bar reads Hold instead of its status", () => {
+    wrap(
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[{ ...TL_TASK_ALPHA, hold: "Waiting on review" }]}
+        projects={TL_SCOPES}
+        cycles={TL_CYCLES}
+      />,
+    );
+    const bar = screen.getByTestId("tl-bar-t-alpha-1");
+    expect(bar).toHaveTextContent("Hold");
+    expect(bar).toHaveAccessibleName("Edit TSK-0010: Alpha Scheduled, Hold");
+  });
+
+  it("a bar shorter than five days carries its label outside the bar", () => {
+    const shortTask: BoardTask = {
+      ...TL_TASK_ALPHA,
+      id: "t-short",
+      start: "2026-06-01",
+      due: "2026-06-03",
+    };
+    wrap(
+      <TimelineView
+        colLabel={(id) => (id === "FIELD" ? "In Progress" : id)}
+        tasks={[shortTask]}
+        projects={TL_SCOPES}
+        cycles={TL_CYCLES}
+      />,
+    );
+    const bar = screen.getByTestId("tl-bar-t-short");
+    expect(bar.textContent).not.toContain("In Progress");
+    const outside = screen.getByTestId("tl-label-t-short");
+    expect(outside).toHaveTextContent("In Progress");
+    expect(Number.parseFloat(outside.style.left)).toBeCloseTo(
+      Number.parseFloat(bar.style.left) + Number.parseFloat(bar.style.width),
+    );
   });
 
   it("bar has title attribute set to task title", () => {
@@ -593,12 +666,11 @@ describe("TimelineView — no-due footer", () => {
     );
     const footer = screen.getByTestId("tl-foot");
     expect(footer).toBeInTheDocument();
-    expect(footer).toHaveTextContent("01 WITHOUT DUE DATE");
-    expect(footer).toHaveTextContent("No due date");
+    expect(footer).toHaveTextContent("1 without a due date");
     expect(footer).not.toHaveTextContent(/unscheduled/i);
   });
 
-  it("zero-pads the count of tasks without a due date", () => {
+  it("counts every task without a due date", () => {
     const twoUnscheduled: BoardTask[] = [
       TL_TASK_UNSCHEDULED,
       {
@@ -617,7 +689,7 @@ describe("TimelineView — no-due footer", () => {
       />,
     );
     expect(screen.getByTestId("tl-foot")).toHaveTextContent(
-      "02 WITHOUT DUE DATE",
+      "2 without a due date",
     );
   });
 
@@ -631,7 +703,7 @@ describe("TimelineView — no-due footer", () => {
       />,
     );
     expect(screen.getByTestId("tl-foot")).toHaveTextContent(
-      "No due date · in Backlog or Inbox",
+      "In Backlog or Inbox",
     );
   });
 
@@ -749,6 +821,94 @@ describe("TimelineView — row order within group by start", () => {
     // earlier start should appear first
     expect(rows[0].getAttribute("data-testid")).toBe("tl-row-t-alpha-1");
     expect(rows[1].getAttribute("data-testid")).toBe("tl-row-t-alpha-later");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Today marker
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("TimelineView — today marker", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("marks today on the axis when today falls inside the window", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-01T15:30:00"));
+    wrap(
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[TL_TASK_ALPHA]}
+        projects={TL_SCOPES}
+        cycles={TL_CYCLES}
+      />,
+    );
+    const marker = screen.getByTestId("tl-today");
+    // Padded window May 24–June 24 (31 days); today is day 8.
+    expect(Number.parseFloat(marker.style.left)).toBeCloseTo((8 / 31) * 100);
+    expect(marker).toHaveTextContent("Today");
+    // The line continues through each task row.
+    const row = screen.getByTestId("tl-row-t-alpha-1");
+    expect(row.querySelectorAll(".tl-today")).toHaveLength(1);
+  });
+
+  it("draws no today marker when today is outside the window", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2027-01-15T12:00:00"));
+    wrap(
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[TL_TASK_ALPHA]}
+        projects={TL_SCOPES}
+        cycles={TL_CYCLES}
+      />,
+    );
+    expect(screen.queryByTestId("tl-today")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".tl-today")).toHaveLength(0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Token colours only (charcoal night theme must restyle every fill)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("TimelineView — token colours", () => {
+  it("no inline style carries a hex colour literal", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-01T12:00:00"));
+    const statuses = ["INTAKE", "TRIAGE", "FIELD", "REVIEW", "SEALED"];
+    const tasks: BoardTask[] = [
+      ...statuses.map((status, i) => ({
+        ...TL_TASK_ALPHA,
+        id: `t-hex-${status}`,
+        code: `TSK-01${i}`,
+        status,
+        priority: `P${i % 4}`,
+      })),
+      { ...TL_TASK_BETA, hold: "Waiting on review" },
+      TL_TASK_UNFILED,
+      TL_TASK_UNSCHEDULED,
+    ];
+    const cycles: BoardCycle[] = [
+      ...TL_CYCLES,
+      { ...TL_CYCLES[0], id: "cyc-closed", code: "C-00", state: "CLOSED" },
+    ];
+    const { container } = wrap(
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={tasks}
+        projects={TL_SCOPES}
+        cycles={cycles}
+      />,
+    );
+    vi.useRealTimers();
+    const styled = Array.from(container.querySelectorAll("[style]"));
+    expect(styled.length).toBeGreaterThan(0);
+    const offenders = styled
+      .map((el) => el.getAttribute("style") ?? "")
+      .filter((style) => /#[0-9a-f]{3,8}\b/i.test(style));
+    expect(offenders).toEqual([]);
   });
 });
 

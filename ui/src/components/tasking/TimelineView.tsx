@@ -1,29 +1,33 @@
 /**
- * TimelineView — dossier-style gantt for the Tasking board.
+ * TimelineView — gantt for the Tasking board (Stone & Lamp).
  *
- * Design source:
- *   docs/pkm-redesign/project/board-modes.jsx  lines 301-390 (TimelineView)
- *   docs/pkm-redesign/project/styles-board.css .tl* classes
+ * Design source: Stone & Lamp phase 5 mockup `TaskingTimeline.dc.html`.
  *
- * Deviations from prototype:
+ * Behaviour notes:
  *   - windowOf is derived from cycle dates (decision 14), not hardcoded.
  *   - UNFILED grouping: tasks with a null project are collected into a
- *     synthetic "UNFILED" group at the end. A slug with no PROJECT page is a
- *     synthesized ProjectScope, so its tasks group under their own header.
+ *     synthetic "No project" group at the end. A slug with no PROJECT page is
+ *     a synthesized ProjectScope, so its tasks group under their own header.
  *   - Empty state: when no dated cycles exist or no task has a due date, a
- *     centered "— NOTHING SCHEDULED —" notice is shown instead of a broken axis.
+ *     centred "No scheduled tasks" notice is shown instead of a broken axis.
  *   - projects prop: ALL → all project scopes, single scope (opFilter set) →
  *     that scope only (threaded from TaskingScreen).
  *   - parseDay ISO-only (see timeline-math.ts for deviation docs).
+ *   - Colours come from theme tokens only (CSS vars / token utilities), so
+ *     the charcoal night theme restyles every fill.
+ *   - A today marker (accent) is drawn when today falls inside the window.
+ *   - Bars shorter than five days carry their status label outside the bar.
  */
 
 import { useMemo } from "react";
 import type { BoardCycle, BoardTask } from "#/api/board";
-import { pad2 } from "#/lib/time";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useBoardStore } from "#/store/board";
+import { Tick } from "../codex/Tick";
 import {
   type ColLabelFn,
-  fmtCycleWindow,
+  cycleStateLabel,
   HealthDot,
   priColor,
 } from "./board-constants";
@@ -43,34 +47,69 @@ interface TLGroup {
   items: ScheduledTask[];
 }
 
-// ── bar status → border/background classes (tl-bar) ─────────────────────────
+const DAY_MS = 864e5;
+
+/** Bars spanning fewer days than this carry their label outside the bar. */
+const INSIDE_LABEL_MIN_DAYS = 5;
+
+/** Label column width shared by the axis and every row. */
+const ROW_GRID = "grid grid-cols-[320px_minmax(0,1fr)]";
+
+// ── bar look per status (token fills only) ───────────────────────────────────
 
 const TL_BAR_BASE =
-  "absolute top-1/2 h-[16px] -translate-y-1/2 flex items-center gap-[5px] border px-[5px] cursor-pointer overflow-hidden transition-colors duration-[120ms] hover:border-[var(--hot)] hover:bg-[var(--bg)] hover:z-[3]";
+  "absolute top-2.5 flex h-[26px] cursor-pointer items-center gap-[7px] overflow-hidden whitespace-nowrap rounded-full px-2.5 text-[12.5px] transition-colors hover:z-[3]";
 
-function tlBarStateClass(status: string, hold: boolean): string {
-  const bg =
-    status === "SEALED" ? "bg-[var(--bg-2)] opacity-70" : "bg-[var(--bg-3)]";
-  const border = hold
-    ? "border-[var(--hot)] border-dashed"
-    : status === "FIELD"
-      ? "border-[var(--cool)]"
-      : status === "REVIEW"
-        ? "border-[var(--warn)]"
-        : status === "SEALED"
-          ? "border-[var(--ink-faint)] border-dashed"
-          : "border-[var(--ink-3)]";
-  return `${border} ${bg}`;
+function tlBarLook(status: string, hold: boolean): string {
+  if (hold)
+    return "bg-[color-mix(in_oklab,var(--hot)_10%,transparent)] text-hot";
+  if (status === "SEALED")
+    return "bg-transparent text-mute shadow-[inset_0_0_0_1px_var(--rule)]";
+  if (status === "FIELD")
+    return "bg-[color-mix(in_oklab,var(--accent)_12%,transparent)] text-accent";
+  if (status === "REVIEW")
+    return "bg-raise text-ink shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--accent)_45%,transparent)]";
+  return "bg-sink text-ink-2"; // INTAKE, TRIAGE and any other status
 }
 
-// ── cycle band/gridline tint (tl-band, tl-grid) ──────────────────────────────
+/** Label colour for a bar whose label sits outside it. */
+function tlOutsideLabelColor(status: string, hold: boolean): string {
+  if (hold) return "text-hot";
+  if (status === "SEALED") return "text-mute";
+  if (status === "FIELD") return "text-accent";
+  if (status === "REVIEW") return "text-ink";
+  return "text-ink-2";
+}
 
-function tlBandTint(state: string): string {
-  if (state === "ACTIVE")
-    return "color-mix(in oklab, var(--cool) 9%, transparent)";
-  if (state === "CLOSED")
-    return "color-mix(in oklab, var(--ink-mute) 14%, transparent)";
-  return "transparent"; // PLANNED (and any other state)
+// ── cycle band fill (axis) ───────────────────────────────────────────────────
+
+function tlBandFill(state: string): string {
+  if (state === "ACTIVE") return "bg-accent-tint";
+  if (state === "CLOSED") return "bg-sink";
+  return "bg-raise"; // PLANNED (and any other state)
+}
+
+/** ISO day → "26 May". */
+function fmtDay(iso: string): string {
+  const ms = parseDay(iso);
+  if (ms === null) return iso;
+  return new Date(ms).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function bandWhen(c: BoardCycle): string {
+  if (c.start) return fmtDay(c.start);
+  if (c.end) return `to ${fmtDay(c.end)}`;
+  return "";
+}
+
+/** Local midnight today as ms epoch. */
+function todayMs(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
 }
 
 // ── TimelineView ──────────────────────────────────────────────────────────────
@@ -164,10 +203,13 @@ export function TimelineView({
   if (!win || !hasScheduledTasks) {
     return (
       <div
-        className="cl-mono flex h-full items-center justify-center text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]"
+        className="flex h-full items-center justify-center gap-2.5"
         data-testid="tl-empty"
       >
-        No scheduled tasks
+        <Tick variant="faint" />
+        <span className="font-serif text-[19px] italic text-mute">
+          No scheduled tasks
+        </span>
       </div>
     );
   }
@@ -185,43 +227,68 @@ export function TimelineView({
     return { left: `${l}%`, width: `${w}%` };
   }
 
+  const today = todayMs();
+  const todayPct =
+    today >= displayWindow.start && today <= displayWindow.end
+      ? pct(today, displayWindow)
+      : null;
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full flex-col overflow-auto" data-testid="tl-root">
+    <div
+      className="flex h-full flex-col overflow-auto px-3 pb-6"
+      data-testid="tl-root"
+    >
       {/* ── Axis ─────────────────────────────────────────────────────── */}
-      <div className="sticky top-0 z-[2] grid grid-cols-[240px_1fr] border-b border-[var(--rule)] bg-[var(--bg-2)]">
-        <div className="flex items-center border-r border-[var(--rule)] px-[var(--pad)]">
-          <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-3)]">
-            Project / Task
-          </span>
-        </div>
-        <div className="relative h-[34px] overflow-hidden">
+      <div className={cn(ROW_GRID, "sticky top-0 z-[4] h-[52px] bg-ground")}>
+        <span className="self-center px-5 text-[12.5px] text-mute">
+          Project / task
+        </span>
+        <div className="relative">
           {datedCycles.map((c) => {
             const style = bandStyle(c);
             if (!style) return null;
-            const winLabel = fmtCycleWindow(c.start, c.end).split(" — ")[0];
-            const lblColor =
-              c.state === "ACTIVE" ? "var(--cool)" : "var(--ink-2)";
+            const active = c.state === "ACTIVE";
             return (
               <div
                 key={c.id}
-                className={`absolute top-0 bottom-0 flex items-center gap-[6px] overflow-hidden border-l border-r border-[var(--rule)] px-[6px] ${c.state}`}
-                style={{ ...style, background: tlBandTint(c.state) }}
+                className={`absolute top-0 bottom-0 px-[3px] ${c.state}`}
+                style={style}
                 data-testid={`tl-band-${c.code}`}
               >
-                <span
-                  className="cl-mono whitespace-nowrap text-[var(--fs-xs)] tracking-[0.1em]"
-                  style={{ color: lblColor }}
+                <div
+                  className={cn(
+                    "flex h-full flex-col justify-center gap-0.5 overflow-hidden rounded-xl px-3.5",
+                    tlBandFill(c.state),
+                  )}
                 >
-                  {c.code}
-                </span>
-                <span className="cl-mono whitespace-nowrap text-[var(--fs-xs)] tracking-[0.06em] text-[var(--ink-4)]">
-                  {winLabel}
-                </span>
+                  <span
+                    className={cn(
+                      "whitespace-nowrap text-[13px]",
+                      active ? "font-medium text-accent" : "text-ink-2",
+                    )}
+                  >
+                    {c.code}
+                  </span>
+                  <span className="whitespace-nowrap text-[12px] text-mute">
+                    {bandWhen(c)} · {cycleStateLabel(c.state)}
+                  </span>
+                </div>
               </div>
             );
           })}
+          {todayPct !== null && (
+            <div
+              className="pointer-events-none absolute top-0 bottom-0 z-[1] w-px bg-accent"
+              style={{ left: `${todayPct}%` }}
+              data-testid="tl-today"
+            >
+              <span className="absolute bottom-0.5 left-1.5 rounded-full bg-ground px-1.5 text-[12px] leading-4 text-accent">
+                Today
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -231,44 +298,59 @@ export function TimelineView({
           const groupKey = g.scope ? g.scope.key : "UNFILED";
 
           return (
-            <div
+            <section
               key={groupKey}
-              className="border-b border-[var(--rule)]"
+              className="mt-6 flex flex-col"
               data-testid={`tl-grp-${groupKey}`}
             >
               {/* Group header */}
-              <div className="flex items-center gap-[8px] border-b border-[var(--ink-3)] bg-[var(--bg)] px-[var(--pad)] py-[6px]">
+              <h2 className="mb-2.5 flex items-center gap-2.5 px-5 font-normal">
                 <HealthDot health={g.scope?.health ?? "NONE"} />
-                <span className="cl-mono text-[var(--fs-s)] tracking-[0.08em] text-[var(--ink)]">
-                  {g.scope ? g.scope.code : "No project"}
+                <span className="font-serif text-[22px] italic text-ink">
+                  {g.scope ? g.scope.name : "No project"}
                 </span>
-                <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.06em] text-[var(--ink-3)]">
-                  {g.scope ? g.scope.name : "Tasks with no project"}
+                {g.scope && (
+                  <span className="text-[12.5px] text-mute tabular-nums">
+                    {g.scope.code}
+                  </span>
+                )}
+                <span className="text-[12.5px] text-mute tabular-nums">
+                  {g.items.length} scheduled
                 </span>
-              </div>
+              </h2>
 
               {/* Task rows */}
               {g.items.map(({ task: t, s, e }) => {
                 const l = pct(s, displayWindow);
                 const w = Math.max(2.5, pct(e, displayWindow) - l);
+                const hold = !!t.hold;
+                const label = hold ? "Hold" : colLabel(t.status);
+                const inside = (e - s) / DAY_MS >= INSIDE_LABEL_MIN_DAYS;
+                const priBar = priColor(t.priority).bar;
 
                 return (
                   <div
                     key={t.id}
-                    className="grid grid-cols-[240px_1fr] items-center border-b border-dotted border-[var(--rule)] hover:bg-[var(--bg-2)]"
+                    className={cn(
+                      ROW_GRID,
+                      "h-[46px] rounded-[10px] hover:bg-raise",
+                    )}
                     data-testid={`tl-row-${t.id}`}
                   >
                     {/* Label cell */}
-                    <div className="flex min-w-0 items-center gap-[7px] border-r border-[var(--rule)] px-[var(--pad)] py-[6px]">
+                    <div className="flex min-w-0 items-center gap-2.5 px-5">
                       <span
-                        className="h-[13px] w-[3px] flex-shrink-0"
-                        style={{ background: priColor(t.priority).bar }}
+                        className="h-3.5 w-[3px] flex-shrink-0 rounded-sm"
+                        style={{ background: priBar }}
                       />
-                      <span className="cl-mono flex-shrink-0 text-[var(--fs-xs)] text-[var(--ink-2)] [font-variant-numeric:tabular-nums]">
+                      <span className="w-[118px] flex-shrink-0 truncate text-[12.5px] text-mute tabular-nums">
                         {t.code}
                       </span>
                       <span
-                        className="cl-mono min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.04em] text-[var(--ink-3)]"
+                        className={cn(
+                          "min-w-0 truncate text-[14px]",
+                          t.status === "SEALED" ? "text-mute" : "text-ink",
+                        )}
                         title={t.title}
                       >
                         {t.title}
@@ -276,7 +358,7 @@ export function TimelineView({
                     </div>
 
                     {/* Track cell */}
-                    <div className="relative min-h-[30px]">
+                    <div className="relative">
                       {/* Cycle gridlines */}
                       {datedCycles.map((c) => {
                         const cs = parseDay(c.start);
@@ -289,35 +371,62 @@ export function TimelineView({
                               left: `${pct(cs, displayWindow)}%`,
                               background:
                                 c.state === "ACTIVE"
-                                  ? "color-mix(in oklab, var(--cool) 22%, transparent)"
+                                  ? "color-mix(in oklab, var(--accent) 22%, transparent)"
                                   : "var(--rule)",
                             }}
                           />
                         );
                       })}
 
+                      {/* Today line */}
+                      {todayPct !== null && (
+                        <span
+                          aria-hidden
+                          className="tl-today pointer-events-none absolute top-0 bottom-0 z-[1] w-px bg-accent"
+                          style={{ left: `${todayPct}%` }}
+                        />
+                      )}
+
                       {/* Task bar */}
                       <button
                         type="button"
-                        className={`${TL_BAR_BASE} ${tlBarStateClass(t.status, !!t.hold)} ${t.status}${t.hold ? " hold" : ""}`}
+                        className={cn(
+                          TL_BAR_BASE,
+                          tlBarLook(t.status, hold),
+                          FOCUS_RING_NATIVE,
+                          t.status,
+                          hold && "hold",
+                        )}
                         style={{ left: `${l}%`, width: `${w}%` }}
                         title={t.title}
+                        aria-label={`Edit ${t.code}: ${t.title}, ${label}`}
                         data-testid={`tl-bar-${t.id}`}
                         onClick={() => handleEditTask(t.id)}
                       >
                         <span
-                          className="h-[8px] w-[3px] flex-shrink-0"
-                          style={{ background: priColor(t.priority).bar }}
+                          className="h-2.5 w-[3px] flex-shrink-0 rounded-sm"
+                          style={{ background: priBar }}
                         />
-                        <span className="cl-mono whitespace-nowrap text-[var(--fs-xs)] tracking-[0.04em] text-[var(--ink-2)]">
-                          {t.code} · {colLabel(t.status)}
-                        </span>
+                        {inside && <span className="truncate">{label}</span>}
                       </button>
+                      {!inside && (
+                        <span
+                          aria-hidden
+                          className={cn(
+                            "pointer-events-none absolute top-2.5 flex h-[26px] items-center whitespace-nowrap pl-2.5 text-[12.5px]",
+                            tlOutsideLabelColor(t.status, hold),
+                          )}
+                          style={{ left: `${l + w}%` }}
+                          data-testid={`tl-label-${t.id}`}
+                        >
+                          {label}
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
               })}
-            </div>
+            </section>
           );
         })}
       </div>
@@ -325,15 +434,16 @@ export function TimelineView({
       {/* ── Footer ───────────────────────────────────────────────────── */}
       {unscheduled > 0 && (
         <div
-          className="flex items-center gap-[10px] border-t border-[var(--rule)] px-[var(--pad)] py-[7px]"
+          className="mt-4 flex items-center gap-3 px-5 text-[13px] text-mute"
           data-testid="tl-foot"
         >
-          <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-2)]">
-            {pad2(unscheduled)} WITHOUT DUE DATE
+          <span className="text-ink-2 tabular-nums">
+            {unscheduled} without a due date
           </span>
-          <span className="cl-mono text-[var(--fs-xs)] text-[var(--ink-4)]">
-            No due date · in Backlog or Inbox
+          <span aria-hidden className="text-faint">
+            ·
           </span>
+          <span>In Backlog or Inbox</span>
         </div>
       )}
     </div>
