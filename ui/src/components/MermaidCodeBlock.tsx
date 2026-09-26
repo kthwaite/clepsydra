@@ -19,9 +19,9 @@ export function MermaidCodeBlock({ code }: { code: string }) {
   const showSource = !diagram || state.status === "error";
 
   return (
-    <div className="group my-4 border border-border bg-muted">
+    <div className="group my-4 overflow-hidden rounded-xl bg-sink">
       <div
-        className="cl-mono flex select-none items-center justify-between border-b border-rule bg-paper px-3 py-1 text-[9px] uppercase tracking-[0.18em] text-ink-mute"
+        className="flex select-none items-center justify-between px-3.5 pt-2 pb-1 text-[12.5px] text-mute"
         data-testid="mermaid-block-header"
       >
         <span>Mermaid</span>
@@ -40,7 +40,7 @@ export function MermaidCodeBlock({ code }: { code: string }) {
       <MermaidDiagram state={state} />
       <pre
         className={cn(
-          "overflow-x-auto p-4 font-mono text-sm",
+          "overflow-x-auto px-4 pt-1 pb-4 text-[13px] leading-[1.65] text-ink-2",
           !showSource && "sr-only",
         )}
       >

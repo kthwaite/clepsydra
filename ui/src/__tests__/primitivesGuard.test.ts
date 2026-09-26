@@ -10,47 +10,7 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-/** Files still carrying Vessel chrome; phase 5.3 empties this. */
-const PENDING = new Set<string>([
-  "../../editor/elements/CodeBlockElement.tsx",
-  "../../editor/elements/CodeLangPicker.tsx",
-  "../../editor/schema/elements/table.tsx",
-  "../../editor/schema/elements/list.tsx",
-  "../../editor/schema/elements/journalTime.tsx",
-  "../../editor/elements/LinkElement.tsx",
-  "../../editor/elements/WikilinkElement.tsx",
-  "../../editor/schema/elements/footnoteDef.tsx",
-  "../../editor/schema/elements/conversationTurn.tsx",
-  "../../editor/elements/MathElement.tsx",
-  "../../editor/elements/FootnoteRefElement.tsx",
-  "../../editor/schema/elements/image.tsx",
-  "../../editor/schema/elements/thematicBreak.tsx",
-  "../../editor/elements/renderLeaf.tsx",
-  "../../editor/elements/LiveBaseTemplate.tsx",
-  "../../editor/TaskPropertyPopover.tsx",
-  "../../editor/SelectionBubbleMenu.tsx",
-  "../../editor/MissingWikilinkPopover.tsx",
-  "../../editor/WikilinkInlineEditor.tsx",
-  "../../editor/WikilinkCombobox.tsx",
-  "../../editor/SlashCombobox.tsx",
-  "../../editor/BlockRefCombobox.tsx",
-  "../../editor/vim/VimStatusBar.tsx",
-  "../codex/PreviewMarkdown.tsx",
-  "../codex/PreviewBody.tsx",
-  "../codex/LinkPreviewLayer.tsx",
-  "../codex/CLink.tsx",
-  "../codex/SheafContextMenu.tsx",
-  "../codex/JournalMeta.tsx",
-  "../codex/MeetingMeta.tsx",
-  "../codex/PersonCombo.tsx",
-  "../codex/recipe/RecipeFolioBody.tsx",
-  "../codex/RawMarkdownEditor.tsx",
-  "../codex/LockedFolio.tsx",
-  "../codex/NoteProtectionDialog.tsx",
-  "../codex/EncryptionSetupDialog.tsx",
-  "../codex/InscribeModal.tsx",
-  "../codex/CaptureAsideModal.tsx",
-]);
+const PENDING = new Set<string>([]);
 
 /** Tasking board screen (phase 4.3). */
 const TASKING_FILES = [
@@ -193,6 +153,8 @@ const FOLIO_5_3_FILES = [
   "../codex/EncryptionSetupDialog.tsx",
   "../codex/InscribeModal.tsx",
   "../codex/CaptureAsideModal.tsx",
+  "../MermaidDiagram.tsx",
+  "../MermaidCodeBlock.tsx",
 ];
 
 /** Mobile companion shell (phase 4b-1). */

@@ -93,15 +93,13 @@ export function MermaidDiagram({
     return (
       <p
         className={cn(
-          "cl-mono overflow-x-auto whitespace-pre-wrap border-l-2 border-destructive bg-paper px-3 py-2 text-[10px] leading-[1.5] text-ink-2",
+          "overflow-x-auto whitespace-pre-wrap rounded-xl bg-sink px-3.5 py-2.5 text-[13px] leading-[1.5] text-ink-2",
           className,
         )}
         data-testid="mermaid-error"
       >
-        <span className="uppercase tracking-[0.18em] text-destructive">
-          Diagram error
-        </span>{" "}
-        — {state.message}
+        <span className="font-medium text-hot">Diagram error</span> —{" "}
+        {state.message}
       </p>
     );
   }
@@ -109,7 +107,7 @@ export function MermaidDiagram({
   return (
     <div className={cn("px-4 py-3", className)} data-testid="mermaid-diagram">
       {state.status === "pending" ? (
-        <p className="cl-mono text-center text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+        <p className="text-center text-[12.5px] text-mute">
           Rendering diagram…
         </p>
       ) : (
@@ -148,7 +146,7 @@ export function MermaidExpandButton({
           aria-label="Expand diagram"
           onPress={() => setOpen(true)}
           className={cn(
-            "inline-flex cursor-pointer items-center justify-center bg-transparent p-0 text-ink-mute outline-none transition-colors data-[focus-visible]:text-accent data-[hovered]:text-accent",
+            "inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-transparent p-0 text-mute outline-none transition-colors data-[focus-visible]:text-accent data-[hovered]:bg-sink data-[hovered]:text-ink",
             // Stay reachable when a parent uses `className` to hover-reveal us.
             "data-[focus-visible]:opacity-100",
             className,
@@ -187,9 +185,9 @@ export function MermaidViewToggle({
       onChange={onChange}
       aria-label="Show diagram"
       className={cn(
-        "cl-mono cursor-pointer bg-transparent uppercase tracking-[0.18em] outline-none transition-colors",
-        "text-ink-mute data-[focus-visible]:text-accent data-[hovered]:text-accent",
-        "data-[selected]:text-accent data-[selected]:data-[hovered]:text-accent-deep",
+        "h-7 cursor-pointer rounded-full bg-sink px-2.5 text-[12.5px] outline-none transition-colors",
+        "text-mute data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent data-[hovered]:text-ink",
+        "data-[selected]:bg-accent-tint data-[selected]:text-accent",
         className,
       )}
     >

@@ -36,11 +36,6 @@ export const CURATED_ALIASES = ["zsh"] as const;
  */
 export const DIAGRAM_LANGUAGES = ["mermaid"] as const;
 
-/** Uppercase display label for a language id (matches the code-block header). */
-export function displayLabel(id: string): string {
-  return id.toUpperCase();
-}
-
 /**
  * All refractor-registered grammars, with the registered subset of
  * COMMON_LANGUAGES pinned to the front (in COMMON order) and the rest
