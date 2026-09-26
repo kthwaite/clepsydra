@@ -23,6 +23,9 @@ function apiError(error: components["schemas"]["ApiError"], fallback: string) {
 export function useAgenda(today: string) {
   return useQuery<AgendaResponse>({
     queryKey: queryKeys.agenda.byDate(today),
+    // Callers show a failed Agenda in place; mobile Today must not lose the
+    // journal and capture to a route error over it.
+    throwOnError: false,
     queryFn: async () => {
       const { data, error } = await fetchClient.GET("/api/vault/agenda", {
         params: { query: { today } },

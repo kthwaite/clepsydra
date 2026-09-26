@@ -31,12 +31,7 @@ export function journalExcerpt(body: string, max = 180): string | null {
   return `${(space > 0 ? cut.slice(0, space) : plain.slice(0, max)).trimEnd()}…`;
 }
 
-export type AgendaBucketKey =
-  | "overdue"
-  | "today"
-  | "week"
-  | "later"
-  | "undated";
+export type AgendaBucketKey = "overdue" | "today" | "week" | "undated";
 
 interface AgendaBucket {
   key: AgendaBucketKey;
@@ -44,32 +39,17 @@ interface AgendaBucket {
   items: AgendaItem[];
 }
 
-function addDays(dateKey: string, days: number): string {
-  const [y, m, d] = dateKey.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d + days));
-  return date.toISOString().slice(0, 10);
-}
-
-/** The mobile Agenda's sections: the server's buckets, with upcoming split
- *  at seven days. Empty sections are left out. */
-export function bucketAgenda(
-  data: AgendaResponse,
-  today: string,
-): AgendaBucket[] {
-  const weekEnd = addDays(today, 7);
-  const upcoming = data.upcoming ?? [];
+/** The mobile Agenda's sections, from the server's buckets. The server
+ *  sends upcoming items for the next seven days only, so they are all
+ *  "This week". Empty sections are left out. */
+export function bucketAgenda(data: AgendaResponse): AgendaBucket[] {
   const buckets: AgendaBucket[] = [
     { key: "overdue", label: "Overdue", items: data.overdue ?? [] },
     { key: "today", label: "Today", items: data.today ?? [] },
     {
       key: "week",
       label: "This week",
-      items: upcoming.filter((d) => d.date <= weekEnd).flatMap((d) => d.items),
-    },
-    {
-      key: "later",
-      label: "Later",
-      items: upcoming.filter((d) => d.date > weekEnd).flatMap((d) => d.items),
+      items: (data.upcoming ?? []).flatMap((d) => d.items),
     },
     { key: "undated", label: "No date", items: data.undated ?? [] },
   ];

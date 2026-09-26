@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { type BoardTask, useBoard, useCreateTask } from "#/api/board";
 import {
   type BoardStatus,
@@ -78,7 +78,10 @@ export function MobileTasking() {
   const [draft, setDraft] = useState("");
 
   const tasks = data?.tasks ?? [];
-  const scopes = deriveProjectScopes(data?.operations ?? [], tasks);
+  const scopes = useMemo(
+    () => deriveProjectScopes(data?.operations ?? [], data?.tasks ?? []),
+    [data],
+  );
   const scoped = filterTasks(tasks, opFilter);
   const groups = tasksByStatus(scoped);
   const selected = status ?? firstStatus(groups);
@@ -90,13 +93,19 @@ export function MobileTasking() {
         ? scope.name || scope.code
         : "All projects";
 
+  // Self-heal a stale saved project, as the desktop board does.
+  useEffect(() => {
+    if (!data || opFilter === "ALL" || opFilter === "UNFILED") return;
+    if (!scopes.some((p) => p.key === opFilter)) setOpFilter("ALL");
+  }, [data, scopes, opFilter, setOpFilter]);
+
   const cycle = data?.cycles.find((c) => c.state === "ACTIVE");
   const cycleTasks = cycle ? scoped.filter((t) => t.cycle === cycle.code) : [];
   const cycleDone = cycleTasks.filter((t) => t.status === "SEALED").length;
 
   const submit = () => {
     const title = draft.trim();
-    if (!title) return;
+    if (!title || create.isPending) return;
     create.mutate(
       { title, status: selected, project: scope?.slug ?? null },
       { onSuccess: () => setDraft("") },
@@ -205,7 +214,7 @@ export function MobileTasking() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 submit();
               } else if (e.key === "Escape") {

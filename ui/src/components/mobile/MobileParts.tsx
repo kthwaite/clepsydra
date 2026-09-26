@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import type { AgendaItem } from "#/api/tasks";
 import { useToggleTaskStatus } from "#/api/tasks";
 import { Tick } from "#/components/codex/Tick";
@@ -163,14 +164,18 @@ export function AgendaRow({
   return (
     <div className="ml-[17px] flex min-w-0 flex-col gap-[3px]">
       <Checkbox
-        isDisabled={toggle.isPending}
+        isSelected={toggle.isPending || toggle.isSuccess}
+        isDisabled={toggle.isPending || toggle.isSuccess}
         onChange={(checked) => {
           if (!checked) return;
-          toggle.mutate({
-            pagePath: agendaItemPath(item),
-            spanStart: item.span_start,
-            status: "done",
-          });
+          toggle.mutate(
+            {
+              pagePath: agendaItemPath(item),
+              spanStart: item.span_start,
+              status: "done",
+            },
+            { onError: () => toast.error("Couldn’t check that off") },
+          );
         }}
         className="min-h-11 justify-center [&_[data-slot=checkbox-box]]:size-[18px]"
       >

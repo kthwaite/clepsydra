@@ -117,11 +117,10 @@ describe("MobileToday", () => {
     await userEvent.click(
       screen.getByRole("checkbox", { name: "Rebuild extension icons" }),
     );
-    expect(m.toggle).toHaveBeenCalledWith({
-      pagePath: "notes/a.md",
-      spanStart: 1,
-      status: "done",
-    });
+    expect(m.toggle).toHaveBeenCalledWith(
+      { pagePath: "notes/a.md", spanStart: 1, status: "done" },
+      expect.anything(),
+    );
   });
 
   it("opens a task's page", async () => {

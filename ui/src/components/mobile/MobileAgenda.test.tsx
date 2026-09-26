@@ -3,11 +3,40 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgendaResponse } from "#/api/tasks";
 
-const m = vi.hoisted(() => ({ toggle: vi.fn(), openTab: vi.fn() }));
-
-vi.mock("#/api/tasks", () => ({
-  useToggleTaskStatus: () => ({ mutate: m.toggle, isPending: false }),
+const m = vi.hoisted(() => ({
+  toggle: vi.fn(),
+  openTab: vi.fn(),
+  toastError: vi.fn(),
 }));
+
+vi.mock("#/api/tasks", async () => {
+  const { useState } = await import("react");
+  return {
+    useToggleTaskStatus: () => {
+      const [state, setState] = useState({
+        isPending: false,
+        isSuccess: false,
+      });
+      return {
+        ...state,
+        mutate: (
+          vars: unknown,
+          opts?: { onError?: (e: Error) => void; onSuccess?: () => void },
+        ) => {
+          const outcome = m.toggle(vars);
+          if (outcome === "fail") {
+            setState({ isPending: false, isSuccess: false });
+            opts?.onError?.(new Error("nope"));
+          } else {
+            setState({ isPending: false, isSuccess: true });
+            opts?.onSuccess?.();
+          }
+        },
+      };
+    },
+  };
+});
+vi.mock("sonner", () => ({ toast: { error: m.toastError } }));
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => m.openTab }));
 
 import { MobileAgenda } from "#/components/mobile/MobileAgenda";
@@ -75,7 +104,6 @@ describe("MobileAgenda", () => {
       "Overdue",
       "Today",
       "This week",
-      "Later",
       "No date",
     ]);
     expect(headings[0]).toHaveClass("text-hot");
@@ -92,6 +120,23 @@ describe("MobileAgenda", () => {
       spanStart: 2,
       status: "done",
     });
+  });
+
+  it("unticks and says so when checking off fails", async () => {
+    m.toggle.mockReturnValue("fail");
+    render(<MobileAgenda agenda={agenda()} today="2026-09-25" />);
+    const box = screen.getByRole("checkbox", { name: "Set theme-color" });
+    await userEvent.click(box);
+    expect(box).not.toBeChecked();
+    expect(m.toastError).toHaveBeenCalledWith("Couldn’t check that off");
+  });
+
+  it("keeps a checked-off todo ticked until it leaves the list", async () => {
+    m.toggle.mockReturnValue("ok");
+    render(<MobileAgenda agenda={agenda()} today="2026-09-25" />);
+    const box = screen.getByRole("checkbox", { name: "Set theme-color" });
+    await userEvent.click(box);
+    expect(box).toBeChecked();
   });
 
   it("opens a task instead of offering a checkbox", async () => {

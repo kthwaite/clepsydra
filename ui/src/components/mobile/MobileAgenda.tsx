@@ -10,7 +10,6 @@ const TICK: Record<AgendaBucketKey, string> = {
   overdue: "bg-hot",
   today: "bg-accent",
   week: "bg-faint",
-  later: "bg-faint",
   undated: "bg-faint",
 };
 
@@ -20,7 +19,8 @@ interface AgendaQuery {
   isError: boolean;
 }
 
-/** Mobile Agenda (spec §9 Q3): every open item by when it is due. */
+/** Mobile Agenda (spec §9 Q3): open items overdue, due today, due in the
+ *  next seven days, or undated — the server's Agenda window. */
 export function MobileAgenda({
   agenda,
   today,
@@ -28,7 +28,7 @@ export function MobileAgenda({
   agenda: AgendaQuery;
   today: string;
 }) {
-  const buckets = agenda.data ? bucketAgenda(agenda.data, today) : [];
+  const buckets = agenda.data ? bucketAgenda(agenda.data) : [];
   const open = buckets.reduce((n, b) => n + b.items.length, 0);
 
   return (

@@ -70,24 +70,25 @@ describe("bucketAgenda", () => {
     undated: [todo("whenever", 4)],
   };
 
-  it("orders buckets and splits upcoming at seven days", () => {
-    const buckets = bucketAgenda(data, "2026-09-25");
+  it("orders buckets; everything upcoming is this week (the server sends seven days)", () => {
+    const buckets = bucketAgenda(data);
     expect(buckets.map((b) => [b.label, b.items.map(agendaItemTitle)])).toEqual(
       [
         ["Overdue", ["late"]],
         ["Today", ["now"]],
-        ["This week", ["in seven"]],
-        ["Later", ["in eight"]],
+        ["This week", ["in seven", "in eight"]],
         ["No date", ["whenever"]],
       ],
     );
   });
 
   it("omits empty buckets", () => {
-    const buckets = bucketAgenda(
-      { overdue: [], today: [task("now")], upcoming: [], undated: [] },
-      "2026-09-25",
-    );
+    const buckets = bucketAgenda({
+      overdue: [],
+      today: [task("now")],
+      upcoming: [],
+      undated: [],
+    });
     expect(buckets.map((b) => b.key)).toEqual(["today"]);
   });
 });

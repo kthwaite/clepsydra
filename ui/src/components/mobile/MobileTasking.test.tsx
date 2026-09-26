@@ -12,12 +12,13 @@ import type { BoardResponse, BoardTask } from "#/api/board";
 const m = vi.hoisted(() => ({
   board: undefined as unknown,
   create: vi.fn(),
+  creating: false,
   openTab: vi.fn(),
 }));
 
 vi.mock("#/api/board", () => ({
   useBoard: () => ({ data: m.board, isLoading: false, isError: false }),
-  useCreateTask: () => ({ mutate: m.create, isPending: false }),
+  useCreateTask: () => ({ mutate: m.create, isPending: m.creating }),
 }));
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => m.openTab }));
 
@@ -87,6 +88,25 @@ describe("MobileTasking", () => {
     vi.clearAllMocks();
     m.board = board();
     useBoardStore.setState({ opFilter: "ALL" });
+    m.creating = false;
+  });
+
+  it("falls back to all projects when the saved project is gone", () => {
+    useBoardStore.setState({ opFilter: "deleted-project" });
+    render(<MobileTasking />);
+    expect(useBoardStore.getState().opFilter).toBe("ALL");
+    expect(screen.getByRole("tab", { name: "Ready 2" })).toBeVisible();
+  });
+
+  it("does not post a second task while the first is saving", async () => {
+    m.creating = true;
+    render(<MobileTasking />);
+    await userEvent.click(screen.getByRole("button", { name: "+ New task" }));
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "New task title" }),
+      "Twice{Enter}",
+    );
+    expect(m.create).not.toHaveBeenCalled();
   });
 
   it("counts tasks per status and opens on Ready", () => {
