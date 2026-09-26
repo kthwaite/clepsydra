@@ -195,4 +195,17 @@ describe("PageEditorHeader read-only title", () => {
 
     expect(screen.queryByRole("button", { name: "Raw Markdown" })).toBeNull();
   });
+
+  it("steps the title down to 38px on a phone", () => {
+    render(
+      <PageEditorHeader
+        {...baseProps}
+        onTitleChange={vi.fn()}
+        onSaveNow={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "Page title" })).toHaveClass(
+      "max-md:text-[38px]",
+    );
+  });
 });

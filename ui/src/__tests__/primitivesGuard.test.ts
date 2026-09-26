@@ -79,6 +79,8 @@ const MOBILE_FILES = [
   "../codex/OpenPagesSheet.tsx",
   "../codex/MobileGoTo.tsx",
   "../codex/ContentsBadge.tsx",
+  "../../editor/SaveIndicator.tsx",
+  "../codex/MobileFolioLayout.tsx",
 ];
 
 const FORBIDDEN: Array<[string, RegExp]> = [

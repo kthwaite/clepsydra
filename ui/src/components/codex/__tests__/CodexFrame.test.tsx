@@ -222,6 +222,7 @@ vi.mock("#/store/workspace", () => {
 
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { useConnectionStore } from "#/offline/connectionStore";
+import { useMobileChrome } from "#/store/mobileChrome";
 
 function renderFrame(forceView?: "folio" | "archive") {
   return render(
@@ -541,6 +542,47 @@ describe("CodexFrame responsive shell", () => {
     for (const button of within(roots).getAllByRole("button")) {
       expect(button).not.toHaveAttribute("aria-current");
     }
+  });
+
+  it("keeps the top bar while Folio has no page bar (loading, locked, error)", () => {
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/workspace";
+    workspaceState.tabs = [{ id: "a", type: "page", path: "notes/a.md" }];
+    workspaceState.activeTabId = "a";
+    useMobileChrome.setState({ ownBar: false });
+    renderFrame();
+    expect(screen.getByRole("banner")).toBeVisible();
+  });
+
+  it("leaves the top bar to the page on Folio", () => {
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/workspace";
+    workspaceState.tabs = [{ id: "a", type: "page", path: "notes/a.md" }];
+    workspaceState.activeTabId = "a";
+    useMobileChrome.setState({ ownBar: true });
+    renderFrame();
+    expect(screen.queryByRole("banner")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("navigation", { name: "Mobile roots" }),
+    ).toBeVisible();
+  });
+
+  it("gives mobile Folio a definite height so the page scrolls itself", () => {
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/workspace";
+    workspaceState.tabs = [{ id: "a", type: "page", path: "notes/a.md" }];
+    workspaceState.activeTabId = "a";
+    renderFrame();
+    expect(screen.getByText("Frame content").parentElement).toHaveClass(
+      "h-full",
+    );
+  });
+
+  it("keeps the top bar on the empty launcher", () => {
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/workspace";
+    renderFrame();
+    expect(screen.getByRole("banner")).toBeVisible();
   });
 
   it("fits five 44px targets at 320px with visible labels", () => {

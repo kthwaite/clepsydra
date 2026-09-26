@@ -1110,7 +1110,8 @@ describe("mobile Folio Back", () => {
     const navigateSpy = vi.spyOn(router, "navigate");
     navigateSpy.mockClear();
 
-    await user.click(screen.getByRole("button", { name: "Document details" }));
+    await user.click(screen.getByRole("button", { name: "Page details" }));
+    await user.click(screen.getByRole("tab", { name: "Properties" }));
     await user.click(screen.getByRole("button", { name: "Manage paths" }));
     await user.click(
       await screen.findByRole("button", { name: "Complete page archival" }),
