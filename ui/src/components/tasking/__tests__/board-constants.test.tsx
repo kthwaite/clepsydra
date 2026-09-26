@@ -6,6 +6,7 @@ import {
   COL_SUBLABEL,
   cycleStateLabel,
   fmtCycleWindow,
+  healthColor,
   MODES,
   PRI_LABEL,
   PRI_ORDER,
@@ -128,5 +129,14 @@ describe("priority tones stay legible", () => {
     expect(PRI_ON_STYLE.P1.color).toBe("var(--ground)");
     expect(PRI_ON_STYLE.P2.color).toBe("var(--ground)");
     expect(PRI_ON_STYLE.P3.color).toBe("var(--ink)");
+  });
+});
+
+describe("healthColor", () => {
+  it("maps health to Stone & Lamp tokens, cobalt for green", () => {
+    expect(healthColor("GREEN")).toBe("var(--accent)");
+    expect(healthColor("AMBER")).toBe("var(--warn)");
+    expect(healthColor("RED")).toBe("var(--hot)");
+    expect(healthColor("")).toBe("var(--mute)");
   });
 });
