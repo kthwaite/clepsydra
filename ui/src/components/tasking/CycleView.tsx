@@ -179,11 +179,9 @@ export function CycleView({
   const stateClass =
     cycle.state === "ACTIVE"
       ? "text-accent"
-      : cycle.state === "CLOSED"
-        ? "text-faint"
-        : cycle.state === "OPEN"
-          ? "text-hot"
-          : "text-mute";
+      : cycle.state === "OPEN"
+        ? "text-hot"
+        : "text-mute";
 
   // Unassigned tasks, counted over the same slice the view shows.
   const backlogCount = useMemo(

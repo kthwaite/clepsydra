@@ -27,10 +27,9 @@ const TAB = cn(
   FOCUS_RING,
 );
 
-/** State word colour: active cobalt, planned mute, closed faint. */
+/** State word colour: active cobalt, the rest mute (faint is decoration only). */
 function stateWordClass(state: string): string {
   if (state === "ACTIVE") return "text-accent";
-  if (state === "CLOSED") return "text-faint";
   return "text-mute";
 }
 
@@ -86,7 +85,7 @@ export function CycleStrip({
           ))}
           <Tab id={BACKLOG_KEY} className={TAB}>
             Backlog
-            <span className="font-normal tabular-nums text-faint">
+            <span className="font-normal tabular-nums text-mute">
               {backlogCount}
             </span>
           </Tab>

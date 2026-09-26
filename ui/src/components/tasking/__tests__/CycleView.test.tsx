@@ -274,6 +274,22 @@ function renderCycleView(
   );
 }
 
+// ── informational text never uses faint (spec §3) ───────────────────────────
+
+describe("CycleView — contrast", () => {
+  it("draws the Closed state word and the Backlog count in mute, not faint", () => {
+    const closed = { ...ACTIVE_CYCLE, state: "CLOSED" } as BoardCycle;
+    const { container } = renderCycleView(closed, C01_TASKS, undefined, [
+      closed,
+    ]);
+    const faintText = Array.from(container.querySelectorAll(".text-faint"))
+      .filter((el) => el.getAttribute("aria-hidden") !== "true")
+      .map((el) => el.textContent?.trim())
+      .filter(Boolean);
+    expect(faintText).toEqual([]);
+  });
+});
+
 // ── action buttons per cycle state ────────────────────────────────────────────
 
 describe("CycleView — lifecycle entry points", () => {
