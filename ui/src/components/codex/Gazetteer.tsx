@@ -7,12 +7,17 @@ import { shortFolio } from "#/components/codex/folio-utils";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { MobileGazetteer } from "#/components/codex/MobileGazetteer";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { Tick } from "#/components/codex/Tick";
 import { FilterBar } from "#/components/filters/FilterBar";
 import { KindIcon } from "#/components/KindIcon";
+import { Radio, RadioGroup } from "#/components/ui/radio-group";
+import { Switch } from "#/components/ui/switch";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useTableCompact } from "#/hooks/useTableCompact";
 import { cn } from "#/lib/cn";
 import type { FilterField, FilterState } from "#/lib/filters/model";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import {
   KINDS,
   type Kind,
@@ -39,13 +44,22 @@ export function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
 
 export const MOBILE_GAZETTEER_PAGE_SIZE = 20;
 
+const SORT_OPTIONS: Array<{ value: GazetteerSort; label: string }> = [
+  { value: "ts", label: "Edited" },
+  { value: "id", label: "Code" },
+  { value: "title", label: "Title" },
+  { value: "words", label: "Words" },
+];
+
+const fmt = (n: number) => n.toLocaleString("en-US");
+
 export interface GazetteerFilters {
   filterState: FilterState;
   sort: GazetteerSort;
   page: number;
   onFilterChange: (next: FilterState) => void;
   onSortChange: (sort: GazetteerSort) => void;
-  onPageChange: (page: number) => void;
+  onPageChange: (page: number, replace?: boolean) => void;
 }
 
 type Props = {
@@ -78,8 +92,10 @@ export function Gazetteer({ initialTag, filters }: Props) {
   const sort = filters?.sort ?? store.sort;
   const page = filters?.page ?? store.page;
   const setSort = filters?.onSortChange ?? store.setSort;
-  const setPage = filters?.onPageChange ?? store.setPage;
+  const setPage: (page: number, replace?: boolean) => void =
+    filters?.onPageChange ?? store.setPage;
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [compact, setCompact] = useTableCompact("gazetteer", true);
 
   useLayoutEffect(() => {
     if (!filters) store.enter(initialTag);
@@ -112,7 +128,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
       {
         id: "kind",
         kind: "single",
-        label: "KIND",
+        label: "Kind",
         options: sortKindsByLabel(KINDS).map((k) => ({
           value: k,
           label: kindLabel(k),
@@ -121,13 +137,13 @@ export function Gazetteer({ initialTag, filters }: Props) {
       {
         id: "project",
         kind: "single",
-        label: "PROJECT",
+        label: "Project",
         options: projectValues.map((p) => ({ value: p })),
       },
       {
         id: "tags",
         kind: "multi",
-        label: "TAG",
+        label: "Tag",
         options: tags.map((t) => ({ value: t.tag })),
       },
     ],
@@ -256,81 +272,107 @@ export function Gazetteer({ initialTag, filters }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* header */}
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-rule px-5 py-3">
-        <h1 className="font-sans text-[20px] font-black uppercase tracking-[0.04em] text-ink">
-          Gazetteer<span className="text-accent"> / </span>Index
-        </h1>
-        <span className="cl-mono text-[10px] uppercase tracking-[0.16em] text-ink-mute">
-          {filteredCount} entries{tagSummary}
+      <div
+        className={cn(
+          "flex flex-shrink-0 flex-wrap items-end gap-x-7 gap-y-4 px-10",
+          compact ? "pt-7" : "pt-10",
+        )}
+      >
+        <div className="flex flex-col gap-2">
+          <span className="flex items-center gap-2.5">
+            <Tick />
+            <span className="font-serif text-[19px] italic text-mute">
+              Index
+            </span>
+          </span>
+          <h1
+            className={cn(
+              "font-serif leading-none tracking-[-0.015em] text-ink",
+              compact ? "text-[44px]" : "text-[52px]",
+            )}
+          >
+            Gazetteer
+          </h1>
+        </div>
+        <span className="pb-1.5 text-[14px] text-mute">
+          {filteredCount === totalCount
+            ? `${fmt(totalCount)} ${totalCount === 1 ? "page" : "pages"}`
+            : `${fmt(filteredCount)} of ${fmt(totalCount)} pages`}
+          {tagSummary}
         </span>
         <div className="flex-1" />
-        <div className="cl-mono flex items-stretch border border-rule-soft text-[9px] uppercase tracking-[0.12em]">
-          {(["ts", "id", "title", "words"] as GazetteerSort[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setSort(s)}
-              className={cn(
-                "cursor-pointer border-r border-rule-soft px-2 py-1 last:border-r-0",
-                sort === s
-                  ? "bg-accent text-black"
-                  : "text-ink-mute hover:text-ink",
-              )}
-            >
-              {s}
-            </button>
+        <Switch isSelected={compact} onChange={setCompact}>
+          Compact
+        </Switch>
+        <RadioGroup
+          segmented
+          aria-label="Sort"
+          orientation="horizontal"
+          value={sort}
+          onChange={(value) => setSort(value as GazetteerSort)}
+        >
+          {SORT_OPTIONS.map((option) => (
+            <Radio key={option.value} value={option.value}>
+              {option.label}
+            </Radio>
           ))}
-        </div>
+        </RadioGroup>
       </div>
 
-      <div className="flex flex-shrink-0 items-center border-b border-rule-soft px-5 py-2">
+      <div
+        className={cn(
+          "flex flex-shrink-0 flex-wrap items-center gap-x-2.5 gap-y-2 px-10",
+          compact ? "pt-[18px]" : "pt-6",
+        )}
+      >
         <FilterBar
           fields={filterFields}
           primaryFieldIds={["kind", "project", "tags"]}
           state={filterState}
           onChange={onFilterChange}
-          textPlaceholder="grep…"
+          textPlaceholder="Filter pages"
           textAriaLabel="Search pages"
           filteredCount={filteredCount}
           totalCount={totalCount}
-          className="flex-wrap"
+          className="min-w-0 flex-1 flex-wrap"
         />
+        {selected.length > 0 && (
+          <div className="flex items-center gap-3.5 text-[13.5px]">
+            <span className="font-medium text-accent">
+              {selected.length} selected
+            </span>
+            <div className="w-[150px]">
+              <KindSelect
+                value={null}
+                inferred={false}
+                ariaLabel="Set kind for selection"
+                placeholder="Set kind…"
+                isDisabled={bulk.isPending}
+                onAssign={applyKind}
+              />
+            </div>
+            <div className="w-[180px]">
+              <ProjectCombo
+                value={null}
+                options={projects}
+                onAssign={applyProject}
+                onClear={applyClearProject}
+              />
+            </div>
+            <button
+              type="button"
+              aria-label="Clear selection"
+              onClick={clearSelection}
+              className={cn(
+                "h-8 cursor-pointer rounded-full px-2 text-mute hover:text-ink",
+                FOCUS_RING_NATIVE,
+              )}
+            >
+              Clear
+            </button>
+          </div>
+        )}
       </div>
-
-      {/* bulk action bar — only when rows are selected */}
-      {selected.length > 0 && (
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-rule bg-paper-2 px-5 py-2">
-          <button
-            type="button"
-            onClick={clearSelection}
-            className="cl-mono cursor-pointer text-[10px] uppercase tracking-[0.12em] text-ink-mute transition-colors hover:text-hot"
-          >
-            ✕ {selected.length} selected
-          </button>
-          <span className="cl-mono text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-            ↦ assign
-          </span>
-          <div className="w-[140px]">
-            <KindSelect
-              value={null}
-              inferred={false}
-              ariaLabel="Set kind for selection"
-              placeholder="Set kind…"
-              isDisabled={bulk.isPending}
-              onAssign={applyKind}
-            />
-          </div>
-          <div className="w-[180px]">
-            <ProjectCombo
-              value={null}
-              options={projects}
-              onAssign={applyProject}
-              onClear={applyClearProject}
-            />
-          </div>
-        </div>
-      )}
 
       {/* table */}
       <div className="cl-noscroll min-h-0 flex-1 overflow-auto">
@@ -348,7 +390,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
                 />
               </th>
               <Th w="48px">No</Th>
-              <Th w="150px">File-ID</Th>
+              <Th w="150px">Code</Th>
               <Th>Title · excerpt</Th>
               <Th w="200px">Tags</Th>
               <Th w="64px" right>

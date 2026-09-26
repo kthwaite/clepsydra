@@ -204,7 +204,7 @@ describe("Gazetteer controller", () => {
     expect(within(restored).getByTestId("filter-bar-input")).toHaveValue("Al");
     expect(
       within(restored).getByTestId("filter-bar-chip-tags"),
-    ).toHaveTextContent("TAG: research");
+    ).toHaveTextContent("Tag: research");
     expect(
       within(restored).getByRole("radio", { name: "Title" }),
     ).toBeChecked();
@@ -370,9 +370,9 @@ describe("Gazetteer controller", () => {
     );
 
     expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent(
-      "TAG: legacy-url-tag",
+      "Tag: legacy-url-tag",
     );
-    await user.click(screen.getByRole("button", { name: "Clear TAG filter" }));
+    await user.click(screen.getByRole("button", { name: "Clear Tag filter" }));
     expect(onFilterChange).toHaveBeenCalledWith({ text: "", facets: {} });
   });
 
@@ -426,7 +426,7 @@ describe("Gazetteer controller", () => {
     render(createElement(Gazetteer));
 
     await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
-    expect(screen.getByRole("button", { name: "✕ 1 selected" })).toBeVisible();
+    expect(screen.getByText("1 selected")).toBeVisible();
 
     await user.type(
       screen.getByRole("combobox", { name: "Project" }),
@@ -443,8 +443,6 @@ describe("Gazetteer controller", () => {
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
-    expect(
-      screen.queryByRole("button", { name: "✕ 1 selected" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
   });
 });

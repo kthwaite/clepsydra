@@ -165,7 +165,7 @@ describe("Gazetteer route filters", () => {
     render(<GazetteerPage />);
 
     expect(screen.getByTestId("filter-bar-chip-kind")).toHaveTextContent(
-      "KIND: WIDGET",
+      "Kind: WIDGET",
     );
     expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
       q: "atlas",
@@ -243,10 +243,10 @@ describe("Gazetteer route filters", () => {
 
     routeMocks.navigate.mockClear();
     expect(screen.getByTestId("filter-bar-chip-project")).toHaveTextContent(
-      "PROJECT: clepsydra",
+      "Project: clepsydra",
     );
     await user.click(
-      screen.getByRole("button", { name: "Clear PROJECT filter" }),
+      screen.getByRole("button", { name: "Clear Project filter" }),
     );
     expect(resolvedSearch()).toEqual({
       ...completeSearch,

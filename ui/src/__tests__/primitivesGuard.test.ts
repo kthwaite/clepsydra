@@ -10,7 +10,7 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([]);
+const PENDING = new Set<string>(["../codex/Gazetteer.tsx"]);
 
 /** Tasking board screen (phase 4.3). */
 const TASKING_FILES = [
@@ -55,6 +55,7 @@ const SCREEN_FILES = [
   "../codex/MoonDisc.tsx",
   "../codex/DayArc.tsx",
   "../codex/FeedRiver.tsx",
+  "../codex/Gazetteer.tsx",
 ];
 
 const FORBIDDEN: Array<[string, RegExp]> = [
