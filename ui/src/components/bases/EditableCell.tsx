@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PropertyDefinition, PropertyType } from "#/api/bases";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { CELL_EDITORS } from "./cells/registry";
 import { type CellValue, formatCellValue } from "./cells/types";
 
@@ -125,9 +126,11 @@ export function EditableCell({
       aria-label={ariaLabel ? `Edit ${ariaLabel}` : undefined}
       aria-describedby={ariaDescribedBy}
       className={cn(
-        "cl-mono block w-full cursor-text truncate border border-transparent px-1 py-0.5 text-left text-[12px]",
-        text === "" ? "text-ink-mute" : "text-ink-2",
-        "hover:border-rule focus-visible:border-accent focus-visible:outline-none",
+        // No size of its own: the cell inherits the table's density.
+        "block w-full cursor-text truncate rounded-md px-1 py-0.5 text-left",
+        text === "" ? "text-faint" : "text-ink",
+        "hover:bg-raise",
+        FOCUS_RING_NATIVE,
       )}
       onClick={() => {
         if (controlled) onEdit?.();

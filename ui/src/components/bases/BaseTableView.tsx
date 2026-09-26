@@ -239,7 +239,10 @@ function BodyExcerptCell({
     <button
       type="button"
       aria-label={`Open body excerpt for ${pageLabel} in Folio`}
-      className="cl-mono block w-full min-w-0 cursor-pointer truncate px-1 py-0.5 text-left text-[12px] text-ink-2 underline-offset-2 hover:text-accent hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring text-wrap"
+      className={cn(
+        "block w-full min-w-0 cursor-pointer truncate rounded-md px-1 py-0.5 text-left text-mute hover:text-accent text-wrap",
+        FOCUS_RING_NATIVE,
+      )}
       onClick={() => onOpenPage(path)}
     >
       {value}
@@ -284,7 +287,7 @@ function AggregateChips({
         return (
           <span
             key={aggregateRow?.id ?? label}
-            className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
+            className="inline-flex h-6 items-center gap-1.5 rounded-full bg-sink px-2.5 text-[12px] text-ink-2 tabular-nums"
           >
             {label} {formatCellValue(value as CellValue)}
           </span>
@@ -897,6 +900,7 @@ export const BaseTableView = forwardRef<
     <Table
       key={cacheIdentity}
       aria-label={label}
+      data-density={dense ? "compact" : "comfortable"}
       sortDescriptor={readOnly ? undefined : sortDescriptor}
       onSortChange={
         readOnly
@@ -909,7 +913,12 @@ export const BaseTableView = forwardRef<
                 },
               ])
       }
-      className="w-full border-collapse"
+      className={cn(
+        "w-full border-collapse",
+        dense
+          ? "text-[12.5px] [--title:13.5px]"
+          : "text-[13px] [--title:14.5px]",
+      )}
     >
       <TableHeader>
         {visibleColumns.map((column) => {
@@ -922,10 +931,11 @@ export const BaseTableView = forwardRef<
               isRowHeader={column === visibleColumns[0]}
               allowsSorting={allowsSorting}
               className={cn(
-                "cl-mono border-b border-rule px-1 py-1 text-left text-[10px] uppercase tracking-[0.12em] text-ink-mute",
+                "px-3 text-left text-[12.5px] font-normal text-mute",
+                dense ? "h-[34px]" : "h-10",
                 allowsSorting && "cursor-pointer data-[hovered]:text-ink",
                 // The scroller moves the rows under the header, not past it.
-                compact && "sticky top-0 z-[1] bg-paper",
+                compact && "sticky top-0 z-[1] bg-ground",
               )}
             >
               {({ sortDirection }) => {
@@ -935,7 +945,7 @@ export const BaseTableView = forwardRef<
                     {label}
                     {sortDirection && (
                       <span aria-hidden="true">
-                        {sortDirection === "ascending" ? "▲" : "▼"}
+                        {sortDirection === "ascending" ? "↑" : "↓"}
                       </span>
                     )}
                   </span>
@@ -982,12 +992,18 @@ export const BaseTableView = forwardRef<
         {(row) => (
           <Row
             id={row.id}
-            className="group border-b border-rule/50 data-[hovered]:bg-highlight"
+            className={cn(
+              "group data-[hovered]:*:bg-sink",
+              dense ? "h-8" : "h-[42px]",
+            )}
           >
             {visibleColumns.map((column) => {
               const property = properties.get(column);
               return (
-                <Cell key={column} className="px-1 py-0.5 align-top">
+                <Cell
+                  key={column}
+                  className="px-3 align-middle first:rounded-l-[10px] last:rounded-r-[10px]"
+                >
                   {/* One menu serves the row; each cell forwards its context
                     events to the `⋯` button that owns it. */}
                   <div className="flex min-w-0 items-center">
@@ -998,7 +1014,7 @@ export const BaseTableView = forwardRef<
                     >
                       {column === "title" ? (
                         readOnly || memberDraftOpen ? (
-                          <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink">
+                          <span className="block truncate px-1 py-0.5 text-[length:var(--title)] font-medium text-ink">
                             {row.title ?? row.path}
                           </span>
                         ) : (
@@ -1014,7 +1030,10 @@ export const BaseTableView = forwardRef<
                             }
                             type="button"
                             data-row-title={String(row.id)}
-                            className="cl-mono cursor-pointer truncate text-left text-[12px] text-ink underline-offset-2 hover:text-accent hover:underline"
+                            className={cn(
+                              "cursor-pointer truncate rounded-md text-left text-[length:var(--title)] font-medium text-ink hover:text-accent",
+                              FOCUS_RING_NATIVE,
+                            )}
                             onClick={() => onOpenPage(row.path)}
                           >
                             {row.title ?? row.path}
@@ -1106,7 +1125,7 @@ export const BaseTableView = forwardRef<
                         />
                       ) : (
                         // System fields and undeclared keys are read-only.
-                        <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink-2">
+                        <span className="block truncate px-1 py-0.5 text-mute tabular-nums">
                           {formatCellValue(
                             (row.columns as Record<string, CellValue>)[
                               column
@@ -1486,7 +1505,7 @@ export const BaseTableView = forwardRef<
       {memberNotice ? (
         <p
           role="status"
-          className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-2"
+          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-mute"
         >
           {memberNotice}
         </p>
@@ -1495,7 +1514,7 @@ export const BaseTableView = forwardRef<
       {viewError ? (
         <p
           role="alert"
-          className="cl-mono border border-warn px-3 py-2 text-[11px] text-warn"
+          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-warn"
         >
           View failed: {viewError}
         </p>
@@ -1503,7 +1522,7 @@ export const BaseTableView = forwardRef<
       {rowActionError ? (
         <p
           role="alert"
-          className="cl-mono border border-warn px-3 py-2 text-[11px] text-warn"
+          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-warn"
         >
           {rowActionError}
         </p>
@@ -1512,7 +1531,7 @@ export const BaseTableView = forwardRef<
         <p
           role="status"
           aria-label="View loading"
-          className="cl-mono px-1 py-2 text-[11px] text-ink-mute"
+          className="px-1 py-2 text-[13px] text-mute"
         >
           Loading…
         </p>
@@ -1521,7 +1540,7 @@ export const BaseTableView = forwardRef<
         <p
           role="status"
           aria-label={compact ? "Result window" : "Result limit"}
-          className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-2"
+          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-mute"
         >
           {capStatus}
         </p>
@@ -1530,7 +1549,7 @@ export const BaseTableView = forwardRef<
         <p
           role="status"
           aria-label="Empty view"
-          className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-mute"
+          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-mute"
         >
           No pages match this view.
         </p>
@@ -1543,7 +1562,7 @@ export const BaseTableView = forwardRef<
             onApproachEnd={approachEnd}
           >
             {groups ? (
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1">
                 {groups.map((group, index) => {
                   const key =
                     group.key == null
@@ -1555,29 +1574,37 @@ export const BaseTableView = forwardRef<
                   const panelId = `${groupPanelIdBase}-group-${index}`;
                   return (
                     <section key={cacheIdentity}>
-                      <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
+                      <header
+                        className={cn(
+                          "flex flex-wrap items-center gap-3",
+                          dense ? "pt-3 pb-1" : "pt-5 pb-1",
+                        )}
+                      >
                         <Button
                           variant="ghost"
                           size="sm"
                           aria-expanded={expanded}
                           aria-controls={panelId}
                           onPress={() => groupCollapse.toggle(identity)}
-                          className="cl-mono h-auto gap-1 px-1 py-0 font-normal text-[12px] uppercase tracking-[0.1em] text-ink"
+                          className={cn(
+                            "h-auto gap-2 px-1 py-0 font-serif font-normal italic text-ink",
+                            dense ? "text-[18px]" : "text-[21px]",
+                          )}
                         >
                           {expanded ? (
                             <ChevronDown
                               aria-hidden="true"
-                              className="h-3 w-3"
+                              className="h-4 w-4 text-mute"
                             />
                           ) : (
                             <ChevronRight
                               aria-hidden="true"
-                              className="h-3 w-3"
+                              className="h-4 w-4 text-mute"
                             />
                           )}
                           {key}
                         </Button>
-                        <span className="cl-mono text-[10px] text-ink-mute">
+                        <span className="text-[12.5px] text-mute tabular-nums">
                           {group.rows.length < group.total
                             ? `${group.rows.length} of ${group.total} rows`
                             : `${group.total} row${group.total === 1 ? "" : "s"}`}
@@ -1615,11 +1642,9 @@ export const BaseTableView = forwardRef<
             <footer
               role="group"
               aria-label="Totals"
-              className="mt-1 flex flex-wrap items-baseline gap-2 border-t border-rule pt-1"
+              className="mt-2 flex flex-wrap items-center gap-2"
             >
-              <span className="cl-mono text-[10px] uppercase tracking-[0.1em] text-ink-mute">
-                Totals
-              </span>
+              <span className="text-[12.5px] text-mute">Totals</span>
               <AggregateChips
                 values={output.aggregates}
                 definition={definition}
@@ -1636,7 +1661,7 @@ export const BaseTableView = forwardRef<
           // The row reads as "+ Add member…"; its name stays plain for
           // assistive technology and matches the toolbar action.
           aria-label={`Add member to ${definition.name}`}
-          className="cl-mono w-full justify-start border border-dashed border-rule px-2 py-1.5 text-[11px] text-ink-mute hover:text-ink"
+          className="w-full justify-start rounded-[10px] px-3 text-[13px] text-mute hover:text-ink"
           isDisabled={memberAddDisabled}
           aria-describedby={memberBlocker ? memberBlockerId : undefined}
           onPress={onAddMember}

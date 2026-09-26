@@ -1,7 +1,12 @@
-import { Dialog, DialogTrigger } from "react-aria-components";
+import {
+  Button as AriaButton,
+  Dialog,
+  DialogTrigger,
+} from "react-aria-components";
 import { Button } from "#/components/ui/button";
 import { Checkbox } from "#/components/ui/checkbox";
 import { Popover } from "#/components/ui/popover";
+import { PICKER_PILL } from "./BasePickers";
 
 export interface FieldsPopoverProps {
   /** The saved view's columns, in saved order. */
@@ -34,15 +39,15 @@ export function FieldsPopover({
   const hiddenInView = hidden.filter((c) => columns.includes(c));
   return (
     <DialogTrigger>
-      <Button variant="secondary" size="sm">
+      <AriaButton className={PICKER_PILL(hiddenInView.length > 0)}>
         {hiddenInView.length === 0
           ? "Fields"
           : `Fields (${hiddenInView.length} hidden)`}
-      </Button>
+      </AriaButton>
       <Popover hideArrow placement="bottom start">
         <Dialog
           aria-label="Fields"
-          className="cl-mono flex min-w-[200px] flex-col gap-2 border-[1.5px] border-ink bg-paper p-3 text-[11px] text-ink outline-none"
+          className="flex min-w-[220px] flex-col gap-2 p-3 text-[13px] text-ink outline-none"
         >
           {columns.map((column) => {
             const visible = !hidden.includes(column);

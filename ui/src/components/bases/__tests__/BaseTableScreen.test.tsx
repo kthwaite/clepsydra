@@ -222,3 +222,27 @@ describe("embedded chrome", () => {
     });
   }
 });
+
+describe("Bases table density", () => {
+  it("renders comfortable rows on the screen by default and compact on request", async () => {
+    renderScreen();
+    const grid = screen.getByRole("grid");
+    expect(grid).toHaveAttribute("data-density", "comfortable");
+    await userEvent
+      .setup()
+      .click(screen.getByRole("switch", { name: "Compact" }));
+    expect(screen.getByRole("grid")).toHaveAttribute("data-density", "compact");
+  });
+
+  it("renders embeds dense", () => {
+    renderScreen({ screen: undefined, chrome: "compact" });
+    expect(screen.getByRole("grid")).toHaveAttribute("data-density", "compact");
+  });
+
+  it("shows sentence-case headers and arrows, not caps and triangles", () => {
+    renderScreen({ sort: [{ field: "author", dir: "desc" }] });
+    const header = screen.getByRole("columnheader", { name: /author/ });
+    expect(header).toHaveTextContent("↓");
+    expect(header).not.toHaveTextContent("▼");
+  });
+});
