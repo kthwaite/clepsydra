@@ -117,17 +117,61 @@ describe("RubbishBin", () => {
     const rows = screen.getAllByRole("listitem");
     expect(within(rows[0]).getByText("Alpha dossier")).toBeVisible();
     expect(within(rows[0]).getByText("projects/alpha.md")).toBeVisible();
-    expect(within(rows[0]).getByText("PROJECT")).toBeVisible();
-    expect(within(rows[0]).getByText(/13 Aug 2026/)).toBeVisible();
+    // Kinds read in sentence case (kindDisplayLabel), never KIND_META caps.
+    expect(within(rows[0]).getByText("Project")).toBeVisible();
+    expect(within(rows[0]).queryByText("PROJECT")).toBeNull();
+    expect(within(rows[1]).getByText("Note")).toBeVisible();
     expect(within(rows[1]).getByText("Beta note")).toBeVisible();
 
-    const invalidRow = screen.getByText("Invalid rubbish item").closest("li");
-    if (!invalidRow) throw new Error("invalid Rubbish Bin row missing");
+    const invalidRow = screen.getByText("Unreadable item").closest("li");
+    if (!invalidRow) throw new Error("unreadable rubbish bin row missing");
     expect(within(invalidRow).getByText(invalid.error)).toBeVisible();
+    expect(within(invalidRow).getByText(invalid.item_id)).toBeVisible();
     expect(within(invalidRow).queryByRole("button")).toBeNull();
-    const timestamp = within(rows[0]).getByText(/Deleted 13 Aug 2026/);
-    expect(timestamp).toHaveClass("text-ink-2");
-    expect(timestamp).not.toHaveClass("text-ink-mute");
+    // Hot text never sits on sink: the unreadable row is a 5% hot tint.
+    expect(invalidRow).toHaveClass("bg-hot/5");
+    expect(invalidRow).not.toHaveClass("bg-sink");
+
+    // Deletion time: fixed month names, machine-readable instant.
+    const timestamp = within(rows[0]).getByText(/13 Aug 2026/);
+    expect(timestamp.tagName).toBe("TIME");
+    expect(timestamp).toHaveAttribute("datetime", alpha.item.deleted_at);
+  });
+
+  it("heads the bin with a serif title and an item count that says items stay until emptied", () => {
+    render(<RubbishBin />);
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Rubbish bin" }),
+    ).toBeVisible();
+    expect(screen.getByText("Retained deletions")).toBeVisible();
+    expect(
+      screen.getByText("2 items · kept until you empty the bin"),
+    ).toBeVisible();
+  });
+
+  it("marks the selected row with the accent tint", async () => {
+    const user = userEvent.setup();
+    render(<RubbishBin />);
+
+    const row = screen.getByRole("button", { name: /Alpha dossier/ });
+    await user.click(row);
+
+    expect(row).toHaveAttribute("aria-current", "true");
+    expect(row).toHaveClass("bg-accent-tint", "rounded-xl");
+  });
+
+  it("sentence-cases a stored kind the app no longer knows", () => {
+    api.list.mockReturnValue({
+      data: [{ ...beta, item: { ...beta.item, kind: "LEGACY_MEMO" } }],
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<RubbishBin />);
+
+    expect(screen.getByText("Legacy memo")).toBeVisible();
   });
 
   it("fetches dedicated detail on selection and renders a bounded read-only preview", async () => {
@@ -141,7 +185,15 @@ describe("RubbishBin", () => {
       screen.getByRole("heading", { name: "Alpha dossier" }),
     ).toBeVisible();
     expect(screen.getByText(alpha.item.page_id)).toBeVisible();
-    expect(screen.getByText("Stored body")).toBeVisible();
+    expect(screen.getByText("Retained page, read only")).toBeVisible();
+    const metadata = screen.getByText("Original path").closest("dl");
+    if (!metadata) throw new Error("metadata list missing");
+    expect(
+      within(metadata).getByText("Kind").nextElementSibling,
+    ).toHaveTextContent("Project");
+    expect(
+      screen.getByRole("heading", { level: 3, name: "Stored body" }),
+    ).toBeVisible();
     expect(screen.getByText(/preview is truncated/i)).toBeVisible();
     expect(screen.queryByRole("textbox", { name: /page body/i })).toBeNull();
   });
@@ -177,7 +229,7 @@ describe("RubbishBin", () => {
   it("states loading, list failure, empty, and detail failure explicitly", async () => {
     api.list.mockReturnValueOnce({ data: undefined, isPending: true });
     const loading = render(<RubbishBin />);
-    expect(screen.getByRole("status")).toHaveTextContent("Loading Rubbish Bin");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading rubbish bin");
 
     api.list.mockReturnValueOnce({
       data: undefined,
@@ -197,7 +249,7 @@ describe("RubbishBin", () => {
     });
     loading.rerender(<RubbishBin />);
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Rubbish Bin is empty",
+      "Rubbish bin is empty",
     );
 
     setDefaultHooks();
@@ -290,7 +342,7 @@ describe("RubbishBin", () => {
       "retained item state changed while restoring",
     );
     expect(alert).toHaveTextContent(
-      "The item remains in the Rubbish Bin. Refresh the Bin and retry.",
+      "The item remains in the rubbish bin. Refresh the bin and retry.",
     );
     expect(screen.getByRole("button", { name: /Alpha dossier/ })).toBeVisible();
   });
@@ -307,7 +359,7 @@ describe("RubbishBin", () => {
 
     await user.click(screen.getByRole("button", { name: /Alpha dossier/ }));
     await user.click(
-      screen.getByRole("button", { name: "Delete permanently" }),
+      screen.getByRole("button", { name: "Delete permanently…" }),
     );
 
     const dialog = screen.getByRole("dialog");
@@ -327,7 +379,7 @@ describe("RubbishBin", () => {
     const view = render(<RubbishBin />);
     await user.click(screen.getByRole("button", { name: /Alpha dossier/ }));
     await user.click(
-      screen.getByRole("button", { name: "Delete permanently" }),
+      screen.getByRole("button", { name: "Delete permanently…" }),
     );
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
@@ -357,12 +409,12 @@ describe("RubbishBin", () => {
     render(<RubbishBin />);
 
     expect(
-      screen.getByRole("button", { name: "Empty Rubbish Bin" }),
+      screen.getByRole("button", { name: "Empty rubbish bin…" }),
     ).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /Alpha dossier/ }));
     expect(screen.getByRole("button", { name: "Restore" })).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Delete permanently" }),
+      screen.getByRole("button", { name: "Delete permanently…" }),
     ).toBeDisabled();
   });
 
@@ -388,13 +440,15 @@ describe("RubbishBin", () => {
     const user = userEvent.setup();
     render(<RubbishBin />);
 
-    await user.click(screen.getByRole("button", { name: "Empty Rubbish Bin" }));
+    await user.click(
+      screen.getByRole("button", { name: "Empty rubbish bin…" }),
+    );
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveTextContent("2 items");
     expect(dialog).toHaveTextContent(/permanently delete every valid item/i);
     await user.click(
       within(dialog).getByRole("button", {
-        name: "Empty Rubbish Bin permanently",
+        name: "Empty rubbish bin permanently",
       }),
     );
 
@@ -422,10 +476,12 @@ describe("RubbishBin", () => {
     api.empty.mockReturnValue(mutation(empty));
     const user = userEvent.setup();
     const view = render(<RubbishBin />);
-    await user.click(screen.getByRole("button", { name: "Empty Rubbish Bin" }));
+    await user.click(
+      screen.getByRole("button", { name: "Empty rubbish bin…" }),
+    );
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Empty Rubbish Bin permanently",
+        name: "Empty rubbish bin permanently",
       }),
     );
 
@@ -451,8 +507,13 @@ describe("RubbishBin — shared FilterBar composition", () => {
     const user = userEvent.setup();
     render(<ControlledRubbishBin />);
 
-    await user.click(screen.getByTestId("filter-bar-chip-kind"));
-    await user.click(screen.getByTestId("filter-bar-option-kind-PROJECT"));
+    const chip = screen.getByTestId("filter-bar-chip-kind");
+    expect(chip).toHaveTextContent("Kind");
+    expect(chip).not.toHaveTextContent("KIND");
+    await user.click(chip);
+    const option = screen.getByTestId("filter-bar-option-kind-PROJECT");
+    expect(option).toHaveTextContent("Project");
+    await user.click(option);
 
     expect(screen.getByRole("button", { name: /Alpha dossier/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Beta note/ })).toBeNull();
@@ -479,11 +540,11 @@ describe("RubbishBin — shared FilterBar composition", () => {
     const user = userEvent.setup();
     render(<ControlledRubbishBin />);
 
-    expect(screen.getByText("Invalid rubbish item")).toBeVisible();
+    expect(screen.getByText("Unreadable item")).toBeVisible();
 
     await user.type(screen.getByTestId("filter-bar-input"), "alpha");
 
-    expect(screen.queryByText("Invalid rubbish item")).toBeNull();
+    expect(screen.queryByText("Unreadable item")).toBeNull();
   });
 
   it("shows the filtered-empty state when no item matches the filter", async () => {

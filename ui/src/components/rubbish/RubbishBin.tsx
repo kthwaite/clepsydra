@@ -1,4 +1,4 @@
-import { ArrowLeft, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { formatApiError, isApiConflict } from "#/api/error";
 import {
@@ -12,6 +12,7 @@ import {
   useRubbishList,
 } from "#/api/rubbish";
 import { PreviewMarkdown } from "#/components/codex/PreviewMarkdown";
+import { Tick } from "#/components/codex/Tick";
 import { FilterBar } from "#/components/filters/FilterBar";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
@@ -25,7 +26,9 @@ import {
   type FilterState,
   isFilterActive,
 } from "#/lib/filters/model";
-import { KINDS, type Kind, kindLabel } from "#/lib/kind";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { KINDS, type Kind, kindDisplayLabel } from "#/lib/kind";
+import { formatCapturedAt } from "#/lib/time";
 
 type Confirmation =
   | { kind: "purge"; item: RubbishItemSummary }
@@ -37,33 +40,54 @@ interface RestoredPage {
   title: string;
 }
 
-const deletedAtFormatter = new Intl.DateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  timeZone: "UTC",
-  timeZoneName: "short",
-});
-
+/** Local "13 Aug 2026, 15:30" with fixed month names. */
 function formatDeletedAt(value: string): string {
-  const timestamp = new Date(value);
-  return Number.isNaN(timestamp.valueOf())
+  return Number.isNaN(new Date(value).valueOf())
     ? "Deletion time unavailable"
-    : deletedAtFormatter.format(timestamp);
+    : formatCapturedAt(value);
 }
 
 /** Retained items store `kind` as a bare string, not the typed `Kind` union
- * (see RubbishItemSummary in schema.d.ts). Guard against an unrecognised
- * value — e.g. from a stale item predating a kind — rather than crashing
- * `kindLabel`, mirroring the asWorkType/asReadingStatus narrowing pattern in
- * AcademicLibrary. */
-function kindOptionLabel(kind: string): string {
-  return (KINDS as readonly string[]).includes(kind)
-    ? kindLabel(kind as Kind)
-    : kind;
+ * (see RubbishItemSummary in schema.d.ts). A known kind reads through
+ * `kindDisplayLabel`; an unrecognised one — e.g. from a stale item predating
+ * a kind — is sentence-cased here rather than crashing the lookup. */
+function kindText(kind: string): string {
+  if ((KINDS as readonly string[]).includes(kind)) {
+    return kindDisplayLabel(kind as Kind);
+  }
+  const words = kind.replace(/_/g, " ").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+/** Tick plus muted italic serif label (spec decision 6). */
+function Eyebrow({
+  id,
+  as: Tag = "p",
+  tick = "faint",
+  children,
+}: {
+  id?: string;
+  as?: "p" | "h2" | "h3";
+  tick?: "live" | "faint";
+  children: string;
+}) {
+  return (
+    <Tag className="m-0 flex items-center gap-2.5 font-normal">
+      <Tick variant={tick} />
+      <span
+        id={id}
+        className="font-serif text-[19px] italic leading-none text-mute"
+      >
+        {children}
+      </span>
+    </Tag>
+  );
+}
+
+/** Quiet destructive action: hot text on ground or raise, a 5% hot tint on
+ *  hover — never hot on sink. */
+const QUIET_DANGER =
+  "h-10 px-5 text-hot data-[hovered]:bg-hot/5 data-[hovered]:text-hot data-[pressed]:bg-hot/5";
 
 function RubbishRow({
   entry,
@@ -76,46 +100,50 @@ function RubbishRow({
 }) {
   if (entry.status === "invalid") {
     return (
-      <li className="border-b border-hot/40 bg-hot/5 px-4 py-3">
-        <p className="cl-mono text-[10px] font-bold uppercase tracking-[0.14em] text-hot">
-          Invalid rubbish item
+      <li className="flex flex-col gap-[5px] rounded-xl bg-hot/5 px-3.5 py-[13px]">
+        <p className="flex items-center gap-2 text-[14.5px] font-medium text-hot">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-hot" />
+          Unreadable item
         </p>
-        <p className="mt-1 break-all font-mono text-[10px] text-ink-mute">
-          {entry.item_id}
+        <p className="text-[12.5px] leading-relaxed text-ink-2">
+          {entry.error}
         </p>
-        <p className="mt-2 text-xs leading-relaxed text-ink-2">{entry.error}</p>
+        <p className="break-all text-[12.5px] text-mute">{entry.item_id}</p>
       </li>
     );
   }
 
   const { item } = entry;
   return (
-    <li className="border-b border-rule-soft">
+    <li>
       <button
         type="button"
         aria-current={selected ? "true" : undefined}
         onClick={() => onSelect(item.item_id)}
         className={cn(
-          "group block min-h-20 w-full px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent",
-          selected ? "bg-highlight" : "hover:bg-paper-2",
+          "flex w-full flex-col gap-[5px] rounded-xl px-3.5 py-[13px] text-left transition-colors",
+          FOCUS_RING_NATIVE,
+          selected ? "bg-accent-tint" : "hover:bg-sink/60",
         )}
         aria-label={`${item.title}, ${item.original_path}`}
       >
-        <span className="flex items-start justify-between gap-3">
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-bold text-ink">
-              {item.title}
-            </span>
-            <span className="cl-mono mt-1 block truncate text-[10px] text-ink-mute">
-              {item.original_path}
-            </span>
+        <span className="flex min-w-0 items-baseline gap-3">
+          <span className="min-w-0 truncate text-[14.5px] font-medium text-ink">
+            {item.title}
           </span>
-          <span className="cl-mono shrink-0 border border-rule px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-ink-mute">
-            {item.kind}
+          <span className="flex-1" />
+          <span className="shrink-0 text-[12.5px] text-mute">
+            {kindText(item.kind)}
           </span>
         </span>
-        <span className="cl-mono mt-2 block text-[9px] tabular-nums text-ink-2">
-          Deleted {formatDeletedAt(item.deleted_at)}
+        <span className="flex min-w-0 gap-2 text-[12.5px] text-mute">
+          <span className="min-w-0 truncate">{item.original_path}</span>
+          <span aria-hidden className="text-faint">
+            ·
+          </span>
+          <time dateTime={item.deleted_at} className="shrink-0 tabular-nums">
+            {formatDeletedAt(item.deleted_at)}
+          </time>
         </span>
       </button>
     </li>
@@ -125,21 +153,16 @@ function RubbishRow({
 function DetailMetadata({ item }: { item: RubbishItemSummary }) {
   const fields = [
     ["Original path", item.original_path],
-    ["Page ID", item.page_id],
-    ["Kind", item.kind],
+    ["Kind", kindText(item.kind)],
     ["Deleted", formatDeletedAt(item.deleted_at)],
+    ["Page ID", item.page_id],
   ];
   return (
-    <dl className="grid border-y border-rule-soft sm:grid-cols-2">
+    <dl className="mt-7 grid grid-cols-1 gap-x-7 gap-y-4 sm:grid-cols-2 md:pl-[17px] xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)]">
       {fields.map(([label, value]) => (
-        <div
-          key={label}
-          className="border-b border-rule-soft px-4 py-3 even:sm:border-l last:border-b-0 sm:[&:nth-last-child(2)]:border-b-0"
-        >
-          <dt className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-            {label}
-          </dt>
-          <dd className="mt-1 break-words font-mono text-[11px] text-ink-2">
+        <div key={label} className="flex min-w-0 flex-col gap-1">
+          <dt className="text-[12.5px] text-mute">{label}</dt>
+          <dd className="text-[13.5px] text-ink [overflow-wrap:anywhere]">
             {value}
           </dd>
         </div>
@@ -197,10 +220,10 @@ export function RubbishBin({
     {
       id: "kind",
       kind: "single",
-      label: "KIND",
+      label: "Kind",
       options: [...new Set(validItems.map((item) => item.kind))]
         .sort()
-        .map((value) => ({ value, label: kindOptionLabel(value) })),
+        .map((value) => ({ value, label: kindText(value) })),
     },
   ];
 
@@ -246,7 +269,7 @@ export function RubbishBin({
         const serverMessage = formatApiError(error, "Restore conflict.");
         const guidance = /occupied/i.test(serverMessage)
           ? `Move or rename the page at ${selectedSummary.original_path}, then restore again.`
-          : "The item remains in the Rubbish Bin. Refresh the Bin and retry.";
+          : "The item remains in the rubbish bin. Refresh the bin and retry.";
         setActionError(`${serverMessage} ${guidance}`);
         return;
       }
@@ -295,46 +318,42 @@ export function RubbishBin({
     } catch (error) {
       setConfirmation(null);
       setActionError(
-        formatApiError(error, "The Rubbish Bin could not be emptied."),
+        formatApiError(error, "The rubbish bin could not be emptied."),
       );
     }
   }
 
   return (
-    <main className="mx-auto flex h-full min-h-screen w-full max-w-[1440px] flex-col bg-paper text-ink">
-      <header className="border-b border-rule bg-paper-2 px-4 py-4 md:px-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="cl-mono text-[9px] uppercase tracking-[0.22em] text-ink-mute">
-              Vault lifecycle / retained deletions
-            </p>
-            <h1 className="mt-1 text-2xl font-black tracking-tight">
-              Rubbish Bin
-            </h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <p className="cl-mono text-[10px] tabular-nums text-ink-mute">
-              {validItems.length} {validItems.length === 1 ? "item" : "items"}
-            </p>
-            <Button
-              size="sm"
-              variant="danger"
-              isDisabled={validItems.length === 0 || lifecycleBusy}
-              onPress={() => {
-                if (lifecycleBusy) return;
-                setConfirmation({ kind: "empty" });
-              }}
-            >
-              Empty Rubbish Bin
-            </Button>
-          </div>
+    <main className="mx-auto flex h-full min-h-screen w-full max-w-[1440px] flex-col bg-ground text-ink">
+      <header className="flex flex-wrap items-end gap-x-7 gap-y-3 px-4 pt-8 md:px-10 md:pt-10">
+        <div className="flex flex-col gap-2.5">
+          <Eyebrow>Retained deletions</Eyebrow>
+          <h1 className="m-0 font-serif text-[40px] font-normal leading-none tracking-[-0.015em] md:text-[56px]">
+            Rubbish bin
+          </h1>
         </div>
+        <p className="pb-1.5 text-[14px] tabular-nums text-mute">
+          {validItems.length} {validItems.length === 1 ? "item" : "items"} ·
+          kept until you empty the bin
+        </p>
+        <span className="hidden flex-1 sm:block" />
+        <Button
+          variant="ghost"
+          className={QUIET_DANGER}
+          isDisabled={validItems.length === 0 || lifecycleBusy}
+          onPress={() => {
+            if (lifecycleBusy) return;
+            setConfirmation({ kind: "empty" });
+          }}
+        >
+          Empty rubbish bin…
+        </Button>
       </header>
 
       {actionError ? (
         <div
           role="alert"
-          className="border-b border-hot bg-hot/5 px-4 py-3 text-sm text-hot"
+          className="mx-4 mt-6 rounded-xl bg-hot/5 px-4 py-3 text-[14px] text-hot md:mx-10"
         >
           {actionError}
         </div>
@@ -342,13 +361,13 @@ export function RubbishBin({
       {restoredPage ? (
         <div
           role="status"
-          className="flex flex-wrap items-center justify-between gap-3 border-b border-cool bg-paper-2 px-4 py-3 text-sm text-ink-2"
+          className="mx-4 mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-raise px-4 py-3 text-[14px] text-ink-2 md:mx-10"
         >
-          <span>
-            Restored to <code>{restoredPage.path}</code>.
+          <span className="min-w-0 [overflow-wrap:anywhere]">
+            Restored to{" "}
+            <span className="font-medium text-ink">{restoredPage.path}</span>.
           </span>
           <Button
-            size="sm"
             variant="secondary"
             onPress={() =>
               openTab("page", restoredPage.path, restoredPage.title)
@@ -363,16 +382,19 @@ export function RubbishBin({
           ref={emptyOutcomesRef}
           aria-label="Empty Bin results"
           tabIndex={-1}
-          className="border-b border-rule bg-paper-2 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+          className={cn(
+            "mx-4 mt-6 rounded-2xl bg-raise px-5 py-4 md:mx-10",
+            FOCUS_RING_NATIVE,
+          )}
         >
-          <h2 className="cl-mono text-[10px] font-bold uppercase tracking-[0.16em]">
-            Empty Bin results
-          </h2>
+          <Eyebrow as="h2" tick="live">
+            Empty bin results
+          </Eyebrow>
           <p
             role="status"
             aria-label="Empty Bin completion"
             aria-live="polite"
-            className="mt-1 text-xs text-ink-2"
+            className="mt-2 text-[13.5px] text-ink-2 md:pl-[17px]"
           >
             {
               emptyOutcomes.filter((outcome) => outcome.status === "purged")
@@ -385,7 +407,7 @@ export function RubbishBin({
             }{" "}
             failed.
           </p>
-          <ol className="mt-2 space-y-1">
+          <ol className="mt-3 flex flex-col gap-1 md:pl-[17px]">
             {emptyOutcomes.map((outcome, index) => (
               <li
                 key={
@@ -395,24 +417,22 @@ export function RubbishBin({
                 }
                 aria-label={`Empty outcome ${index + 1}`}
                 className={cn(
-                  "grid gap-x-3 border-l-2 px-3 py-2 text-xs sm:grid-cols-[minmax(0,1fr)_auto]",
-                  outcome.status === "purged"
-                    ? "border-cool bg-paper"
-                    : "border-hot bg-hot/5",
+                  "grid gap-x-3 gap-y-0.5 rounded-[10px] px-3 py-2 text-[13px] sm:grid-cols-[minmax(0,1fr)_auto]",
+                  outcome.status === "purged" ? "bg-ground" : "bg-hot/5",
                 )}
               >
                 {outcome.status === "purged" ? (
                   <>
-                    <code className="break-all">
+                    <span className="min-w-0 break-all text-ink">
                       {outcome.item.original_path}
-                    </code>
-                    <span className="cl-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
-                      Deleted permanently
                     </span>
+                    <span className="text-mute">Deleted permanently</span>
                   </>
                 ) : (
                   <>
-                    <code className="break-all">{outcome.item_id}</code>
+                    <span className="min-w-0 break-all text-ink">
+                      {outcome.item_id}
+                    </span>
                     <span className="text-hot">{outcome.error}</span>
                   </>
                 )}
@@ -425,30 +445,26 @@ export function RubbishBin({
       {listQuery.isPending ? (
         <div
           role="status"
-          className="cl-mono flex flex-1 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute"
+          className="flex flex-1 items-center justify-center p-8 text-[14px] text-mute"
         >
-          Loading Rubbish Bin…
+          Loading rubbish bin…
         </div>
       ) : listQuery.isError ? (
         <div
           role="alert"
-          className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-sm text-hot"
+          className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-[14px] text-hot"
         >
           <p>
-            {formatApiError(listQuery.error, "The Rubbish Bin could not load.")}
+            {formatApiError(listQuery.error, "The rubbish bin could not load.")}
           </p>
-          <Button
-            size="sm"
-            variant="secondary"
-            onPress={() => void listQuery.refetch()}
-          >
+          <Button variant="secondary" onPress={() => void listQuery.refetch()}>
             Try again
           </Button>
         </div>
       ) : (
         <>
           {hasAnyEntries ? (
-            <div className="border-b border-rule-soft px-4 py-3 md:px-5">
+            <div className="px-4 pt-8 md:px-10">
               <FilterBar
                 fields={filterFields}
                 primaryFieldIds={["kind"]}
@@ -464,8 +480,10 @@ export function RubbishBin({
               className="flex flex-1 items-center justify-center p-8 text-center"
             >
               <div>
-                <p className="text-sm font-semibold">Rubbish Bin is empty.</p>
-                <p className="mt-1 text-xs text-ink-mute">
+                <p className="text-[15px] font-medium text-ink">
+                  Rubbish bin is empty.
+                </p>
+                <p className="mt-1 text-[13.5px] text-mute">
                   Deleted pages retained for recovery will appear here.
                 </p>
               </div>
@@ -473,18 +491,18 @@ export function RubbishBin({
           ) : showFilteredEmpty ? (
             <div
               role="status"
-              className="cl-mono flex flex-1 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute"
+              className="flex flex-1 items-center justify-center p-8 text-[14px] text-mute"
             >
               No items match the filter
             </div>
           ) : (
-            <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(18rem,0.78fr)_minmax(24rem,1.22fr)]">
+            <div className="grid min-h-0 flex-1 gap-10 px-4 pt-7 pb-8 md:grid-cols-[minmax(18rem,456px)_minmax(0,1fr)] md:px-10">
               {!mobile || selectedId === null ? (
                 <section
                   aria-label="Rubbish ledger"
-                  className="min-h-0 overflow-y-auto border-rule md:border-r"
+                  className="min-h-0 overflow-y-auto md:-mx-3.5"
                 >
-                  <ul>
+                  <ul className="flex flex-col gap-1">
                     {visibleEntries.map((entry) => (
                       <RubbishRow
                         key={
@@ -511,15 +529,15 @@ export function RubbishBin({
               {!mobile || selectedId !== null ? (
                 <section
                   aria-label="Rubbish item detail"
-                  className="min-h-0 overflow-y-auto bg-paper"
+                  className="min-h-0 min-w-0 overflow-y-auto rounded-2xl bg-raise"
                 >
                   {selectedId === null ? (
                     <div className="flex h-full min-h-64 items-center justify-center p-8 text-center">
                       <div>
-                        <p className="text-sm font-semibold">
+                        <p className="text-[15px] font-medium text-ink">
                           Select a retained page.
                         </p>
-                        <p className="mt-1 text-xs text-ink-mute">
+                        <p className="mt-1 text-[13.5px] text-mute">
                           Inspect its stored metadata and read-only preview
                           before acting.
                         </p>
@@ -528,14 +546,14 @@ export function RubbishBin({
                   ) : detailQuery.isPending ? (
                     <div
                       role="status"
-                      className="cl-mono flex min-h-64 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute"
+                      className="flex min-h-64 items-center justify-center p-8 text-[14px] text-mute"
                     >
                       Loading retained page…
                     </div>
                   ) : detailQuery.isError ? (
                     <div
                       role="alert"
-                      className="flex min-h-64 items-center justify-center p-8 text-center text-sm text-hot"
+                      className="flex min-h-64 items-center justify-center p-8 text-center text-[14px] text-hot"
                     >
                       {formatApiError(
                         detailQuery.error,
@@ -543,40 +561,38 @@ export function RubbishBin({
                       )}
                     </div>
                   ) : detailQuery.data ? (
-                    <article>
-                      <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-4 md:px-5">
-                        <div className="min-w-0">
+                    <article className="px-5 py-6 md:px-9 md:py-8">
+                      <div className="flex flex-wrap items-start gap-x-6 gap-y-4">
+                        <div className="flex min-w-0 flex-1 basis-64 flex-col gap-2">
                           {mobile ? (
                             <Button
-                              size="sm"
                               variant="ghost"
-                              className="mb-3"
+                              className="mb-2 self-start"
                               onPress={() => setSelectedId(null)}
                             >
-                              <ArrowLeft aria-hidden /> Back to Rubbish Bin
+                              <ArrowLeft aria-hidden /> Back to rubbish bin
                             </Button>
                           ) : null}
-                          <p className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-                            Retained page / read only
-                          </p>
-                          <h2 className="mt-1 break-words text-xl font-black tracking-tight">
+                          <Eyebrow>Retained page, read only</Eyebrow>
+                          <h2 className="m-0 break-words font-serif text-[30px] font-normal leading-[1.1] md:text-[38px]">
                             {detailQuery.data.item.title}
                           </h2>
                         </div>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex shrink-0 flex-wrap items-center gap-2 md:pt-[30px]">
                           <Button
-                            size="sm"
-                            variant="secondary"
+                            variant="primary"
+                            className="h-10 pr-5 pl-4"
                             isDisabled={lifecycleBusy}
                             onPress={() => {
                               if (!lifecycleBusy) void restoreSelected();
                             }}
                           >
-                            <RotateCcw aria-hidden /> Restore
+                            <RotateCcw aria-hidden className="h-4 w-4" />{" "}
+                            Restore
                           </Button>
                           <Button
-                            size="sm"
-                            variant="danger"
+                            variant="ghost"
+                            className={QUIET_DANGER}
                             isDisabled={lifecycleBusy}
                             onPress={() => {
                               if (!lifecycleBusy) {
@@ -587,34 +603,39 @@ export function RubbishBin({
                               }
                             }}
                           >
-                            <Trash2 aria-hidden /> Delete permanently
+                            Delete permanently…
                           </Button>
                         </div>
                       </div>
                       <DetailMetadata item={detailQuery.data.item} />
                       <section
                         aria-labelledby="stored-preview-heading"
-                        className="px-4 py-5 md:px-5"
+                        className="mt-9 flex flex-col gap-4"
                       >
-                        <div className="flex flex-wrap items-baseline justify-between gap-2">
-                          <h3
+                        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                          <Eyebrow
+                            as="h3"
+                            tick="live"
                             id="stored-preview-heading"
-                            className="cl-mono text-[10px] font-bold uppercase tracking-[0.16em]"
                           >
-                            Stored body preview
-                          </h3>
+                            Stored body
+                          </Eyebrow>
+                          <span className="flex-1" />
                           {detailQuery.data.preview.truncated ? (
-                            <span className="cl-mono text-[9px] uppercase tracking-[0.1em] text-warn">
+                            <span className="text-[12.5px] text-hot">
                               Preview is truncated
                             </span>
                           ) : null}
                         </div>
                         <section
                           aria-label="Read-only stored body preview"
-                          className="mt-3 max-h-96 overflow-y-auto border-l-2 border-rule bg-paper-2 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                          className={cn(
+                            "max-h-96 overflow-y-auto rounded-xl bg-ground px-5 py-4 md:ml-[17px] md:px-7 md:py-[22px]",
+                            FOCUS_RING_NATIVE,
+                          )}
                         >
                           {detailQuery.data.preview.encrypted ? (
-                            <p className="text-xs text-ink-mute">
+                            <p className="text-[13.5px] text-mute">
                               This retained body is encrypted and is not
                               disclosed in the preview.
                             </p>
@@ -644,19 +665,20 @@ export function RubbishBin({
         title={
           confirmation?.kind === "purge"
             ? "Delete permanently"
-            : "Empty Rubbish Bin"
+            : "Empty rubbish bin"
         }
         description={
           confirmation?.kind === "purge"
             ? `Delete “${confirmation.item.title}” and its retained content permanently? This cannot be undone.`
             : confirmation?.kind === "empty"
-              ? `Permanently delete every valid item currently in the Rubbish Bin (${validItems.length} ${validItems.length === 1 ? "item" : "items"})? Every item will be attempted and this cannot be undone.`
+              ? `Permanently delete every valid item currently in the rubbish bin (${validItems.length} ${validItems.length === 1 ? "item" : "items"})? Every item will be attempted and this cannot be undone.`
               : undefined
         }
         footer={
           <>
             <Button
               variant="secondary"
+              className="h-10 px-5"
               isDisabled={confirmationBusy}
               onPress={() => {
                 if (!confirmationBusy) setConfirmation(null);
@@ -667,6 +689,7 @@ export function RubbishBin({
             {confirmation?.kind === "purge" ? (
               <Button
                 variant="danger"
+                className="h-10 px-5"
                 isDisabled={confirmationBusy}
                 onPress={() => void confirmPurge(confirmation.item)}
               >
@@ -677,27 +700,28 @@ export function RubbishBin({
             ) : confirmation?.kind === "empty" ? (
               <Button
                 variant="danger"
+                className="h-10 px-5"
                 isDisabled={confirmationBusy}
                 onPress={() => void confirmEmpty()}
               >
                 {empty.isPending
-                  ? "Emptying Rubbish Bin…"
-                  : "Empty Rubbish Bin permanently"}
+                  ? "Emptying rubbish bin…"
+                  : "Empty rubbish bin permanently"}
               </Button>
             ) : null}
           </>
         }
       >
-        <p className="text-sm leading-relaxed text-ink-2">
+        <p className="text-[14px] leading-relaxed text-ink-2">
           {confirmation?.kind === "purge"
             ? "The archived body, metadata, and retained attachments for this page will be removed."
-            : "Successful deletions disappear immediately. Any failures remain in the Bin and are reported in their original order."}
+            : "Successful deletions disappear immediately. Any failures remain in the bin and are reported in their original order."}
         </p>
         {confirmationBusy ? (
           <p
             role="status"
             aria-live="polite"
-            className="mt-3 text-xs text-ink-mute"
+            className="mt-3 text-[13px] text-mute"
           >
             {confirmation?.kind === "purge"
               ? "Deleting permanently…"
