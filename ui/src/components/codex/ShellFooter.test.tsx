@@ -47,6 +47,22 @@ describe("ShellFooter", () => {
     expect(screen.getByText("Saved 2m ago")).toBeVisible();
   });
 
+  it("shows the Feeds entry context before the index time", () => {
+    act(() =>
+      useFooterContextStore.getState().publish("r", ["Feeds", "Entry 5"]),
+    );
+    render(<ShellFooter view="feeds" />);
+    expect(screen.getByText("Feeds · Entry 5 · Indexed 1m ago")).toBeVisible();
+  });
+
+  it("keeps a kept-alive Folio's context out of other screens", () => {
+    act(() =>
+      useFooterContextStore.getState().publish("f", ["notes/a.md", "12 words"]),
+    );
+    render(<ShellFooter view="gazetteer" />);
+    expect(screen.getByText("Indexed 1m ago")).toBeVisible();
+  });
+
   it("defaults the right side to the index time", () => {
     render(<ShellFooter view="bases" />);
     expect(screen.getByText("Indexed 1m ago")).toBeVisible();
