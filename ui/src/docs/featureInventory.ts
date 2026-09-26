@@ -239,7 +239,7 @@ export const FEATURE_INVENTORY = [
   },
   {
     id: "app.themeToggle",
-    label: "Toggle dark mode",
+    label: "Toggle bone / night mode",
     surface: "command",
     disposition: { kind: "reference", slug: "configuration" },
   },

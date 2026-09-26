@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useIndexWarnings, useRebuildIndex } from "#/api/index";
+import { Section } from "#/components/codex/Section";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { TextField } from "#/components/ui/text-field";
@@ -38,28 +39,24 @@ function DiagnosticSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="border border-border bg-background">
-      <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
-        <h5 className="cl-mono text-[10px] font-bold uppercase tracking-[0.14em]">
-          {title}
-        </h5>
-        <span className="cl-mono text-[10px] tabular-nums text-muted-foreground">
-          {count}
-        </span>
+    <section className="rounded-xl bg-ground px-4 py-3.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h5 className="text-[14px] font-medium text-ink">{title}</h5>
+        <span className="text-[13px] text-mute tabular-nums">{count}</span>
       </div>
-      <div className="p-3">
+      <div className="mt-2">
         {isPending ? (
-          <p className="cl-marg">Loading…</p>
+          <p className="text-[13px] text-mute">Loading…</p>
         ) : error ? (
           <p
             role="alert"
             aria-label={errorLabel}
-            className="text-sm text-destructive"
+            className="text-[14px] text-hot"
           >
             {errorLabel} {errorMessage(error, "Unknown index error.")}
           </p>
         ) : count === 0 ? (
-          <p className="cl-marg">{emptyLabel}</p>
+          <p className="text-[13px] text-mute">{emptyLabel}</p>
         ) : (
           children
         )}
@@ -113,24 +110,18 @@ export function IndexHealthPanel() {
   }
 
   return (
-    <div className="space-y-5">
-      <section className="border border-border bg-card p-4">
-        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h4 className="font-heading text-base font-bold">
-              Index diagnostics
-            </h4>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+    <div className="flex flex-col gap-12">
+      <Section label="Index diagnostics" compact headingLevel={4} className="[&_h4]:text-[21px]">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+            <p className="min-w-0 max-w-2xl flex-1 basis-64 text-[14px] text-mute">
               Review and resolve reference issues in the dedicated workspace.
               Build warnings remain available here.
             </p>
+            <Button variant="primary" onPress={openRepairs}>
+              Open Reference Repairs
+            </Button>
           </div>
-          <Button variant="primary" onPress={openRepairs}>
-            Open Reference Repairs
-          </Button>
-        </div>
-
-        <div className="space-y-3">
           <DiagnosticSection
             title="Build warnings"
             count={warningItems.length}
@@ -139,7 +130,7 @@ export function IndexHealthPanel() {
             errorLabel="Index warnings could not be loaded."
             emptyLabel="No warnings from the latest index build."
           >
-            <ul className="list-disc space-y-1 pl-5 text-sm text-foreground">
+            <ul className="list-disc space-y-1 pl-5 text-[14px] text-ink">
               {warningItems.map((warning) => (
                 <li key={warning} className="break-words">
                   {warning}
@@ -148,29 +139,24 @@ export function IndexHealthPanel() {
             </ul>
           </DiagnosticSection>
         </div>
-      </section>
+      </Section>
 
-      <section className="border border-border bg-card p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h4 className="font-heading text-base font-bold">
-              Index maintenance
-            </h4>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Rebuild the derived index from vault files. Page content is not
-              changed, but search and link resolution are recalculated.
-            </p>
-          </div>
+      <Section label="Index maintenance" compact headingLevel={4} className="[&_h4]:text-[21px]">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <p className="min-w-0 max-w-2xl flex-1 basis-64 text-[14px] text-mute">
+            Rebuild the derived index from vault files. Page content is not
+            changed, but search and link resolution are recalculated.
+          </p>
           <Button variant="danger" onPress={openRebuild}>
             Rebuild index
           </Button>
         </div>
         {actionMessage ? (
-          <p role="status" className="mt-3 text-sm text-foreground">
+          <p role="status" className="mt-3 text-[14px] text-ink">
             {actionMessage}
           </p>
         ) : null}
-      </section>
+      </Section>
       <Dialog
         isOpen={rebuildOpen}
         onOpenChange={(open) => {
@@ -207,7 +193,7 @@ export function IndexHealthPanel() {
             autoFocus
           />
           {rebuildError ? (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-[14px] text-hot">
               {rebuildError}
             </p>
           ) : null}

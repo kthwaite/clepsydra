@@ -3,6 +3,7 @@ import {
   enabledStaticCommands,
   STATIC_COMMANDS,
 } from "#/components/codex/commandRegistry";
+import { SHORTCUTS } from "#/lib/shortcuts";
 
 describe("enabledStaticCommands", () => {
   it("removes every Academic command when Academic is disabled", () => {
@@ -19,5 +20,13 @@ describe("enabledStaticCommands", () => {
     expect(enabledStaticCommands({ academic: true, feeds: false })).toEqual(
       STATIC_COMMANDS,
     );
+  });
+});
+
+describe("theme toggle naming", () => {
+  it("names the palettes bone and night, as Settings does", () => {
+    const command = STATIC_COMMANDS.find((c) => c.id === "app.themeToggle");
+    expect(command?.title).toBe("Toggle bone / night mode");
+    expect(SHORTCUTS["app.themeToggle"].label).toBe("Toggle bone / night mode");
   });
 });

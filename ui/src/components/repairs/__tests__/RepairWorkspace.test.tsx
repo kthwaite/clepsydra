@@ -197,6 +197,90 @@ beforeEach(() => {
 });
 
 describe("RepairWorkspace", () => {
+  it("heads the workspace with a ticked eyebrow, serif title and issue count", () => {
+    mocks.total = 118;
+    renderWorkspace();
+    expect(screen.getByText("Vault index")).toBeVisible();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Reference repair" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "118 issues · inspect the evidence, preview, then apply",
+      ),
+    ).toBeVisible();
+  });
+
+  it("names page kinds in sentence case and summarises each filter select", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    const pageKind = screen.getByRole("button", { name: /Page kind/ });
+    expect(pageKind).toHaveAccessibleName(/All/);
+    expect(
+      screen.getByRole("button", { name: /Repairability/ }),
+    ).toHaveAccessibleName(/All/);
+    expect(
+      screen.getByRole("button", { name: "Clear filters" }),
+    ).toHaveTextContent("Clear");
+
+    await user.click(pageKind);
+    expect(screen.getByRole("option", { name: "Note" })).toBeVisible();
+    expect(
+      screen.queryByRole("option", { name: "NOTE" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("highlights the link token inside the source evidence", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /Unresolved Target/ }));
+
+    expect(
+      screen.getByText("[[Unresolved Target]]", { selector: "mark" }),
+    ).toBeVisible();
+  });
+
+  it("summarises the previewed mutation plan", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /Unresolved Target/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Replace with notes/target.md" }),
+    );
+
+    expect(
+      await screen.findByText("1 text edit · 1 file operation"),
+    ).toBeVisible();
+  });
+
+  it("says when a preview has no file operations", async () => {
+    mocks.preview.mockResolvedValueOnce({
+      fingerprint: unresolvedIssue.fingerprint,
+      before: "[[Unresolved Target]]",
+      after: "[[notes/target.md]]",
+      plan: {
+        file_ops: [],
+        text_edits: [
+          {
+            path: "notes/source.md",
+            old_text: "[[Unresolved Target]]",
+            new_text: "[[notes/target.md]]",
+          },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /Unresolved Target/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Replace with notes/target.md" }),
+    );
+
+    expect(
+      await screen.findByText("1 text edit · no file operations"),
+    ).toBeVisible();
+  });
+
   it("previews before applying and retains the row until invalidation", async () => {
     const user = userEvent.setup();
     renderWorkspace();

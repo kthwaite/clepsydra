@@ -82,6 +82,15 @@ describe("ConflictsPanel", () => {
     });
   });
 
+  it("explains copies with the compare page's local and remote wording", () => {
+    mocks.data = { total: 0, items: [] };
+    render(<ConflictsPanel />);
+    expect(
+      screen.getByText(/the remote version was saved as a copy/),
+    ).toBeVisible();
+    expect(screen.getByText(/moves the copy to the rubbish bin\./)).toBeVisible();
+  });
+
   it("shows empty, loading, error and missing-original states", () => {
     mocks.isPending = true;
     const { rerender } = render(<ConflictsPanel />);

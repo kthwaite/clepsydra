@@ -174,6 +174,30 @@ const GATHER_FILES = [
   "../books/BookImportModal.tsx",
 ];
 
+/** Maintain: settings, rubbish, repairs, conflicts, stats, shortcuts (phase 5.5). */
+const MAINTAIN_FILES = [
+  "../SettingsModal.tsx",
+  "../settings/IndexHealthPanel.tsx",
+  "../settings/OfflinePanel.tsx",
+  "../codex/LocationForm.tsx",
+  "../rubbish/RubbishBin.tsx",
+  "../repairs/RepairFilters.tsx",
+  "../repairs/RepairIssueDetail.tsx",
+  "../repairs/RepairIssueList.tsx",
+  "../repairs/RepairWorkspace.tsx",
+  "../conflicts/ConflictDiffView.tsx",
+  "../conflicts/ConflictsPanel.tsx",
+  "../conflicts/DiffRows.tsx",
+  "../codex/Stats.tsx",
+  "../codex/ShortcutHelpModal.tsx",
+  "../StatCard.tsx",
+  "../../routes/rubbish.tsx",
+  "../../routes/repairs.tsx",
+  "../../routes/conflicts.tsx",
+  "../../routes/conflicts_.compare.$.tsx",
+  "../../routes/stats.tsx",
+];
+
 /** Mobile companion shell (phase 4b-1). */
 const MOBILE_FILES = [
   "../codex/MobileCodexFrame.tsx",
@@ -228,6 +252,7 @@ const files = [
   ...MOBILE_FILES,
   ...FOLIO_5_3_FILES,
   ...GATHER_FILES,
+  ...MAINTAIN_FILES,
 ].filter((f) => {
   try {
     readFileSync(path.join(uiDir, f));

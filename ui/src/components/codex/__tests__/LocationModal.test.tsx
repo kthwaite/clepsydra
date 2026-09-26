@@ -108,7 +108,27 @@ describe("LocationModal", () => {
 
     expect(updateMutate).not.toHaveBeenCalled();
     expect(
-      screen.getByText(/latitude must be between -90 and 90/i),
+      screen.getByText("Latitude must be between -90 and 90"),
+    ).toBeInTheDocument();
+  });
+
+  it("names its fields and actions in sentence case", () => {
+    render(<LocationModal />);
+    for (const label of [
+      "Latitude",
+      "Longitude",
+      "Label (optional)",
+      "City search",
+    ]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(
+      screen.getByRole("button", { name: "Use my current location" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Save location" }),
     ).toBeInTheDocument();
   });
 

@@ -1,29 +1,53 @@
 import { X } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useState } from "react";
-import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 import { useEncryptionConfig } from "#/api/encryption";
 import { useStats } from "#/api/index";
 import { useLocation } from "#/api/location";
+import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { LocationForm } from "#/components/codex/LocationForm";
+import { Section } from "#/components/codex/Section";
 import { NavigationModeSelector } from "#/components/NavigationModeSelector";
 import { IndexHealthPanel } from "#/components/settings/IndexHealthPanel";
 import { OfflinePanel } from "#/components/settings/OfflinePanel";
 import { useTheme } from "#/components/ThemeProvider";
 import { Badge } from "#/components/ui/badge";
+import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
 import { SegmentedControl } from "#/components/ui/segmented-control";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { formatChord, SHORTCUTS } from "#/lib/shortcuts";
 import { DENSITIES } from "#/lib/theme";
 import { formatRelativeTime } from "#/lib/time";
 import { type SettingsSection, useUiStore } from "#/store/ui";
 
-const sections: { id: SettingsSection; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "navigation", label: "Navigation" },
-  { id: "appearance", label: "Appearance" },
-  { id: "location", label: "Location" },
+const sections: {
+  id: SettingsSection;
+  label: string;
+  description?: string;
+}[] = [
+  { id: "general", label: "General", description: "The vault at a glance." },
+  {
+    id: "navigation",
+    label: "Navigation",
+    description: "What happens when a page opens.",
+  },
+  {
+    id: "appearance",
+    label: "Appearance",
+    description: "How the app looks on this device.",
+  },
+  {
+    id: "location",
+    label: "Location",
+    description: "Where the Atrium sky is drawn from.",
+  },
   { id: "editor", label: "Editor" },
-  { id: "advanced", label: "Advanced" },
+  {
+    id: "advanced",
+    label: "Advanced",
+    description: "Encryption, index health and the offline copy.",
+  },
 ];
 
 const EncryptionSetupDialog = lazy(() =>
@@ -38,66 +62,86 @@ export function SettingsModal() {
   const closeSettings = useUiStore((s) => s.closeSettings);
   const setActiveSection = useUiStore((s) => s.setActiveSettingsSection);
 
-  return (
-    <ModalOverlay
-      isOpen={isOpen}
-      onOpenChange={(open) => {
-        if (!open) closeSettings();
-      }}
-      isDismissable
-      className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/35 p-0 md:items-center md:p-4"
-    >
-      <Modal className="flex h-dvh w-full max-w-none overflow-hidden border border-border bg-background shadow-lg md:h-[min(86vh,720px)] md:max-w-5xl">
-        <Dialog className="flex h-full min-w-0 flex-1 outline-none">
-          <aside className="flex w-56 flex-col border-r border-border bg-card">
-            <div className="border-b border-border px-4 py-3">
-              <Heading
-                slot="title"
-                className="text-sm font-bold uppercase tracking-widest"
-              >
-                Settings
-              </Heading>
-            </div>
-            <nav className="flex-1 overflow-y-auto px-2 py-2">
-              {sections.map((section) => (
-                <button
-                  key={section.id}
-                  type="button"
-                  onClick={() => setActiveSection(section.id)}
-                  className={cn(
-                    "mb-1 block w-full border border-transparent px-3 py-2 text-left text-xs uppercase tracking-wider hover:bg-accent",
-                    activeSection === section.id
-                      ? "border-border bg-accent font-bold"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {section.label}
-                </button>
-              ))}
-            </nav>
-          </aside>
+  if (!isOpen) return null;
+  const active = sections.find((s) => s.id === activeSection);
 
-          <section className="flex min-w-0 flex-1 flex-col">
-            <div className="flex items-center justify-between border-b border-border px-5 py-3">
-              <h3 className="text-sm font-bold uppercase tracking-widest">
-                {sections.find((s) => s.id === activeSection)?.label}
-              </h3>
-              <IconButton
-                variant="secondary"
-                onPress={closeSettings}
-                aria-label="Close settings"
-                className="h-auto w-auto p-1"
+  return (
+    <CodexModalShell
+      ariaLabel="Settings"
+      onDismiss={closeSettings}
+      widthClassName="w-[92%]"
+      maxWidthClassName="max-w-[960px]"
+      panelClassName="flex max-md:flex-col md:h-[min(86vh,640px)] rounded-[18px]"
+    >
+      <aside className="flex flex-shrink-0 flex-col gap-4 bg-sink px-4 pt-6 pb-4 md:w-[248px] md:gap-[22px] md:pt-8 md:pb-6">
+        <h2 className="px-3.5 font-serif text-[30px] leading-[1.15] text-ink">
+          Settings
+        </h2>
+        <nav
+          aria-label="Settings sections"
+          className="flex gap-0.5 max-md:-mx-4 max-md:overflow-x-auto max-md:px-4 md:flex-col"
+        >
+          {sections.map((section) => {
+            const current = activeSection === section.id;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                aria-current={current ? "true" : undefined}
+                onClick={() => setActiveSection(section.id)}
+                className={cn(
+                  "flex h-10 flex-shrink-0 items-center gap-3 rounded-full px-3.5 text-left text-[14.5px] transition-colors",
+                  FOCUS_RING_NATIVE,
+                  current
+                    ? "bg-accent-tint font-medium text-ink"
+                    : "text-mute hover:text-ink",
+                )}
               >
-                <X />
-              </IconButton>
-            </div>
-            <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
-              <SettingsSectionContent section={activeSection} />
-            </div>
-          </section>
-        </Dialog>
-      </Modal>
-    </ModalOverlay>
+                <span
+                  aria-hidden
+                  className={cn(
+                    "h-[5px] w-[5px] flex-shrink-0 rounded-full",
+                    current ? "bg-accent" : "bg-transparent",
+                  )}
+                />
+                {section.label}
+              </button>
+            );
+          })}
+        </nav>
+        <span className="flex-1 max-md:hidden" />
+        <p className="px-3.5 text-[12.5px] leading-normal text-mute max-md:hidden">
+          Stored in this browser.
+          <br />
+          Vault settings live in <code className="text-ink-2">.clepsydra/</code>
+        </p>
+      </aside>
+
+      <section className="flex min-w-0 flex-1 flex-col md:overflow-y-auto">
+        <div className="flex items-start gap-4 px-5 pt-6 md:px-10 md:pt-8 md:pl-12">
+          <div className="flex min-w-0 flex-col gap-2">
+            <h3 className="font-serif text-[36px] leading-none tracking-[-0.01em] text-ink md:text-[44px]">
+              {active?.label}
+            </h3>
+            {active?.description ? (
+              <p className="text-[14px] text-mute">{active.description}</p>
+            ) : null}
+          </div>
+          <span className="flex-1" />
+          <IconButton
+            variant="secondary"
+            onPress={closeSettings}
+            aria-label="Close settings"
+            className="h-9 w-9 text-ink-2"
+          >
+            <X />
+          </IconButton>
+        </div>
+        <div className="flex flex-col gap-12 px-5 pt-10 pb-10 md:px-10 md:pt-14 md:pl-12">
+          <SettingsSectionContent section={activeSection} />
+        </div>
+      </section>
+    </CodexModalShell>
   );
 }
 
@@ -110,12 +154,12 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
     return (
       <>
         <SettingsCard
-          title="Tab Opening Mode"
+          title="Tab opening mode"
           description="Control what happens when opening a page that is not already open."
           trailing={<NavigationModeSelector />}
         />
         <SettingsCard
-          title="Mode Reference"
+          title="Mode reference"
           description="Smart: focus existing tab or open a new one. New Tab: always open a new tab. Replace: replace the active tab."
         />
       </>
@@ -134,12 +178,12 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
     return (
       <>
         <SettingsCard
-          title="Editing Defaults"
+          title="Editing defaults"
           description="Editor behavior such as autosave and formatting options will be configurable here."
           trailing={<ComingSoonBadge />}
         />
         <SettingsCard
-          title="Markdown Tools"
+          title="Markdown tools"
           description="Preview and markdown helper controls are planned for this section."
           trailing={<ComingSoonBadge />}
         />
@@ -176,27 +220,22 @@ function EncryptionSettings() {
         }
         trailing={
           config.isPending ? (
-            <span className="text-xs text-muted-foreground">loading…</span>
+            <span className="text-[13px] text-mute">Loading…</span>
           ) : initialized ? (
             canChangePassword ? (
-              <button
-                type="button"
-                className="cl-btn"
-                onClick={() => setDialogMode("change-password")}
+              <Button
+                variant="secondary"
+                onPress={() => setDialogMode("change-password")}
               >
                 Change password
-              </button>
+              </Button>
             ) : (
-              <Badge>recovery identity only</Badge>
+              <Badge>Recovery identity only</Badge>
             )
           ) : (
-            <button
-              type="button"
-              className="cl-btn cl-btn-hot"
-              onClick={() => setDialogMode("setup")}
-            >
+            <Button variant="primary" onPress={() => setDialogMode("setup")}>
               Set up encryption
-            </button>
+            </Button>
           )
         }
       />
@@ -212,71 +251,149 @@ function EncryptionSettings() {
   );
 }
 
+/** Sample row height per density, for the Appearance preview only. */
+const PREVIEW_ROW_HEIGHT: Record<(typeof DENSITIES)[number], string> = {
+  compact: "h-8",
+  default: "h-10",
+  spacious: "h-12",
+};
+
+const PREVIEW_ROWS = [
+  {
+    title: "Set theme-color to cobalt",
+    code: "TSK-mild-quail",
+    dot: "bg-accent",
+  },
+  { title: "Bases board view", code: "TSK-keen-newt", dot: "bg-faint" },
+  {
+    title: "Colour rules for Bases",
+    code: "TSK-dry-lark",
+    dot: "bg-transparent",
+  },
+] as const;
+
 function OperatorPreferences() {
   const { resolvedTheme, setMode, density, setDensity } = useTheme();
 
   return (
-    <div className="space-y-5">
-      <Row label="Mode">
-        <SegmentedControl
-          label="Mode"
-          value={resolvedTheme}
-          options={[
-            { id: "dark", label: "Dark" },
-            { id: "light", label: "Paper" },
-          ]}
-          onChange={(value) => setMode(value as "dark" | "light")}
-          className="w-fit gap-0 border border-border"
-          itemClassName="cl-mono ml-0 border-0 border-r border-border px-3 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground last:border-r-0 data-[hovered]:bg-transparent data-[hovered]:text-foreground data-[selected]:border-border data-[selected]:bg-accent data-[selected]:font-normal data-[selected]:text-black [&[data-hovered][data-selected]]:text-black"
-        />
-      </Row>
+    <>
+      <Section
+        label="Mode"
+        compact
+        headingLevel={4}
+        className="[&_h4]:text-[21px]"
+      >
+        <div className="flex flex-wrap items-center gap-x-7 gap-y-3">
+          <SegmentedControl
+            label="Mode"
+            value={resolvedTheme}
+            options={[
+              { id: "light", label: "Bone" },
+              { id: "dark", label: "Night" },
+            ]}
+            onChange={(value) => setMode(value as "dark" | "light")}
+            itemClassName={SEGMENT_ITEM}
+          />
+          <p className="text-[13px] text-mute">
+            Bone for daylight, night for the lamp.{" "}
+            <kbd className="font-sans text-ink-2">
+              {formatChord(SHORTCUTS["app.themeToggle"].chord)}
+            </kbd>{" "}
+            switches anywhere.
+          </p>
+        </div>
+      </Section>
 
-      <Row label="Density">
-        <SegmentedControl
-          label="Density"
-          value={density}
-          options={DENSITIES.map((item) => ({
-            id: item,
-            label: item,
-          }))}
-          onChange={(value) => setDensity(value as (typeof DENSITIES)[number])}
-          className="w-fit gap-0 border border-border"
-          itemClassName="cl-mono ml-0 border-0 border-r border-border px-3 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground last:border-r-0 data-[hovered]:bg-transparent data-[hovered]:text-foreground data-[selected]:border-border data-[selected]:bg-accent data-[selected]:font-normal data-[selected]:text-black [&[data-hovered][data-selected]]:text-black"
-        />
-      </Row>
-    </div>
+      <Section
+        label="Density"
+        compact
+        headingLevel={4}
+        className="[&_h4]:text-[21px]"
+      >
+        <div className="flex flex-col gap-[22px]">
+          <SegmentedControl
+            label="Density"
+            value={density}
+            options={DENSITIES.map((item) => ({
+              id: item,
+              label: item,
+            }))}
+            onChange={(value) =>
+              setDensity(value as (typeof DENSITIES)[number])
+            }
+            itemClassName={cn(SEGMENT_ITEM, "capitalize")}
+          />
+          <div
+            aria-hidden="true"
+            data-density-preview={density}
+            className="flex w-full max-w-[420px] flex-col rounded-[14px] bg-ground py-1.5"
+          >
+            {PREVIEW_ROWS.map((row) => (
+              <span
+                key={row.code}
+                className={cn(
+                  "flex items-center gap-2.5 px-4 text-[14px] text-ink transition-[height]",
+                  PREVIEW_ROW_HEIGHT[density],
+                )}
+              >
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 flex-shrink-0 rounded-full",
+                    row.dot,
+                  )}
+                />
+                <span className="min-w-0 truncate">{row.title}</span>
+                <span className="flex-1" />
+                <span className="flex-shrink-0 text-[12.5px] text-mute">
+                  {row.code}
+                </span>
+              </span>
+            ))}
+          </div>
+          <p className="text-[13px] text-mute">
+            Sets row height and spacing, not type size. Each table's Compact
+            switch starts from here.
+          </p>
+        </div>
+      </Section>
+    </>
   );
 }
+
+/** Mockup segment: 34px pill, 14px label. */
+const SEGMENT_ITEM = "h-[34px] px-4 text-[14px]";
 
 function LocationSettings() {
   const { data: location } = useLocation();
   const configured = location?.latitude != null && location?.longitude != null;
   return (
-    <div className="space-y-4">
-      <div className="border border-border bg-card p-4">
-        <h4 className="cl-mono mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
-          § Vault location
-        </h4>
-        <p className="text-sm text-muted-foreground">
-          Sets the coordinates the Atrium sky panel uses for sunrise, sunset,
-          and the day-arc. Saved to{" "}
-          <code className="cl-mono text-foreground">
-            .clepsydra/location.toml
-          </code>
-          .
-        </p>
-        <p className="cl-mono mt-2 text-[12px] text-foreground">
-          {configured
-            ? `${location?.latitude}, ${location?.longitude}${
-                location?.label ? ` · ${location.label}` : ""
-              }`
-            : "Not configured"}
-        </p>
+    <Section
+      label="Vault location"
+      compact
+      headingLevel={4}
+      className="[&_h4]:text-[21px]"
+    >
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-2">
+          <p className="max-w-2xl text-[14px] text-mute">
+            Sets the coordinates the Atrium sky panel uses for sunrise, sunset,
+            and the day-arc. Saved to{" "}
+            <code className="text-[13px] text-ink-2">
+              .clepsydra/location.toml
+            </code>
+            .
+          </p>
+          <p className="text-[14px] text-ink tabular-nums">
+            {configured
+              ? `${location?.latitude}, ${location?.longitude}${
+                  location?.label ? ` · ${location.label}` : ""
+                }`
+              : "Not configured"}
+          </p>
+        </div>
+        <LocationForm initial={location} className="p-0" />
       </div>
-      <div className="border border-border bg-card">
-        <LocationForm initial={location} />
-      </div>
-    </div>
+    </Section>
   );
 }
 
@@ -294,32 +411,21 @@ function CorpusPanel() {
     ["Last collated", formatRelativeTime(stats?.last_indexed_at)],
   ];
   return (
-    <div className="border border-border bg-card p-4">
-      <h4 className="cl-mono mb-3 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
-        § Corpus
-      </h4>
-      <div className="cl-mono flex flex-col gap-1 text-[12px]">
+    <Section
+      label="Corpus"
+      compact
+      headingLevel={4}
+      className="[&_h4]:text-[21px]"
+    >
+      <dl className="flex max-w-[420px] flex-col gap-1.5 text-[14px]">
         {rows.map(([k, v]) => (
           <div key={k} className="flex items-baseline justify-between gap-4">
-            <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              {k}
-            </span>
-            <span className="tabular-nums text-foreground">{v}</span>
+            <dt className="text-mute">{k}</dt>
+            <dd className="text-ink tabular-nums">{v}</dd>
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-2 border-b border-border pb-4 last:border-b-0">
-      <span className="cl-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-        {label}
-      </span>
-      {children}
-    </div>
+      </dl>
+    </Section>
   );
 }
 
@@ -333,24 +439,22 @@ function SettingsCard({
   trailing?: ReactNode;
 }) {
   return (
-    <div className="border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="text-xs font-bold uppercase tracking-wider">
-            {title}
-          </h4>
-          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-        </div>
-        {trailing && <div className="shrink-0">{trailing}</div>}
+    <Section
+      label={title}
+      compact
+      headingLevel={4}
+      className="[&_h4]:text-[21px]"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <p className="min-w-0 max-w-2xl flex-1 basis-64 text-[14px] text-mute">
+          {description}
+        </p>
+        {trailing && <div className="flex-shrink-0">{trailing}</div>}
       </div>
-    </div>
+    </Section>
   );
 }
 
 function ComingSoonBadge() {
-  return (
-    <Badge size="sm" className="tracking-widest">
-      Coming Soon
-    </Badge>
-  );
+  return <Badge size="sm">Coming soon</Badge>;
 }

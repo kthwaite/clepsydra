@@ -27,6 +27,7 @@ const statsMocks = vi.hoisted(() => ({
   useReferenceIssues: vi.fn(() => ({
     data: { items: [], total: 23, limit: 1, offset: 0 },
   })),
+  lastIndexedAt: null as string | null,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -43,7 +44,7 @@ vi.mock("#/api/index", () => ({
       orphan_pages: 3,
       isolated_pages: 2,
       attachments: 44,
-      last_indexed_at: null,
+      last_indexed_at: statsMocks.lastIndexedAt,
     },
   }),
   useTags: () => ({
@@ -79,12 +80,34 @@ function expectInventoryCell(
 describe("Stats", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    statsMocks.lastIndexedAt = null;
+  });
+
+  it("titles the page with a Vault eyebrow and a Stats heading", () => {
+    render(<Stats />);
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Stats" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Vault")).toBeInTheDocument();
+    expect(screen.queryByText(/last collated/)).toBeNull();
+  });
+
+  it("names when the index was last collated, when the index says", () => {
+    statsMocks.lastIndexedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    render(<Stats />);
+
+    expect(
+      screen.getByText("Counts from the index, last collated 5m ago"),
+    ).toBeInTheDocument();
   });
 
   it("renders the vault inventory derived from stats and content", () => {
     render(<Stats />);
 
-    const inventory = closestSection(screen.getByText("Vessel · Inventory"));
+    const inventory = closestSection(
+      screen.getByRole("heading", { name: "Inventory" }),
+    );
     for (const [label, value] of [
       ["Notes", "1,234"],
       ["Links", "5,678"],
@@ -92,10 +115,10 @@ describe("Stats", () => {
       ["Unresolved", "12"],
       ["Orphans", "3"],
       ["Isolated", "2"],
-      ["Attach", "44"],
-      ["Captures · today", "0"],
-      ["Edited · today", "0"],
-      ["New · 7d", "0"],
+      ["Attachments", "44"],
+      ["Captured today", "0"],
+      ["Edited today", "0"],
+      ["New this week", "0"],
       ["Unfiled", "1"],
     ]) {
       expectInventoryCell(inventory, label, value);
@@ -108,6 +131,7 @@ describe("Stats", () => {
     render(<Stats />);
 
     const subjects = closestSection(screen.getByText("Subjects, by frequency"));
+    expect(within(subjects).getByText("All 3 tags")).toBeInTheDocument();
     const garden = within(subjects).getByRole("button", {
       name: /#garden.*9/i,
     });
@@ -139,7 +163,7 @@ describe("Stats", () => {
     const repairs = screen.getByRole("button", {
       name: "Open Reference Repairs, 23 issues",
     });
-    expect(repairs).toHaveTextContent("23 issues");
+    expect(repairs).toHaveTextContent("23 reference issues");
 
     await user.click(repairs);
 

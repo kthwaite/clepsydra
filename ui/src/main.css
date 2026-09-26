@@ -235,10 +235,13 @@ body {
     text-rendering: optimizeLegibility;
 }
 
-ul {
-    /** use padding to indent each list item the equivalent distance of a line height. 
-     * This will allow the bullet to sit neatly in a square of white-space. */
-    padding-inline-start: 1lh;
+/* Base layer, so a list's own padding utilities (p-0, px-*) win over it. */
+@layer base {
+    ul {
+        /* Indent each item by one line height, so the bullet sits in a
+           square of white space. */
+        padding-inline-start: 1lh;
+    }
 }
 
 ::selection {

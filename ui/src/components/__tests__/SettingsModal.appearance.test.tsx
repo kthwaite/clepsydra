@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsModal } from "#/components/SettingsModal";
+import { formatChord, SHORTCUTS } from "#/lib/shortcuts";
 
 const mocks = vi.hoisted(() => ({
   closeSettings: vi.fn(),
@@ -54,14 +55,68 @@ describe("SettingsModal appearance", () => {
     expect(screen.getByRole("radiogroup", { name: "Density" })).toBeVisible();
     expect(screen.queryByRole("radiogroup", { name: "Accent" })).toBeNull();
 
-    expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Night" })).toBeChecked();
     expect(screen.getByRole("radio", { name: /Default/i })).toBeChecked();
 
-    await user.click(screen.getByRole("radio", { name: "Paper" }));
+    await user.click(screen.getByRole("radio", { name: "Bone" }));
     expect(mocks.setMode).toHaveBeenCalledWith("light");
 
     await user.click(screen.getByRole("radio", { name: /Compact/i }));
     expect(mocks.setDensity).toHaveBeenCalledWith("compact");
+  });
+
+  it("labels the modes Bone and Night, with the theme shortcut hint", () => {
+    render(<SettingsModal />);
+    expect(screen.queryByRole("radio", { name: "Dark" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Paper" })).toBeNull();
+    expect(
+      screen.getByText(/Bone for daylight, night for the lamp\./),
+    ).toBeVisible();
+    // The platform's own chord text: Ctrl+Shift+\ off a Mac.
+    const kbd = screen.getByText(
+      formatChord(SHORTCUTS["app.themeToggle"].chord),
+    );
+    expect(kbd.tagName).toBe("KBD");
+    expect(
+      screen.getByText(
+        "Sets row height and spacing, not type size. Each table's Compact switch starts from here.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("nests section eyebrows under the pane title", () => {
+    render(<SettingsModal />);
+    expect(
+      screen.getByRole("heading", { level: 4, name: "Mode" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { level: 4, name: "Density" }),
+    ).toBeVisible();
+  });
+
+  it("previews the selected density with hidden sample rows", () => {
+    const { container } = render(<SettingsModal />);
+    const preview = container.ownerDocument.querySelector(
+      "[data-density-preview]",
+    );
+    expect(preview).not.toBeNull();
+    expect(preview).toHaveAttribute("aria-hidden", "true");
+    expect(preview?.getAttribute("data-density-preview")).toBe("default");
+  });
+
+  it("names the section in a serif title and marks the current nav item", () => {
+    render(<SettingsModal />);
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Appearance" })).toBeVisible();
+    expect(screen.getByText("How the app looks on this device.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Appearance" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "General" })).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(screen.getByText(/Stored in this browser\./)).toBeVisible();
   });
 
   it("has no diegetic chrome control", () => {
