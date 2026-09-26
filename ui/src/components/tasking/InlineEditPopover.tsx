@@ -8,6 +8,8 @@ import { Button, Dialog, DialogTrigger } from "react-aria-components";
 import type { BoardTask } from "#/api/board";
 import { usePatchTask } from "#/api/board";
 import { Popover } from "#/components/ui/popover";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 import type { ColLabelFn } from "./board-constants";
 import { DispositionRow, PriorityRow } from "./fields";
 
@@ -44,7 +46,10 @@ export function InlineEditPopover({
     // reach the window-level useGlobalShortcuts dispatcher.
     <DialogTrigger isOpen={open} onOpenChange={setOpen}>
       <Button
-        className="pointer-events-auto relative z-[1] cursor-pointer outline-none focus-visible:outline-[1px] focus-visible:outline-[var(--hot)]"
+        className={cn(
+          "pointer-events-auto relative z-[1] cursor-pointer rounded-full",
+          FOCUS_RING,
+        )}
         data-testid={`${testIdPrefix}-inline-${field}-${task.id}`}
         aria-label={`Change ${field}`}
       >
@@ -53,7 +58,7 @@ export function InlineEditPopover({
       <Popover hideArrow placement="bottom start">
         <Dialog
           aria-label={`Set ${field}`}
-          className="w-[320px] border border-[var(--ink-3)] bg-[var(--bg)] p-[8px] outline-none"
+          className="w-[360px] max-w-[92vw] rounded-xl bg-raise p-2 shadow-md outline-none"
         >
           {field === "status" ? (
             <DispositionRow

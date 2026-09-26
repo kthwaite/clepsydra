@@ -1,29 +1,29 @@
 /** Shared constants and micro-chips for the Tasking board. */
 
 import type { BoardOperation } from "#/api/board";
+import { formatDayMonth } from "#/lib/time";
 import type { BoardMode } from "#/store/board";
 
 // ── date formatting ──────────────────────────────────────────────────────────
 
 /**
- * Formats a cycle date window as "MM.DD — MM.DD" (half-open when only one
- * bound is set). Returns "No dates" when both start and end are absent.
+ * Formats a cycle date window as "21 Sep – 4 Oct", or "14–27 Sep" within one
+ * month; "From …" / "Until …" when only one bound is set; "No dates" when
+ * neither is.
  */
 export function fmtCycleWindow(
   start?: string | null,
   end?: string | null,
 ): string {
-  if (!start && !end) return "No dates";
-  const fmt = (s: string) => {
-    // ISO date "YYYY-MM-DD" → "MM.DD"
-    const parts = s.split("-");
-    if (parts.length === 3) return `${parts[1]}.${parts[2]}`;
-    return s;
-  };
-  if (start && end) return `${fmt(start)} — ${fmt(end)}`;
-  if (start) return `${fmt(start)} —`;
-  if (!end) return "No dates";
-  return `— ${fmt(end)}`;
+  if (start && end) {
+    const [from, to] = [formatDayMonth(start), formatDayMonth(end)];
+    const sameMonth = from !== start && start.slice(0, 7) === end.slice(0, 7);
+    // Same month: "14–27 Sep".
+    return sameMonth ? `${from.split(" ")[0]}–${to}` : `${from} – ${to}`;
+  }
+  if (start) return `From ${formatDayMonth(start)}`;
+  if (end) return `Until ${formatDayMonth(end)}`;
+  return "No dates";
 }
 
 // ── canonical op key ─────────────────────────────────────────────────────────

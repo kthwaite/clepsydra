@@ -128,3 +128,27 @@ export function formatFeedTime(iso: string | null | undefined): string {
 export function feedEntryBoundary(iso: string, id: number): string {
   return `${iso}|${id}`;
 }
+
+const SHORT_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** ISO day ("2026-09-21") → "21 Sep". Fixed month names: ICU's en-GB short
+ *  September is "Sept". Anything else comes back unchanged. */
+export function formatDayMonth(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  const month = m ? SHORT_MONTHS[Number(m[2]) - 1] : undefined;
+  if (!m || !month) return iso;
+  return `${Number(m[3])} ${month}`;
+}

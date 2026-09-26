@@ -1,22 +1,24 @@
 /**
- * CycleView — sprint view for the TASKING board.
+ * CycleView — the Cycle view of the Tasking board (Stone & Lamp).
  *
- * Design source: docs/pkm-redesign/project/board-modes.jsx lines 195-299
- * (SprintView) + docs/pkm-redesign/project/styles-board.css .sp* classes.
+ * Design source: the phase 5 mockup TaskingCycle.dc.html.
  *
  * - resolveCycle: exported pure helper; determines the displayed cycle from
  *   the persisted cycleSel store value and the live cycles array.
  * - board-stats: pure helpers compute committed/sealed/field/hold/
  *   check counts and sealed percentage.
- * - CycleView: renders the header (window·state, h2 label, goal, actions),
- *   right-side metrics + historical burndown Spark, progress bar, and
- *   disposition lanes.
+ * - CycleView: renders the cycle strip (CycleStrip), the header (window ·
+ *   state meta line, serif h2, goal, quiet lifecycle action), serif numeral
+ *   stats + burndown Spark, the progress bar, and the status lanes.
  */
 
 import { useMemo } from "react";
 import type { BoardCycle, BoardTask } from "#/api/board";
+import { Tick } from "#/components/codex/Tick";
+import { Button } from "#/components/ui/button";
 import { Spark } from "#/components/ui/spark";
-import { pad2 } from "#/lib/time";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useBoardStore } from "#/store/board";
 import {
   COL_ORDER,
@@ -28,6 +30,7 @@ import {
   StatePip,
 } from "./board-constants";
 import { checklistProgress, cycleStats } from "./board-stats";
+import { CycleStrip } from "./CycleStrip";
 import { InlineEditPopover } from "./InlineEditPopover";
 
 // ── resolveCycle ──────────────────────────────────────────────────────────────
@@ -83,6 +86,8 @@ export interface CycleViewProps {
    * === "BACKLOG" with no `id` field).
    */
   cycle: BoardCycle | typeof BACKLOG_PSEUDO_CYCLE;
+  /** Every cycle on the board, in board order — drives the cycle strip. */
+  cycles: BoardCycle[];
   /**
    * Op-filtered tasks from TaskingScreen (same `visibleTasks` slice used by
    * KanbanView and BacklogView). CycleView filters to items whose cycle
@@ -107,6 +112,7 @@ export interface CycleViewProps {
 
 export function CycleView({
   cycle,
+  cycles,
   tasks,
   activeProject,
   onEditTask,
@@ -163,21 +169,25 @@ export function CycleView({
 
   // Window label
   const windowLabel = isBacklog
-    ? "No Cycle"
+    ? "No cycle"
     : fmtCycleWindow(cycle.start, cycle.end);
 
-  // State label color — mirrors .sp-state.* in styles-board.css
-  // Note: "OPEN" is the BACKLOG pseudo-cycle state (uncommitted tasking).
-  const stateColor =
+  // Display label — the Backlog pseudo-cycle's stored label is "BACKLOG".
+  const displayLabel = isBacklog ? "Backlog" : cycle.label;
+
+  // State word colour. "OPEN" is the Backlog pseudo-cycle state.
+  const stateClass =
     cycle.state === "ACTIVE"
-      ? "var(--cool)"
-      : cycle.state === "PLANNED"
-        ? "var(--ink-2)"
-        : cycle.state === "CLOSED"
-          ? "var(--ink-3)"
-          : cycle.state === "OPEN"
-            ? "var(--warn)" // BACKLOG pseudo-cycle
-            : "var(--ink-mute)";
+      ? "text-accent"
+      : cycle.state === "OPEN"
+        ? "text-hot"
+        : "text-mute";
+
+  // Unassigned tasks, counted over the same slice the view shows.
+  const backlogCount = useMemo(
+    () => tasks.filter((t) => !t.cycle).length,
+    [tasks],
+  );
 
   function handleCommitTask() {
     const preset: { cycle?: string; project?: string } = {};
@@ -187,137 +197,85 @@ export function CycleView({
   }
 
   return (
-    <div className="cl-mono h-full overflow-y-auto px-[var(--pad)] py-[16px]">
+    <div className="flex h-full flex-col overflow-y-auto px-10 pb-10 pt-9">
+      <CycleStrip
+        cycles={cycles}
+        selectedCode={cycle.code}
+        backlogCount={backlogCount}
+      />
+
       {/* ── Header ─────────────────────────────────────────────────── */}
-      <div className="mb-[16px] flex items-start justify-between gap-[24px]">
-        {/* Left */}
-        <div className="min-w-0 flex-1">
-          {/* Window · State */}
-          <div className="mb-[2px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
+      <div className="mt-8 flex flex-wrap items-start gap-12">
+        <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+          <span data-testid="cv-meta" className="text-[13px] text-mute">
             {windowLabel}
-            <span className="mx-[6px] text-[var(--rule)]">·</span>
-            <span style={{ color: stateColor, letterSpacing: "0.16em" }}>
+            <span aria-hidden="true"> · </span>
+            <span className={stateClass}>
               {cycleStateLabel(isBacklog ? "BACKLOG" : cycle.state)}
             </span>
-          </div>
+          </span>
 
-          {/* h2 label */}
-          <h2 className="cl-display mb-[4px] text-[22px] font-black uppercase leading-none tracking-[0.04em] text-[var(--ink)]">
-            {cycle.label}
+          <h2 className="m-0 font-serif text-[36px] font-normal leading-[1.05] tracking-[-0.01em] text-ink">
+            {displayLabel}
           </h2>
 
-          {/* Goal */}
           {cycle.goal && (
-            <div className="max-w-[520px] text-[13px] leading-snug text-[var(--ink-2)]">
+            <p className="m-0 max-w-[560px] text-[15px] leading-[1.55] text-ink-2">
               {cycle.goal}
-            </div>
+            </p>
           )}
 
-          {/* Actions */}
           {!isBacklog && (
-            <div className="mt-[12px] flex items-center gap-[10px]">
+            <div className="mt-2 flex items-center gap-2.5">
               {cycle.state === "PLANNED" && isRealCycle(cycle) && (
-                <button
-                  type="button"
-                  className="cursor-pointer border border-[var(--hot)] px-[12px] py-[6px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--hot)] transition-colors hover:bg-[var(--hot)] hover:text-black"
-                  onClick={() =>
-                    openCycleModal({
-                      kind: "open",
-                      cycleId: cycle.id,
-                    })
+                <Button
+                  onPress={() =>
+                    openCycleModal({ kind: "open", cycleId: cycle.id })
                   }
                 >
-                  <span aria-hidden="true">▶ </span>Start cycle
-                </button>
+                  Start cycle
+                </Button>
               )}
               {cycle.state === "ACTIVE" && isRealCycle(cycle) && (
-                <button
-                  type="button"
-                  className="cursor-pointer border border-[var(--hot)] px-[12px] py-[6px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--hot)] transition-colors hover:bg-[var(--hot)] hover:text-black"
-                  onClick={() =>
-                    openCycleModal({
-                      kind: "seal",
-                      cycleId: cycle.id,
-                    })
+                <Button
+                  onPress={() =>
+                    openCycleModal({ kind: "seal", cycleId: cycle.id })
                   }
                 >
-                  <span aria-hidden="true">■ </span>Close cycle
-                </button>
+                  Close cycle
+                </Button>
               )}
               {cycle.state === "CLOSED" && (
-                <span className="border border-[var(--ink-3)] px-[10px] py-[4px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-                  <span aria-hidden="true">✓ </span>Cycle closed
-                </span>
+                <span className="text-[13px] text-mute">Cycle closed</span>
               )}
             </div>
           )}
         </div>
 
-        {/* Right — metrics + burndown */}
-        <div className="flex flex-col items-end gap-[10px]">
-          <div className="flex gap-[20px]">
-            <div className="flex flex-col items-end gap-[1px]">
-              <span className="text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                Tasks
-              </span>
-              <b className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]">
-                {pad2(stats.committed)}
-              </b>
-            </div>
-            <div className="flex flex-col items-end gap-[1px]">
-              <span className="text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                Done
-              </span>
-              <b
-                className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]"
-                style={{ color: "var(--cool)" }}
-              >
-                {pad2(stats.sealed)}
-              </b>
-            </div>
-            <div className="flex flex-col items-end gap-[1px]">
-              <span className="text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                In progress
-              </span>
-              <b className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]">
-                {pad2(stats.field)}
-              </b>
-            </div>
-            <div className="flex flex-col items-end gap-[1px]">
-              <span className="text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                Blocked
-              </span>
-              <b
-                className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]"
-                data-hot={stats.hold > 0 ? "true" : undefined}
-                style={stats.hold > 0 ? { color: "var(--hot)" } : undefined}
-              >
-                {pad2(stats.hold)}
-              </b>
-            </div>
-          </div>
+        {/* Right — stats + burndown */}
+        <div className="flex flex-shrink-0 flex-col items-end gap-[18px]">
+          <dl className="m-0 flex gap-8">
+            <Stat label="Tasks" value={stats.committed} />
+            <Stat label="Done" value={stats.sealed} className="text-accent" />
+            <Stat label="In progress" value={stats.field} />
+            <Stat
+              label="Blocked"
+              value={stats.hold}
+              hot={stats.hold > 0}
+              className={stats.hold > 0 ? "text-hot" : undefined}
+            />
+          </dl>
 
-          {/* Burndown */}
-          <div className="flex flex-col items-end gap-[2px]">
-            <span className="text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-              Progress
-            </span>
+          <div data-testid="cv-burndown" className="flex items-center gap-3">
+            <span className="text-[12.5px] text-mute">Progress</span>
             {!burndownApplicable ? (
-              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
-                NOT APPLICABLE
-              </span>
+              <span className="text-[12.5px] text-mute">Not applicable</span>
             ) : burndownPending ? (
-              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
-                LOADING
-              </span>
+              <span className="text-[12.5px] text-mute">Loading</span>
             ) : burndownError ? (
-              <span className="text-[var(--fs-xs)] text-[var(--hot)]">
-                UNAVAILABLE
-              </span>
+              <span className="text-[12.5px] text-hot">Unavailable</span>
             ) : burndown.length === 0 ? (
-              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
-                NO HISTORY
-              </span>
+              <span className="text-[12.5px] text-mute">No history</span>
             ) : (
               <figure
                 className="m-0"
@@ -328,7 +286,7 @@ export function CycleView({
                     data={burndown}
                     width={150}
                     height={30}
-                    accent="var(--hot)"
+                    accent="var(--accent)"
                   />
                 </div>
                 <figcaption
@@ -344,59 +302,48 @@ export function CycleView({
       </div>
 
       {/* ── Progress bar ────────────────────────────────────────────── */}
-      <div className="mb-[16px] flex items-center gap-[12px]">
-        <div className="h-[8px] flex-1 border border-[var(--rule)] bg-[var(--bg-3)]">
-          <i
-            className="block h-full transition-[width] duration-[240ms]"
-            style={{ width: `${stats.pct}%`, background: "var(--cool)" }}
+      <div className="mt-[26px] flex items-center gap-4">
+        <span className="block h-1.5 flex-1 overflow-hidden rounded-full bg-sink">
+          <span
+            className="block h-full rounded-full bg-accent transition-[width] duration-[240ms]"
+            style={{ width: `${stats.pct}%` }}
           />
-        </div>
-        <span className="whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-          {stats.pct}% Completion · {stats.checkDone}/{stats.checkTot} Checklist
-          items
+        </span>
+        <span className="whitespace-nowrap text-[13px] tabular-nums text-mute">
+          {stats.pct}% complete · {stats.checkDone} of {stats.checkTot}{" "}
+          checklist items
         </span>
       </div>
 
       {/* ── Body ─────────────────────────────────────────────────────── */}
       {items.length === 0 ? (
-        /* Empty state */
-        <div className="py-[60px] text-center">
-          <div className="mb-[8px] text-[32px] text-[var(--ink-mute)]">∅</div>
-          <div className="mb-[12px] text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-3)]">
-            No tasks in {cycle.label}
-          </div>
-          <button
-            type="button"
-            className="cursor-pointer border border-[var(--hot)] px-[12px] py-[6px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--hot)] transition-colors hover:bg-[var(--hot)] hover:text-black"
-            onClick={handleCommitTask}
-          >
-            + New task
-          </button>
+        <div className="flex flex-col items-center gap-4 py-16 text-center">
+          <span className="text-[15px] text-mute">
+            No tasks in {displayLabel}
+          </span>
+          <Button onPress={handleCommitTask}>New task</Button>
         </div>
       ) : (
-        /* Disposition lanes */
-        <div className="grid grid-cols-2 gap-[18px]">
+        <div className="mt-[34px] grid grid-cols-1 items-start gap-x-12 gap-y-[30px] min-[1400px]:grid-cols-2">
           {byCol.map((g) => (
-            <div
+            <section
               key={g.cid}
-              className="mb-[16px] break-inside-avoid"
+              className="flex min-w-0 flex-col gap-0.5"
               data-testid={`cv-lane-${g.cid}`}
             >
-              {/* Lane header */}
-              <div className="mb-[4px] flex items-center gap-[6px] border-b border-[var(--rule)] pb-[5px]">
-                <StatePip col={g.cid} />
-                <span className="cl-display text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--ink)]">
+              <h3 className="m-0 mb-2 flex items-center gap-2.5 font-normal">
+                <Tick variant={g.cid === "SEALED" ? "faint" : "live"} />
+                <span className="font-serif text-[21px] italic text-ink">
                   {colLabel(g.cid)}
                 </span>
                 <span
-                  className="ml-auto text-[var(--fs-xs)] [font-variant-numeric:tabular-nums] text-[var(--ink-3)]"
+                  className="text-[12.5px] tabular-nums text-mute"
                   data-testid={`cv-lane-count-${g.cid}`}
                 >
-                  {pad2(g.items.length)}
+                  {g.items.length}
                 </span>
-              </div>
+              </h3>
 
-              {/* Task rows */}
               {g.items.map((t) => {
                 const { done: d, total } = checklistProgress(t.checks);
 
@@ -404,16 +351,18 @@ export function CycleView({
                   <div
                     key={t.id}
                     data-testid={`cv-row-${t.id}`}
-                    className="pointer-events-none relative flex w-full cursor-pointer items-center gap-[8px] border-b border-dotted border-[var(--rule)] py-[5px] px-[2px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)]"
+                    className="pointer-events-none relative flex h-10 w-full items-center gap-3 rounded-[10px] px-3 text-left text-[14px] transition-colors hover:bg-raise"
                   >
                     <button
                       type="button"
                       aria-label={`Edit ${t.code}: ${t.title}`}
-                      className="pointer-events-auto absolute inset-0 z-0 cursor-pointer border-0 bg-transparent p-0 text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--hot)] focus-visible:outline-offset-[-1px]"
+                      className={cn(
+                        "pointer-events-auto absolute inset-0 z-0 cursor-pointer rounded-[10px] bg-transparent p-0 text-left",
+                        FOCUS_RING_NATIVE,
+                      )}
                       onClick={() => handleEditTask(t.id)}
                       data-testid={`cv-action-${t.id}`}
                     />
-                    {/* Priority chip */}
                     <span className="flex-shrink-0">
                       <InlineEditPopover
                         task={t}
@@ -425,12 +374,10 @@ export function CycleView({
                       </InlineEditPopover>
                     </span>
 
-                    {/* Code */}
-                    <span className="min-w-0 truncate text-[var(--fs-s)] [font-variant-numeric:tabular-nums] text-[var(--ink)]">
+                    <span className="w-[168px] min-w-[72px] shrink truncate text-[13px] tabular-nums text-ink-2">
                       {t.code}
                     </span>
 
-                    {/* Status pip */}
                     <span className="flex-shrink-0">
                       <InlineEditPopover
                         task={t}
@@ -442,47 +389,75 @@ export function CycleView({
                       </InlineEditPopover>
                     </span>
 
-                    {/* Title + HOLD tag */}
-                    <span className="flex min-w-0 flex-1 items-center gap-[6px] overflow-hidden">
+                    <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                       {t.hold && (
                         <span
                           className="flex-shrink-0"
                           data-testid={`cv-hold-${t.id}`}
                         >
-                          <span className="inline-block border border-[var(--hot)] px-[4px] text-[var(--fs-xs)] leading-[14px] tracking-[0.12em] text-[var(--hot)]">
+                          <span className="inline-flex h-[22px] items-center rounded-full bg-[color-mix(in_oklab,var(--hot)_10%,transparent)] px-[9px] text-[12px] text-hot">
                             Blocked
                           </span>
                         </span>
                       )}
                       <span
-                        className="overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-s)] text-[var(--ink)]"
+                        className={cn(
+                          "truncate",
+                          t.status === "SEALED" ? "text-mute" : "text-ink",
+                        )}
                         title={t.title}
                       >
                         {t.title}
                       </span>
                     </span>
 
-                    {/* Project */}
-                    <span className="flex-shrink-0 text-[var(--fs-xs)] tracking-[0.06em] text-[var(--ink-3)]">
+                    <span className="min-w-0 max-w-[112px] shrink truncate text-[12.5px] text-mute">
                       {t.project ?? "—"}
                     </span>
 
-                    {/* Assignee */}
-                    <span className="flex-shrink-0 text-[var(--fs-xs)] text-[var(--ink-2)]">
+                    <span className="min-w-0 max-w-[96px] shrink truncate text-[12.5px] text-mute">
                       {t.assignee ?? "—"}
                     </span>
 
-                    {/* Checks */}
-                    <span className="flex-shrink-0 text-right text-[var(--fs-xs)] [font-variant-numeric:tabular-nums] text-[var(--ink-3)]">
+                    <span className="w-[34px] flex-shrink-0 text-right text-[12.5px] tabular-nums text-mute">
                       {total ? `${d}/${total}` : "—"}
                     </span>
                   </div>
                 );
               })}
-            </div>
+            </section>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** One serif numeral stat: the label sits under the value, right-aligned. */
+function Stat({
+  label,
+  value,
+  hot,
+  className,
+}: {
+  label: string;
+  value: number;
+  /** Marks the value as a warning (data attribute, not a class). */
+  hot?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className="flex flex-col-reverse items-end gap-1.5">
+      <dt className="text-[12.5px] text-mute">{label}</dt>
+      <dd
+        className={cn(
+          "m-0 font-serif text-[40px] leading-none tabular-nums",
+          className,
+        )}
+        data-hot={hot ? "true" : undefined}
+      >
+        {value}
+      </dd>
     </div>
   );
 }

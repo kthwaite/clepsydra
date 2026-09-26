@@ -24,6 +24,17 @@ const TASKING_FILES = [
   "../tasking/board-presentation.tsx",
   "../tasking/TaskingScreen.tsx",
   "../tasking/BoardModalFrame.tsx",
+  "../tasking/BacklogView.tsx",
+  "../tasking/CycleView.tsx",
+  "../tasking/TimelineView.tsx",
+  "../tasking/TaskEditPanel.tsx",
+  "../tasking/fields.tsx",
+  "../tasking/InlineEditPopover.tsx",
+  "../tasking/NewTaskModal.tsx",
+  "../tasking/NewCycleModal.tsx",
+  "../tasking/OpenCycleModal.tsx",
+  "../tasking/SealCycleModal.tsx",
+  "../tasking/CycleStrip.tsx",
 ];
 
 /** Slate prose elements restyled in phase 4.4a. */

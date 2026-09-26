@@ -9,12 +9,11 @@
  * ModalOverlay/Modal/Dialog provide focus trapping, focus restoration, Escape
  * dismissal and scrim-click dismissal. We do not use the house <Dialog>
  * wrapper because its fixed header (Heading + X icon) and justify-end footer
- * slots don't fit the authoritative board chrome (prompt glyph + sub-line +
- * ESC chip header; split footer with the ⌘↵ hint) from
- * docs/pkm-redesign/project/board-panels.jsx.
+ * slots don't fit the board chrome (serif title + sub-line + Esc chip header;
+ * split footer with the ⌘↵ hint).
  *
- * Styling follows the .board-modal-* / .cap-* / .ed-* classes from
- * docs/pkm-redesign/project/styles-board.css, translated to Tailwind tokens.
+ * Stone & Lamp interior (spec §5.5): serif title, sentence-case mute labels
+ * over sink inputs, a quiet Cancel and a primary cobalt Create task pill.
  *
  * Design deviation (plan decision 7):
  *   The prototype's SUBTASKS "checklist size" number field is replaced with a
@@ -23,13 +22,15 @@
  *   the markdown source-of-truth model; the prototype's count-only field
  *   would generate placeholder items anyway.
  *
- *   DUE hint changed from "MM.DD" to "YYYY-MM-DD" to match the ISO wire format.
+ *   Dates use native date inputs, which carry the ISO wire format.
  */
 
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { BoardCycle } from "#/api/board";
 import { useCreateTask } from "#/api/board";
+import { Button } from "#/components/ui/button";
 import { Select, SelectItem } from "#/components/ui/select";
+import { cn } from "#/lib/cn";
 import { useBoardStore } from "#/store/board";
 import {
   BOARD_MODAL_WIDTHS,
@@ -182,22 +183,19 @@ export function NewTaskModal({
       isDismissable={!dirty}
     >
       {/* Header */}
-      <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
-        <span className="cl-display text-[16px] font-extrabold text-[var(--hot)]">
-          +
-        </span>
-        <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
+      <div className="flex items-baseline gap-3 px-6 pt-5 pb-2">
+        <h2 className="m-0 font-serif text-[26px] leading-none font-normal text-ink">
           New task
-        </span>
-        <span className="cl-mono text-[var(--fs-xs)] tracking-[0.14em] text-[var(--ink-3)]">
+        </h2>
+        <span className="min-w-0 truncate text-[13px] text-mute">
           {opLabel} · Create task
         </span>
         <ModalEscChip onClose={closeTaskModal} testId="new-task-close-btn" />
       </div>
 
       {/* Body */}
-      <div className="flex flex-1 flex-col gap-[12px] overflow-y-auto p-[14px]">
-        {/* TITLE */}
+      <div className="flex flex-1 flex-col gap-4.5 overflow-y-auto px-6 pt-3 pb-6">
+        {/* Title */}
         <EdField label="Title">
           <input
             ref={titleRef}
@@ -211,11 +209,11 @@ export function NewTaskModal({
           />
         </EdField>
 
-        {/* BRIEF — prose body, written above any checklist on the page. */}
+        {/* Brief — prose body, written above any checklist on the page. */}
         <EdField label="Description" hint="Optional">
           <textarea
             aria-label="Description"
-            className={`${INPUT_CLS} resize-none`}
+            className={cn(INPUT_CLS, "resize-none")}
             rows={3}
             placeholder="What the task is and why it matters…"
             value={brief}
@@ -224,8 +222,8 @@ export function NewTaskModal({
           />
         </EdField>
 
-        {/* PROJECT + CYCLE */}
-        <div className="grid grid-cols-2 gap-[12px]">
+        {/* Project + cycle */}
+        <div className="grid grid-cols-2 gap-3.5">
           <EdField label="Project">
             <Select
               aria-label="Project"
@@ -268,7 +266,7 @@ export function NewTaskModal({
           </EdField>
         </div>
 
-        {/* DISPOSITION */}
+        {/* Status */}
         <EdField label="Status">
           <DispositionRow
             value={status}
@@ -278,7 +276,7 @@ export function NewTaskModal({
           />
         </EdField>
 
-        {/* PRIORITY */}
+        {/* Priority */}
         <EdField label="Priority">
           <PriorityRow
             value={priority}
@@ -287,8 +285,8 @@ export function NewTaskModal({
           />
         </EdField>
 
-        {/* ASSIGNEE / EST */}
-        <div className="grid grid-cols-2 gap-[12px]">
+        {/* Assignee + estimate */}
+        <div className="grid grid-cols-2 gap-3.5">
           <EdField label="Assignee">
             <input
               type="text"
@@ -311,9 +309,9 @@ export function NewTaskModal({
           </EdField>
         </div>
 
-        {/* START / DUE */}
-        <div className="grid grid-cols-2 gap-[12px]">
-          <EdField label="Start date" hint="YYYY-MM-DD">
+        {/* Start + due */}
+        <div className="grid grid-cols-2 gap-3.5">
+          <EdField label="Start date">
             <input
               type="date"
               aria-label="Start date"
@@ -323,7 +321,7 @@ export function NewTaskModal({
               data-testid="new-task-start"
             />
           </EdField>
-          <EdField label="Due date" hint="YYYY-MM-DD">
+          <EdField label="Due date">
             <input
               type="date"
               aria-label="Due date"
@@ -335,8 +333,8 @@ export function NewTaskModal({
           </EdField>
         </div>
 
-        {/* TAGS + CHECKLIST */}
-        <div className="grid grid-cols-2 gap-[12px]">
+        {/* Tags + checklist */}
+        <div className="grid grid-cols-2 gap-3.5">
           <EdField label="Tags" hint="Comma-separated">
             <input
               type="text"
@@ -348,13 +346,13 @@ export function NewTaskModal({
               data-testid="new-task-tags"
             />
           </EdField>
-          {/* CHECKLIST: one item per line → checklist[] array on POST.
+          {/* Checklist: one item per line → checklist[] array on POST.
                     Plan deviation: prototype used a count field; we use a
                     textarea so items carry actual text in the page body. */}
           <EdField label="Checklist" hint="One item per line">
             <textarea
               aria-label="Checklist"
-              className={`${INPUT_CLS} resize-none`}
+              className={cn(INPUT_CLS, "resize-none")}
               rows={3}
               placeholder="One item per line"
               value={checklist}
@@ -364,7 +362,7 @@ export function NewTaskModal({
           </EdField>
         </div>
 
-        {/* DOSSIER LINK */}
+        {/* Related page */}
         <EdField label="Related page" hint="Optional">
           <input
             type="text"
@@ -379,35 +377,35 @@ export function NewTaskModal({
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
-        <div className="cl-mono text-[var(--fs-xs)] tracking-[0.12em] text-[var(--ink-3)]">
-          <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
+      <div className="flex items-center justify-between gap-3 bg-ground px-6 pt-3 pb-3.5">
+        <div className="flex items-center gap-1.5 text-[12.5px] text-mute">
+          <kbd className="rounded-md bg-sink px-1.5 font-sans text-[12px] text-ink-2">
             ⌘↵
-          </span>{" "}
-          Create task ·{" "}
-          <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
-            ESC
-          </span>{" "}
-          Cancel
+          </kbd>
+          <span>Create task ·</span>
+          <kbd className="rounded-md bg-sink px-1.5 font-sans text-[12px] text-ink-2">
+            Esc
+          </kbd>
+          <span>Cancel</span>
         </div>
-        <div className="flex gap-[8px]">
-          <button
-            type="button"
-            className="cl-btn"
-            onClick={closeTaskModal}
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onPress={closeTaskModal}
             data-testid="new-task-cancel"
           >
             Cancel
-          </button>
-          <button
-            type="button"
-            className="cl-btn cl-btn-hot"
-            onClick={commit}
-            disabled={create.isPending || title.trim() === ""}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onPress={commit}
+            isDisabled={create.isPending || title.trim() === ""}
             data-testid="new-task-commit"
           >
             {create.isPending ? "Creating…" : "Create task"}
-          </button>
+          </Button>
         </div>
       </div>
     </BoardModalFrame>

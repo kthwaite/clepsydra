@@ -1,8 +1,9 @@
 /**
  * NewCycleModal — create a new cadence cycle.
  *
- * Design source: docs/pkm-redesign/project/board-panels.jsx lines 274-359
- * (NewSprintModal) + styles-board.css .board-modal* / .sp-confirm* classes.
+ * Design: the Stone & Lamp vocabulary of TaskingSealCycle (spec §5.5/§5.6):
+ * tick + italic serif eyebrow, serif title, segmented Status radios,
+ * primary commit button.
  *
  * Opened by openCycleModal({ kind: "new" }).
  * On success: closeCycleModal + setCycleSel(created.code) + setMode("cycle").
@@ -13,6 +14,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoardCycle } from "#/api/board";
 import { useCreateCycle } from "#/api/board";
+import { Tick } from "#/components/codex/Tick";
+import { Button } from "#/components/ui/button";
+import { Radio, RadioGroup } from "#/components/ui/radio-group";
 import { isoAddDays } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import {
@@ -21,7 +25,7 @@ import {
   ModalEscChip,
 } from "./BoardModalFrame";
 import { cycleStateLabel, fmtCycleWindow } from "./board-constants";
-import { EdField, INPUT_CLS, RADIO_CLS_BASE, RADIO_CLS_ON } from "./fields";
+import { EdField, INPUT_CLS } from "./fields";
 
 // ── newCyclePrefill ───────────────────────────────────────────────────────────
 
@@ -34,7 +38,7 @@ export interface NewCyclePrefill {
 /**
  * Pure helper — computes default field values for a new cycle.
  *
- * - label = "CYCLE " + (cycle count + 1)
+ * - label = "Cycle " + (cycle count + 1)
  * - start = day after latest cycle end (fallback: now)
  * - end   = start + 6 days
  *
@@ -63,17 +67,10 @@ export function newCyclePrefill(
   const end = isoAddDays(start, 6);
 
   return {
-    label: `CYCLE ${n}`,
+    label: `Cycle ${n}`,
     start,
     end,
   };
-}
-
-/** "YYYY-MM-DD" → "MM.DD" display string. */
-function fmtMD(iso: string): string {
-  const parts = iso.split("-");
-  if (parts.length === 3) return `${parts[1]}.${parts[2]}`;
-  return iso;
 }
 
 // ── NewCycleModal ─────────────────────────────────────────────────────────────
@@ -122,16 +119,13 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
 
   if (!isOpen) return null;
 
-  const windowLabel =
-    start && end
-      ? `${fmtMD(start)} — ${fmtMD(end)}`
-      : fmtCycleWindow(start, end);
+  const windowLabel = fmtCycleWindow(start, end);
 
   const commit = () => {
     create.mutate(
       {
         code: code.trim() || undefined,
-        label: (label.trim() || "CYCLE").toUpperCase(),
+        label: label.trim() || "Cycle",
         start,
         end,
         goal: goal.trim() || undefined,
@@ -162,24 +156,30 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
       }}
       constrainHeight
     >
-      {/* Header */}
-      <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
-        <span className="cl-display text-[16px] font-extrabold text-[var(--hot)]">
-          ◴
-        </span>
-        <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
-          New cycle
-        </span>
-        <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-          {windowLabel}
-        </span>
+      {/* Header: tick eyebrow + serif title */}
+      <div className="flex items-start gap-3 pt-[26px] pr-[22px] pl-8">
+        <div className="flex flex-col gap-2">
+          <span className="flex items-center gap-2.5">
+            <Tick />
+            <span className="font-serif text-[19px] italic text-mute">
+              Cycle
+            </span>
+          </span>
+          <h2 className="m-0 font-serif text-[36px] font-normal leading-none tracking-[-0.01em] text-ink">
+            New cycle
+          </h2>
+        </div>
         <ModalEscChip onClose={closeCycleModal} testId="new-cycle-close-btn" />
       </div>
 
       {/* Body */}
-      <div className="flex flex-1 flex-col gap-[12px] overflow-y-auto p-[14px]">
-        {/* LABEL + CODE */}
-        <div className="grid grid-cols-2 gap-[12px]">
+      <div className="flex flex-1 flex-col gap-[18px] overflow-y-auto px-8 pt-[22px] pb-[30px]">
+        <p className="m-0 text-[15px] leading-normal text-mute tabular-nums">
+          {windowLabel}
+        </p>
+
+        {/* Name + ID */}
+        <div className="grid grid-cols-2 gap-4">
           <EdField label="Name">
             <input
               ref={labelRef}
@@ -204,8 +204,8 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
           </EdField>
         </div>
 
-        {/* WINDOW */}
-        <div className="grid grid-cols-2 gap-[12px]">
+        {/* Window */}
+        <div className="grid grid-cols-2 gap-4">
           <EdField label="Start date" hint="start">
             <input
               type="date"
@@ -228,34 +228,33 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
           </EdField>
         </div>
 
-        {/* INITIAL STATE */}
-        <fieldset aria-label="Status" className="m-0 min-w-0 border-0 p-0">
-          <legend className="mb-[5px] flex w-full items-baseline justify-between gap-[8px]">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-[var(--ink-mute)]">
-              Status
-            </span>
-            <span className="cl-mono text-[9px] uppercase tracking-[0.1em] text-[var(--ink-4)]">
-              lifecycle
-            </span>
-          </legend>
-          <div className="flex gap-[6px]">
+        {/* Initial state */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-baseline justify-between">
+            <span className="text-[12.5px] text-mute">Status</span>
+            <span className="text-[12.5px] text-mute">lifecycle</span>
+          </div>
+          <RadioGroup
+            aria-label="Status"
+            value={state}
+            onChange={setState}
+            segmented
+            optionsClassName="rounded-xl p-[3px]"
+          >
             {["PLANNED", "ACTIVE"].map((st) => (
-              <button
+              <Radio
                 key={st}
-                type="button"
-                aria-label={cycleStateLabel(st)}
-                aria-pressed={state === st}
-                className={`${RADIO_CLS_BASE} ${state === st ? RADIO_CLS_ON : "hover:text-[var(--ink)] hover:border-[var(--ink-3)]"}`}
-                onClick={() => setState(st)}
+                value={st}
+                className="h-[34px] min-w-[112px] justify-center rounded-[9px] text-[13.5px]"
                 data-testid={`new-cycle-state-${st}`}
               >
                 {cycleStateLabel(st)}
-              </button>
+              </Radio>
             ))}
-          </div>
-        </fieldset>
+          </RadioGroup>
+        </div>
 
-        {/* GOAL */}
+        {/* Goal */}
         <EdField label="Goal" hint="one line">
           <textarea
             className={`${INPUT_CLS} resize-none`}
@@ -270,36 +269,30 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
-        <div className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-3)]">
-          <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
-            ⌘↵
-          </span>{" "}
-          create ·{" "}
-          <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
-            ESC
-          </span>{" "}
+      <div className="flex items-center gap-2.5 bg-ground pt-4 pr-[22px] pb-[18px] pl-8">
+        <span className="mr-auto flex items-center gap-1.5 text-[12.5px] text-mute">
+          <kbd className="rounded-md bg-sink px-1.5 py-px font-sans">⌘↵</kbd>
+          create ·
+          <kbd className="rounded-md bg-sink px-1.5 py-px font-sans">Esc</kbd>
           cancel
-        </div>
-        <div className="flex gap-[8px]">
-          <button
-            type="button"
-            className="cl-btn"
-            onClick={closeCycleModal}
-            data-testid="new-cycle-cancel"
-          >
-            CANCEL
-          </button>
-          <button
-            type="button"
-            className="cl-btn cl-btn-hot"
-            onClick={commit}
-            disabled={create.isPending}
-            data-testid="new-cycle-commit"
-          >
-            {create.isPending ? "Creating…" : "Create cycle"}
-          </button>
-        </div>
+        </span>
+        <Button
+          variant="secondary"
+          className="h-10 rounded-full"
+          onPress={closeCycleModal}
+          data-testid="new-cycle-cancel"
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          className="h-10"
+          onPress={commit}
+          isDisabled={create.isPending}
+          data-testid="new-cycle-commit"
+        >
+          {create.isPending ? "Creating…" : "Create cycle"}
+        </Button>
       </div>
     </BoardModalFrame>
   );

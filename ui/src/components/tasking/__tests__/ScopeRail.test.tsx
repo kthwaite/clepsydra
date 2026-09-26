@@ -124,7 +124,7 @@ describe("ScopeRail", () => {
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
     const row = screen.getByRole("button", { name: /C-01/ });
 
-    expect(within(row).getByText("05.26 — 06.08")).toBeInTheDocument();
+    expect(within(row).getByText("26 May – 8 Jun")).toBeInTheDocument();
     expect(within(row).getByText("3")).toBeInTheDocument();
   });
 
