@@ -286,6 +286,16 @@ describe("TaskingScreen smoke", () => {
     expect(screen.queryByText(/COMING SOON/)).not.toBeInTheDocument();
   });
 
+  it("cycle mode's strip lists the board's cycles", async () => {
+    useBoardStore.setState({ mode: "cycle" });
+    stubBoardFetch();
+    renderScreen();
+    const strip = await screen.findByRole("tablist", { name: "Cycles" });
+    expect(
+      within(strip).getByRole("tab", { name: /C-01/ }),
+    ).toBeInTheDocument();
+  });
+
   it("op with null project: clicking its row shows op-meta and zero tasks", async () => {
     stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
     renderScreen();

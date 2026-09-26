@@ -261,9 +261,15 @@ function renderCycleView(
   cycle: BoardCycle | typeof BACKLOG_PSEUDO = ACTIVE_CYCLE,
   items: BoardTask[] = C01_TASKS,
   fetchStub?: ReturnType<typeof vi.fn>,
+  allCycles: BoardCycle[] = cycles,
 ) {
   return wrap(
-    <CycleView colLabel={FIXTURE_COL_LABEL} cycle={cycle} tasks={items} />,
+    <CycleView
+      colLabel={FIXTURE_COL_LABEL}
+      cycle={cycle}
+      cycles={allCycles}
+      tasks={items}
+    />,
     fetchStub,
   );
 }
@@ -324,6 +330,90 @@ describe("CycleView — lifecycle entry points", () => {
   });
 });
 
+// ── cycle strip ───────────────────────────────────────────────────────────────
+
+describe("CycleView — cycle strip", () => {
+  it("lists every cycle with its state word, plus Backlog with its count", () => {
+    const closed: BoardCycle = {
+      ...PLANNED_CYCLE,
+      id: "c-closed",
+      code: "C-00",
+      state: "CLOSED",
+    };
+    renderCycleView(ACTIVE_CYCLE, tasks, undefined, [...cycles, closed]);
+    const strip = screen.getByRole("tablist", { name: "Cycles" });
+    const tabs = within(strip).getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual([
+      "C-01Active",
+      "C-02Planned",
+      "C-00Closed",
+      `Backlog${tasks.filter((t) => !t.cycle).length}`,
+    ]);
+  });
+
+  it("marks the resolved cycle's tab as selected", () => {
+    renderCycleView(PLANNED_CYCLE, []);
+    const strip = screen.getByRole("tablist", { name: "Cycles" });
+    expect(within(strip).getByRole("tab", { name: /C-02/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(within(strip).getByRole("tab", { name: /C-01/ })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
+  it("marks Backlog selected for the backlog pseudo-cycle", () => {
+    renderCycleView(BACKLOG_PSEUDO, []);
+    expect(screen.getByRole("tab", { name: /Backlog/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("clicking a cycle tab sets cycleSel to its code", async () => {
+    renderCycleView(ACTIVE_CYCLE, []);
+    await userEvent.click(screen.getByRole("tab", { name: /C-02/ }));
+    expect(useBoardStore.getState().cycleSel).toBe("C-02");
+  });
+
+  it("clicking Backlog sets cycleSel to BACKLOG", async () => {
+    renderCycleView(ACTIVE_CYCLE, []);
+    await userEvent.click(screen.getByRole("tab", { name: /Backlog/ }));
+    expect(useBoardStore.getState().cycleSel).toBe("BACKLOG");
+  });
+
+  it("arrow keys move focus between tabs and Enter selects", async () => {
+    const user = userEvent.setup();
+    renderCycleView(ACTIVE_CYCLE, []);
+    await user.tab();
+    expect(screen.getByRole("tab", { name: /C-01/ })).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: /C-02/ })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(useBoardStore.getState().cycleSel).toBe("C-02");
+  });
+
+  it("New cycle opens the new-cycle modal", async () => {
+    renderCycleView(ACTIVE_CYCLE, []);
+    await userEvent.click(screen.getByRole("button", { name: "New cycle" }));
+    expect(useBoardStore.getState().cycleModal).toEqual({ kind: "new" });
+  });
+
+  it("with zero cycles still shows Backlog and New cycle", () => {
+    renderCycleView(BACKLOG_PSEUDO, tasks, undefined, []);
+    const strip = screen.getByRole("tablist", { name: "Cycles" });
+    const tabs = within(strip).getAllByRole("tab");
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]).toHaveTextContent("Backlog");
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+    expect(
+      screen.getByRole("button", { name: "New cycle" }),
+    ).toBeInTheDocument();
+  });
+});
+
 // ── header rendering ──────────────────────────────────────────────────────────
 
 describe("CycleView — header", () => {
@@ -341,7 +431,7 @@ describe("CycleView — header", () => {
 
   it("renders canonical Backlog copy without retired scheduling language", () => {
     renderCycleView(BACKLOG_PSEUDO, []);
-    expect(screen.getByText("No Cycle")).toBeInTheDocument();
+    expect(screen.getByTestId("cv-meta")).toHaveTextContent("No cycle");
     expect(
       screen.getByText("Tasks not assigned to a Cycle."),
     ).toBeInTheDocument();
@@ -355,8 +445,9 @@ describe("CycleView — header", () => {
 
   it("renders the neutral cycle state label instead of the raw state id", () => {
     renderCycleView(ACTIVE_CYCLE, []);
-    expect(screen.getByText("Active")).toBeInTheDocument();
-    expect(screen.queryByText("ACTIVE")).not.toBeInTheDocument();
+    const meta = screen.getByTestId("cv-meta");
+    expect(within(meta).getByText("Active")).toBeInTheDocument();
+    expect(meta).not.toHaveTextContent("ACTIVE");
   });
 });
 
@@ -374,7 +465,11 @@ describe("CycleView — metrics and burndown", () => {
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
-    expect(screen.getByText("03")).toBeInTheDocument();
+    const tasksTerm = screen.getByText("Tasks");
+    expect(tasksTerm.tagName).toBe("DT");
+    expect(tasksTerm.parentElement?.querySelector("dd")).toHaveTextContent(
+      /^3$/,
+    );
   });
 
   it("labels the progress chart with its values", () => {
@@ -382,6 +477,7 @@ describe("CycleView — metrics and burndown", () => {
       <CycleView
         colLabel={FIXTURE_COL_LABEL}
         cycle={ACTIVE_CYCLE}
+        cycles={cycles}
         tasks={C01_TASKS}
         burndown={[3, 2, 1]}
       />,
@@ -395,8 +491,8 @@ describe("CycleView — metrics and burndown", () => {
     renderCycleView(ACTIVE_CYCLE, [T_HOLD]);
     const blockedLabel = screen
       .getAllByText("Blocked")
-      .find((element) => element.closest("div")?.querySelector("b") !== null);
-    const metricValue = blockedLabel?.closest("div")?.querySelector("b");
+      .find((element) => element.tagName === "DT");
+    const metricValue = blockedLabel?.parentElement?.querySelector("dd");
     // data-hot attribute is used (not a CSS class) to avoid Tailwind purging
     expect(metricValue?.getAttribute("data-hot")).toBe("true");
   });
@@ -404,7 +500,7 @@ describe("CycleView — metrics and burndown", () => {
   it("renders Blocked metric without hot color when blocked = 0", () => {
     renderCycleView(ACTIVE_CYCLE, [T_FIELD]);
     const blockedLabel = screen.getByText("Blocked");
-    const metricValue = blockedLabel.closest("div")?.querySelector("b");
+    const metricValue = blockedLabel.parentElement?.querySelector("dd");
     expect(metricValue?.getAttribute("data-hot")).toBeNull();
   });
 });
@@ -414,17 +510,17 @@ describe("CycleView — metrics and burndown", () => {
 describe("CycleView — progress bar", () => {
   it("renders completion percentage", () => {
     renderCycleView(ACTIVE_CYCLE, [T_SEALED, T_FIELD]); // 1/2 = 50%
-    expect(screen.getByText(/50% Completion/)).toBeInTheDocument();
+    expect(screen.getByText(/50% complete/)).toBeInTheDocument();
   });
 
-  it("renders 0% Completion when no tasks", () => {
+  it("renders 0% complete when no tasks", () => {
     renderCycleView(ACTIVE_CYCLE, []);
-    expect(screen.getByText(/0% Completion/)).toBeInTheDocument();
+    expect(screen.getByText(/0% complete/)).toBeInTheDocument();
   });
 
   it("renders Checklist items summary", () => {
     renderCycleView(ACTIVE_CYCLE, [T_SEALED]); // checks: [3,3]
-    expect(screen.getByText(/3\/3 Checklist items/)).toBeInTheDocument();
+    expect(screen.getByText(/3 of 3 checklist items/)).toBeInTheDocument();
   });
 });
 
@@ -441,10 +537,10 @@ describe("CycleView — lanes", () => {
     expect(screen.queryByTestId("cv-lane-REVIEW")).not.toBeInTheDocument();
   });
 
-  it("lane header shows zero-padded count", () => {
+  it("lane header shows the lane count", () => {
     renderCycleView(ACTIVE_CYCLE, [T_FIELD]);
     // 1 task in FIELD
-    expect(screen.getByTestId("cv-lane-count-FIELD")).toHaveTextContent("01");
+    expect(screen.getByTestId("cv-lane-count-FIELD")).toHaveTextContent(/^1$/);
   });
 
   it("lane header uses the canonical status label", () => {
@@ -452,6 +548,7 @@ describe("CycleView — lanes", () => {
       <CycleView
         colLabel={(id) => (id === "FIELD" ? "In Progress" : id)}
         cycle={ACTIVE_CYCLE}
+        cycles={cycles}
         tasks={[T_FIELD]}
       />,
     );
@@ -564,9 +661,9 @@ describe("CycleView — inline editing", () => {
 // ── empty state ───────────────────────────────────────────────────────────────
 
 describe("CycleView — empty state", () => {
-  it("renders ∅ glyph when no tasks", () => {
+  it("renders no lanes when no tasks", () => {
     renderCycleView(ACTIVE_CYCLE, []);
-    expect(screen.getByText("∅")).toBeInTheDocument();
+    expect(screen.queryByTestId(/^cv-lane-/)).not.toBeInTheDocument();
   });
 
   it("renders No tasks in {label}", () => {
@@ -600,6 +697,7 @@ describe("CycleView — empty state", () => {
       <CycleView
         colLabel={FIXTURE_COL_LABEL}
         cycle={ACTIVE_CYCLE}
+        cycles={cycles}
         tasks={[]}
         activeProject="alpha"
       />,
@@ -616,6 +714,7 @@ describe("CycleView — empty state", () => {
       <CycleView
         colLabel={FIXTURE_COL_LABEL}
         cycle={ACTIVE_CYCLE}
+        cycles={cycles}
         tasks={[]}
       />,
     );
@@ -696,7 +795,7 @@ describe("TaskingScreen integration — cycle mode", () => {
     expect(
       screen.getByRole("heading", { name: /BACKLOG/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText("No Cycle")).toBeInTheDocument();
+    expect(screen.getByTestId("cv-meta")).toHaveTextContent("No cycle");
     expect(screen.queryByText(/unscheduled/i)).not.toBeInTheDocument();
   });
 

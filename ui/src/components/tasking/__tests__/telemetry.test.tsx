@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchClient } from "#/api/client";
 import { useBoardStore } from "#/store/board";
@@ -127,7 +127,9 @@ describe("tasking telemetry", () => {
     renderScreen();
 
     expect(await screen.findByText("No completed tasks")).toBeInTheDocument();
-    expect(await screen.findByText("NO HISTORY")).toBeInTheDocument();
+    expect(
+      within(await screen.findByTestId("cv-burndown")).getByText("No history"),
+    ).toBeInTheDocument();
   });
 
   it("keeps the board visible when telemetry queries fail", async () => {
@@ -152,8 +154,14 @@ describe("tasking telemetry", () => {
 
     expect(await screen.findByText("Task board")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByText("Unavailable")).toBeInTheDocument();
-      expect(screen.getByText("UNAVAILABLE")).toBeInTheDocument();
+      const burndown = screen.getByTestId("cv-burndown");
+      // Board header completed-history state, outside the cycle burndown.
+      expect(
+        screen
+          .getAllByText("Unavailable")
+          .some((element) => !burndown.contains(element)),
+      ).toBe(true);
+      expect(within(burndown).getByText("Unavailable")).toBeInTheDocument();
     });
   });
 });

@@ -339,6 +339,7 @@ export function TaskingScreen({
             {mode === "cycle" && (
               <CycleView
                 cycle={resolveCycle(cycleSel, cycles)}
+                cycles={cycles}
                 tasks={visibleTasks}
                 activeProject={activeScope?.slug ?? undefined}
                 burndown={
