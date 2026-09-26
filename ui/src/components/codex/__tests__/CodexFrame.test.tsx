@@ -555,6 +555,17 @@ describe("CodexFrame responsive shell", () => {
     ).toBeVisible();
   });
 
+  it("gives mobile Folio a definite height so the page scrolls itself", () => {
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/workspace";
+    workspaceState.tabs = [{ id: "a", type: "page", path: "notes/a.md" }];
+    workspaceState.activeTabId = "a";
+    renderFrame();
+    expect(screen.getByText("Frame content").parentElement).toHaveClass(
+      "h-full",
+    );
+  });
+
   it("keeps the top bar on the empty launcher", () => {
     mobileLayoutState.matches = true;
     locationState.pathname = "/workspace";

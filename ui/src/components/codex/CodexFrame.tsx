@@ -53,7 +53,9 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
           key={pathname}
           className={cn(
             "view-anim",
-            fullPage || !mobile ? "h-full" : "min-h-full",
+            // Mobile Folio scrolls its own page (reading progress, outline
+            // jumps), so it needs a definite height, not the page scroll.
+            fullPage || !mobile || view === "folio" ? "h-full" : "min-h-full",
           )}
         >
           {children}
