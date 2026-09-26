@@ -378,6 +378,8 @@ columns = ["title", "author", "rating", "started"]
 
 Open `/bases` to discover, create, configure, open, or delete bases. Open `/bases/<slug>` for a saved table. The UI opens the view named by `?view=` in the URL when there is one, otherwise the view you last used in this browser, otherwise the first view, and presents the saved views as tabs. Switching views updates `?view=` in place, so the address can be shared; a `?view=` that names no saved view is dropped from the address. It renders flat or grouped tables, resolves the active view's display labels by canonical field identity while retaining the original field keys, shows group counts and aggregate values, renders a flat view's aggregates as a **Totals** row beneath the table, and lets you click a column header to apply a temporary ascending or descending sort override. **Configure** opens `/bases/<slug>/edit`. Clicking a title opens that page.
 
+The view bar holds **Filter**, **Sort** and **Group** beside **Fields**. Filter offers each column's presets (the same ones as its header menu); Sort picks a column and a direction; Group picks a column or **No grouping**. The pills name the effective sort and grouping, and turn cobalt while they carry an override; **Use the view's sort** and **Use the view's grouping** drop the override. The **Compact** switch in the header toggles 32px and 42px rows — Bases start comfortable — and is remembered on this device. The footer shows the base file and its row count.
+
 System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions.
 
 Each commit fetches the page's current revision, sends only the changed property key with its type hint, and updates `updated_at`. For TOML `+++` frontmatter, the server splices that edit into the existing bytes, preserving untouched keys and comments. The first inline property edit on legacy YAML `---` frontmatter instead converts it to TOML through full serialization, so YAML frontmatter comments are not preserved. A stale edit is rejected rather than overwriting a newer page revision; the table refetches the winning state and reports the failed key.
@@ -388,7 +390,7 @@ Every column header has a `⋯` menu — also reachable by right-clicking the he
 
 Right-click any cell (or press <kbd>Shift</kbd>+<kbd>F10</kbd> / <kbd>⌃</kbd><kbd>Enter</kbd> on a focused cell control) for a quick filter derived from the cell's value — `Status is reading`, `Tags has fiction`, `Due is 2026-08-28`, `Done is checked`, `Author is empty` — a **Filter by date ▸** submenu on date columns, **Copy value**, and the row actions: **Open**, **Open in new tab**, **Copy wikilink**, **Duplicate**, and **Archive…**. A ghost `⋯` button in the first cell opens the row actions alone.
 
-Sort, quick filters, grouping, and hidden columns are **view overrides**: they apply to the table you are looking at and appear as removable chips in a strip under the toolbar. **Clear** drops them all; **Save to view** writes them into the saved view (`filter`, `sort`, `group_by`, `columns`) through the revision-guarded definition update, so a base edited elsewhere in the meantime is reported instead of overwritten. Switching views drops the overrides.
+Sort, quick filters, grouping, and hidden columns are **view overrides**: they apply to the table you are looking at and appear as removable chips in a strip under the view bar. **Clear** drops them all; **Save to view** writes them into the saved view (`filter`, `sort`, `group_by`, `columns`) through the revision-guarded definition update, so a base edited elsewhere in the meantime is reported instead of overwritten. Switching views drops the overrides.
 
 **Duplicate** creates a new page through the member endpoint with the same declared properties, kind, project, and tags, titled `<title> (copy)`; the body is not copied, and the new page must still match the view. **Archive…** asks for confirmation and moves the page to the Rubbish Bin; focus returns to the next row.
 
@@ -434,7 +436,7 @@ Normal configured embeds are not edited as raw source. Use **Edit embed** and th
 
 ### Compact display
 
-An embed renders compact. The Base name, its view switcher, **Add member**, and the embed's own **Edit embed** and **Remove** share one toolbar, and the rows scroll inside the block rather than pushing the rest of the document down. Set `display = "full"` in the fence, or **Display → Full** in the inspector, to get the older form: the embed's own header above the complete Base table, with every loaded row in the page.
+An embed renders compact, and embedded tables always use compact rows. The Base name, its view switcher, **Add member**, and the embed's own **Edit embed** and **Remove** share one toolbar, and the rows scroll inside the block rather than pushing the rest of the document down. Set `display = "full"` in the fence, or **Display → Full** in the inspector, to get the older form: the embed's own header above the complete Base table, with every loaded row in the page.
 
 ### Large results
 
