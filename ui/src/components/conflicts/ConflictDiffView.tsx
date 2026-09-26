@@ -89,7 +89,7 @@ export function ConflictDiffView({ copyPath }: { copyPath: string }) {
 
 function Frame({ children }: { children: ReactNode }) {
   return (
-    <main className="mx-auto flex h-full min-h-screen w-full max-w-[1440px] flex-col bg-ground text-ink">
+    <main className="mx-auto flex h-full min-h-0 w-full max-w-[1440px] flex-col bg-ground text-ink">
       {children}
     </main>
   );

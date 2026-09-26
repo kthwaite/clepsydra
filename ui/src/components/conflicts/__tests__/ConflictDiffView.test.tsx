@@ -82,6 +82,15 @@ beforeEach(() => {
 });
 
 describe("ConflictDiffView", () => {
+  it("fits the shell so Resolve stays on screen without scrolling the page", () => {
+    render(<ConflictDiffView copyPath={COPY} />);
+    const main = screen.getByRole("main");
+    // min-h-screen made the page taller than the space under the shell
+    // header, pushing Resolve below the fold.
+    expect(main).not.toHaveClass("min-h-screen");
+    expect(main).toHaveClass("h-full", "min-h-0");
+  });
+
   it("shows each hunk's local and remote lines side by side", () => {
     render(<ConflictDiffView copyPath={COPY} />);
 

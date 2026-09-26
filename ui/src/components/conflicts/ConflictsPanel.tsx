@@ -12,7 +12,7 @@ export function ConflictsPanel() {
   const total = conflictsQuery.data?.total ?? 0;
 
   return (
-    <main className="mx-auto flex h-full min-h-screen w-full max-w-[1440px] flex-col bg-ground text-ink">
+    <main className="mx-auto flex h-full min-h-0 w-full max-w-[1440px] flex-col bg-ground text-ink">
       <header className="px-4 pt-6 pb-2 md:px-10">
         <div className="flex flex-wrap items-end justify-between gap-x-7 gap-y-3">
           <div className="flex min-w-0 flex-col gap-2.5">
