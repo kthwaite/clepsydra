@@ -184,3 +184,16 @@ describe("FeedGroupComboBox", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+describe("FeedGroupComboBox — Stone & Lamp", () => {
+  it("draws the input on sink and the suggestions on a raised overlay", async () => {
+    const user = userEvent.setup();
+    const { input } = renderCombo();
+
+    expect(input).toHaveClass("bg-sink", "rounded-full");
+    await user.type(input, "des");
+    const option = await screen.findByRole("option", { name: "Design" });
+    expect(option.closest(".bg-raise")).not.toBeNull();
+    expect(option).not.toHaveClass("tracking-[0.04em]");
+  });
+});
