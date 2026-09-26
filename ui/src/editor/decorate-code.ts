@@ -1,24 +1,25 @@
 import { type NodeEntry, type Range, Element as SlateElement } from "slate";
 import { loadRefractor, type Refractor } from "#/editor/refractor-lazy";
 
-/** Prism token type → Vessel colour CSS var, applied by renderLeaf. */
+/** Prism token type → Stone & Lamp colour token, applied by renderLeaf:
+ *  keywords cobalt, literals ochre, strings verdigris, comments mute. */
 export const TOKEN_COLOR: Record<string, string> = {
-  keyword: "var(--cool)",
-  string: "var(--warn)",
-  comment: "var(--ink-mute)",
-  function: "var(--accent)",
-  "class-name": "var(--accent)",
-  number: "var(--accent-deep)",
-  boolean: "var(--accent-deep)",
-  constant: "var(--accent-deep)",
-  operator: "var(--ink-2)",
-  punctuation: "var(--ink-mute)",
-  property: "var(--cool)",
-  tag: "var(--cool)",
-  "attr-name": "var(--accent-deep)",
-  "attr-value": "var(--warn)",
-  regex: "var(--warn)",
+  keyword: "var(--accent)",
   builtin: "var(--accent)",
+  property: "var(--accent)",
+  tag: "var(--accent)",
+  function: "var(--ink)",
+  "class-name": "var(--ink)",
+  string: "var(--quire-verdigris)",
+  "attr-value": "var(--quire-verdigris)",
+  regex: "var(--quire-verdigris)",
+  number: "var(--quire-ochre)",
+  boolean: "var(--quire-ochre)",
+  constant: "var(--quire-ochre)",
+  "attr-name": "var(--quire-ochre)",
+  operator: "var(--ink-2)",
+  comment: "var(--mute)",
+  punctuation: "var(--mute)",
 };
 
 // Minimal hast shapes we read (avoid pulling @types/hast).
