@@ -32,10 +32,10 @@ export function ConflictsPanel() {
         </div>
         <p className="mt-4 max-w-2xl text-[14px] leading-[1.55] text-ink-2">
           Each entry is a page another device changed at the same time as this
-          one; the local version kept its place, the other version was saved as
-          a copy. Compare the two to pick what to keep, hunk by hunk; resolving
-          writes the result into the original and moves the copy to the Rubbish
-          Bin.
+          one; the local version kept its place, the remote version was saved
+          as a copy. Compare the two to pick what to keep, hunk by hunk;
+          resolving writes the result into the original and moves the copy to
+          the rubbish bin.
         </p>
       </header>
 
