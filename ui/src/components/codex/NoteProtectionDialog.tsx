@@ -1,10 +1,13 @@
+import { X } from "lucide-react";
 import { useState } from "react";
 import {
   useEncryptionConfig,
   useProtectPage,
   useUnprotectPage,
 } from "#/api/encryption";
+import { Button } from "#/components/ui/button";
 import { Checkbox } from "#/components/ui/checkbox";
+import { IconButton } from "#/components/ui/icon-button";
 import { encryptMarkdown } from "#/crypto/age";
 import {
   useEncryptionActions,
@@ -114,23 +117,24 @@ export function NoteProtectionDialog({
     <CodexModalShell
       ariaLabel={protecting ? "Protect note" : "Remove note encryption"}
       maxWidthClassName="max-w-[580px]"
+      panelClassName="rounded-[18px]"
       onDismiss={onDismiss}
     >
-      <div className="border-b border-ink bg-paper-2 px-3 py-1.5">
-        <span className="cl-mono text-[10px] uppercase tracking-[0.18em]">
-          {protecting ? "▣ Protect note" : "⚠ Remove encryption"}
-        </span>
-      </div>
-      <div className="space-y-4 px-4 py-4">
-        <p className="text-sm">
+      <div className="flex flex-col gap-6 px-6 py-7 md:px-9 md:py-8">
+        <DialogHeading
+          title={protecting ? "Protect note" : "Remove encryption"}
+          onClose={onDismiss}
+          closeDisabled={busy}
+        />
+        <p className="text-[14.5px] leading-[1.55] text-ink-2">
           {protecting
             ? "Only the Markdown body will be encrypted. The following information remains visible:"
             : "This destructive transition writes the decrypted Markdown body back to disk as plaintext."}
         </p>
-        <div className="cl-mono space-y-1 border border-rule bg-paper-2 p-3 text-[11px]">
-          <p>Title · {page.title || "(untitled)"}</p>
+        <div className="flex flex-col gap-1.5 rounded-[14px] bg-sink px-[22px] py-5 text-[13.5px] leading-[1.5] text-ink-2">
+          <p className="break-all">Title · {page.title || "(untitled)"}</p>
           <p>Tags · {page.tags.length > 0 ? page.tags.join(", ") : "(none)"}</p>
-          <p>Path · {page.path}</p>
+          <p className="break-all">Path · {page.path}</p>
           <p>Attachments are not encrypted.</p>
           <p>Git and filesystem history are not encrypted.</p>
         </div>
@@ -144,33 +148,65 @@ export function NoteProtectionDialog({
             : "I understand this will make this note plaintext on disk."}
         </Checkbox>
         {error ? (
-          <p role="alert" aria-live="assertive" className="text-sm text-hot">
-            ⁂ {error}
+          <p
+            role="alert"
+            aria-live="assertive"
+            className="text-[13.5px] text-hot"
+          >
+            {error}
           </p>
         ) : null}
         <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="cl-btn"
-            onClick={onDismiss}
-            disabled={busy}
-          >
+          <Button variant="secondary" onPress={onDismiss} isDisabled={busy}>
             Cancel
-          </button>
-          <button
-            type="button"
-            className="cl-btn cl-btn-hot"
-            disabled={!acknowledged || busy}
-            onClick={() => void transition()}
+          </Button>
+          <Button
+            variant={protecting ? "primary" : "danger"}
+            isDisabled={!acknowledged || busy}
+            onPress={() => void transition()}
           >
             {busy
-              ? "saving…"
+              ? "Saving…"
               : protecting
                 ? "Protect note"
                 : "Remove encryption"}
-          </button>
+          </Button>
         </div>
       </div>
     </CodexModalShell>
+  );
+}
+
+/** Serif title, optional mute subtitle and a round close button — the shared head
+ *  of the encryption dialogs. */
+export function DialogHeading({
+  title,
+  subtitle,
+  onClose,
+  closeDisabled = false,
+}: {
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  closeDisabled?: boolean;
+}) {
+  return (
+    <div className="flex items-start gap-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <h2 className="font-serif text-[34px] font-normal leading-[1.05] text-ink">
+          {title}
+        </h2>
+        {subtitle ? (
+          <span className="text-[13px] text-mute">{subtitle}</span>
+        ) : null}
+      </div>
+      <IconButton
+        aria-label="Close dialog"
+        onPress={onClose}
+        isDisabled={closeDisabled}
+      >
+        <X />
+      </IconButton>
+    </div>
   );
 }

@@ -1,6 +1,9 @@
 import { type FormEvent, useState } from "react";
 import { useQuickCapture } from "#/api/journal";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
+import { Button } from "#/components/ui/button";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useUiStore } from "#/store/ui";
 
 /** One-line aside capture — appends a time-stamped entry to today's journal
@@ -35,43 +38,44 @@ export function CaptureAsideModal() {
   return (
     <CodexModalShell
       ariaLabel="Capture aside"
-      maxWidthClassName="max-w-[440px]"
+      maxWidthClassName="max-w-[480px]"
+      panelClassName="rounded-[18px]"
       onDismiss={dismiss}
     >
-      <form onSubmit={submit}>
-        <div className="flex items-baseline justify-between border-b border-ink bg-paper-2 px-3 py-1.5">
-          <span className="cl-mono text-[10px] uppercase tracking-[0.18em] text-ink">
-            ❦ Aside
-          </span>
-          <span className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-            TODAY'S JOURNAL
-          </span>
+      <form
+        onSubmit={submit}
+        className="flex flex-col gap-[22px] px-6 py-7 md:px-9 md:py-8"
+      >
+        <div className="flex flex-col gap-1.5">
+          <h2 className="font-serif text-[34px] font-normal leading-[1.05] text-ink">
+            Aside
+          </h2>
+          <span className="text-[13px] text-mute">Today's journal</span>
         </div>
-        <div className="px-4 py-3">
-          <input
-            aria-label="Aside"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            // biome-ignore lint/a11y/noAutofocus: this single-field capture modal intentionally starts focus at its only text input
-            autoFocus
-            placeholder="capture an aside …"
-            className="cl-mono w-full border border-rule bg-transparent p-1.5 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
-          />
-          {error && (
-            <div className="cl-mono mt-2 text-[11px] text-hot">⁂ {error}</div>
+        <input
+          aria-label="Aside"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          // biome-ignore lint/a11y/noAutofocus: this single-field capture modal intentionally starts focus at its only text input
+          autoFocus
+          placeholder="Capture an aside…"
+          className={cn(
+            "h-11 w-full shrink-0 rounded-[10px] bg-sink px-3.5 text-[15px] text-ink placeholder:text-mute",
+            FOCUS_RING_NATIVE,
           )}
-          <div className="mt-3 flex justify-end gap-2">
-            <button type="button" className="cl-btn" onClick={dismiss}>
-              cancel
-            </button>
-            <button
-              type="submit"
-              className="cl-btn cl-btn-hot"
-              disabled={capture.isPending || !text.trim()}
-            >
-              {capture.isPending ? "noting…" : "❦ note"}
-            </button>
-          </div>
+        />
+        {error && <div className="text-[13.5px] text-hot">{error}</div>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onPress={dismiss}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            isDisabled={capture.isPending || !text.trim()}
+          >
+            {capture.isPending ? "Noting…" : "Note"}
+          </Button>
         </div>
       </form>
     </CodexModalShell>

@@ -1,7 +1,13 @@
+import { Lock } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useEncryptionConfig } from "#/api/encryption";
+import { Section } from "#/components/codex/Section";
+import { Tick } from "#/components/codex/Tick";
+import { Button } from "#/components/ui/button";
 import { useEncryptionActions } from "#/crypto/EncryptionProvider";
 import type { DecryptedBodyState } from "#/editor/useDecryptedPageBody";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 type LockedFolioProps = {
   path: string;
@@ -60,149 +66,163 @@ export function LockedFolio({
 
   return (
     <div className="cl-noscroll h-full overflow-auto">
-      <main className="mx-auto max-w-[760px] px-7 py-10">
-        <div className="cl-mono mb-5 border-b border-rule pb-2 text-[10px] uppercase tracking-[0.18em] text-ink-mute">
-          Protected folio
-        </div>
-        <h1 className="font-heading text-2xl font-bold">{title || path}</h1>
-        <p className="cl-mono mt-2 break-all text-[11px] text-ink-mute">
-          {path}
-        </p>
-        {tags.length > 0 ? (
-          <section
-            aria-label="Tags"
-            className="cl-mono mt-2 text-[11px] text-accent"
-          >
-            {tags.map((tag) => `#${tag}`).join(" ")}
-          </section>
-        ) : null}
-        {derivedTags.length > 0 ? (
-          <section
-            aria-label="Read-only Tags"
-            className="cl-mono mt-2 text-[11px] text-accent"
-          >
-            {derivedTags.map((tag) => `#${tag}`).join(" ")}
-          </section>
+      <main className="mx-auto grid max-w-[1040px] gap-10 px-7 pt-12 pb-16 lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-x-16 lg:px-10 lg:pt-16">
+        <header className="w-full min-w-0 max-w-[680px] justify-self-center lg:col-start-2 lg:row-start-1">
+          <div className="flex items-center gap-2 text-[13px] text-mute">
+            <Lock aria-hidden className="size-3.5" />
+            <span>Protected folio</span>
+          </div>
+          <h1 className="mt-3.5 font-serif text-[clamp(44px,4.2vw,60px)] font-normal leading-[1.02] tracking-[-0.015em] text-ink">
+            {title || path}
+          </h1>
+          <p className="mt-3.5 break-all text-[13px] text-mute">{path}</p>
+          {tags.length > 0 ? (
+            <section
+              aria-label="Tags"
+              className="mt-1.5 text-[13px] text-accent"
+            >
+              {tags.map((tag) => `#${tag}`).join(" ")}
+            </section>
+          ) : null}
+          {derivedTags.length > 0 ? (
+            <section
+              aria-label="Read-only Tags"
+              className="mt-1.5 text-[13px] text-accent"
+            >
+              {derivedTags.map((tag) => `#${tag}`).join(" ")}
+            </section>
+          ) : null}
+        </header>
+
+        {properties || pageActions ? (
+          <aside className="flex min-w-0 flex-col gap-12 lg:col-start-1 lg:row-span-2 lg:row-start-1 lg:pt-1.5">
+            {properties}
+            {pageActions ? (
+              <Section label="Page actions" pip="dim" compact>
+                {pageActions}
+              </Section>
+            ) : null}
+          </aside>
         ) : null}
 
-        {properties}
-        {pageActions ? (
-          <section className="mt-8 border border-rule bg-paper-2 p-5">
-            <h2 className="mb-3 text-sm font-bold uppercase tracking-wider">
-              Page actions
-            </h2>
-            {pageActions}
-          </section>
-        ) : null}
-
-        <section className="mt-8 border border-rule bg-paper-2 p-5">
+        <section className="w-full min-w-0 max-w-[680px] self-start justify-self-center rounded-2xl bg-raise px-6 pt-7 pb-8 md:px-8 lg:col-start-2 lg:row-start-2">
           {state.status === "decrypting" ? (
-            <p className="text-sm">Decrypting protected note…</p>
+            <p className="text-[14.5px] text-mute">
+              Decrypting protected note…
+            </p>
           ) : (
-            <div className="space-y-4">
+            <div className="flex flex-col gap-5">
               <div>
-                <h2 className="text-sm font-bold uppercase tracking-wider">
-                  Unlock protected note
-                </h2>
-                <p className="mt-1 text-sm text-ink-mute">
+                <div className="flex items-center gap-2.5">
+                  <Tick />
+                  <h2 className="font-serif text-[22px] font-normal italic leading-none text-ink">
+                    Unlock protected note
+                  </h2>
+                </div>
+                <p className="mt-2 pl-[17px] text-[14.5px] leading-[1.55] text-mute">
                   The encrypted body is unavailable until the vault identity is
                   unlocked in this browser session.
                 </p>
               </div>
-              {state.status === "error" ? (
-                <p role="alert" className="text-sm text-hot">
-                  ⁂ {state.error}
-                </p>
-              ) : null}
-              {config.data?.wrapped_identity && !recoveryMode ? (
-                <div className="space-y-2">
-                  <label className="block">
-                    <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-                      Encryption password
-                    </span>
-                    <input
-                      aria-label="Encryption password"
-                      type="password"
-                      value={password}
-                      disabled={busy}
-                      onChange={(event) => setPassword(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void unlockWithPassword();
-                        }
-                      }}
-                      className="cl-mono mt-1 w-full border border-rule bg-paper p-2 text-[12px] outline-none focus:border-accent"
-                    />
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="cl-btn cl-btn-hot"
-                      disabled={busy || !password}
-                      onClick={() => void unlockWithPassword()}
-                    >
-                      {busy ? "unlocking…" : "Unlock note"}
-                    </button>
-                    <button
-                      type="button"
-                      className="cl-btn"
-                      disabled={busy}
-                      onClick={() => setRecoveryMode(true)}
-                    >
-                      Use recovery identity
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <label className="block">
-                    <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-                      Recovery identity
-                    </span>
-                    <textarea
-                      aria-label="Recovery identity"
-                      value={recoveryIdentity}
-                      disabled={busy}
-                      rows={3}
-                      spellCheck={false}
-                      onChange={(event) =>
-                        setRecoveryIdentity(event.target.value)
-                      }
-                      className="cl-mono mt-1 w-full resize-y border border-rule bg-paper p-2 text-[11px] outline-none focus:border-accent"
-                    />
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="cl-btn cl-btn-hot"
-                      disabled={busy || !recoveryIdentity.trim()}
-                      onClick={() => void unlockWithRecovery()}
-                    >
-                      {busy ? "validating…" : "Import and unlock"}
-                    </button>
-                    {config.data?.wrapped_identity ? (
-                      <button
-                        type="button"
-                        className="cl-btn"
+              <div className="flex flex-col gap-3.5 pl-[17px]">
+                {state.status === "error" ? (
+                  <p role="alert" className="text-[13.5px] text-hot">
+                    {state.error}
+                  </p>
+                ) : null}
+                {config.data?.wrapped_identity && !recoveryMode ? (
+                  <>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-[13px] text-mute">
+                        Encryption password
+                      </span>
+                      <input
+                        aria-label="Encryption password"
+                        type="password"
+                        value={password}
                         disabled={busy}
-                        onClick={() => setRecoveryMode(false)}
+                        onChange={(event) => setPassword(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void unlockWithPassword();
+                          }
+                        }}
+                        className={cn(
+                          "h-11 w-full shrink-0 rounded-[10px] bg-sink px-3.5 text-[15px] text-ink disabled:opacity-45",
+                          FOCUS_RING_NATIVE,
+                        )}
+                      />
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="primary"
+                        isDisabled={busy || !password}
+                        onPress={() => void unlockWithPassword()}
                       >
-                        Use password
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              )}
-              {error ? (
-                <p
-                  role="alert"
-                  aria-live="assertive"
-                  className="text-sm text-hot"
-                >
-                  ⁂ {error}
-                </p>
-              ) : null}
+                        {busy ? "Unlocking…" : "Unlock note"}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        isDisabled={busy}
+                        onPress={() => setRecoveryMode(true)}
+                      >
+                        Use recovery identity
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-[13px] text-mute">
+                        Recovery identity
+                      </span>
+                      <textarea
+                        aria-label="Recovery identity"
+                        data-code-editor=""
+                        value={recoveryIdentity}
+                        disabled={busy}
+                        rows={3}
+                        spellCheck={false}
+                        onChange={(event) =>
+                          setRecoveryIdentity(event.target.value)
+                        }
+                        className={cn(
+                          "w-full shrink-0 resize-y rounded-[10px] bg-sink px-3.5 py-3 text-[12.5px] leading-[1.55] text-ink disabled:opacity-45",
+                          FOCUS_RING_NATIVE,
+                        )}
+                      />
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="primary"
+                        isDisabled={busy || !recoveryIdentity.trim()}
+                        onPress={() => void unlockWithRecovery()}
+                      >
+                        {busy ? "Validating…" : "Import and unlock"}
+                      </Button>
+                      {config.data?.wrapped_identity ? (
+                        <Button
+                          variant="secondary"
+                          isDisabled={busy}
+                          onPress={() => setRecoveryMode(false)}
+                        >
+                          Use password
+                        </Button>
+                      ) : null}
+                    </div>
+                  </>
+                )}
+                {error ? (
+                  <p
+                    role="alert"
+                    aria-live="assertive"
+                    className="text-[13.5px] text-hot"
+                  >
+                    {error}
+                  </p>
+                ) : null}
+              </div>
             </div>
           )}
         </section>
