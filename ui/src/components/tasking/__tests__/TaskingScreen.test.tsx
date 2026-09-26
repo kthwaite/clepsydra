@@ -282,7 +282,7 @@ describe("TaskingScreen smoke", () => {
     renderScreen();
     await screen.findByRole("tab", { name: "Board" });
     // BacklogView's header row is mounted
-    expect(screen.getByText("ID")).toBeInTheDocument();
+    expect(screen.getByText("Code")).toBeInTheDocument();
     expect(screen.queryByText(/COMING SOON/)).not.toBeInTheDocument();
   });
 

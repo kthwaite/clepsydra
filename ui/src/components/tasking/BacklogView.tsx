@@ -8,15 +8,20 @@
  *   tasks with no due date sort last.
  * - Each row uses a native overlay button for click and keyboard activation.
  *   Priority and disposition cells remain independent popover triggers.
- * - Checklist mini-dots: small squares, done=filled cool accent.
+ * - Checklist mini-dots: 6px rounds, done = cobalt, open = faint.
+ * - Stone & Lamp dense table (spec §5.6): no cell borders, sentence-case
+ *   12.5px mute header, 40px rows, hover sink, the row being edited in
+ *   accent-tint, tabular numerals. Group headers: tick + italic serif
+ *   priority name + "P0 · n tasks" caption.
  *
- * Design source: docs/pkm-redesign/project/board-modes.jsx lines 128-193
- * and .bk* rules in docs/pkm-redesign/project/styles-board.css.
+ * Design source: TaskingBacklog.dc.html (Stone & Lamp phase 5 mockups).
  */
 
 import { useMemo } from "react";
 import type { BoardTask } from "#/api/board";
-import { pad2 } from "#/lib/time";
+import { Tick, type TickVariant } from "#/components/codex/Tick";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useBoardStore } from "#/store/board";
 import {
   COL_ORDER,
@@ -24,15 +29,26 @@ import {
   PRI_LABEL,
   PRI_ORDER,
   PriChip,
-  priColor,
   StatePip,
 } from "./board-constants";
 import { checklistProgress } from "./board-stats";
 import { InlineEditPopover } from "./InlineEditPopover";
 import { QuickAddRow } from "./QuickAddRow";
 
-/** Shared grid tracks for the header row and task rows (.bk-row). */
-const BK_COLS = "94px minmax(0,1fr) 90px 122px 58px 70px 58px 72px";
+/** Shared grid tracks for the header row and task rows. */
+const BK_COLS =
+  "grid grid-cols-[136px_minmax(0,1fr)_110px_132px_90px_76px_70px_86px] items-center gap-x-4 px-3";
+
+/** Quick-add bar (44px) + 18px gap + column header (40px): where the
+ *  sticky group headers dock. */
+const GROUP_TOP = "top-[102px]";
+
+/** Group tick: Critical hot, Low faint, the rest cobalt. */
+function groupTick(pri: string): { variant: TickVariant; className?: string } {
+  if (pri === "P0") return { variant: "live", className: "bg-hot" };
+  if (pri === "P3") return { variant: "faint" };
+  return { variant: "live" };
+}
 
 // ── groupBacklog — pure helper (unit-testable) ────────────────────────────────
 
@@ -78,241 +94,204 @@ export interface BacklogViewProps {
 
 export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
+  const editTaskId = useBoardStore((s) => s.editTaskId);
 
   const groups = useMemo(() => groupBacklog(tasks), [tasks]);
 
   return (
-    <div className="h-full overflow-auto text-[var(--fs-s)]">
-      {/* ── QuickAddRow ──────────────────────────────────────────────────── */}
-      {/*
-        The three sticky rows below stack on `top: 0 / var(--row-h) /
-        calc(2 * var(--row-h))`, so this bar's rendered height (border-box,
-        including its border-b) must equal var(--row-h) exactly at every
-        density — no vertical padding here, and the input inside is slimmed
-        to fill the remaining height instead of adding its own py.
-      */}
-      <div
-        className="sticky top-0 z-[4] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)]"
-        style={{ height: "var(--row-h)" }}
-      >
-        <QuickAddRow
-          preset={{}}
-          testId="qa-backlog"
-          className="h-full box-border py-0"
-        />
-      </div>
+    <div className="h-full overflow-auto px-4 pb-6 text-[14px]">
+      {/* Quick add + column header share one sticky block on ground. */}
+      <div className="sticky top-0 z-[4] bg-ground">
+        <div className="flex h-11 items-center rounded-[14px] bg-sink">
+          <QuickAddRow
+            preset={{}}
+            testId="qa-backlog"
+            className="h-full hover:bg-transparent focus:bg-transparent"
+          />
+        </div>
 
-      {/* ── Header row ──────────────────────────────────────────────────── */}
-      <div
-        className="cl-mono sticky z-[3] grid w-full border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-3)]"
-        style={{
-          gridTemplateColumns: BK_COLS,
-          gap: "12px",
-          minHeight: "var(--row-h)",
-          alignItems: "center",
-          top: "var(--row-h)",
-        }}
-      >
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          ID
-        </span>
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          Task
-        </span>
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          Project
-        </span>
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          Status
-        </span>
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          Assignee
-        </span>
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          Estimate
-        </span>
-        <span
-          className="overflow-hidden text-ellipsis whitespace-nowrap"
-          style={{ textAlign: "right" }}
+        <div
+          className={cn(
+            BK_COLS,
+            "mt-[18px] h-10 text-[12.5px] text-mute [&>span]:truncate",
+          )}
         >
-          Due
-        </span>
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          Checklist
-        </span>
+          <span>Code</span>
+          <span>Task</span>
+          <span>Project</span>
+          <span>Status</span>
+          <span>Assignee</span>
+          <span>Estimate</span>
+          <span className="text-right">Due</span>
+          <span>Checklist</span>
+        </div>
       </div>
 
-      {/* ── Empty state ─────────────────────────────────────────────────── */}
       {groups.length === 0 && (
         <div
-          className="cl-mono border border-dashed border-[var(--rule)] px-[8px] py-[16px] text-center text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-4)]"
+          className="mt-2 rounded-xl bg-sink px-3 py-6 text-center text-[13px] text-mute"
           data-testid="bk-empty"
         >
           No tasks
         </div>
       )}
 
-      {/* ── Priority groups ──────────────────────────────────────────────── */}
-      {groups.map((g, idx) => (
-        <div key={g.pri}>
-          {/* Group header — top border on every group except the first
-              (matches the stylesheet's `.bk-grp-hd:first-child` intent;
-              `first:` can't express this since each header is the first
-              child of its own group wrapper). */}
-          <div
-            data-testid={`bk-grp-hd-${g.pri}`}
-            className="sticky z-[4] flex items-center gap-[12px] border-b border-[var(--ink-3)] bg-[var(--bg)] px-[var(--pad)] py-[7px]"
-            style={{
-              top: "calc(2 * var(--row-h))",
-              borderTopStyle: idx === 0 ? "none" : "solid",
-              borderTopWidth: idx === 0 ? 0 : "1px",
-              borderTopColor: "var(--rule)",
-            }}
-          >
-            <span
-              className="cl-display text-[14px] font-black tracking-[0.06em]"
-              style={{ color: priColor(g.pri).text }}
+      {groups.map((g) => {
+        const tick = groupTick(g.pri);
+        const count =
+          g.items.length === 1 ? "1 task" : `${g.items.length} tasks`;
+        return (
+          <section key={g.pri} className="flex flex-col">
+            <h2
+              data-testid={`bk-grp-hd-${g.pri}`}
+              className={cn(
+                "sticky z-[3] m-0 flex h-[46px] items-center gap-2.5 bg-ground px-3 pt-2 font-normal",
+                GROUP_TOP,
+              )}
             >
-              {g.pri}
-            </span>
-            <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-3)]">
-              {PRI_LABEL[g.pri]}
-            </span>
-            <span className="cl-mono ml-auto text-[var(--fs-xs)] tracking-[0.14em] text-[var(--ink-3)] [font-variant-numeric:tabular-nums]">
-              {pad2(g.items.length)} ITEMS
-            </span>
-          </div>
+              <Tick variant={tick.variant} className={tick.className} />
+              <span className="font-serif text-[21px] italic leading-none text-ink">
+                {PRI_LABEL[g.pri]}
+              </span>
+              <span className="text-[12.5px] text-mute tabular-nums">
+                {g.pri} · {count}
+              </span>
+            </h2>
 
-          {/* Task rows */}
-          {g.items.map((t) => {
-            const { done, total } = checklistProgress(t.checks);
+            {g.items.map((t) => {
+              const { done, total } = checklistProgress(t.checks);
+              const selected = t.id === editTaskId;
+              const sealed = t.status === "SEALED";
 
-            return (
-              <div
-                key={t.id}
-                data-testid={`bk-row-${t.id}`}
-                className="cl-mono pointer-events-none relative grid w-full cursor-pointer border-b border-dotted border-[var(--rule)] px-[var(--pad)] py-[5px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)]"
-                style={{
-                  gridTemplateColumns: BK_COLS,
-                  gap: "12px",
-                  alignItems: "center",
-                  minHeight: "var(--row-h)",
-                }}
-              >
-                <button
-                  type="button"
-                  aria-label={`Edit ${t.code}: ${t.title}`}
-                  className="pointer-events-auto absolute inset-0 z-0 cursor-pointer border-0 bg-transparent p-0 text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--hot)] focus-visible:outline-offset-[-1px]"
-                  onClick={() => setEditTaskId(t.id)}
-                  data-testid={`bk-action-${t.id}`}
-                />
-                {/* FILE-ID */}
-                <span className="overflow-hidden text-ellipsis whitespace-nowrap tracking-[0.04em] text-[var(--ink)] [font-variant-numeric:tabular-nums]">
-                  {t.code}
-                </span>
-
-                {/* TASKING — priority chip · title with optional HOLD tag */}
-                <span className="flex items-center gap-[8px] overflow-hidden text-[var(--ink)]">
-                  <InlineEditPopover
-                    task={t}
-                    field="priority"
-                    testIdPrefix="bk"
-                    colLabel={colLabel}
+              return (
+                <div
+                  key={t.id}
+                  data-testid={`bk-row-${t.id}`}
+                  data-selected={selected ? "true" : undefined}
+                  className={cn(
+                    BK_COLS,
+                    "pointer-events-none relative h-10 rounded-[10px] transition-colors duration-[120ms]",
+                    selected ? "bg-accent-tint" : "hover:bg-sink",
+                  )}
+                >
+                  <button
+                    type="button"
+                    aria-label={`Edit ${t.code}: ${t.title}`}
+                    aria-current={selected ? "true" : undefined}
+                    className={cn(
+                      "pointer-events-auto absolute inset-0 z-0 cursor-pointer rounded-[10px] bg-transparent p-0 text-left",
+                      FOCUS_RING_NATIVE,
+                    )}
+                    onClick={() => setEditTaskId(t.id)}
+                    data-testid={`bk-action-${t.id}`}
+                  />
+                  {/* Code */}
+                  <span
+                    className={cn(
+                      "truncate text-[13px] tabular-nums",
+                      sealed ? "text-mute" : "text-ink-2",
+                    )}
                   >
-                    <PriChip pri={t.priority} />
-                  </InlineEditPopover>
-                  {t.hold && (
-                    <span
-                      data-testid={`bk-hold-tag-${t.id}`}
-                      className="flex-shrink-0"
+                    {t.code}
+                  </span>
+
+                  {/* Task — priority chip · Blocked pill · title */}
+                  <span className="flex min-w-0 items-center gap-2.5">
+                    <InlineEditPopover
+                      task={t}
+                      field="priority"
+                      testIdPrefix="bk"
+                      colLabel={colLabel}
                     >
-                      <span className="inline-block border border-[var(--hot)] px-[4px] text-[var(--fs-xs)] leading-[14px] tracking-[0.12em] text-[var(--hot)]">
+                      <PriChip pri={t.priority} />
+                    </InlineEditPopover>
+                    {t.hold && (
+                      <span
+                        data-testid={`bk-hold-tag-${t.id}`}
+                        className="inline-flex h-[22px] flex-shrink-0 items-center rounded-full bg-[color-mix(in_oklab,var(--hot)_10%,transparent)] px-[9px] text-[12px] text-hot"
+                      >
                         Blocked
                       </span>
+                    )}
+                    <span
+                      className={cn(
+                        "truncate",
+                        sealed ? "text-mute" : "text-ink",
+                      )}
+                      title={t.title}
+                    >
+                      {t.title}
                     </span>
-                  )}
-                  <span
-                    className="overflow-hidden text-ellipsis whitespace-nowrap"
-                    title={t.title}
-                  >
-                    {t.title}
                   </span>
-                </span>
 
-                {/* PROJECT */}
-                <span className="overflow-hidden text-ellipsis whitespace-nowrap tracking-[0.06em] text-[var(--ink-3)]">
-                  {t.project ?? "—"}
-                </span>
+                  {/* Project */}
+                  <span className="truncate text-[13px] text-mute">
+                    {t.project ?? "—"}
+                  </span>
 
-                {/* DISPOSITION */}
-                <span className="flex items-center gap-[7px] tracking-[0.1em] text-[var(--ink-2)]">
-                  <InlineEditPopover
-                    task={t}
-                    field="status"
-                    testIdPrefix="bk"
-                    colLabel={colLabel}
-                  >
-                    <span className="flex items-center gap-[7px]">
-                      <StatePip col={t.status} />
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                        {colLabel(t.status)}
+                  {/* Status */}
+                  <span className="flex min-w-0 items-center text-[13px] text-ink-2">
+                    <InlineEditPopover
+                      task={t}
+                      field="status"
+                      testIdPrefix="bk"
+                      colLabel={colLabel}
+                    >
+                      <span className="flex items-center gap-2">
+                        <StatePip col={t.status} />
+                        <span className="truncate">{colLabel(t.status)}</span>
                       </span>
-                    </span>
-                  </InlineEditPopover>
-                </span>
+                    </InlineEditPopover>
+                  </span>
 
-                {/* ASSIGNEE */}
-                <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[var(--ink-2)]">
-                  {t.assignee ?? "—"}
-                </span>
-
-                {/* EST */}
-                <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[var(--ink-3)] [font-variant-numeric:tabular-nums]">
-                  {t.estimate ?? "—"}
-                </span>
-
-                {/* DUE */}
-                <span
-                  className="overflow-hidden text-ellipsis whitespace-nowrap [font-variant-numeric:tabular-nums]"
-                  style={{
-                    textAlign: "right",
-                    color: t.due ? "var(--ink-2)" : "var(--ink-3)",
-                  }}
-                >
-                  {t.due ?? "—"}
-                </span>
-
-                {/* CHK — mini dot grid */}
-                <span>
+                  {/* Assignee */}
                   <span
-                    className="inline-grid gap-[2px]"
-                    style={{ gridAutoFlow: "column" }}
+                    className={cn(
+                      "truncate text-[13px]",
+                      t.assignee ? "text-ink-2" : "text-mute",
+                    )}
                   >
+                    {t.assignee ?? "—"}
+                  </span>
+
+                  {/* Estimate */}
+                  <span className="truncate text-[13px] text-mute tabular-nums">
+                    {t.estimate ?? "—"}
+                  </span>
+
+                  {/* Due */}
+                  <span
+                    className={cn(
+                      "truncate text-right text-[13px] tabular-nums",
+                      t.due ? "text-ink-2" : "text-mute",
+                    )}
+                  >
+                    {t.due ?? "—"}
+                  </span>
+
+                  {/* Checklist — mini dots */}
+                  <span className="flex gap-[3px]">
                     {Array.from(
                       { length: total },
                       (_, position) => position + 1,
                     ).map((position) => (
-                      <i
+                      <span
                         key={`${t.id}-check-${position}`}
                         data-testid={`bk-dot-${t.id}-${position - 1}`}
                         data-done={position <= done ? "true" : "false"}
-                        className="not-italic"
-                        style={{
-                          width: "5px",
-                          height: "5px",
-                          background:
-                            position <= done ? "var(--cool)" : "var(--ink-4)",
-                          display: "block",
-                        }}
+                        className={cn(
+                          "block h-1.5 w-1.5 rounded-full",
+                          position <= done ? "bg-accent" : "bg-faint",
+                        )}
                       />
                     ))}
                   </span>
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      ))}
+                </div>
+              );
+            })}
+          </section>
+        );
+      })}
     </div>
   );
 }

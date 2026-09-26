@@ -321,45 +321,50 @@ describe("BacklogView — grouping", () => {
     expect(screen.getByText("Low")).toBeInTheDocument();
   });
 
-  it("zero-pads group count to 2 digits (01 ITEMS, 10 ITEMS etc.)", () => {
+  it("captions each group with its priority and task count", () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    expect(screen.getByText("01 ITEMS")).toBeInTheDocument();
+    expect(screen.getByTestId("bk-grp-hd-P0")).toHaveTextContent("P0 · 1 task");
   });
 
-  it("zero-pads two-digit group count correctly", () => {
+  it("pluralises the group count", () => {
     const ten = Array.from({ length: 10 }, (_, i) => ({
       ...T_P0_DUE,
       id: `p0-${i}`,
       code: `TSK-20${String(i).padStart(2, "0")}`,
     }));
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={ten} />);
-    expect(screen.getByText("10 ITEMS")).toBeInTheDocument();
+    expect(screen.getByTestId("bk-grp-hd-P0")).toHaveTextContent(
+      "P0 · 10 tasks",
+    );
   });
 
-  it("first group header has no top border; subsequent group headers do", () => {
+  it("group headers are headings with a tick and an italic serif label", () => {
+    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P1_HOLD]} />);
+    const hd = screen.getByTestId("bk-grp-hd-P1");
+    expect(hd.tagName).toBe("H2");
+    expect(hd.querySelector("[data-tick]")).not.toBeNull();
+    const label = screen.getByText("High");
+    expect(label).toHaveClass("font-serif", "italic");
+  });
+
+  it("ticks Critical hot, Low faint and the rest cobalt", () => {
+    const low: BoardTask = { ...T_P2_INTAKE, id: "bk-p3", priority: "P3" };
     wrap(
       <BacklogView
         colLabel={FIXTURE_COL_LABEL}
-        tasks={[T_P0_DUE, T_P1_HOLD, T_P2_CHECKS]}
+        tasks={[T_P0_DUE, T_P1_HOLD, low]}
       />,
     );
-    // jsdom expands the border-top shorthand — assert on borderTopStyle
-    expect(screen.getByTestId("bk-grp-hd-P0")).toHaveStyle({
-      borderTopStyle: "none",
-    });
-    expect(screen.getByTestId("bk-grp-hd-P1")).toHaveStyle({
-      borderTopStyle: "solid",
-      borderTopWidth: "1px",
-    });
-    expect(screen.getByTestId("bk-grp-hd-P2")).toHaveStyle({
-      borderTopStyle: "solid",
-      borderTopWidth: "1px",
-    });
+    const tick = (pri: string) =>
+      screen.getByTestId(`bk-grp-hd-${pri}`).querySelector("[data-tick]");
+    expect(tick("P0")).toHaveClass("bg-hot");
+    expect(tick("P1")).toHaveClass("bg-accent");
+    expect(tick("P3")).toHaveClass("bg-faint");
   });
 });
 
 describe("BacklogView — row rendering", () => {
-  it("renders the task code as FILE-ID", () => {
+  it("renders the task code in the Code column", () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
     expect(screen.getByText("TSK-1000")).toBeInTheDocument();
   });
@@ -464,6 +469,40 @@ describe("BacklogView — row click sets editTaskId", () => {
     await userEvent.click(screen.getByTestId("bk-action-bk-p1-hold"));
     expect(useBoardStore.getState().editTaskId).toBe("bk-p1-hold");
   });
+
+  it("pressing Enter on a focused row opens the task", async () => {
+    const user = userEvent.setup();
+    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
+    const action = screen.getByRole("button", {
+      name: "Edit TSK-1000: Critical with due",
+    });
+    action.focus();
+    expect(action).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(useBoardStore.getState().editTaskId).toBe("bk-p0-due");
+  });
+
+  it("marks the row being edited as selected", () => {
+    useBoardStore.setState({ editTaskId: "bk-p1-hold" });
+    wrap(
+      <BacklogView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[T_P0_DUE, T_P1_HOLD]}
+      />,
+    );
+    const selected = screen.getByTestId("bk-row-bk-p1-hold");
+    expect(selected).toHaveAttribute("data-selected", "true");
+    expect(selected).toHaveClass("bg-accent-tint");
+    expect(screen.getByTestId("bk-action-bk-p1-hold")).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    const other = screen.getByTestId("bk-row-bk-p0-due");
+    expect(other).not.toHaveAttribute("data-selected");
+    expect(screen.getByTestId("bk-action-bk-p0-due")).not.toHaveAttribute(
+      "aria-current",
+    );
+  });
 });
 
 describe("BacklogView — inline editing", () => {
@@ -528,13 +567,14 @@ describe("BacklogView — within-group sort order in DOM", () => {
 describe("BacklogView — empty state", () => {
   it("renders only the header when no tasks are provided", () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[]} />);
-    // Header should be present
-    expect(screen.getByText("ID")).toBeInTheDocument();
+    // Sentence-case column header should be present
+    expect(screen.getByText("Code")).toBeInTheDocument();
+    expect(screen.getByText("Checklist")).toBeInTheDocument();
     // No group headers
     expect(screen.queryByText("Critical")).not.toBeInTheDocument();
   });
 
-  it("renders the dashed No tasks empty-state block when no tasks are provided", () => {
+  it("renders the No tasks empty state when no tasks are provided", () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[]} />);
     const empty = screen.getByTestId("bk-empty");
     expect(empty).toBeInTheDocument();
