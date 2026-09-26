@@ -294,14 +294,17 @@ export function BaseEmbedElement({
           onClick={() => exit(path, "before")}
         />
         {active ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            className="absolute top-3 right-3.5 z-10 h-7 rounded-full bg-accent-tint px-[11px] text-[12.5px] font-normal text-accent data-[hovered]:bg-accent-tint"
-            onPress={focusDockedInspector}
-          >
-            Go to embed settings
-          </Button>
+          <div className="flex items-center justify-between gap-3 rounded-t-[14px] bg-accent-tint py-1.5 pr-2 pl-3.5 text-[12.5px] text-accent">
+            <span>Editing in the side panel</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 rounded-full px-[11px] text-[12.5px] font-medium text-accent"
+              onPress={focusDockedInspector}
+            >
+              Go to embed settings
+            </Button>
+          </div>
         ) : null}
         {/* While its panel is open this embed holds still: changing it would
             replace the node the panel's draft belongs to. */}
