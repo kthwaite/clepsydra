@@ -1644,6 +1644,9 @@ export function Folio({ tabId, path }: FolioProps) {
           relationships={relationships}
           contents={contents}
           onBack={onMobileBack}
+          group={null}
+          status={null}
+          linkedCount={linkedFrom.length}
         />
         {overlays}
       </>

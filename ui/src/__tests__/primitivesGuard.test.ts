@@ -80,6 +80,7 @@ const MOBILE_FILES = [
   "../codex/MobileGoTo.tsx",
   "../codex/ContentsBadge.tsx",
   "../../editor/SaveIndicator.tsx",
+  "../codex/MobileFolioLayout.tsx",
 ];
 
 const FORBIDDEN: Array<[string, RegExp]> = [
