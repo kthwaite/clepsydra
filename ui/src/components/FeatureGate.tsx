@@ -3,9 +3,7 @@ import type { FeatureName } from "#/api/features";
 import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 
 export function NotFoundPage() {
-  return (
-    <div className="cl-cap p-8 text-[var(--ink-mute)]">404 · folio missing</div>
-  );
+  return <p className="px-10 py-8 text-[14px] text-mute">Page not found.</p>;
 }
 
 export function FeatureGate({

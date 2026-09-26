@@ -1,39 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useUiStore } from "#/store/ui";
+import { Tick } from "./Tick";
 
-const LINES: { t: string; status?: "ok" | "warn" }[] = [
-  { t: "[BIOS] CLEPSYDRA-7 VESSEL CONTROLLER · rev γ-3" },
-  { t: "[init] power-on self-test", status: "ok" },
-  { t: "[init] mounting /archive", status: "ok" },
-  { t: "[init] mounting /index", status: "ok" },
-  { t: "[init] verifying corpus checksum (BLAKE3)", status: "ok" },
-  { t: "[net ] link layer · nominal", status: "ok" },
-  { t: "[idx ] rebuilding link graph", status: "ok" },
-  { t: "[idx ] resolving wikilinks", status: "warn" },
-  { t: "[ui  ] hydrating operator console", status: "ok" },
-  { t: "[ok  ] vessel ready — welcome, operator" },
-];
+/** How long the boot screen holds before it ends by itself. */
+const BOOT_MS = 2100;
 
-const STEP = 150;
-const HOLD = 600;
-
+/** The launch screen: a calm wordmark with a pulsing tick. Click, Escape or
+ *  the hold timer ends it. */
 export function BootSequence() {
   const booting = useUiStore((s) => s.isBooting);
   const endBoot = useUiStore((s) => s.endBoot);
-  const [shown, setShown] = useState(0);
 
   useEffect(() => {
     if (!booting) return;
-    setShown(0);
-    const timers: number[] = [];
-    for (let i = 1; i <= LINES.length; i++) {
-      timers.push(window.setTimeout(() => setShown(i), i * STEP));
-    }
-    timers.push(window.setTimeout(() => endBoot(), LINES.length * STEP + HOLD));
-    return () =>
-      timers.forEach((timer) => {
-        window.clearTimeout(timer);
-      });
+    const timer = window.setTimeout(() => endBoot(), BOOT_MS);
+    return () => window.clearTimeout(timer);
   }, [booting, endBoot]);
 
   useEffect(() => {
@@ -51,30 +32,26 @@ export function BootSequence() {
     <button
       type="button"
       onClick={endBoot}
-      aria-label="skip boot sequence"
-      className="fixed inset-0 z-[10000] flex cursor-pointer flex-col items-start justify-center gap-6 bg-paper px-[12vw] text-left"
+      aria-label="Skip boot sequence"
+      className="fixed inset-0 z-[10000] flex cursor-pointer flex-col items-center justify-center gap-5 bg-ground px-6 text-center outline-none"
     >
-      <div className="font-sans text-[56px] font-black uppercase leading-none tracking-[0.04em] text-ink">
-        CLEPSYDRA<span className="text-accent">/</span>VII
-      </div>
-      <pre className="cl-mono m-0 text-[12px] leading-[1.7]">
-        {LINES.slice(0, shown).map((l) => (
-          <div key={l.t}>
-            <span className="text-ink-2">{l.t}</span>
-            {l.status && (
-              <span className={l.status === "ok" ? "text-cool" : "text-warn"}>
-                {"  "}[{l.status === "ok" ? " ok " : "warn"}]
-              </span>
-            )}
-          </div>
-        ))}
-        {shown < LINES.length && (
-          <span className="cl-cursor align-middle text-accent" />
-        )}
-      </pre>
-      <div className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-        click or esc to skip
-      </div>
+      <span className="flex items-center gap-3">
+        <img
+          src={`${import.meta.env.BASE_URL}favicon.svg`}
+          alt=""
+          className="h-10 w-10 rounded-[10px]"
+        />
+        <span className="font-serif text-[44px] leading-none text-ink">
+          Clepsydra
+        </span>
+      </span>
+      <span className="flex items-center gap-2.5 text-[14px] text-mute">
+        <Tick variant="pulse" />
+        Opening the vault…
+      </span>
+      <span className="text-[12.5px] text-mute">
+        Click or press Esc to skip
+      </span>
     </button>
   );
 }

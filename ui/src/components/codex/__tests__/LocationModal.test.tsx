@@ -56,6 +56,16 @@ describe("LocationModal", () => {
     );
   });
 
+  it("heads the dialog with a tick eyebrow and a serif title", () => {
+    render(<LocationModal />);
+    expect(screen.getByRole("dialog", { name: "Location" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Location" }),
+    ).toBeVisible();
+    expect(screen.getByText("Atrium sky")).toBeVisible();
+    expect(screen.queryByText(/CLP-GEO/)).not.toBeInTheDocument();
+  });
+
   it("returns null when closed", () => {
     useUiStore.setState({ isLocationOpen: false });
     const { container } = render(<LocationModal />);

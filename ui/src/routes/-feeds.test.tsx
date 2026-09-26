@@ -252,7 +252,7 @@ describe("feeds route controls", () => {
 
     render(<FeedsPage />);
 
-    expect(screen.getByText("404 · folio missing")).toBeVisible();
+    expect(screen.getByText("Page not found.")).toBeVisible();
     expect(routeMocks.useFeeds).not.toHaveBeenCalled();
     expect(routeMocks.useFeedEntry).not.toHaveBeenCalled();
   });

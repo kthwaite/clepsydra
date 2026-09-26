@@ -23,11 +23,9 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
       <div
         role="status"
         aria-label="Loading features"
-        className="flex min-h-dvh items-center justify-center bg-paper"
+        className="flex min-h-dvh items-center justify-center bg-ground"
       >
-        <span className="cl-mono text-[11px] uppercase tracking-[0.18em] text-[var(--ink-mute)]">
-          Loading features…
-        </span>
+        <span className="text-[14px] text-mute">Loading features…</span>
       </div>
     );
   }

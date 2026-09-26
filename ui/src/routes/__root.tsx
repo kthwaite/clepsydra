@@ -166,11 +166,9 @@ function OverlayLoadingFallback({
           onDismiss();
         }
       }}
-      className="fixed inset-0 z-[10000] flex items-center justify-center bg-paper"
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-ground outline-none"
     >
-      <span className="cl-mono text-[11px] uppercase tracking-[0.18em] text-[var(--ink-mute)]">
-        Loading {label}…
-      </span>
+      <span className="text-[14px] text-mute">Loading {label}…</span>
     </div>
   );
 }

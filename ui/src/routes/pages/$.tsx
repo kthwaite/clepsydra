@@ -21,5 +21,5 @@ function PageRedirect() {
     }
   }, [path, openTab, navigate]);
 
-  return <div className="p-8 text-muted-foreground">Redirecting...</div>;
+  return <p className="px-10 py-8 text-[14px] text-mute">Redirecting…</p>;
 }

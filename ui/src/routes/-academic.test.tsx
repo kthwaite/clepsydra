@@ -130,7 +130,7 @@ describe("Academic route capability gate", () => {
 
     render(<AcademicRoute />);
 
-    expect(screen.getByText("404 · folio missing")).toBeVisible();
+    expect(screen.getByText("Page not found.")).toBeVisible();
     expect(routeMocks.useAcademicApi).not.toHaveBeenCalled();
   });
 

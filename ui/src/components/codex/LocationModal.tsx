@@ -2,10 +2,11 @@ import { useLocation } from "#/api/location";
 import { useUiStore } from "#/store/ui";
 import { CodexModalShell } from "./CodexModalShell";
 import { LocationForm } from "./LocationForm";
+import { Tick } from "./Tick";
 
-/** Atrium location picker: a vessel-diegetic overlay (scrim dismiss, Escape,
- * role=dialog) wrapping the shared {@link LocationForm}, prefilled from the
- * current location and closing on a successful save. */
+/** Atrium location picker: a modal (scrim dismiss, Escape, role=dialog)
+ * wrapping the shared {@link LocationForm}, prefilled from the current
+ * location and closing on a successful save. */
 export function LocationModal() {
   const isOpen = useUiStore((s) => s.isLocationOpen);
   const onClose = useUiStore((s) => s.closeLocation);
@@ -19,13 +20,16 @@ export function LocationModal() {
       maxWidthClassName="max-w-[520px]"
       onDismiss={onClose}
     >
-      <div className="flex items-baseline justify-between border-b border-ink bg-paper-2 px-3 py-1.5">
-        <span className="cl-mono text-[10px] uppercase tracking-[0.18em] text-ink">
-          ◎ Location
+      <div className="flex flex-col gap-2 px-5 pt-6">
+        <span className="flex items-center gap-2.5">
+          <Tick />
+          <span className="font-serif text-[18px] italic leading-none text-mute">
+            Atrium sky
+          </span>
         </span>
-        <span className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-          FORM CLP-GEO-01 / REV.01
-        </span>
+        <h2 className="font-serif text-[30px] leading-[1.15] text-ink">
+          Location
+        </h2>
       </div>
       <LocationForm initial={current} onSaved={onClose} onCancel={onClose} />
     </CodexModalShell>
