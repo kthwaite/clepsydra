@@ -177,4 +177,22 @@ describe("GroupPicker", () => {
     );
     expect(onSetGroup).toHaveBeenLastCalledWith(undefined);
   });
+
+  it("shows a grouping on a field outside the view's columns, and ungroups", async () => {
+    const user = userEvent.setup();
+    const onSetGroup = vi.fn();
+    render(
+      <GroupPicker
+        columns={columns.filter((c) => !c.groupable)}
+        group="status"
+        overridden={false}
+        onSetGroup={onSetGroup}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Group · status" }));
+    await user.click(
+      screen.getByRole("menuitemradio", { name: "No grouping" }),
+    );
+    expect(onSetGroup).toHaveBeenCalledWith({ kind: "flat" });
+  });
 });

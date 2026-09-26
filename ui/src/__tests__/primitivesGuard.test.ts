@@ -10,7 +10,15 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([]);
+const PENDING = new Set<string>([
+  "../bases/BaseTableView.tsx",
+  "../bases/FieldsPopover.tsx",
+  "../bases/ViewOverridesStrip.tsx",
+  "../bases/EditableCell.tsx",
+  "../bases/BaseMemberDraft.tsx",
+  "../bases/BasesIndex.tsx",
+  "../bases/CreateBaseDialog.tsx",
+]);
 
 /** Tasking board screen (phase 4.3). */
 const TASKING_FILES = [
@@ -58,6 +66,20 @@ const SCREEN_FILES = [
   "../codex/Gazetteer.tsx",
 ];
 
+/** Bases (phase 4.5b). */
+const BASES_FILES = [
+  "../bases/BaseTableView.tsx",
+  "../bases/BaseTable.tsx",
+  "../bases/BasePickers.tsx",
+  "../bases/FieldsPopover.tsx",
+  "../bases/ViewOverridesStrip.tsx",
+  "../bases/EditableCell.tsx",
+  "../bases/BaseMemberDraft.tsx",
+  "../bases/BasesIndex.tsx",
+  "../bases/CreateBaseDialog.tsx",
+  "../../routes/bases.$slug.tsx",
+];
+
 const FORBIDDEN: Array<[string, RegExp]> = [
   ["uppercase", /\buppercase\b/],
   // Negative tracking tightens large serif display type (mockup); Vessel's
@@ -93,6 +115,7 @@ const files = [
   ...TASKING_FILES,
   ...PROSE_FILES,
   ...FOLIO_FILES,
+  ...BASES_FILES,
 ].filter((f) => {
   try {
     readFileSync(path.join(uiDir, f));

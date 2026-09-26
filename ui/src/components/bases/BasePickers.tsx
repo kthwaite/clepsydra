@@ -153,7 +153,9 @@ export function GroupPicker({
   onSetGroup(group: GroupOverride | undefined): void;
 }) {
   const groupable = columns.filter((c) => c.groupable);
-  if (groupable.length === 0) return null;
+  // A saved grouping may key on a field the view does not show; the pill
+  // still names it and offers No grouping.
+  if (groupable.length === 0 && group === undefined) return null;
   const labelOf = (field: string) =>
     columns.find((c) => c.column === field)?.label ?? field;
   return (
