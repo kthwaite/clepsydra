@@ -26,9 +26,11 @@ const {
   useSearchMock,
   useTagsMock,
   workspaceStateMock,
+  layout,
 } = vi.hoisted(() => {
   const searchRefetchMock = vi.fn();
   return {
+    layout: { mobile: false },
     featureFlagsState: { academic: true, feeds: true },
     navigateMock: vi.fn(),
     openTabMock: vi.fn(),
@@ -94,6 +96,19 @@ vi.mock("#/hooks/useFolioHistoryNavigation", () => ({
   useActivateTabWithFolioHistory: () => vi.fn(),
   useLeaveFolioWorkspace: () => (proceed: () => void) => proceed(),
 }));
+vi.mock("#/hooks/useMobileLayout", () => ({
+  useMobileLayout: () => layout.mobile,
+}));
+vi.mock("#/components/codex/MobileGoTo", () => ({
+  MobileGoTo: ({ onGo }: { onGo: () => void }) => (
+    <section>
+      <h2>Go to</h2>
+      <button type="button" onClick={onGo}>
+        Gazetteer
+      </button>
+    </section>
+  ),
+}));
 vi.mock("#/store/workspace", () => {
   const useWorkspaceStore = Object.assign(
     (selector: (state: unknown) => unknown) => selector(workspaceStateMock),
@@ -112,6 +127,7 @@ import { useUiStore } from "#/store/ui";
 describe("CommandPalette keyboard navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    layout.mobile = false;
     featureFlagsState.academic = true;
     featureFlagsState.feeds = true;
     workspaceStateMock.tabs = [];
@@ -673,6 +689,7 @@ describe("CommandPalette keyboard navigation", () => {
 describe("CommandPalette pointer highlight", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    layout.mobile = false;
     featureFlagsState.academic = true;
     featureFlagsState.feeds = true;
     workspaceStateMock.tabs = [];
@@ -760,5 +777,43 @@ describe("CommandPalette pointer highlight", () => {
     expect(screen.getByText("↑↓ move")).toBeInTheDocument();
     expect(screen.getByText(/^\d+ results?$/)).toBeInTheDocument();
     expect(screen.queryByText(/HITS/)).toBeNull();
+  });
+});
+
+describe("CommandPalette on mobile", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    layout.mobile = true;
+    useUiStore.setState({ isSearchOpen: true });
+  });
+
+  it("shows a pill search with Cancel and the Go to block, without key hints", async () => {
+    render(<CommandPalette />);
+    expect(
+      screen.getByRole("textbox", { name: "Command query" }),
+    ).toHaveAttribute("placeholder", "Search pages, tasks and screens");
+    expect(screen.getByRole("heading", { name: "Go to" })).toBeVisible();
+    expect(screen.queryByText("esc close")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+
+  it("closes after a Go to chip", async () => {
+    render(<CommandPalette />);
+    await userEvent.click(screen.getByRole("button", { name: "Gazetteer" }));
+    expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+
+  it("keeps the desktop layout off mobile", () => {
+    layout.mobile = false;
+    render(<CommandPalette />);
+    expect(screen.getByText("esc close")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Cancel" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Go to" }),
+    ).not.toBeInTheDocument();
   });
 });

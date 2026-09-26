@@ -13,8 +13,7 @@ import {
   SearchField,
   useFilter,
 } from "react-aria-components";
-import { useFeeds } from "#/api/feeds";
-import { useSyncConflicts } from "#/api/index";
+import { ContentsBadge } from "#/components/codex/ContentsBadge";
 import type { CodexView } from "#/components/codex/useCodexView";
 import {
   contentsGroups,
@@ -27,44 +26,6 @@ import { cn } from "#/lib/cn";
 import { formatChord, SHORTCUTS } from "#/lib/shortcuts";
 import { useUiStore } from "#/store/ui";
 import { useViewHistory } from "#/store/viewHistory";
-
-function Badge({
-  children,
-  warn,
-}: {
-  children: React.ReactNode;
-  warn?: boolean;
-}) {
-  return (
-    <span
-      className={cn(
-        "rounded-full px-1.5 text-[11.5px] tabular-nums",
-        warn ? "bg-warn/12 text-warn" : "bg-accent-tint text-accent",
-      )}
-    >
-      {children}
-    </span>
-  );
-}
-
-/** Mounted only while its row renders, so the feeds query never runs when
- *  Feeds is disabled or Contents is closed. */
-function FeedsBadge() {
-  const unread = useFeeds().data?.counts.unread ?? 0;
-  return unread > 0 ? <Badge>{unread}</Badge> : null;
-}
-
-function ConflictsBadge() {
-  const total = useSyncConflicts().data?.total ?? 0;
-  return total > 0 ? <Badge warn>{total}</Badge> : null;
-}
-
-function RowBadge({ view }: { view: CodexView }) {
-  if (isCoreView(view)) return <Badge>core</Badge>;
-  if (view === "feeds") return <FeedsBadge />;
-  if (view === "conflicts") return <ConflictsBadge />;
-  return null;
-}
 
 /** The header's Contents trigger and the sheet listing every other screen,
  *  grouped from VIEW_REGISTRY (spec §5.2). */
@@ -177,7 +138,7 @@ export function ContentsMenu({
                           <span className="text-[15px] font-medium text-ink">
                             {d.label}
                           </span>
-                          <RowBadge view={v} />
+                          <ContentsBadge view={v} />
                           <span className="flex-1" />
                           {d.shortcut && (
                             <span className="text-[12px] text-faint">
