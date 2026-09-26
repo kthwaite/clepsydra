@@ -90,7 +90,7 @@ export const KIND_META: Record<Kind, KindMeta> = {
   CODE: { label: "CODE", color: "var(--ink)", icon: Code },
   PERSON: { label: "PERSON", color: "var(--quire-madder)", icon: User },
   CAPTURE: { label: "CAPTURE", color: "var(--quire-slate)", icon: Inbox },
-  NOTE: { label: "NOTE", color: "var(--ink-mute)", icon: FileText },
+  NOTE: { label: "NOTE", color: "var(--mute)", icon: FileText },
   TASK: {
     label: "TASK",
     color: "var(--quire-verdigris)",
@@ -103,7 +103,7 @@ export const KIND_META: Record<Kind, KindMeta> = {
   MEETING: { label: "MEETING", color: "var(--quire-madder)", icon: Users },
   // Archived pages are inert captures of someone else's writing; a muted ink
   // hue keeps them legible without competing with authored material.
-  ARCHIVE: { label: "ARCHIVE", color: "var(--ink-3)", icon: Archive },
+  ARCHIVE: { label: "ARCHIVE", color: "var(--mute)", icon: Archive },
   AI_CONVERSATION: {
     label: "AI CONVERSATION",
     color: "var(--quire-indigo)",

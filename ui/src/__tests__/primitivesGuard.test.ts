@@ -10,26 +10,7 @@ const ALLOW: Record<string, string[]> = {};
 
 /** Not yet clean; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([
-  "components/BacklinksPanel.tsx",
-  "components/MarkdownRenderer.tsx",
-  "components/TagCloud.tsx",
-  "components/ThemeToggle.stories.tsx",
-  "components/bases/ArchiveRowDialog.tsx",
-  "components/bases/CreateBaseDialog.tsx",
-  "components/bases/cells/types.ts",
-  "components/codex/Gazetteer.tsx",
-  "components/codex/MoonDisc.stories.tsx",
-  "components/codex/PreviewBody.stories.tsx",
-  "components/ui/badge.stories.tsx",
-  "components/ui/checkbox-group.stories.tsx",
-  "components/ui/editor-suggestion-popover.stories.tsx",
-  "components/ui/page-link.tsx",
-  "components/ui/progress-circle.tsx",
-  "editor/schema/elements.stories.tsx",
-  "lib/kind.ts",
-  "lib/mermaid.ts",
-]);
+const PENDING = new Set<string>([]);
 
 const FORBIDDEN: Array<[string, RegExp]> = [
   ["uppercase", /\buppercase\b/],

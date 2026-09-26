@@ -318,7 +318,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
   if (isMobile) {
     if (loadError) {
       return (
-        <p role="alert" className="p-4 text-sm text-destructive">
+        <p role="alert" className="p-4 text-sm text-hot">
           {loadError}
         </p>
       );

@@ -74,7 +74,7 @@ export function ArchiveRowDialog({
         </p>
         <p>You can restore this page from the Rubbish Bin.</p>
         {error ? (
-          <p className="text-xs text-destructive" role="alert">
+          <p className="text-xs text-hot" role="alert">
             {error}
           </p>
         ) : null}

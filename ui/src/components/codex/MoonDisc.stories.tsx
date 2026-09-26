@@ -33,16 +33,7 @@ export const AllPhases: Story = {
         return (
           <div key={info.phaseName} style={{ textAlign: "center" }}>
             <MoonDisc info={info} />
-            <div
-              className="cl-mono"
-              style={{
-                marginTop: 8,
-                fontSize: 9,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                color: "var(--ink-mute)",
-              }}
-            >
+            <div className="mt-2 text-[12.5px] text-mute">
               {info.phaseName} · {info.illumPct}%
             </div>
           </div>

@@ -35,9 +35,9 @@ export interface CellEditorProps {
 
 export type CellEditorComponent = (props: CellEditorProps) => React.ReactNode;
 
-/** Shared Vessel styling for inline cell inputs. */
+/** Shared styling for inline cell inputs: a raised field inside a cobalt ring. */
 export const CELL_INPUT_CLASS =
-  "cl-mono w-full border border-accent bg-paper px-1 py-0.5 text-[12px] text-ink outline-none";
+  "w-full rounded-[4px] bg-raise px-1 py-0.5 text-[12.5px] text-ink outline-none ring-1 ring-inset ring-accent";
 
 /** Focus an editor after React has mounted its input. */
 export function useInitialFocus<T extends HTMLElement>() {

@@ -42,9 +42,7 @@ export const Default: Story = {
       renderItem={(item) => (
         <>
           <div className="font-medium">{item.label}</div>
-          <div className="text-xs text-muted-foreground">
-            {item.description}
-          </div>
+          <div className="text-[13px] text-mute">{item.description}</div>
         </>
       )}
       getItemKey={(item) => item.id}

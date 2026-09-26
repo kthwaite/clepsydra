@@ -186,7 +186,7 @@ export function CreateBaseDialog({
           </p>
         </section>
         {requestError && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-xs text-hot">
             {requestError}
           </p>
         )}

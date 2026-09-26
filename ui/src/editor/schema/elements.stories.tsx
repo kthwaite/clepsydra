@@ -81,7 +81,7 @@ function SchemaPreview({
           renderElement={renderElement}
           renderLeaf={renderLeaf}
           decorate={decorateCode}
-          className="max-w-2xl font-body text-ink outline-none"
+          className="max-w-2xl text-ink outline-none"
         />
       </BaseEmbedEditingProvider>
     </Slate>

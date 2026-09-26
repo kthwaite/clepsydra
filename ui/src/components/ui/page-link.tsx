@@ -17,7 +17,7 @@ export function PageLink({ path, label, children, className }: PageLinkProps) {
       type="button"
       onClick={() => openTab("page", path, label)}
       className={cn(
-        "text-left text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground",
+        "text-left text-ink underline decoration-rule underline-offset-2 hover:decoration-ink",
         className,
       )}
     >

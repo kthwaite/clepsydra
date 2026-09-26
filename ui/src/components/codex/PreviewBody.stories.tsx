@@ -84,7 +84,7 @@ const conflictPreview = {
 
 export const Success: Story = {
   render: () => (
-    <div className="w-[340px] border-[1.5px] border-ink bg-paper">
+    <div className="w-[340px] rounded-[12px] bg-raise shadow-md">
       <PreviewBody
         path="notes/water-clocks.md"
         page={page}
@@ -98,7 +98,7 @@ export const Success: Story = {
 
 export const ConflictAndMissing: Story = {
   render: () => (
-    <div className="w-[340px] border-[1.5px] border-ink bg-paper">
+    <div className="w-[340px] rounded-[12px] bg-raise shadow-md">
       <PreviewBody
         path="notes/water-clocks.md"
         page={page}
@@ -112,7 +112,7 @@ export const ConflictAndMissing: Story = {
 
 export const Loading: Story = {
   render: () => (
-    <div className="w-[340px] border-[1.5px] border-ink bg-paper">
+    <div className="w-[340px] rounded-[12px] bg-raise shadow-md">
       <PreviewBody
         path="notes/water-clocks.md"
         page={page}
@@ -125,7 +125,7 @@ export const Loading: Story = {
 
 export const Failure: Story = {
   render: () => (
-    <div className="w-[340px] border-[1.5px] border-ink bg-paper">
+    <div className="w-[340px] rounded-[12px] bg-raise shadow-md">
       <PreviewBody
         path="notes/water-clocks.md"
         page={page}
@@ -138,7 +138,7 @@ export const Failure: Story = {
 
 export const Protected: Story = {
   render: () => (
-    <div className="w-[340px] border-[1.5px] border-ink bg-paper">
+    <div className="w-[340px] rounded-[12px] bg-raise shadow-md">
       <PreviewBody
         path="notes/private.md"
         page={{ ...page, encrypted: true }}

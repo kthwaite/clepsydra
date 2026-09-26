@@ -222,8 +222,8 @@ describe("kind colours (Stone & Lamp)", () => {
       BOOK: "var(--quire-sepia)",
       RECIPE: "var(--quire-sepia)",
       CODE: "var(--ink)",
-      NOTE: "var(--ink-mute)",
-      ARCHIVE: "var(--ink-3)",
+      NOTE: "var(--mute)",
+      ARCHIVE: "var(--mute)",
     });
   });
 
