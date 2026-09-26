@@ -26,11 +26,13 @@ import {
   GeneratedPreviewDialog,
   type PreparedGeneratedChange,
 } from "#/components/bases/GeneratedPreviewDialog";
+import { Button } from "#/components/ui/button";
 import { useWidthDrag, WidthResizer } from "#/components/ui/width-resizer";
 import { useBaseEmbedEditing } from "#/editor/baseEmbedEditing";
 import { useBaseRendering } from "#/editor/baseRendering";
 import type { ConfiguredBaseEmbedElement } from "#/editor/schema/types";
 import type { BaseEmbedElement as BaseEmbedNode } from "#/editor/types";
+import { cn } from "#/lib/cn";
 import { EmbeddedBaseTable } from "./EmbeddedBaseTable";
 import { LiveBaseTemplate } from "./LiveBaseTemplate";
 
@@ -222,23 +224,29 @@ export function BaseEmbedElement({
   }
   const actions = (
     <>
-      <button
+      <Button
         ref={editRef}
-        type="button"
-        className="cl-mono border border-rule px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-        onClick={openInspector}
+        variant="secondary"
+        size="sm"
+        aria-expanded={active}
+        className={cn(
+          "h-7 rounded-full px-[11px] text-[12.5px] font-normal",
+          active && "bg-accent-tint text-accent data-[hovered]:bg-accent-tint",
+        )}
+        onPress={openInspector}
       >
         Edit embed
-      </button>
-      <button
+      </Button>
+      <Button
         ref={removeRef}
-        type="button"
+        variant="ghost"
+        size="sm"
         aria-label="Remove Base embed"
-        className="cl-mono border border-rule px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink hover:border-destructive hover:text-destructive focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-        onClick={removeEmbed}
+        className="h-7 px-[11px] text-[12.5px] font-normal data-[hovered]:text-hot"
+        onPress={removeEmbed}
       >
         Remove
-      </button>
+      </Button>
     </>
   );
 
@@ -246,9 +254,10 @@ export function BaseEmbedElement({
     <div
       {...attributes}
       style={embedWidthStyle(previewWidth ?? authoredWidth)}
-      className={`relative my-4 min-w-0 rounded border bg-paper transition-colors ${
-        selected ? "border-accent ring-1 ring-accent" : "border-rule"
-      }`}
+      className={cn(
+        "relative my-4 min-w-0 rounded-[14px] bg-raise transition-shadow",
+        (selected || active) && "ring-2 ring-accent",
+      )}
       data-testid="base-embed"
     >
       <fieldset
@@ -280,12 +289,10 @@ export function BaseEmbedElement({
           onClick={() => exit(path, "before")}
         />
         {compact ? null : (
-          <header className="flex flex-wrap items-center gap-3 border-b border-rule px-3 py-2">
+          <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3.5 pt-3 pb-1">
             <div className="min-w-0 flex-1">
-              <p className="cl-mono text-[11px] uppercase tracking-[0.14em] text-ink-mute">
-                Base embed
-              </p>
-              <p className="truncate text-sm text-ink">
+              <p className="text-[12.5px] text-mute">Base embed</p>
+              <p className="truncate text-[13.5px] font-medium text-ink">
                 {element.status === "configured"
                   ? `${element.base}${element.view ? ` · ${element.view}` : ""}`
                   : element.status === "invalid"
@@ -293,11 +300,11 @@ export function BaseEmbedElement({
                     : "Choose a saved Base and view"}
               </p>
             </div>
-            {actions}
+            <div className="flex items-center gap-1.5">{actions}</div>
           </header>
         )}
 
-        <div className={`min-w-0 ${compact ? "p-2" : "p-3"}`}>
+        <div className={cn("min-w-0", compact ? "p-2" : "px-3.5 pt-2 pb-3")}>
           {element.status === "configured" && element.template ? (
             <LiveBaseTemplate selection={baseRenderSelection(element)} />
           ) : element.status === "configured" && element.view ? (
@@ -310,16 +317,20 @@ export function BaseEmbedElement({
               {...(compact ? { actions } : {})}
             />
           ) : element.status === "configured" ? (
-            <p role="alert">Choose a saved view for this table embed.</p>
+            <p role="alert" className="text-[13.5px] text-hot">
+              Choose a saved view for this table embed.
+            </p>
           ) : element.status === "invalid" ? (
-            <div role="alert" className="text-sm text-destructive">
+            <div role="alert" className="text-[13.5px] text-hot">
               <p>
                 This Base embed cannot be rendered until its source is repaired.
               </p>
-              <p className="cl-mono mt-1 text-xs">{element.parseError}</p>
+              <code className="mt-1 block text-[12.5px] text-ink-2">
+                {element.parseError}
+              </code>
             </div>
           ) : (
-            <p className="text-sm text-ink-mute">
+            <p className="text-[13.5px] text-mute">
               Configure this embed to render a saved Base view.
             </p>
           )}

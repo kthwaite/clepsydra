@@ -673,6 +673,82 @@ describe("BaseEmbedInspector structured mode", () => {
   });
 });
 
+describe("BaseEmbedInspector docked panel", () => {
+  function renderBesideEditor() {
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    const onRestoreFocus = vi.fn();
+    const outsideClick = vi.fn();
+    render(
+      <>
+        <button type="button" onClick={outsideClick}>
+          Editor content
+        </button>
+        <BaseEmbedInspector
+          isOpen
+          node={configured()}
+          onSave={onSave}
+          onCancel={onCancel}
+          onRestoreFocus={onRestoreFocus}
+        />
+      </>,
+    );
+    return { onSave, onCancel, onRestoreFocus, outsideClick };
+  }
+
+  it("is a labelled non-modal dialog docked to the right, with no scrim", () => {
+    renderBesideEditor();
+    const panel = screen.getByRole("dialog", { name: "Configure Base embed" });
+    expect(panel).not.toHaveAttribute("aria-modal", "true");
+    expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(document.querySelector(".bg-scrim")).toBeNull();
+    expect(panel).toHaveAttribute("data-docked", "right");
+    expect(panel.className).toMatch(/\bfixed\b/);
+    expect(panel.className).toMatch(/\bright-0\b/);
+  });
+
+  it("closes on Escape without saving and hands focus back", async () => {
+    const user = userEvent.setup();
+    const callbacks = renderBesideEditor();
+    await user.keyboard("{Escape}");
+    expect(callbacks.onSave).not.toHaveBeenCalled();
+    expect(callbacks.onCancel).toHaveBeenCalledTimes(1);
+    expect(callbacks.onRestoreFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes from its close button without saving", async () => {
+    const user = userEvent.setup();
+    const callbacks = renderBesideEditor();
+    await user.click(
+      screen.getByRole("button", { name: "Close without saving" }),
+    );
+    expect(callbacks.onSave).not.toHaveBeenCalled();
+    expect(callbacks.onCancel).toHaveBeenCalledTimes(1);
+    expect(callbacks.onRestoreFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the editor beside it interactive while open", async () => {
+    const user = userEvent.setup();
+    const callbacks = renderBesideEditor();
+    // Not hidden from assistive tech, not trapped behind a focus scope.
+    const outside = screen.getByRole("button", { name: "Editor content" });
+    expect(outside.closest("[aria-hidden='true'],[inert]")).toBeNull();
+    await user.click(outside);
+    expect(callbacks.outsideClick).toHaveBeenCalledTimes(1);
+    expect(outside).toHaveFocus();
+    // Clicking outside does not dismiss a docked panel.
+    expect(callbacks.onCancel).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("dialog", { name: "Configure Base embed" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders nothing while closed", () => {
+    renderInspector(configured(), { isOpen: false });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
 describe("pure Base embed validation bounds", () => {
   function comparison(field = "title", value: unknown = "x"): BaseFilter {
     return { field, op: "eq", value };

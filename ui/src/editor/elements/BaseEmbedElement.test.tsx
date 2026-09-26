@@ -1,4 +1,13 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ForwardedRef } from "react";
 import {
   createEditor,
@@ -28,9 +37,61 @@ const adapterState = vi.hoisted(() => ({
   model: null as BaseTableControllerModel | null,
 }));
 
-vi.mock("#/components/bases/BaseEmbedInspector", () => ({
-  BaseEmbedInspector: () => null,
-}));
+const inspectorMode = vi.hoisted(() => ({ real: false }));
+
+// Most tests render the embed alone; the docked-inspector tests opt into the
+// real panel with its Base registry hooks stubbed.
+vi.mock("#/components/bases/BaseEmbedInspector", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("#/components/bases/BaseEmbedInspector")
+    >();
+  return {
+    BaseEmbedInspector: (
+      props: Parameters<typeof actual.BaseEmbedInspector>[0],
+    ) => (inspectorMode.real ? <actual.BaseEmbedInspector {...props} /> : null),
+  };
+});
+
+vi.mock("#/api/bases", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#/api/bases")>();
+  const summaries = [
+    {
+      slug: "reading",
+      name: "Reading Log",
+      diagnostic_count: 0,
+      views: ["All", "Unread"],
+    },
+    { slug: "tasks", name: "Tasks", diagnostic_count: 0, views: ["Open"] },
+  ];
+  const settled = { isPending: false, isFetching: false, error: null };
+  return {
+    ...actual,
+    useBases: () => ({
+      ...settled,
+      data: { bases: summaries, diagnostics: [] },
+    }),
+    useBaseTemplates: () => ({ ...settled, data: { templates: [] } }),
+    useBase: (slug: string) => ({
+      ...settled,
+      data: {
+        slug,
+        name: slug,
+        properties: [
+          { key: "rating", definition: { type: "number" } },
+          { key: "archived", definition: { type: "bool" } },
+          { key: "title", definition: { type: "text" } },
+        ],
+        views: (slug === "tasks" ? ["Open"] : ["All", "Unread"]).map(
+          (name) => ({ name, layout: "table", columns: ["title"], sort: [] }),
+        ),
+        diagnostics: [],
+        member_creation: [],
+        revision: `${slug}-r1`,
+      },
+    }),
+  };
+});
 
 vi.mock("#/components/bases/useBaseTableController", () => ({
   useBaseTableController: (options: BaseTableControllerOptions) => {
@@ -248,6 +309,7 @@ function renderConfigured(
 }
 
 beforeEach(() => {
+  inspectorMode.real = false;
   adapterState.options = null;
   adapterState.tableProps = null;
   adapterState.model = null;
@@ -522,5 +584,90 @@ describe("EmbeddedBaseTable live Slate adapter", () => {
     expect(
       SlateElement.isElement(editor.children[0]) && editor.children[0].type,
     ).toBe("base-embed");
+  });
+});
+
+describe("BaseEmbedElement docked inspector", () => {
+  function tasksEmbed(): BaseEmbedElement {
+    return {
+      type: "base-embed",
+      status: "configured",
+      base: "tasks",
+      view: "Open",
+      children: [{ text: "" }],
+    } as BaseEmbedElement;
+  }
+
+  function renderTwoEmbeds() {
+    inspectorMode.real = true;
+    adapterState.model = controllerModel();
+    const editor = withReact(withSchema(createEditor()));
+    const value: Descendant[] = [
+      configured(),
+      { type: "paragraph", children: [{ text: "Prose between embeds" }] },
+      tasksEmbed(),
+    ];
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Harness editor={editor} value={value} />
+      </QueryClientProvider>,
+    );
+    return editor;
+  }
+
+  it("returns focus to the embed's Edit embed control on Escape", async () => {
+    const user = userEvent.setup();
+    renderTwoEmbeds();
+    const [firstEdit] = screen.getAllByRole("button", { name: "Edit embed" });
+    await user.click(firstEdit as HTMLElement);
+    const panel = await screen.findByRole("dialog", {
+      name: "Configure Base embed",
+    });
+    expect(panel).not.toHaveAttribute("aria-modal", "true");
+    expect(firstEdit).toHaveAttribute("aria-expanded", "true");
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(firstEdit).toHaveFocus());
+    expect(firstEdit).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps the editor beside it focusable while it is open", async () => {
+    const user = userEvent.setup();
+    renderTwoEmbeds();
+    const [firstEdit] = screen.getAllByRole("button", { name: "Edit embed" });
+    await user.click(firstEdit as HTMLElement);
+    await screen.findByRole("dialog", { name: "Configure Base embed" });
+
+    const editable = screen.getByRole("textbox");
+    expect(editable.closest("[aria-hidden='true'],[inert]")).toBeNull();
+    act(() => editable.focus());
+    expect(editable).toHaveFocus();
+    expect(
+      screen.getByRole("dialog", { name: "Configure Base embed" }),
+    ).toBeInTheDocument();
+  });
+
+  it("replaces the open inspector when a second embed is edited", async () => {
+    const user = userEvent.setup();
+    renderTwoEmbeds();
+    const [firstEdit, secondEdit] = screen.getAllByRole("button", {
+      name: "Edit embed",
+    });
+    await user.click(firstEdit as HTMLElement);
+    await screen.findByRole("dialog", { name: "Configure Base embed" });
+    await user.click(secondEdit as HTMLElement);
+
+    // One panel, now inspecting the second embed's Base.
+    await waitFor(() => expect(screen.getAllByRole("dialog")).toHaveLength(1));
+    const panel = screen.getByRole("dialog", { name: "Configure Base embed" });
+    expect(
+      await within(panel).findByRole("button", { name: /Tasks/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).queryByRole("button", { name: /Reading Log/ }),
+    ).toBeNull();
+    expect(firstEdit).toHaveAttribute("aria-expanded", "false");
+    expect(secondEdit).toHaveAttribute("aria-expanded", "true");
   });
 });
