@@ -38,9 +38,7 @@ function ControlledCheckboxGroup() {
         <Checkbox value="product">Product</Checkbox>
         <Checkbox value="security">Security</Checkbox>
       </CheckboxGroup>
-      <p className="text-xs text-muted-foreground">
-        Selected: {value.join(", ")}
-      </p>
+      <p className="text-[13px] text-mute">Selected: {value.join(", ")}</p>
     </div>
   );
 }

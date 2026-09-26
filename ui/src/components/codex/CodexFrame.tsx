@@ -29,7 +29,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
   return (
     <div
       className={cn(
-        "cl-root cl-paper flex w-screen flex-col overflow-hidden",
+        "cl-root bg-ground flex w-screen flex-col overflow-hidden",
         mobile ? "h-dvh" : "h-screen",
       )}
     >

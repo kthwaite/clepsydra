@@ -3,249 +3,14 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const src = path.resolve(import.meta.dirname, "..");
-const uiDir = path.join(src, "components/ui");
 
-/** Files deliberately outside the guard (none since phase 4.1). */
-const OUT_OF_SCOPE = new Set<string>([]);
+/** Sanctioned exceptions: file (relative to src) → rule names it may use.
+ *  Mono belongs to code only (spec §3.2); code blocks get it from main.css. */
+const ALLOW: Record<string, string[]> = {};
 
-/** Not yet restyled; each task removes its files. `it.fails` makes a file
+/** Not yet clean; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
 const PENDING = new Set<string>([]);
-
-/** Tasking board screen (phase 4.3). */
-const TASKING_FILES = [
-  "../tasking/BoardHeader.tsx",
-  "../filters/FilterBar.tsx",
-  "../tasking/ScopeRail.tsx",
-  "../tasking/KanbanView.tsx",
-  "../tasking/TaskCard.tsx",
-  "../tasking/QuickAddRow.tsx",
-  "../tasking/board-constants.tsx",
-  "../tasking/board-presentation.tsx",
-  "../tasking/TaskingScreen.tsx",
-  "../tasking/BoardModalFrame.tsx",
-  "../tasking/BacklogView.tsx",
-  "../tasking/CycleView.tsx",
-  "../tasking/TimelineView.tsx",
-  "../tasking/TaskEditPanel.tsx",
-  "../tasking/fields.tsx",
-  "../tasking/InlineEditPopover.tsx",
-  "../tasking/NewTaskModal.tsx",
-  "../tasking/NewCycleModal.tsx",
-  "../tasking/OpenCycleModal.tsx",
-  "../tasking/SealCycleModal.tsx",
-  "../tasking/CycleStrip.tsx",
-];
-
-/** Slate prose elements restyled in phase 4.4a. */
-const PROSE_FILES = [
-  "../../editor/schema/elements/heading.tsx",
-  "../../editor/schema/elements/blockquote.tsx",
-];
-
-/** Folio screen (phase 4.4a). */
-const FOLIO_FILES = [
-  "../codex/Folio.tsx",
-  "../codex/FolioProperties.tsx",
-  "../codex/FolioError.tsx",
-  "../codex/FolioNotFound.tsx",
-  "../codex/FolioLauncher.tsx",
-  "../codex/KindSelect.tsx",
-  "../codex/ProjectCombo.tsx",
-  "../../editor/PageEditorHeader.tsx",
-];
-
-/** Screens restyled in phase 4; guarded like the primitives. */
-const SCREEN_FILES = [
-  "../codex/Atrium.tsx",
-  "../codex/AgendaTile.tsx",
-  "../codex/FeedRiverPanel.tsx",
-  "../codex/SkyCard.tsx",
-  "../codex/ActivityHeatmap.tsx",
-  "../codex/ReadingContinues.tsx",
-  "../codex/MoonDisc.tsx",
-  "../codex/DayArc.tsx",
-  "../codex/FeedRiver.tsx",
-  "../codex/Gazetteer.tsx",
-];
-
-/** Bases (phase 4.5b). */
-const BASES_FILES = [
-  "../bases/BaseTableView.tsx",
-  "../bases/BaseTable.tsx",
-  "../bases/BasePickers.tsx",
-  "../bases/FieldsPopover.tsx",
-  "../bases/ViewOverridesStrip.tsx",
-  "../bases/EditableCell.tsx",
-  "../bases/BaseMemberDraft.tsx",
-  "../bases/BasesIndex.tsx",
-  "../bases/CreateBaseDialog.tsx",
-  "../../routes/bases.$slug.tsx",
-  // Phase 5.2: definition workspace and embed.
-  "../bases/BaseDefinitionWorkspace.tsx",
-  "../bases/DefinitionHeader.tsx",
-  "../bases/ValidationSummary.tsx",
-  "../bases/GeneralEditor.tsx",
-  "../bases/ViewsEditor.tsx",
-  "../bases/ViewDefinitionEditor.tsx",
-  "../bases/PropertiesEditor.tsx",
-  "../bases/PropertyDefinitionEditor.tsx",
-  "../bases/PreviewPropertiesEditor.tsx",
-  "../bases/DisplayLabelsEditor.tsx",
-  "../bases/BaseFilterEditor.tsx",
-  "../bases/FilterComparisonEditor.tsx",
-  "../bases/TagConditionEditor.tsx",
-  "../bases/OrderedSortEditor.tsx",
-  "../bases/TemplateSourceEditor.tsx",
-  "../bases/BasePreview.tsx",
-  "../bases/BaseRenderedMarkdown.tsx",
-  "../bases/GeneratedPreviewDialog.tsx",
-  "../bases/BaseEmbedInspector.tsx",
-  "../bases/BaseHeaderMenu.tsx",
-  "../bases/BaseRowMenu.tsx",
-  "../bases/ArchiveRowDialog.tsx",
-  "../bases/BaseMemberIntake.tsx",
-  "../bases/ordered-list.tsx",
-  "../bases/filter-actions.tsx",
-  "../../editor/elements/BaseEmbedElement.tsx",
-  "../../editor/elements/GeneratedRegionElement.tsx",
-  "../../editor/baseEmbedEditing.tsx",
-  "../../editor/elements/EmbeddedBaseTable.tsx",
-];
-
-/** Folio and editor rest (phase 5.3). */
-const FOLIO_5_3_FILES = [
-  "../../editor/elements/CodeBlockElement.tsx",
-  "../../editor/elements/CodeLangPicker.tsx",
-  "../../editor/schema/elements/table.tsx",
-  "../../editor/schema/elements/list.tsx",
-  "../../editor/schema/elements/journalTime.tsx",
-  "../../editor/elements/LinkElement.tsx",
-  "../../editor/elements/WikilinkElement.tsx",
-  "../../editor/schema/elements/footnoteDef.tsx",
-  "../../editor/schema/elements/conversationTurn.tsx",
-  "../../editor/elements/MathElement.tsx",
-  "../../editor/elements/FootnoteRefElement.tsx",
-  "../../editor/schema/elements/image.tsx",
-  "../../editor/schema/elements/thematicBreak.tsx",
-  "../../editor/elements/renderLeaf.tsx",
-  "../../editor/elements/LiveBaseTemplate.tsx",
-  "../../editor/TaskPropertyPopover.tsx",
-  "../../editor/SelectionBubbleMenu.tsx",
-  "../../editor/MissingWikilinkPopover.tsx",
-  "../../editor/WikilinkInlineEditor.tsx",
-  "../../editor/WikilinkCombobox.tsx",
-  "../../editor/SlashCombobox.tsx",
-  "../../editor/BlockRefCombobox.tsx",
-  "../../editor/vim/VimStatusBar.tsx",
-  "../codex/PreviewMarkdown.tsx",
-  "../codex/PreviewBody.tsx",
-  "../codex/LinkPreviewLayer.tsx",
-  "../codex/CLink.tsx",
-  "../codex/SheafContextMenu.tsx",
-  "../codex/JournalMeta.tsx",
-  "../codex/MeetingMeta.tsx",
-  "../codex/PersonCombo.tsx",
-  "../codex/recipe/RecipeFolioBody.tsx",
-  "../codex/RawMarkdownEditor.tsx",
-  "../codex/LockedFolio.tsx",
-  "../codex/NoteProtectionDialog.tsx",
-  "../codex/EncryptionSetupDialog.tsx",
-  "../codex/InscribeModal.tsx",
-  "../codex/CaptureAsideModal.tsx",
-  "../MermaidDiagram.tsx",
-  "../MermaidCodeBlock.tsx",
-];
-
-/** Gather: feeds, archive viewer, academic, book import (phase 5.4). */
-const GATHER_FILES = [
-  "../codex/ArchiveBanner.tsx",
-  "../codex/FeedFacetSelect.tsx",
-  "../codex/FeedGroupComboBox.tsx",
-  "../codex/FeedManagement.tsx",
-  "../codex/FeedReaderPane.tsx",
-  "../../routes/feeds.tsx",
-  "../../routes/archive.$.tsx",
-  "../../routes/academic.tsx",
-  "../academic/AcademicLibrary.tsx",
-  "../academic/ImportDialog.tsx",
-  "../academic/WorkDetail.tsx",
-  "../books/BookBarcodeScanner.tsx",
-  "../books/BookImportModal.tsx",
-];
-
-/** Maintain: settings, rubbish, repairs, conflicts, stats, shortcuts (phase 5.5). */
-const MAINTAIN_FILES = [
-  "../SettingsModal.tsx",
-  "../settings/IndexHealthPanel.tsx",
-  "../settings/OfflinePanel.tsx",
-  "../codex/LocationForm.tsx",
-  "../rubbish/RubbishBin.tsx",
-  "../repairs/RepairFilters.tsx",
-  "../repairs/RepairIssueDetail.tsx",
-  "../repairs/RepairIssueList.tsx",
-  "../repairs/RepairWorkspace.tsx",
-  "../conflicts/ConflictDiffView.tsx",
-  "../conflicts/ConflictsPanel.tsx",
-  "../conflicts/DiffRows.tsx",
-  "../codex/Stats.tsx",
-  "../codex/ShortcutHelpModal.tsx",
-  "../StatCard.tsx",
-  "../../routes/rubbish.tsx",
-  "../../routes/repairs.tsx",
-  "../../routes/conflicts.tsx",
-  "../../routes/conflicts_.compare.$.tsx",
-  "../../routes/stats.tsx",
-];
-
-/** The rest: docs, constellation, mobile gazetteer, errors, Folio menus, agenda (phase 5.6). */
-const REST_FILES = [
-  "../docs/DocsArticle.tsx",
-  "../docs/DocsLayout.tsx",
-  "../docs/DocsMdxComponents.tsx",
-  "../docs/DocsScreen.tsx",
-  "../docs/DocsSidebar.tsx",
-  "../docs/DocsToc.tsx",
-  "../codex/Constellation.tsx",
-  "../codex/MobileConstellation.tsx",
-  "../ForceGraph.tsx",
-  "../../routes/graph.tsx",
-  "../codex/MobileGazetteer.tsx",
-  "../codex/LocationModal.tsx",
-  "../codex/BootSequence.tsx",
-  "../../routes/__root.tsx",
-  "../FeatureFlagsProvider.tsx",
-  "../FeatureGate.tsx",
-  "../OfflineUnavailable.tsx",
-  "../RouteError.tsx",
-  "../../routes/pages/$.tsx",
-  "../page-tree/FolderActionsMenu.tsx",
-  "../page-tree/PageActionsMenu.tsx",
-  "../page-tree/MutationPreviewDialog.tsx",
-  "../attachments/AttachmentManager.tsx",
-  "../attachments/PlaintextAttachmentDialog.tsx",
-  "../blocks/BlockTransclusion.tsx",
-  "../FileTree.tsx",
-  "../MarkdownRenderer.tsx",
-  "../agenda/AgendaItemList.tsx",
-  "../../routes/agenda.tsx",
-  "../TabContent.tsx",
-];
-
-/** Mobile companion shell (phase 4b-1). */
-const MOBILE_FILES = [
-  "../codex/MobileCodexFrame.tsx",
-  "../codex/StatusDot.tsx",
-  "../codex/OpenPagesSheet.tsx",
-  "../codex/MobileGoTo.tsx",
-  "../codex/ContentsBadge.tsx",
-  "../../editor/SaveIndicator.tsx",
-  "../codex/MobileFolioLayout.tsx",
-  "../mobile/MobileParts.tsx",
-  "../mobile/MobileToday.tsx",
-  "../mobile/MobileAgenda.tsx",
-  "../mobile/MobileTasking.tsx",
-];
 
 const FORBIDDEN: Array<[string, RegExp]> = [
   ["uppercase", /\buppercase\b/],
@@ -271,44 +36,50 @@ const FORBIDDEN: Array<[string, RegExp]> = [
   // (cool = accent, paper, bar-*, ink-3, bg) have Stone & Lamp role names.
   ["cl-btn", /\bcl-btn\b/],
   ["cl-marg", /\bcl-marg\b/],
-  ["Vessel var", /var\(--(ink-3|bg|paper|cool|bar-)/],
+  [
+    "Vessel var",
+    /var\(--(ink-3|ink-4|ink-mute|ink-faint|bg|paper|cool|bar-|highlight|grid|accent-deep|rule-soft)/,
+  ],
   ["cool", /\b(bg|text|border|fill|stroke)-cool\b/],
+  // Phase 6: Vessel and shadcn colour names are gone from the theme, so a
+  // class using one would silently render no colour.
+  [
+    "legacy colour",
+    /\b(bg|text|border|decoration|fill|stroke|ring|outline|shadow|from|to|via|divide|placeholder|caret)-(paper(-2|-edge)?|ink-mute|ink-faint|highlight|accent-deep|rule-soft|background|foreground|card|popover|primary|secondary|muted|destructive|input)\b/,
+  ],
+  ["font alias", /\bfont-(heading|body|slab|serif-sc)\b/],
 ];
 
-const files = [
-  ...readdirSync(uiDir)
-    .filter((f) => f.endsWith(".tsx") && !f.includes(".stories."))
-    .filter((f) => !OUT_OF_SCOPE.has(f)),
-  "../codex/TabPreviewCard.tsx",
-  "../codex/CodexModalShell.tsx",
-  "../codex/CommandPalette.tsx",
-  "../codex/Section.tsx",
-  "../codex/Tick.tsx",
-  ...SCREEN_FILES,
-  ...TASKING_FILES,
-  ...PROSE_FILES,
-  ...FOLIO_FILES,
-  ...BASES_FILES,
-  ...MOBILE_FILES,
-  ...FOLIO_5_3_FILES,
-  ...GATHER_FILES,
-  ...MAINTAIN_FILES,
-  ...REST_FILES,
-].filter((f) => {
-  try {
-    readFileSync(path.join(uiDir, f));
-    return true;
-  } catch {
-    return false; // Section/Tick appear in Task 2
-  }
-});
+const SKIP = /(\.test\.|__tests__|routeTree\.gen\.ts$|schema\.d\.ts$)/;
 
-function offences(file: string): string[] {
-  const text = readFileSync(path.join(uiDir, file), "utf8");
-  return FORBIDDEN.filter(([, re]) => re.test(text)).map(([name]) => name);
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, out);
+    else if (/\.(tsx?|mdx)$/.test(entry.name) && !SKIP.test(full)) {
+      out.push(path.relative(src, full));
+    }
+  }
+  return out;
 }
 
-describe("Stone & Lamp primitives carry no Vessel chrome", () => {
+const files = walk(src).sort();
+
+function offences(file: string): string[] {
+  const text = readFileSync(path.join(src, file), "utf8");
+  const allowed = ALLOW[file] ?? [];
+  return FORBIDDEN.filter(
+    ([name, re]) => !allowed.includes(name) && re.test(text),
+  ).map(([name]) => name);
+}
+
+describe("the UI source carries no Vessel chrome", () => {
+  it("scans the whole tree", () => {
+    expect(files.length).toBeGreaterThan(500);
+    expect(files).toContain("components/ui/button.tsx");
+    expect(files).toContain("docs/content/lsp.mdx");
+  });
+
   for (const file of files) {
     const run = PENDING.has(file) ? it.fails : it;
     run(`${file} is clean`, () => {
@@ -316,8 +87,8 @@ describe("Stone & Lamp primitives carry no Vessel chrome", () => {
     });
   }
 
-  it("every pending file still exists", () => {
-    for (const file of PENDING) {
+  it("every pending and allowed file still exists", () => {
+    for (const file of [...PENDING, ...Object.keys(ALLOW)]) {
       expect(files).toContain(file);
     }
   });

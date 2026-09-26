@@ -21,6 +21,5 @@ export const ComingSoon: Story = {
   args: {
     children: "Coming Soon",
     size: "sm",
-    className: "tracking-widest",
   },
 };

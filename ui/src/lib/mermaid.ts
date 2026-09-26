@@ -1,4 +1,4 @@
-// Mermaid diagram rendering, themed with the Vessel tokens.
+// Mermaid diagram rendering, themed with the Stone & Lamp tokens.
 //
 // mermaid is ~1 MB minified — several times the editor chunk — so it stays out
 // of the static import graph and loads the first time a diagram is actually
@@ -15,20 +15,21 @@ export function loadMermaid(): Promise<Mermaid> {
 }
 
 /**
- * Vessel tokens the diagram palette is built from, with fallbacks for
+ * Tokens the diagram palette is built from, with charcoal fallbacks for
  * environments where the stylesheet is absent (jsdom, Storybook docs frames).
  */
 const TOKEN_FALLBACKS: Record<string, string> = {
-  "--paper": "#0a0a0a",
-  "--paper-2": "#111111",
-  "--paper-edge": "#161616",
-  "--ink": "#e8e6df",
-  "--ink-2": "#b8b5a8",
-  "--ink-mute": "#918d80",
-  "--accent": "#ee7733",
-  "--rule": "#2a2825",
-  "--hot": "#ff3b1f",
-  "--font-mono": '"JetBrains Mono Variable", ui-monospace, monospace',
+  "--ground": "#151412",
+  "--raise": "#262420",
+  "--sink": "#1f1d1a",
+  "--ink": "#eee8db",
+  "--ink-2": "#cbc5b8",
+  "--mute": "#9a948a",
+  "--accent": "#809cff",
+  "--rule": "#34312c",
+  "--hot": "#e08a6a",
+  "--font-sans":
+    '"Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif',
 };
 
 const TOKENS = Object.keys(TOKEN_FALLBACKS);
@@ -54,42 +55,42 @@ function readTokens(): Record<string, string> {
 }
 
 /**
- * Maps the Vessel palette onto mermaid's `base` theme. Only the primaries are
- * set: mermaid derives the rest (arrowheads, sequence actors, note fills) from
- * them, so paper mode and the six accent presets follow automatically.
+ * Maps the palette onto mermaid's `base` theme. Only the primaries are set:
+ * mermaid derives the rest (arrowheads, sequence actors, note fills) from
+ * them, so bone and charcoal follow automatically.
  */
-export function vesselThemeVariables(): Record<string, string | boolean> {
+export function diagramThemeVariables(): Record<string, string | boolean> {
   const t = readTokens();
   return {
     // Dark is the base palette; light mode adds `.paper` to <html>.
     darkMode: !isPaperMode(),
-    background: t["--paper"],
-    fontFamily: t["--font-mono"],
+    background: t["--ground"],
+    fontFamily: t["--font-sans"],
     fontSize: "13px",
 
-    primaryColor: t["--paper-edge"],
+    primaryColor: t["--sink"],
     primaryTextColor: t["--ink"],
     primaryBorderColor: t["--accent"],
-    secondaryColor: t["--paper-2"],
+    secondaryColor: t["--raise"],
     secondaryTextColor: t["--ink-2"],
     secondaryBorderColor: t["--rule"],
-    tertiaryColor: t["--paper-2"],
+    tertiaryColor: t["--raise"],
     tertiaryTextColor: t["--ink-2"],
     tertiaryBorderColor: t["--rule"],
 
-    lineColor: t["--ink-mute"],
+    lineColor: t["--mute"],
     textColor: t["--ink"],
-    mainBkg: t["--paper-edge"],
+    mainBkg: t["--sink"],
     nodeBorder: t["--accent"],
-    clusterBkg: t["--paper-2"],
+    clusterBkg: t["--raise"],
     clusterBorder: t["--rule"],
-    edgeLabelBackground: t["--paper"],
+    edgeLabelBackground: t["--ground"],
     titleColor: t["--ink"],
-    noteBkgColor: t["--paper-2"],
+    noteBkgColor: t["--raise"],
     noteTextColor: t["--ink-2"],
     noteBorderColor: t["--rule"],
     errorBkgColor: t["--hot"],
-    errorTextColor: t["--paper"],
+    errorTextColor: t["--raise"],
   };
 }
 
@@ -104,7 +105,7 @@ const listeners = new Set<() => void>();
 
 /** Identity of the current palette; changes whenever a diagram must re-render. */
 export function themeSignature(): string {
-  signature ??= Object.values(vesselThemeVariables()).join("|");
+  signature ??= Object.values(diagramThemeVariables()).join("|");
   return signature;
 }
 
@@ -168,7 +169,7 @@ export async function renderMermaid(
       // source — the only boundary where authored markdown becomes markup.
       securityLevel: "strict",
       theme: "base",
-      themeVariables: vesselThemeVariables(),
+      themeVariables: diagramThemeVariables(),
     });
     appliedSignature = theme;
   }

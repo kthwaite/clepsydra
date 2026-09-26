@@ -8,7 +8,7 @@ const meta: Meta<typeof ThemeToggle> = {
   decorators: [
     (Story) => (
       <ThemeProvider>
-        <div className="p-8 bg-background text-foreground">
+        <div className="p-8 bg-ground text-ink">
           <Story />
         </div>
       </ThemeProvider>
@@ -26,6 +26,6 @@ export const Default: Story = {};
 
 export const WithClassName: Story = {
   args: {
-    className: "p-2 border border-border hover:bg-muted",
+    className: "p-2 rounded-full bg-sink hover:bg-raise",
   },
 };

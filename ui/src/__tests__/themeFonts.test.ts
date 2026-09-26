@@ -42,24 +42,14 @@ describe("Stone & Lamp fonts", () => {
     );
   });
 
-  it("remaps .cl-mono and .cl-cap to sans (stopgap until the phase 5 sweep)", () => {
-    expect(prop(rule(".cl-mono"), "font-family")).toBe("var(--font-sans)");
-    const cap = rule(".cl-cap");
-    expect(prop(cap, "font-family")).toBe("var(--font-sans)");
-    expect(prop(cap, "text-transform")).toBe("none");
-    expect(prop(cap, "letter-spacing")).toBe("normal");
-  });
-
   it("keeps the app frame (.cl-root) in sans at 14px, not mono", () => {
     const root = rule(".cl-root");
     expect(prop(root, "font-family")).toBe("var(--font-sans)");
     expect(prop(root, "font-size")).toBe("14px");
   });
 
-  it("keeps code monospace, including code marked .cl-mono", () => {
-    const code = rule(
-      ":where(pre, code, kbd, samp, [data-code-editor]), pre.cl-mono, code.cl-mono, kbd.cl-mono, samp.cl-mono",
-    );
+  it("keeps code monospace", () => {
+    const code = rule(":where(pre, code, kbd, samp, [data-code-editor])");
     expect(prop(code, "font-family")).toBe("var(--font-mono)");
   });
 });

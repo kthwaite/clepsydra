@@ -18,62 +18,22 @@
     --font-serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
     --font-mono:
         "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-    /* Legacy aliases: keep resolving to sans until their call sites are
-       migrated (font-heading has 18 users; phase 4/5 decides each). */
-    --font-body: var(--font-sans);
-    --font-heading: var(--font-sans);
-    --font-slab: var(--font-sans);
-    --font-serif-sc: var(--font-sans);
-
     /* Colours: every Tailwind colour points at a bare property defined per
-       theme on :root (charcoal) / .paper (bone). One source of truth. */
-    --color-paper: var(--paper);
-    --color-paper-2: var(--paper-2);
-    --color-paper-edge: var(--paper-edge);
+       theme on :root (charcoal) / .paper (bone). One source of truth. Role
+       names from spec §3.1. */
+    --color-ground: var(--ground);
+    --color-raise: var(--raise);
+    --color-sink: var(--sink);
     --color-ink: var(--ink);
     --color-ink-2: var(--ink-2);
-    --color-ink-mute: var(--ink-mute);
-    --color-ink-faint: var(--ink-faint);
+    --color-mute: var(--mute);
+    --color-faint: var(--faint);
+    --color-rule: var(--rule);
     --color-accent: var(--accent);
-    --color-accent-deep: var(--accent-deep);
-    --color-cool: var(--cool);
+    --color-accent-tint: var(--accent-tint);
     --color-warn: var(--warn);
     --color-hot: var(--hot);
-    --color-rule: var(--rule);
-    --color-rule-soft: var(--rule-soft);
-    --color-highlight: var(--highlight);
-    --color-bar-bg: var(--bar-bg);
-    --color-bar-fg: var(--bar-fg);
-    --color-bar-rule: var(--bar-rule);
-
-    /* Stone & Lamp role names (spec §3.1) */
-    --color-ground: var(--paper);
-    --color-raise: var(--paper-2);
-    --color-sink: var(--paper-edge);
-    --color-mute: var(--ink-mute);
-    --color-faint: var(--ink-faint);
-    --color-accent-tint: var(--highlight);
     --color-scrim: var(--scrim);
-
-    /* Tailwind / shadcn semantic aliases */
-    --color-background: var(--paper);
-    --color-foreground: var(--ink);
-    --color-card: var(--paper-2);
-    --color-card-foreground: var(--ink);
-    --color-popover: var(--paper-2);
-    --color-popover-foreground: var(--ink);
-    --color-primary: var(--accent);
-    --color-primary-foreground: var(--paper-2);
-    --color-secondary: var(--paper-edge);
-    --color-secondary-foreground: var(--ink);
-    --color-muted: var(--paper-edge);
-    --color-muted-foreground: var(--ink-mute);
-    --color-accent-foreground: var(--paper-2);
-    --color-destructive: var(--hot);
-    --color-destructive-foreground: var(--paper-2);
-    --color-border: var(--rule);
-    --color-input: var(--rule);
-    --color-ring: var(--accent);
 
     /* Radius: surfaces 12px (spec decision 13) */
     --radius: 12px;
@@ -83,32 +43,22 @@
     --shadow-md: var(--elev-2);
     --shadow-lg: var(--elev-3);
     --shadow-xl: var(--elev-4);
-
-    /* Density scale (overridable via [data-density]) */
-    --space-row: 22px;
-    --space-gap: 14px;
-    --space-pad: 14px;
-    --text-fs: 11px;
-    --text-fs-s: 10px;
-    --text-fs-xs: 9px;
 }
 
-/* Bare custom properties consumed by .cl-* primitives and inline var() calls.
-   Mirror the Tailwind tokens above so `var(--ink)` etc. keep working. DARK is
-   the base — defined on :root so dark renders with no class (no FOUC). */
+/* Bare custom properties, read by the @theme colours above and by inline
+   var() calls. Charcoal is the base — defined on :root so it renders with no
+   class (no FOUC). */
 :root {
     color-scheme: dark;
     /* Charcoal */
-    --paper: #151412;
-    --paper-2: #262420;
-    --paper-edge: #1f1d1a;
+    --ground: #151412;
+    --raise: #262420;
+    --sink: #1f1d1a;
     --ink: #eee8db;
     --ink-2: #cbc5b8;
-    --ink-mute: #9a948a;
-    --ink-faint: #57524a;
+    --mute: #9a948a;
+    --faint: #57524a;
     --accent: #809cff;
-    --accent-deep: #6680f0;
-    --cool: #809cff;
     --warn: #e08a6a;
     --hot: #e08a6a;
     /* Quire (tab-group) hues; ids unchanged, indigo carries plum */
@@ -122,47 +72,14 @@
     --code-literal: #d2a95a;
     --quire-indigo: #b996cc;
     --rule: #34312c;
-    --rule-soft: #2b2925;
-    --grid: rgba(238, 232, 219, 0.05);
-    --highlight: rgba(128, 156, 255, 0.15);
-    --bar-bg: #1f1d1a;
-    --bar-fg: #cbc5b8;
-    --bar-rule: rgba(238, 232, 219, 0.12);
+    --accent-tint: rgba(128, 156, 255, 0.15);
     --elev-1: 0 1px 2px rgba(0, 0, 0, 0.3);
     --elev-2: 0 8px 24px rgba(0, 0, 0, 0.35);
     --elev-3: 0 24px 60px rgba(0, 0, 0, 0.45);
     --elev-4: 0 40px 100px rgba(0, 0, 0, 0.55);
-
-    /* Stone & Lamp role names (spec §3.1); resolve per theme via the above */
-    --ground: var(--paper);
-    --raise: var(--paper-2);
-    --sink: var(--paper-edge);
-    --mute: var(--ink-mute);
-    --faint: var(--ink-faint);
-    --accent-tint: var(--highlight);
     /* Modal/sheet backdrop. Not ink-based: ink is light in charcoal, which
        would fog the page instead of dimming it. */
     --scrim: rgb(0 0 0 / 0.45);
-
-    /* Density (default) */
-    --row-h: 22px;
-    --gap: 14px;
-    --pad: 14px;
-    --fs: 11px;
-    --fs-s: 10px;
-    --fs-xs: 9px;
-
-    /* Board-prototype token aliases — the TASKING board components (ported
-       from docs/pkm-redesign/project/styles-board.css) were written against
-       a --bg/--ink-3/--ink-4 vocabulary that was never defined here. Bridge
-       them onto the real Vessel tokens instead of rewriting every call site;
-       kept in this same :root block (not a separate one) so .paper's
-       overrides of the right-hand tokens propagate through automatically. */
-    --bg: var(--paper);
-    --bg-2: var(--paper-2);
-    --bg-3: var(--paper-edge);
-    --ink-3: var(--ink-mute);
-    --ink-4: var(--ink-faint);
 }
 
 /* Bone (light). Toggled by `.paper` on <html>. Re-binds bare properties only;
@@ -170,16 +87,14 @@
 .paper {
     --scrim: rgb(14 26 58 / 0.26);
     color-scheme: light;
-    --paper: #f4efe4;
-    --paper-2: #fbf8f2;
-    --paper-edge: #eae3d3;
+    --ground: #f4efe4;
+    --raise: #fbf8f2;
+    --sink: #eae3d3;
     --ink: #0e1a3a;
     --ink-2: #343b50;
-    --ink-mute: #5f6372;
-    --ink-faint: #a9a89f;
+    --mute: #5f6372;
+    --faint: #a9a89f;
     --accent: #1747e6;
-    --accent-deep: #0f36b8;
-    --cool: #1747e6;
     --warn: #b3401f;
     --hot: #b3401f;
     --quire-sepia: #7a5c45;
@@ -193,39 +108,15 @@
     --code-literal: #7a561c;
     --quire-indigo: #7a4f8c;
     --rule: #ddd5c3;
-    --rule-soft: #e6dfd0;
-    --grid: rgba(14, 26, 58, 0.05);
-    --highlight: rgba(23, 71, 230, 0.09);
-    --bar-bg: #eae3d3;
-    --bar-fg: #343b50;
-    --bar-rule: rgba(14, 26, 58, 0.12);
+    --accent-tint: rgba(23, 71, 230, 0.09);
     --elev-1: 0 1px 2px rgba(14, 26, 58, 0.08);
     --elev-2: 0 8px 24px rgba(14, 26, 58, 0.12);
     --elev-3: 0 24px 60px rgba(14, 26, 58, 0.18);
     --elev-4: 0 40px 100px rgba(14, 26, 58, 0.24);
 }
 
-/* Density presets — applied via [data-density] on <html>. */
-[data-density="compact"] {
-    --row-h: 18px;
-    --gap: 10px;
-    --pad: 10px;
-    --fs: 10px;
-    --fs-s: 9px;
-    --fs-xs: 8px;
-}
-
-[data-density="spacious"] {
-    --row-h: 28px;
-    --gap: 18px;
-    --pad: 18px;
-    --fs: 12px;
-    --fs-s: 11px;
-    --fs-xs: 10px;
-}
-
 body {
-    background: var(--paper);
+    background: var(--ground);
     color: var(--ink);
     font-family: var(--font-sans);
     font-size: 14px;
@@ -260,9 +151,8 @@ body {
 }
 
 /* =============================================================================
-   .cl-* primitives — re-pointed to the VESSEL mono-tactical language.
-   Class names preserved so existing components inherit the new aesthetic;
-   they will be migrated to purpose-built components over later phases.
+   Shell-wide classes. `src/__tests__/deadCss.test.ts` fails on any class here that no
+   source file uses.
    ============================================================================= */
 
 .cl-root {
@@ -279,176 +169,25 @@ body {
     color: inherit;
 }
 
-/* Stopgap (spec §6 phase 1): Vessel's tracked caps labels read as plain sans
-   until each call site is restyled in the phase 5 sweep. */
-.cl-cap {
-    font-family: var(--font-sans);
-    text-transform: none;
-    letter-spacing: normal;
-    font-weight: 500;
-}
-
-.cl-cap-tight {
-    letter-spacing: 0.1em;
-}
-
-.cl-cap-wide {
-    letter-spacing: 0.3em;
-}
-
-/* Stopgap (spec §6 phase 1): `.cl-mono` has 501 uses; point it at sans so
-   the chrome leaves mono in one commit. Code keeps mono via the rule below. */
-.cl-mono {
-    font-family: var(--font-sans);
-}
-
-/* Code is the only monospace (spec decision 3). Element selectors carry the
-   `.cl-mono` class too, so they outrank the stopgap above. Source editors
-   (TOML, template markdown) opt in with `data-code-editor`. */
-:where(pre, code, kbd, samp, [data-code-editor]),
-pre.cl-mono,
-code.cl-mono,
-kbd.cl-mono,
-samp.cl-mono {
+/* Code is the only monospace (spec decision 3). Source editors (TOML,
+   template markdown) opt in with `data-code-editor`. */
+:where(pre, code, kbd, samp, [data-code-editor]) {
     font-family: var(--font-mono);
     font-feature-settings:
         "calt" 0,
         "liga" 0;
 }
 
-/* Serif/slab dropped — map to the sans face so any lingering refs read sanely. */
-.cl-slab {
-    font-family: var(--font-sans);
-}
-
-.cl-serif {
-    font-family: var(--font-sans);
-}
-
-/* Hairline rules */
-.cl-rule {
-    border: 0;
-    border-top: 1px solid var(--rule);
-}
-
-.cl-rule-soft {
-    border: 0;
-    border-top: 1px solid var(--rule-soft);
-}
-
-.cl-rule-double {
-    border: 0;
-    border-top: 1px solid var(--rule);
-    box-shadow: 0 3px 0 -2px var(--rule);
-    height: 4px;
-}
-
-/* Dashed separator — dossier divider (6px dash). */
-.cl-rule-dash {
-    border: 0;
-    border-top: 1px dashed var(--rule);
-}
-
-/* Flat field — overlays/grain dropped, so this is just the base surface. */
-.cl-paper {
-    background: var(--paper);
-}
-
-.cl-grid {
-    background-image:
-        linear-gradient(var(--grid) 1px, transparent 1px),
-        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-    background-size: 24px 24px;
-}
-
-.cl-grid-fine {
-    background-image:
-        linear-gradient(var(--grid) 1px, transparent 1px),
-        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-    background-size: 8px 8px;
-}
-
-/* Frames */
-.cl-frame {
-    border: 1px solid var(--rule);
-}
-
-/* Faint dossier grid texture (hero, cards). Sits behind content via ::before. */
-.cl-grid-texture {
-    position: relative;
-    overflow: hidden;
-}
-
-.cl-grid-texture>* {
-    position: relative;
-}
-
-.cl-grid-texture::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image:
-        repeating-linear-gradient(0deg, transparent 0 23px, var(--rule-soft) 23px 24px),
-        repeating-linear-gradient(90deg, transparent 0 23px, var(--rule-soft) 23px 24px);
-    opacity: 0.5;
-    pointer-events: none;
-}
-
-.cl-frame-double {
-    border: 1px solid var(--rule);
-    box-shadow:
-        0 0 0 3px var(--paper),
-        0 0 0 4px var(--rule);
-}
-
-/* Stamp — classification cachet (mono, tracked). */
-.cl-stamp {
-    display: inline-block;
-    border: 1px solid var(--hot);
-    color: var(--hot);
-    padding: 3px 8px;
-    font-family: var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.18em;
-    font-weight: 600;
-    font-size: 10px;
-}
-
-/* Dingbats retained for any inline usage. */
-.cl-fleuron::before {
-    content: "❦";
-}
-
-.cl-asterism::before {
-    content: "⁂";
-}
-
-.cl-section-mark::before {
-    content: "§";
-}
-
-.cl-pilcrow::before {
-    content: "¶";
-}
-
-/* Numeric / coordinate inline */
-.cl-coord {
-    font-family: var(--font-mono);
-    font-size: 0.82em;
-    letter-spacing: 0.04em;
-    color: var(--ink-mute);
-}
-
 /* Underlined link */
 .cl-link {
     color: var(--accent);
     text-decoration: none;
-    border-bottom: 1px solid var(--accent-deep);
+    border-bottom: 1px solid var(--accent);
     cursor: pointer;
 }
 
 .cl-link:hover {
-    background: var(--highlight);
+    background: var(--accent-tint);
 }
 
 /* Block links (Folio rail entries): the card carries its own type, so no
@@ -457,25 +196,6 @@ samp.cl-mono {
 .cl-link.cl-link-plain:hover {
     color: inherit;
     border-bottom: 0;
-    background: transparent;
-}
-
-/* Passive page references read as prose, not as highlighted Markdown syntax. */
-.cl-wikilink {
-    font-family: Georgia, "Times New Roman", serif;
-}
-
-.cl-link.cl-wikilink {
-    color: inherit;
-    border-bottom: 0;
-}
-
-.cl-link.cl-wikilink.text-ink-mute {
-    color: var(--ink-mute);
-}
-
-.cl-link.cl-wikilink:hover {
-    color: var(--accent);
     background: transparent;
 }
 
@@ -567,28 +287,6 @@ samp.cl-mono {
 }
 
 /* Blink cursor */
-@keyframes cl-blink {
-
-    0%,
-    49% {
-        opacity: 1;
-    }
-
-    50%,
-    100% {
-        opacity: 0;
-    }
-}
-
-.cl-cursor {
-    display: inline-block;
-    width: 0.55em;
-    height: 1em;
-    background: currentColor;
-    vertical-align: text-bottom;
-    animation: cl-blink 1s steps(1) infinite;
-}
-
 /* Feed rows that were just read hold their place, then collapse away, so the
    river never reorders under the pointer that read them. */
 @keyframes cl-feed-exit {
@@ -615,56 +313,6 @@ samp.cl-mono {
     overflow: hidden;
     pointer-events: none;
     animation: cl-feed-exit 700ms ease-in forwards;
-}
-
-/* ASCII engraving */
-.cl-ascii {
-    font-family: var(--font-mono);
-    font-size: 8px;
-    line-height: 1;
-    white-space: pre;
-    letter-spacing: 0;
-    color: var(--ink);
-    opacity: 0.55;
-    user-select: none;
-}
-
-.cl-ascii-faint {
-    opacity: 0.32;
-}
-
-/* Dot-leader for table-of-contents lines */
-.cl-leader {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    min-width: 0;
-}
-
-.cl-leader> :first-child {
-    white-space: nowrap;
-    flex-shrink: 0;
-    min-width: 0;
-}
-
-.cl-leader-dots {
-    flex: 1 1 12px;
-    min-width: 12px;
-    border-bottom: 1px dotted var(--rule-soft);
-    transform: translateY(-3px);
-}
-
-.cl-leader> :last-child {
-    flex-shrink: 0;
-}
-
-/* Page corner stamp */
-.cl-folio {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    color: var(--ink-mute);
-    text-transform: uppercase;
 }
 
 /* View transition — restrained fade + lift, keyed on route. */
@@ -694,168 +342,6 @@ samp.cl-mono {
 /* Code blocks get more breathing room above and below than the base gap. */
 :where(.codex-prose [data-slate-editor] .cl-codeblock) {
     margin-block: 1.25em;
-}
-
-/* AI conversation Folios use an editorial speaker gutter rather than chat
-   bubbles. Read and Edit share one Slate tree and the same prose measure. */
-.ai-conversation-controls {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-gap);
-    margin-block: var(--space-gap);
-    font-family: var(--font-mono);
-    font-size: var(--text-fs-s);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-}
-
-.ai-conversation-controls__modes {
-    display: inline-flex;
-    border: 1px solid var(--rule);
-}
-
-.ai-conversation-controls button {
-    min-block-size: 2rem;
-    border: 0;
-    border-inline-end: 1px solid var(--rule);
-    padding-inline: var(--space-pad);
-    background: var(--paper);
-    color: var(--ink-mute);
-}
-
-.ai-conversation-controls button:last-child {
-    border-inline-end: 0;
-}
-
-.ai-conversation-controls button:hover {
-    color: var(--ink);
-}
-
-.ai-conversation-controls button[aria-pressed="true"],
-.ai-conversation-controls__add {
-    background: var(--paper-2);
-    color: var(--accent);
-}
-
-.ai-conversation-controls button:focus-visible,
-.ai-conversation-warning button:focus-visible,
-.ai-conversation-turn__participant-select>button:focus-visible,
-.ai-conversation-turn button:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-}
-
-.ai-conversation-warning {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-gap);
-    border-block: 1px solid var(--warn);
-    padding-block: calc(var(--space-pad) / 2);
-    color: var(--ink-2);
-    font-family: var(--font-mono);
-    font-size: var(--text-fs);
-    line-height: 1.5;
-}
-
-.ai-conversation-warning button {
-    flex: none;
-    border: 1px solid var(--warn);
-    padding: calc(var(--space-pad) / 2) var(--space-pad);
-    color: var(--warn);
-    text-transform: uppercase;
-}
-
-.ai-conversation-turn {
-    display: grid;
-    grid-template-columns: 7.5rem minmax(0, 1fr);
-    gap: var(--space-gap);
-    align-items: start;
-}
-
-.ai-conversation-turn__participant {
-    padding-block-start: calc(var(--space-pad) / 2);
-    color: var(--ink-mute);
-    font-family: var(--font-mono);
-    font-size: var(--text-fs);
-    font-style: normal;
-    letter-spacing: 0.12em;
-    line-height: 1.4;
-    text-transform: uppercase;
-}
-
-.ai-conversation-turn__content {
-    min-width: 0;
-    padding-inline-start: var(--space-pad);
-}
-
-.ai-conversation-turn[data-role="assistant"] .ai-conversation-turn__content {
-    border-inline-start: 2px solid var(--accent);
-}
-
-.ai-conversation--read .ai-conversation-turn {
-    padding-block: var(--space-gap);
-}
-
-.ai-conversation--edit .ai-conversation-turn {
-    padding-block: calc(var(--space-gap) / 2);
-    border-block-start: 1px solid var(--rule-soft);
-}
-
-.ai-conversation--edit .ai-conversation-turn__participant-select>button {
-    width: 100%;
-    border: 1px solid var(--rule);
-    padding: calc(var(--space-pad) / 2);
-    background: var(--paper-2);
-    color: var(--ink);
-}
-
-.ai-conversation-turn__actions {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    margin-block-start: calc(var(--space-gap) / 2);
-}
-
-.ai-conversation-turn__actions button {
-    min-block-size: 2rem;
-    border: 1px solid var(--rule);
-    border-inline-end: 0;
-    color: var(--ink-mute);
-}
-
-.ai-conversation-turn__actions button:last-child {
-    border-inline-end: 1px solid var(--rule);
-}
-
-@media (width < 48rem) {
-
-    .ai-conversation-controls,
-    .ai-conversation-warning {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .ai-conversation-controls__modes {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .ai-conversation-controls button,
-    .ai-conversation-warning button,
-    .ai-conversation-turn__actions button,
-    .ai-conversation--edit .ai-conversation-turn__participant-select>button {
-        min-block-size: 44px;
-    }
-
-    .ai-conversation-turn {
-        grid-template-columns: minmax(0, 1fr);
-        gap: calc(var(--space-gap) / 2);
-    }
-
-    .ai-conversation-turn__content {
-        padding-inline-start: var(--space-pad);
-    }
 }
 
 /* Folio TeX previews — KaTeX output is kept within the prose measure. */
@@ -914,7 +400,7 @@ samp.cl-mono {
 .folio-math--interactive:focus-visible {
     outline: 1px solid var(--accent);
     outline-offset: 2px;
-    background: var(--highlight);
+    background: var(--accent-tint);
 }
 
 .cl-mobile-top {

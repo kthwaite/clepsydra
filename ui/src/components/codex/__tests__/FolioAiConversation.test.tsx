@@ -535,9 +535,11 @@ describe("Folio AI conversation presentation", () => {
     renderFolio(pageEditor({ bodyMarkdown: malformed }));
     expect(screen.getByRole("alert")).toHaveTextContent("marker");
     expect(screen.getByText(/keep this text/)).toBeVisible();
-    await user.click(
-      within(screen.getByRole("alert")).getByRole("button", { name: "Edit" }),
-    );
+    const recover = within(screen.getByRole("alert")).getByRole("button", {
+      name: "Edit",
+    });
+    expect(recover).toHaveClass("max-md:h-11");
+    await user.click(recover);
     expect(
       within(
         screen.getByRole("group", { name: "Conversation mode" }),
@@ -552,6 +554,7 @@ describe("Folio AI conversation presentation", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /no valid conversation markers/i,
     );
+    expect(screen.getByRole("alert")).toHaveClass("bg-hot/5", "text-hot");
     expect(screen.getByText("Ordinary markdown remains visible")).toBeVisible();
   });
 

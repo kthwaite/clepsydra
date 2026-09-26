@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { prop, rule } from "./css-contract";
+import { rule } from "./css-contract";
 
 const SRC = path.resolve(import.meta.dirname, "..");
 const SELF = /\.test\.tsx?$|__tests__/;
@@ -34,12 +34,5 @@ describe("the .cl-btn stopgap is gone (phase 5.6: buttons are ui/button)", () =>
       readFileSync(file, "utf8").includes("cl-btn"),
     );
     expect(offenders.map((file) => path.relative(SRC, file))).toEqual([]);
-  });
-
-  it("rules the assistant turn in cobalt, not the Vessel --cool", () => {
-    const turn = rule(
-      '.ai-conversation-turn[data-role="assistant"] .ai-conversation-turn__content',
-    );
-    expect(prop(turn, "border-inline-start")).toBe("2px solid var(--accent)");
   });
 });
