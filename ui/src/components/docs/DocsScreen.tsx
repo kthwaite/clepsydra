@@ -1,9 +1,13 @@
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
+import { Tick } from "#/components/codex/Tick";
 import { DocsArticle } from "#/components/docs/DocsArticle";
 import { DocsLayout } from "#/components/docs/DocsLayout";
+import { buttonStyles } from "#/components/ui/button";
 import { DEFAULT_DOC_SLUG, getDocPage } from "#/docs/registry";
 import { extractDocToc } from "#/docs/toc";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 export function DocsScreen({ slug }: { slug: string }) {
   const page = getDocPage(slug);
@@ -14,21 +18,28 @@ export function DocsScreen({ slug }: { slug: string }) {
       {page ? (
         <DocsArticle page={page} />
       ) : (
-        <article className="mx-auto w-full max-w-3xl px-4 py-12 font-sans sm:px-6 lg:py-16">
-          <p className="font-mono text-xs font-semibold uppercase tracking-widest text-accent">
-            Guide unavailable
-          </p>
-          <h1 className="mt-3 text-3xl font-bold tracking-tight text-ink sm:text-4xl">
+        <article className="mx-auto w-full max-w-[744px] px-6 pb-16 pt-10 sm:px-8 lg:pt-14">
+          <div className="flex items-center gap-2.5">
+            <Tick />
+            <p className="font-serif text-[18px] italic leading-none text-mute">
+              Guide unavailable
+            </p>
+          </div>
+          <h1 className="mt-4 font-serif text-[40px] font-normal leading-none tracking-[-0.015em] text-ink sm:text-[56px]">
             Documentation not found
           </h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-ink-2">
+          <p className="mt-[18px] max-w-2xl text-[17px] leading-[1.55] text-ink-2">
             The requested guide is not included in this version of Clepsydra.
             Use the documentation navigation or return to the first guide.
           </p>
           <Link
             to="/docs/$slug"
             params={{ slug: DEFAULT_DOC_SLUG }}
-            className="mt-7 inline-flex border border-accent bg-accent px-4 py-2 font-mono text-xs font-semibold uppercase tracking-widest text-paper outline-none transition-colors hover:bg-accent/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            className={buttonStyles(
+              "primary",
+              "md",
+              cn("mt-7", FOCUS_RING_NATIVE),
+            )}
           >
             Open Getting Started
           </Link>

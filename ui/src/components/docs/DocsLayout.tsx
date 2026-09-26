@@ -1,6 +1,7 @@
 import { Menu, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
+import { Tick } from "#/components/codex/Tick";
 import { DocsSidebar } from "#/components/docs/DocsSidebar";
 import { DocsToc } from "#/components/docs/DocsToc";
 import { IconButton } from "#/components/ui/icon-button";
@@ -38,17 +39,17 @@ export function DocsLayout({ activeSlug, toc, children }: DocsLayoutProps) {
   return (
     <div
       data-testid="docs-layout"
-      className="flex h-full min-h-0 overflow-hidden bg-paper text-ink"
+      className="flex h-full min-h-0 overflow-hidden bg-ground text-ink md:gap-8 md:px-6 md:pt-6 lg:gap-14 lg:px-10"
     >
       <aside
         data-testid="docs-desktop-rail"
-        className="hidden w-72 shrink-0 flex-col overflow-y-auto border-r border-rule bg-paper-2 md:flex"
+        className="hidden w-60 shrink-0 flex-col overflow-y-auto rounded-t-2xl bg-sink md:flex lg:w-72"
       >
         <DocsSidebar activeSlug={activeSlug} />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center border-b border-rule bg-paper-2 px-3 md:hidden">
+        <header className="flex h-12 shrink-0 items-center gap-3 px-3 md:hidden">
           <IconButton
             variant="secondary"
             aria-label="Open documentation navigation"
@@ -56,7 +57,7 @@ export function DocsLayout({ activeSlug, toc, children }: DocsLayoutProps) {
           >
             <Menu aria-hidden="true" />
           </IconButton>
-          <span className="ml-3 font-mono text-xs font-semibold uppercase tracking-widest text-ink-2">
+          <span className="font-serif text-[18px] italic leading-none text-mute">
             Documentation
           </span>
         </header>
@@ -74,7 +75,7 @@ export function DocsLayout({ activeSlug, toc, children }: DocsLayoutProps) {
       {hasToc ? (
         <aside
           data-testid="docs-toc-rail"
-          className="hidden w-64 shrink-0 flex-col overflow-y-auto border-l border-rule bg-paper-2 xl:flex"
+          className="hidden w-58 shrink-0 flex-col overflow-y-auto pb-6 pt-6 xl:flex"
         >
           <DocsToc
             entries={toc}
@@ -89,22 +90,25 @@ export function DocsLayout({ activeSlug, toc, children }: DocsLayoutProps) {
         isOpen={drawerOpen}
         isDismissable
         onOpenChange={setDrawerOpen}
-        className="fixed inset-0 z-50 flex justify-start bg-foreground/30 pr-12 md:hidden"
+        className="fixed inset-0 z-50 flex justify-start bg-scrim pr-12 md:hidden"
       >
-        <Modal className="h-full w-full max-w-xs bg-paper-2 shadow-lg">
+        <Modal className="h-full w-full max-w-xs rounded-r-[18px] bg-sink shadow-lg">
           <Dialog
             aria-label="Documentation navigation"
             className="flex h-full min-h-0 flex-col outline-none"
           >
             {({ close }) => (
               <>
-                <div className="flex h-12 shrink-0 items-center justify-between border-b border-rule px-3">
-                  <Heading
-                    slot="title"
-                    className="font-mono text-xs font-semibold uppercase tracking-widest text-ink-2"
-                  >
-                    Documentation navigation
-                  </Heading>
+                <div className="flex h-14 shrink-0 items-center justify-between gap-3 pl-4 pr-2">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <Tick />
+                    <Heading
+                      slot="title"
+                      className="truncate font-serif text-[18px] font-normal italic leading-none text-mute"
+                    >
+                      Documentation navigation
+                    </Heading>
+                  </div>
                   <IconButton
                     variant="ghost"
                     aria-label="Close documentation navigation"
@@ -120,7 +124,7 @@ export function DocsLayout({ activeSlug, toc, children }: DocsLayoutProps) {
                     containerRef={articleRef}
                     recount={activeSlug}
                     onNavigate={close}
-                    className="max-h-64 shrink-0 border-t border-rule"
+                    className="max-h-64 shrink-0 px-4 pb-4 pt-3"
                   />
                 ) : null}
               </>

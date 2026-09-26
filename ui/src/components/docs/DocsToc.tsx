@@ -1,10 +1,12 @@
 import type { RefObject } from "react";
+import { Tick } from "#/components/codex/Tick";
 import {
   type ScrollSpyOptions,
   useScrollSpy,
 } from "#/components/codex/useScrollSpy";
 import type { DocTocEntry } from "#/docs/toc";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 // the h1 page title lives in DocsArticle's header, outside the compiled MDX,
 // so it is excluded here to keep DOM order aligned with extractDocToc
@@ -45,12 +47,15 @@ export function DocsToc({
   return (
     <nav
       aria-label="On this page"
-      className={cn("flex min-h-0 flex-col bg-paper-2 font-mono", className)}
+      className={cn("flex min-h-0 flex-col gap-3", className)}
     >
-      <h2 className="shrink-0 border-b border-rule px-3 py-2 text-xs font-semibold uppercase tracking-widest text-ink-mute">
-        On this page
-      </h2>
-      <ul className="min-h-0 flex-1 overflow-y-auto py-2">
+      <div className="flex shrink-0 items-center gap-2.5">
+        <Tick />
+        <h2 className="font-serif text-[18px] font-normal italic leading-none text-mute">
+          On this page
+        </h2>
+      </div>
+      <ul className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto pl-[5px]">
         {entries.map((entry, index) => {
           const active = index === activeIndex;
 
@@ -64,12 +69,13 @@ export function DocsToc({
                   scrollTo(index);
                   onNavigate?.();
                 }}
-                style={{ paddingLeft: (entry.depth - 2) * 8 + 8 }}
+                style={{ paddingLeft: (entry.depth - 2) * 14 + 12 }}
                 className={cn(
-                  "block w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap border-l-2 py-1 pr-3 text-left text-[11px] leading-5 outline-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+                  "block w-full cursor-pointer truncate rounded-[10px] py-1.5 pr-2.5 text-left text-[13px] leading-5 transition-colors",
+                  FOCUS_RING_NATIVE,
                   active
-                    ? "border-accent bg-highlight text-ink"
-                    : "border-transparent text-ink-mute hover:text-ink",
+                    ? "bg-accent-tint text-ink"
+                    : "text-mute hover:text-ink",
                 )}
               >
                 {entry.text}

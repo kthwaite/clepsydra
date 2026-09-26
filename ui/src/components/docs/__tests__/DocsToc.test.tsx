@@ -132,10 +132,10 @@ describe("DocsToc", () => {
     render(<Harness />);
 
     expect(tocButtons().map((button) => button.style.paddingLeft)).toEqual([
-      "8px",
-      "16px",
-      "24px",
-      "8px",
+      "12px",
+      "26px",
+      "40px",
+      "12px",
     ]);
   });
 

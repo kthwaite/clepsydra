@@ -118,6 +118,10 @@ describe("DocsArticle", () => {
 
     const heading = screen.getByRole("heading", { level: 2, name: /Fields/ });
     expect(heading).toHaveAttribute("id", "fields");
+    // prose h2s hang a decorative cobalt tick in the margin, like Folio
+    const tick = heading.querySelector("[data-tick]");
+    expect(tick).not.toBeNull();
+    expect(tick).toHaveAttribute("aria-hidden");
     expect(
       screen.getByRole("link", { name: /link to fields section/i }),
     ).toHaveAttribute("href", "#fields");

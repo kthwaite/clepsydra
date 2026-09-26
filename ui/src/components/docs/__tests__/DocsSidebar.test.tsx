@@ -65,6 +65,8 @@ describe("DocsSidebar", () => {
     ]);
     for (const button of groupButtons) {
       expect(button).toHaveAttribute("aria-expanded", "true");
+      // each group eyebrow leads with a section tick
+      expect(button.querySelector("[data-tick]")).not.toBeNull();
       const panelId = button.getAttribute("aria-controls");
       expect(panelId).not.toBeNull();
       expect(button.id).not.toBe("");
