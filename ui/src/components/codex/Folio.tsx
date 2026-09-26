@@ -104,7 +104,7 @@ import {
   todayAiJournalPath,
   todayJournalPath,
 } from "#/lib/journal";
-import { kindDisplayLabel, kindLabel, resolveKind } from "#/lib/kind";
+import { kindDisplayLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { formatChord, matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { formatAbsoluteDate, formatRelativeTime } from "#/lib/time";
@@ -1275,7 +1275,7 @@ export function Folio({ tabId, path }: FolioProps) {
       <dl className="m-0 grid grid-cols-[64px_minmax(0,1fr)] gap-x-3.5 gap-y-3 text-[13.5px] leading-[1.4]">
         <Prop k="Kind">
           {folioReadOnly ? (
-            <span>{kindLabel(kind)}</span>
+            <span>{kindDisplayLabel(kind)}</span>
           ) : (
             <KindSelect
               value={kind}

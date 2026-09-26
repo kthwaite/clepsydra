@@ -51,8 +51,8 @@ export function KindSelect({
 
   // The input is a filter draft, not the source of truth; the closed kind set
   // means any text that isn't a committed pick reverts to `value` on blur.
-  // The trigger reads in sentence case ("Note"); options keep KIND_META's
-  // labels, and the filter matches either since it ignores case.
+  // Trigger and options both read in sentence case ("Note"); the filter
+  // ignores case.
   const [draft, setDraft] = useState(
     value !== null ? kindDisplayLabel(value) : "",
   );

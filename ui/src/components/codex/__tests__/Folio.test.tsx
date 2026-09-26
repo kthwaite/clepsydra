@@ -1549,6 +1549,27 @@ describe("Folio property placement", () => {
     });
   });
 
+  // The read-only Kind read "NOTE" beside an editable KindSelect reading
+  // "Note" (5.3 review I2).
+  it("shows a read-only kind in sentence case", () => {
+    mobileLayoutState.matches = false;
+    usePageEditorMock.mockReturnValue({ ...editableEditor(), offline: true });
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const properties = screen.getByRole("complementary", {
+      name: "Page details",
+    });
+    expect(within(properties).getByText("Note")).toBeVisible();
+    expect(within(properties).queryByText("NOTE")).toBeNull();
+  });
+
   it("places projected properties between the read-only header and body", () => {
     mobileLayoutState.matches = false;
     usePageEditorMock.mockReturnValue({

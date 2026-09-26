@@ -6,7 +6,6 @@ import {
   ASSIGNABLE_KINDS,
   KINDS,
   kindDisplayLabel,
-  kindLabel,
   sortKindsByLabel,
 } from "#/lib/kind";
 import { useGazetteerStore } from "#/store/gazetteer";
@@ -320,7 +319,9 @@ describe("Gazetteer controller", () => {
 
     await user.click(screen.getByTestId("filter-bar-chip-kind"));
     for (const kind of KINDS) {
-      const option = screen.getByRole("option", { name: kindLabel(kind) });
+      const option = screen.getByRole("option", {
+        name: kindDisplayLabel(kind),
+      });
       expect(option).toBeVisible();
       expect(option).toHaveAttribute("aria-selected", "false");
     }
@@ -328,7 +329,7 @@ describe("Gazetteer controller", () => {
       .getAllByRole("option")
       .map((option) => option.textContent);
     expect(kindOptionLabels).toEqual(
-      sortKindsByLabel(KINDS).map((kind) => kindLabel(kind)),
+      sortKindsByLabel(KINDS).map((kind) => kindDisplayLabel(kind)),
     );
     await user.click(screen.getByTestId("filter-bar-option-kind-PROJECT"));
     expect(onFilterChange).toHaveBeenCalledWith({
