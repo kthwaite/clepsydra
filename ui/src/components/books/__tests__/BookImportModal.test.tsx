@@ -48,28 +48,55 @@ describe("BookImportModal", () => {
 
   it("focuses manual ISBN entry", () => {
     render(<BookImportModal />);
-    expect(screen.getByRole("textbox", { name: "ISBN" })).toHaveFocus();
+    expect(
+      screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" }),
+    ).toHaveFocus();
   });
 
   it("allows the ISBN-10 X check digit on mobile keyboards", () => {
     render(<BookImportModal />);
-    expect(screen.getByRole("textbox", { name: "ISBN" })).toHaveAttribute(
-      "inputmode",
-      "text",
-    );
+    expect(
+      screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" }),
+    ).toHaveAttribute("inputmode", "text");
   });
 
   it("keeps invalid input local", async () => {
     const user = userEvent.setup();
     render(<BookImportModal />);
 
-    await user.type(screen.getByRole("textbox", { name: "ISBN" }), "1234");
+    await user.type(
+      screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" }),
+      "1234",
+    );
     await user.click(screen.getByRole("button", { name: "Add book" }));
 
     expect(importMutate).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Enter a valid ISBN-10 or ISBN-13",
+      /^Enter a valid ISBN-10 or ISBN-13$/,
     );
+    expect(
+      screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" }),
+    ).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("names the source and describes the field", () => {
+    render(<BookImportModal />);
+    expect(
+      screen.getByRole("heading", { name: "Add book" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("ISBN · Open Library")).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" }),
+    ).toHaveAccessibleDescription(
+      "Metadata is retrieved from Open Library. Review the book page after import.",
+    );
+  });
+
+  it("dismisses with the sentence-case Cancel button", async () => {
+    const user = userEvent.setup();
+    render(<BookImportModal />);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(useUiStore.getState().isBookImportOpen).toBe(false);
   });
 
   it("submits canonical ISBN-13", async () => {
@@ -77,7 +104,7 @@ describe("BookImportModal", () => {
     render(<BookImportModal />);
 
     await user.type(
-      screen.getByRole("textbox", { name: "ISBN" }),
+      screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" }),
       "0-262-01153-0",
     );
     await user.click(screen.getByRole("button", { name: "Add book" }));
@@ -105,7 +132,7 @@ describe("BookImportModal", () => {
       render(<BookImportModal />);
 
       await user.type(
-        screen.getByRole("textbox", { name: "ISBN" }),
+        screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" }),
         "9780262011532",
       );
       await user.click(screen.getByRole("button", { name: "Add book" }));
@@ -126,7 +153,7 @@ describe("BookImportModal", () => {
     );
     render(<BookImportModal />);
 
-    const input = screen.getByRole("textbox", { name: "ISBN" });
+    const input = screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" });
     await user.type(input, "9780262011532");
     await user.click(screen.getByRole("button", { name: "Add book" }));
 
@@ -151,9 +178,9 @@ describe("BookImportModal", () => {
     expect(screen.getByTestId("mock-book-scanner")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Simulate barcode" }));
 
-    expect(screen.getByRole("textbox", { name: "ISBN" })).toHaveValue(
-      "9780262011532",
-    );
+    expect(
+      screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" }),
+    ).toHaveValue("9780262011532");
     expect(screen.queryByTestId("mock-book-scanner")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
       "Barcode captured. Choose Add book to import it.",
@@ -171,18 +198,25 @@ describe("BookImportModal", () => {
     );
 
     expect(screen.queryByTestId("mock-book-scanner")).not.toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "ISBN" })).toHaveFocus();
+    expect(
+      screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" }),
+    ).toHaveFocus();
   });
 
   it("dismisses on Escape and resets before reopening", async () => {
     const user = userEvent.setup();
     const view = render(<BookImportModal />);
-    await user.type(screen.getByRole("textbox", { name: "ISBN" }), "discard");
+    await user.type(
+      screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" }),
+      "discard",
+    );
     await user.keyboard("{Escape}");
     expect(useUiStore.getState().isBookImportOpen).toBe(false);
 
     useUiStore.getState().openBookImport();
     view.rerender(<BookImportModal />);
-    expect(screen.getByRole("textbox", { name: "ISBN" })).toHaveValue("");
+    expect(
+      screen.getByRole("textbox", { name: "ISBN-10 or ISBN-13" }),
+    ).toHaveValue("");
   });
 });
