@@ -193,8 +193,9 @@ describe("conversation turn presentation", () => {
       name: /Change participant/,
     });
     expect(participantTrigger).toHaveTextContent("ChatGPT");
-    expect(participantTrigger.parentElement).toHaveClass(
-      "ai-conversation-turn__participant-select",
+    // The participant picker and turn actions share the speaker gutter.
+    expect(participantTrigger.closest("aside")).toContainElement(
+      screen.getByRole("button", { name: "Move turn up" }),
     );
     expect(
       screen.getByRole("button", { name: "Move turn up" }),

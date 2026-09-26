@@ -23,6 +23,8 @@ import { resolveSchemeUrl } from "#/api/deeplink";
 import { isSchemeLink, openSchemeLink } from "#/editor/schemeLinks";
 import type { LinkElement as LinkElementType } from "#/editor/types";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { classifyLinkResource } from "#/lib/linkResource";
 import { resolveLinkTarget } from "#/lib/resourceUrl";
 
@@ -32,6 +34,11 @@ type Props = RenderElementProps & { element: LinkElementType };
 function truncate(url: string, max = 56): string {
   return url.length > max ? `${url.slice(0, max - 1)}…` : url;
 }
+
+const LINK_ACTION = cn(
+  "flex h-7 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-ink-2 transition-colors hover:bg-sink hover:text-ink",
+  FOCUS_RING_NATIVE,
+);
 
 export function LinkElement({ attributes, children, element }: Props) {
   const url = element.url;
@@ -129,7 +136,7 @@ export function LinkElement({ attributes, children, element }: Props) {
         ref={setRef}
         href={safeHref}
         data-link-resource={resource ?? undefined}
-        className="cl-link underline decoration-1 underline-offset-2 hover:decoration-2"
+        className="cursor-pointer text-accent underline decoration-1 underline-offset-[3px] hover:decoration-2"
         {...getReferenceProps({ onClick })}
       >
         {children}
@@ -140,27 +147,31 @@ export function LinkElement({ attributes, children, element }: Props) {
             ref={refs.setFloating}
             style={floatingStyles}
             contentEditable={false}
-            className="cl-mono z-50 flex items-center gap-2 border-[1.5px] border-ink bg-paper px-2 py-1 text-[11px] text-ink shadow-[4px_4px_0_0_var(--color-ink)]"
+            className="z-50 flex items-center gap-1 rounded-[16px] bg-raise py-1.5 pl-3.5 pr-1.5 text-[13px] text-ink shadow-lg"
             {...getFloatingProps()}
           >
-            <span className="max-w-[260px] truncate text-ink-mute" title={url}>
+            <span className="mr-1 max-w-[260px] truncate text-mute" title={url}>
               {truncate(url)}
             </span>
             <button
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={doOpen}
-              className="flex cursor-pointer items-center gap-1 border-l border-rule-soft pl-2 text-ink hover:text-accent"
+              className={LINK_ACTION}
             >
-              <ExternalLink size={11} /> Open
+              <ExternalLink aria-hidden size={13} /> Open
             </button>
             <button
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={doCopy}
-              className="flex cursor-pointer items-center gap-1 border-l border-rule-soft pl-2 text-ink hover:text-accent"
+              className={LINK_ACTION}
             >
-              {copied ? <Check size={11} /> : <Copy size={11} />}
+              {copied ? (
+                <Check aria-hidden size={13} />
+              ) : (
+                <Copy aria-hidden size={13} />
+              )}
               {copied ? "Copied" : "Copy"}
             </button>
           </div>

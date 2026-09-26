@@ -15,6 +15,8 @@ import { WikilinkInlineEditor } from "#/editor/WikilinkInlineEditor";
 import { useWikilinkEditing } from "#/editor/wikilinkEditing";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { usePreviewStore } from "#/store/preview";
 
 type Props = RenderElementProps & { element: WikilinkElementType };
@@ -82,7 +84,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     return (
       <span {...attributes}>
         <span contentEditable={false} className="align-baseline text-ink">
-          <span aria-hidden className="cl-mono text-accent">
+          <span aria-hidden className="text-mute">
             [[
           </span>
           <WikilinkInlineEditor
@@ -95,7 +97,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
               void openTarget(target);
             }}
           />
-          <span aria-hidden className="cl-mono text-accent">
+          <span aria-hidden className="text-mute">
             ]]
           </span>
         </span>
@@ -105,8 +107,10 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   }
 
   const dangling = resolved === null;
-  const linkClassName = `cl-wikilink ${dangling ? "text-ink-mute" : "text-ink"}`;
-  const iconClassName = dangling ? "text-ink-mute" : "text-accent";
+  // Resolved links read as links (accent); a missing page reads mute and
+  // italic, like the attendee "no page carries this name yet" state.
+  const linkClassName = dangling ? "italic text-mute" : "text-accent";
+  const iconClassName = dangling ? "text-mute" : "text-accent";
 
   const handleActivation = (event: MouseEvent | KeyboardEvent) => {
     event.preventDefault();
@@ -169,7 +173,11 @@ export function WikilinkElement({ attributes, children, element }: Props) {
                 onKeyDown: handleKeyDown,
               }}
               tabIndex={0}
-              className={`cl-link relative cursor-pointer ${linkClassName}`}
+              className={cn(
+                "relative cursor-pointer rounded-[3px] hover:text-ink",
+                FOCUS_RING_NATIVE,
+                linkClassName,
+              )}
             >
               {linkContent}
             </a>

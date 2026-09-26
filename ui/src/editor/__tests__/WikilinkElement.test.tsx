@@ -213,7 +213,7 @@ describe("WikilinkElement dangling", () => {
     expect(clinkCalls).toHaveLength(0);
     const link = screen.getByRole("link", { name: "Unwritten Page" });
     expect(link).not.toHaveAttribute("href");
-    expect(link.className).toContain("text-ink-mute");
+    expect(link).toHaveClass("text-mute", "italic");
     expect(link.textContent).toBe("Unwritten Page");
     expect(link.querySelectorAll("svg[aria-hidden='true']")).toHaveLength(1);
   });

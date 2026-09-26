@@ -72,6 +72,9 @@ describe("JournalTimeHeading", () => {
     const time = heading.querySelector("time");
     expect(time?.getAttribute("datetime")).toBe("2026-09-08 14:32");
     expect(time?.textContent).toBe("14:32");
+    // A tick leads the time; no "TIME /" ledger prefix.
+    expect(heading.textContent).toBe("14:32");
+    expect(heading.querySelector("[data-tick]")).not.toBeNull();
   });
 
   it("keeps showing the date when it differs from the journal's date", () => {

@@ -6,8 +6,11 @@ import {
   useSelected,
   useSlateStatic,
 } from "slate-react";
+import { Tick } from "#/components/codex/Tick";
 import { useJournalDate } from "#/editor/journalContext";
 import { removeJournalTimeHeading } from "#/editor/transforms/journalTime";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type { JournalTimeElement } from "../types";
 
@@ -28,27 +31,36 @@ function JournalTimeHeading({
     <div
       {...attributes}
       contentEditable={false}
-      className={`group relative my-8 flex items-center gap-3 border-y border-border py-2 font-mono ${selected ? "border-accent bg-accent/10 text-ink" : "text-ink-mute"}`}
+      className={cn(
+        "group relative -mx-3 mb-3 mt-8 flex items-center gap-3 rounded-[12px] px-3 py-1.5",
+        selected && "bg-accent-tint",
+      )}
       data-selected={selected || undefined}
     >
       <h2
         aria-label={`Time heading, ${text} local time`}
-        className="flex shrink-0 items-baseline gap-2 text-xs font-bold tracking-[0.14em]"
+        className="flex min-w-0 flex-1 items-center gap-3 font-normal"
       >
-        <span aria-hidden="true" className="text-accent">
-          TIME /
-        </span>
-        <time dateTime={text} className="text-ink">
+        <Tick />
+        <time
+          dateTime={text}
+          className="font-serif text-[24px] leading-none text-ink"
+        >
           {showDate && <span>{element.date} </span>}
           {element.time}
         </time>
       </h2>
-      <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-border" />
       {!readOnly && (
         <button
           type="button"
           aria-label={`Delete time heading ${text}`}
-          className={`shrink-0 border border-transparent p-1 text-ink-mute group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:border-border hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:outline-none ${selected ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+          className={cn(
+            "inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-mute transition-colors hover:bg-sink hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+            FOCUS_RING_NATIVE,
+            selected
+              ? "pointer-events-auto opacity-100"
+              : "pointer-events-none opacity-0",
+          )}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
             removeJournalTimeHeading(
@@ -58,7 +70,7 @@ function JournalTimeHeading({
             ReactEditor.focus(editor);
           }}
         >
-          <Trash2 aria-hidden="true" size={14} />
+          <Trash2 aria-hidden="true" size={15} />
         </button>
       )}
       {children}

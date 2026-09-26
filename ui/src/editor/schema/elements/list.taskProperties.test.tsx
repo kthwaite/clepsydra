@@ -88,11 +88,11 @@ describe("task property chips", () => {
     const scheduled = screen.getByRole("button", {
       name: "Scheduled 2026-08-15",
     });
-    const priority = screen.getByRole("button", { name: "Priority HIGH" });
+    const priority = screen.getByRole("button", { name: "Priority High" });
 
-    expect(due).toHaveTextContent("DUE 2026-08-20");
-    expect(scheduled).toHaveTextContent("SCHED 2026-08-15");
-    expect(priority).toHaveTextContent("HIGH");
+    expect(due).toHaveTextContent("Due 20 Aug");
+    expect(scheduled).toHaveTextContent("Scheduled 15 Aug");
+    expect(priority).toHaveTextContent("High");
     expect(Array.from(chipContainer("Ship the picker").children)).toEqual([
       due,
       scheduled,
@@ -117,11 +117,11 @@ describe("task property chips", () => {
     expect(
       screen.getByRole("button", { name: "Due 2026-08-20" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/SCHED/)).toBeNull();
+    expect(screen.queryByText(/Scheduled/)).toBeNull();
     expect(screen.queryByText(/ignored/i)).toBeNull();
   });
 
-  it("maps priority A/B/C to HIGH/MED/LOW and passes anything else through", () => {
+  it("maps priority A/B/C to High/Medium/Low and passes anything else through", () => {
     renderList(
       list(
         item("alpha", { checked: false, properties: { priority: "A" } }),
@@ -131,9 +131,9 @@ describe("task property chips", () => {
       ),
     );
 
-    expect(chipContainer("alpha")).toHaveTextContent("HIGH");
-    expect(chipContainer("bravo")).toHaveTextContent("MED");
-    expect(chipContainer("charlie")).toHaveTextContent("LOW");
+    expect(chipContainer("alpha")).toHaveTextContent("High");
+    expect(chipContainer("bravo")).toHaveTextContent("Medium");
+    expect(chipContainer("charlie")).toHaveTextContent("Low");
     expect(chipContainer("other")).toHaveTextContent("P1");
     expect(
       screen.getByRole("button", { name: "Priority P1" }),
