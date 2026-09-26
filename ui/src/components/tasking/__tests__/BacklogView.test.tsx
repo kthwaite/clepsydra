@@ -395,9 +395,21 @@ describe("BacklogView — row rendering", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders the due date when set", () => {
+  it("renders the due date as day and short month, ISO in its title", () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    expect(screen.getByText("2026-07-01")).toBeInTheDocument();
+    expect(screen.getByText("1 Jul")).toHaveAttribute("title", "2026-07-01");
+  });
+
+  // At 1024px the full column set left the title 0px (review I1): narrower
+  // widths drop Assignee/Estimate, then Project/Checklist.
+  it("drops secondary columns on narrower screens", () => {
+    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
+    for (const name of ["Assignee", "Estimate"]) {
+      expect(screen.getByText(name).className).toContain("max-[1399px]:hidden");
+    }
+    for (const name of ["Project", "Checklist"]) {
+      expect(screen.getByText(name).className).toContain("max-xl:hidden");
+    }
   });
 
   it("renders em-dash when due is not set", () => {

@@ -22,6 +22,7 @@ import type { BoardTask } from "#/api/board";
 import { Tick, type TickVariant } from "#/components/codex/Tick";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { formatDayMonth } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import {
   COL_ORDER,
@@ -35,9 +36,21 @@ import { checklistProgress } from "./board-stats";
 import { InlineEditPopover } from "./InlineEditPopover";
 import { QuickAddRow } from "./QuickAddRow";
 
-/** Shared grid tracks for the header row and task rows. */
-const BK_COLS =
-  "grid grid-cols-[136px_minmax(0,1fr)_110px_132px_90px_76px_70px_86px] items-center gap-x-4 px-3";
+/** Shared grid tracks for the header row and task rows. Narrower screens
+ *  drop columns (display:none cells take no track) so the title keeps room:
+ *  below 1400px Assignee and Estimate go, below xl Project and Checklist. */
+const BK_COLS = cn(
+  "grid items-center gap-x-4 px-3",
+  "grid-cols-[168px_minmax(0,1fr)_132px_64px]",
+  "xl:grid-cols-[168px_minmax(0,1fr)_110px_132px_64px_86px]",
+  "min-[1400px]:grid-cols-[168px_minmax(0,1fr)_110px_132px_90px_76px_64px_86px]",
+);
+
+/** Cells shown from xl (Project, Checklist). */
+const XL_ONLY = "max-xl:hidden";
+
+/** Cells shown from 1400px (Assignee, Estimate). */
+const WIDE_ONLY = "max-[1399px]:hidden";
 
 /** Quick-add bar (44px) + 18px gap + column header (40px): where the
  *  sticky group headers dock. */
@@ -118,12 +131,12 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
         >
           <span>Code</span>
           <span>Task</span>
-          <span>Project</span>
+          <span className={XL_ONLY}>Project</span>
           <span>Status</span>
-          <span>Assignee</span>
-          <span>Estimate</span>
+          <span className={WIDE_ONLY}>Assignee</span>
+          <span className={WIDE_ONLY}>Estimate</span>
           <span className="text-right">Due</span>
-          <span>Checklist</span>
+          <span className={XL_ONLY}>Checklist</span>
         </div>
       </div>
 
@@ -225,7 +238,9 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                   </span>
 
                   {/* Project */}
-                  <span className="truncate text-[13px] text-mute">
+                  <span
+                    className={cn("truncate text-[13px] text-mute", XL_ONLY)}
+                  >
                     {t.project ?? "—"}
                   </span>
 
@@ -249,13 +264,19 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                     className={cn(
                       "truncate text-[13px]",
                       t.assignee ? "text-ink-2" : "text-mute",
+                      WIDE_ONLY,
                     )}
                   >
                     {t.assignee ?? "—"}
                   </span>
 
                   {/* Estimate */}
-                  <span className="truncate text-[13px] text-mute tabular-nums">
+                  <span
+                    className={cn(
+                      "truncate text-[13px] text-mute tabular-nums",
+                      WIDE_ONLY,
+                    )}
+                  >
                     {t.estimate ?? "—"}
                   </span>
 
@@ -265,12 +286,13 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                       "truncate text-right text-[13px] tabular-nums",
                       t.due ? "text-ink-2" : "text-mute",
                     )}
+                    title={t.due ?? undefined}
                   >
-                    {t.due ?? "—"}
+                    {t.due ? formatDayMonth(t.due) : "—"}
                   </span>
 
                   {/* Checklist — mini dots */}
-                  <span className="flex gap-[3px]">
+                  <span className={cn("flex gap-[3px]", XL_ONLY)}>
                     {Array.from(
                       { length: total },
                       (_, position) => position + 1,
