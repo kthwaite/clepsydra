@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArchiveSnapshotRoute, Route } from "#/routes/archive.$";
@@ -177,6 +177,9 @@ describe("archived snapshot route", () => {
     expect(alert).toHaveTextContent(/restart or upgrade/i);
     expect(alert).toHaveTextContent("sha/with space");
     expect(alert).not.toHaveTextContent(/no longer in the content store/i);
+    expect(
+      within(alert).getByRole("heading", { name: "Outdated backend" }),
+    ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(screen.queryByTitle(/archived snapshot/i)).not.toBeInTheDocument();
   });
@@ -214,6 +217,9 @@ describe("archived snapshot route", () => {
 
     await screen.findByText(/snapshot is no longer in the content store/i);
     const missing = screen.getByRole("status");
+    expect(
+      within(missing).getByRole("heading", { name: "Snapshot missing" }),
+    ).toBeInTheDocument();
     expect(missing).not.toHaveTextContent(/outdated backend/i);
     expect(screen.getByText("sha/with space")).toBeInTheDocument();
     expect(screen.queryByTitle(/archived snapshot/i)).not.toBeInTheDocument();
@@ -309,6 +315,8 @@ describe("archived snapshot route", () => {
     expect(warning).toHaveTextContent(/legacy or incomplete snapshot/i);
     expect(warning).toHaveTextContent(/omitted 3 styles or images/i);
     expect(warning).toHaveTextContent(/recapture.*current extension/i);
+    expect(warning).toHaveClass("bg-hot/8");
+    expect(warning.querySelector("p")).toHaveClass("text-hot");
     expect(
       screen.getByTitle("Archived snapshot: A captured page"),
     ).toHaveAttribute("sandbox", "");

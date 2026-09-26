@@ -1,6 +1,11 @@
 import { Link } from "@tanstack/react-router";
+import { ArrowUpRight, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import type { components } from "#/api/schema";
+import { IconButton } from "#/components/ui/icon-button";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { formatCapturedAt, formatDayMonthYear } from "#/lib/time";
 
 type ArchiveMeta = components["schemas"]["ArchiveMetaResponse"];
 
@@ -38,18 +43,12 @@ function ProvenanceField({
   dateTime?: string;
 }) {
   return (
-    <span className="flex min-w-0 items-baseline gap-2">
-      <span className="shrink-0 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-        {label}
-      </span>
-      {dateTime ? (
-        <time dateTime={dateTime} className="truncate text-[10px] text-ink-2">
-          {value}
-        </time>
-      ) : (
-        <span className="truncate text-[10px] text-ink-2">{value}</span>
-      )}
-    </span>
+    <div className="flex min-w-0 gap-2">
+      <dt className="shrink-0 text-mute">{label}</dt>
+      <dd className="m-0 min-w-0 truncate text-ink">
+        {dateTime ? <time dateTime={dateTime}>{value}</time> : value}
+      </dd>
+    </div>
   );
 }
 
@@ -62,9 +61,8 @@ function isSafeLiveUrl(value: string): boolean {
   }
 }
 
-/** Provenance chrome for a captured page. The ruled strips deliberately echo
- * Clepsydra's dossier headers without presenting the snapshot as a workspace
- * folio or dashboard card. */
+/** Provenance chrome for a captured page: a quiet sink strip above the
+ * full-bleed snapshot, never a workspace folio or dashboard card. */
 export function ArchiveBanner({ title, path, archive }: ArchiveBannerProps) {
   const [collapsed, setCollapsed] = useState(readCollapsed);
 
@@ -77,45 +75,53 @@ export function ArchiveBanner({ title, path, archive }: ArchiveBannerProps) {
   }
 
   return (
-    <header className="shrink-0 border-b border-rule bg-paper-2 text-ink">
-      <div className="cl-mono flex items-center justify-between gap-4 border-b border-rule px-4 py-2">
-        <span className="shrink-0 text-[9px] uppercase tracking-[0.22em] text-accent">
+    <header className="shrink-0 bg-sink px-6 text-ink">
+      <div className="flex h-12 items-center gap-4">
+        <span className="shrink-0 text-[13px] font-medium text-accent">
           Captured record
         </span>
         {collapsed ? (
-          <span className="min-w-0 truncate font-sans text-[11px] font-bold text-ink">
+          <span className="min-w-0 truncate text-[13.5px] font-medium text-ink">
             {title}
           </span>
         ) : null}
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={toggle}
-            aria-expanded={!collapsed}
-            aria-label={
-              collapsed ? "Expand archive banner" : "Collapse archive banner"
-            }
-            className="cl-mono shrink-0 cursor-pointer border border-rule px-1.5 text-[9px] uppercase tracking-[0.16em] text-ink-mute hover:border-accent hover:text-accent"
-          >
-            [{collapsed ? "+" : "–"}]
-          </button>
-          <Link
-            to="/pages/$"
-            params={{ _splat: path }}
-            className="text-[9px] uppercase tracking-[0.16em] text-ink-mute underline decoration-rule underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
-          >
-            ← Back to vault page
-          </Link>
-        </div>
+        <span className="grow" />
+        <IconButton
+          onPress={toggle}
+          aria-expanded={!collapsed}
+          aria-label={
+            collapsed ? "Expand archive banner" : "Collapse archive banner"
+          }
+          className="h-7 w-7 shrink-0 [&_svg]:h-3.5 [&_svg]:w-3.5"
+        >
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              "transition-transform",
+              collapsed ? undefined : "rotate-180",
+            )}
+          />
+        </IconButton>
+        <Link
+          to="/pages/$"
+          params={{ _splat: path }}
+          className={cn(
+            "flex shrink-0 items-center gap-1.5 rounded-sm text-[13px] text-ink-2 hover:text-ink",
+            FOCUS_RING_NATIVE,
+          )}
+        >
+          <span aria-hidden="true">←</span>
+          Back to vault page
+        </Link>
       </div>
 
       {collapsed ? null : (
-        <div className="grid gap-4 px-4 py-4 md:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)] md:items-end">
-          <div className="min-w-0">
-            <p className="cl-mono mb-2 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-              Archive / {archive.domain}
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-10 pt-0.5 pb-4">
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="text-[12.5px] text-mute">
+              Archive · {archive.domain}
             </p>
-            <h1 className="font-sans text-xl font-black leading-tight tracking-tight text-ink md:text-2xl">
+            <h1 className="truncate text-[20px] font-semibold leading-tight tracking-[-0.01em] text-ink">
               {title}
             </h1>
             {isSafeLiveUrl(archive.url) ? (
@@ -123,25 +129,27 @@ export function ArchiveBanner({ title, path, archive }: ArchiveBannerProps) {
                 href={archive.url}
                 target="_blank"
                 rel="noreferrer"
-                className="cl-mono mt-2 block truncate text-[10px] text-accent underline decoration-accent-deep underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
+                className={cn(
+                  "flex min-w-0 items-center gap-1.5 rounded-sm text-[12.5px] text-accent hover:underline hover:underline-offset-4",
+                  FOCUS_RING_NATIVE,
+                )}
                 aria-label={`Open live page: ${archive.url}`}
               >
-                {archive.url} ↗
+                <span className="truncate">{archive.url}</span>
+                <ArrowUpRight aria-hidden="true" className="h-3 w-3 shrink-0" />
               </a>
             ) : (
-              <p className="cl-mono mt-2 text-[10px] text-hot">
-                <span className="mr-2 uppercase tracking-[0.12em]">
-                  Invalid archive URL metadata
-                </span>
+              <p className="text-[12.5px] text-hot">
+                <span className="mr-2">Invalid archive URL metadata</span>
                 <span className="break-all">{archive.url}</span>
               </p>
             )}
           </div>
 
-          <div className="cl-mono grid min-w-0 gap-x-4 gap-y-2 border-l border-rule pl-4 sm:grid-cols-2">
+          <dl className="m-0 grid min-w-0 grid-cols-[auto_auto] gap-x-7 gap-y-1 text-[12.5px]">
             <ProvenanceField
               label="Captured"
-              value={archive.captured_at}
+              value={formatCapturedAt(archive.captured_at)}
               dateTime={archive.captured_at}
             />
             {archive.site_name ? (
@@ -153,11 +161,11 @@ export function ArchiveBanner({ title, path, archive }: ArchiveBannerProps) {
             {archive.published_time ? (
               <ProvenanceField
                 label="Published"
-                value={archive.published_time}
+                value={formatDayMonthYear(archive.published_time)}
                 dateTime={archive.published_time}
               />
             ) : null}
-          </div>
+          </dl>
         </div>
       )}
     </header>
