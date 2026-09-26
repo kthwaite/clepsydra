@@ -291,7 +291,7 @@ export function AcademicLibrary({
           {total} {total === 1 ? "work" : "works"}
         </span>
         <div className="flex-1" />
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Button onPress={() => setImportOpen(true)}>Import</Button>
           <Button variant="primary" onPress={openCreate}>
             Add work

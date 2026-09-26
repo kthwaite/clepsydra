@@ -293,6 +293,13 @@ describe("AcademicLibrary — shared FilterBar composition", () => {
     expect(screen.queryByText(/ loaded works/)).not.toBeInTheDocument();
   });
 
+  it("centres the quiet Import button on the taller Add work button", () => {
+    render(<ControlledAcademicLibrary />);
+    expect(
+      screen.getByRole("button", { name: "Add work" }).parentElement,
+    ).toHaveClass("items-center");
+  });
+
   it("gives the text filter an accessible name of Search works", () => {
     render(<ControlledAcademicLibrary />);
     expect(screen.getByTestId("filter-bar-input")).toHaveAccessibleName(
@@ -480,7 +487,10 @@ describe("WorkDetail", () => {
     expect(screen.getByText("The key claim.")).toBeVisible();
     expect(screen.getByText("Highlight · page 3")).toBeVisible();
     expect(
-      screen.getByRole("heading", { level: 3, name: /Annotations/ }),
+      screen.getByRole("button", { name: "Edit metadata" }).parentElement,
+    ).toHaveClass("items-center");
+    expect(
+      screen.getByRole("heading", { level: 3, name: /^Annotations\s·\s\d+$/ }),
     ).toBeVisible();
     await user.click(
       screen.getByRole("button", { name: "Open annotation The key claim." }),

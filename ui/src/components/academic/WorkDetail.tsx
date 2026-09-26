@@ -233,7 +233,7 @@ export function WorkDetail({ workId }: { workId: string }) {
               {(work.authors ?? []).join(", ") || "Unknown author"}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 md:pt-[30px]">
+          <div className="flex flex-wrap items-center gap-2 md:pt-[30px]">
             <Button onPress={openEditor}>Edit metadata</Button>
             <Button
               variant="primary"
@@ -286,6 +286,7 @@ export function WorkDetail({ workId }: { workId: string }) {
           <div className="flex items-center gap-3">
             <h3
               id={`${id}-annotations`}
+              aria-label={`Annotations · ${annotations.length}`}
               className="flex flex-1 items-center gap-2.5 font-serif text-[20px] italic text-ink"
             >
               <Tick />
