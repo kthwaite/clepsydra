@@ -34,6 +34,7 @@ const PENDING = new Set<string>([
   "../bases/ordered-list.tsx",
   "../../editor/elements/BaseEmbedElement.tsx",
   "../../editor/elements/GeneratedRegionElement.tsx",
+  "../../editor/elements/EmbeddedBaseTable.tsx",
 ]);
 
 /** Tasking board screen (phase 4.3). */
@@ -134,6 +135,7 @@ const BASES_FILES = [
   "../../editor/elements/BaseEmbedElement.tsx",
   "../../editor/elements/GeneratedRegionElement.tsx",
   "../../editor/baseEmbedEditing.tsx",
+  "../../editor/elements/EmbeddedBaseTable.tsx",
 ];
 
 /** Mobile companion shell (phase 4b-1). */
