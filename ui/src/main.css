@@ -18,62 +18,22 @@
     --font-serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
     --font-mono:
         "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-    /* Legacy aliases: keep resolving to sans until their call sites are
-       migrated (font-heading has 18 users; phase 4/5 decides each). */
-    --font-body: var(--font-sans);
-    --font-heading: var(--font-sans);
-    --font-slab: var(--font-sans);
-    --font-serif-sc: var(--font-sans);
-
     /* Colours: every Tailwind colour points at a bare property defined per
-       theme on :root (charcoal) / .paper (bone). One source of truth. */
-    --color-paper: var(--paper);
-    --color-paper-2: var(--paper-2);
-    --color-paper-edge: var(--paper-edge);
+       theme on :root (charcoal) / .paper (bone). One source of truth. Role
+       names from spec §3.1. */
+    --color-ground: var(--ground);
+    --color-raise: var(--raise);
+    --color-sink: var(--sink);
     --color-ink: var(--ink);
     --color-ink-2: var(--ink-2);
-    --color-ink-mute: var(--ink-mute);
-    --color-ink-faint: var(--ink-faint);
+    --color-mute: var(--mute);
+    --color-faint: var(--faint);
+    --color-rule: var(--rule);
     --color-accent: var(--accent);
-    --color-accent-deep: var(--accent-deep);
-    --color-cool: var(--cool);
+    --color-accent-tint: var(--accent-tint);
     --color-warn: var(--warn);
     --color-hot: var(--hot);
-    --color-rule: var(--rule);
-    --color-rule-soft: var(--rule-soft);
-    --color-highlight: var(--highlight);
-    --color-bar-bg: var(--bar-bg);
-    --color-bar-fg: var(--bar-fg);
-    --color-bar-rule: var(--bar-rule);
-
-    /* Stone & Lamp role names (spec §3.1) */
-    --color-ground: var(--paper);
-    --color-raise: var(--paper-2);
-    --color-sink: var(--paper-edge);
-    --color-mute: var(--ink-mute);
-    --color-faint: var(--ink-faint);
-    --color-accent-tint: var(--highlight);
     --color-scrim: var(--scrim);
-
-    /* Tailwind / shadcn semantic aliases */
-    --color-background: var(--paper);
-    --color-foreground: var(--ink);
-    --color-card: var(--paper-2);
-    --color-card-foreground: var(--ink);
-    --color-popover: var(--paper-2);
-    --color-popover-foreground: var(--ink);
-    --color-primary: var(--accent);
-    --color-primary-foreground: var(--paper-2);
-    --color-secondary: var(--paper-edge);
-    --color-secondary-foreground: var(--ink);
-    --color-muted: var(--paper-edge);
-    --color-muted-foreground: var(--ink-mute);
-    --color-accent-foreground: var(--paper-2);
-    --color-destructive: var(--hot);
-    --color-destructive-foreground: var(--paper-2);
-    --color-border: var(--rule);
-    --color-input: var(--rule);
-    --color-ring: var(--accent);
 
     /* Radius: surfaces 12px (spec decision 13) */
     --radius: 12px;
@@ -83,32 +43,22 @@
     --shadow-md: var(--elev-2);
     --shadow-lg: var(--elev-3);
     --shadow-xl: var(--elev-4);
-
-    /* Density scale (overridable via [data-density]) */
-    --space-row: 22px;
-    --space-gap: 14px;
-    --space-pad: 14px;
-    --text-fs: 11px;
-    --text-fs-s: 10px;
-    --text-fs-xs: 9px;
 }
 
-/* Bare custom properties consumed by .cl-* primitives and inline var() calls.
-   Mirror the Tailwind tokens above so `var(--ink)` etc. keep working. DARK is
-   the base — defined on :root so dark renders with no class (no FOUC). */
+/* Bare custom properties, read by the @theme colours above and by inline
+   var() calls. Charcoal is the base — defined on :root so it renders with no
+   class (no FOUC). */
 :root {
     color-scheme: dark;
     /* Charcoal */
-    --paper: #151412;
-    --paper-2: #262420;
-    --paper-edge: #1f1d1a;
+    --ground: #151412;
+    --raise: #262420;
+    --sink: #1f1d1a;
     --ink: #eee8db;
     --ink-2: #cbc5b8;
-    --ink-mute: #9a948a;
-    --ink-faint: #57524a;
+    --mute: #9a948a;
+    --faint: #57524a;
     --accent: #809cff;
-    --accent-deep: #6680f0;
-    --cool: #809cff;
     --warn: #e08a6a;
     --hot: #e08a6a;
     /* Quire (tab-group) hues; ids unchanged, indigo carries plum */
@@ -122,47 +72,14 @@
     --code-literal: #d2a95a;
     --quire-indigo: #b996cc;
     --rule: #34312c;
-    --rule-soft: #2b2925;
-    --grid: rgba(238, 232, 219, 0.05);
-    --highlight: rgba(128, 156, 255, 0.15);
-    --bar-bg: #1f1d1a;
-    --bar-fg: #cbc5b8;
-    --bar-rule: rgba(238, 232, 219, 0.12);
+    --accent-tint: rgba(128, 156, 255, 0.15);
     --elev-1: 0 1px 2px rgba(0, 0, 0, 0.3);
     --elev-2: 0 8px 24px rgba(0, 0, 0, 0.35);
     --elev-3: 0 24px 60px rgba(0, 0, 0, 0.45);
     --elev-4: 0 40px 100px rgba(0, 0, 0, 0.55);
-
-    /* Stone & Lamp role names (spec §3.1); resolve per theme via the above */
-    --ground: var(--paper);
-    --raise: var(--paper-2);
-    --sink: var(--paper-edge);
-    --mute: var(--ink-mute);
-    --faint: var(--ink-faint);
-    --accent-tint: var(--highlight);
     /* Modal/sheet backdrop. Not ink-based: ink is light in charcoal, which
        would fog the page instead of dimming it. */
     --scrim: rgb(0 0 0 / 0.45);
-
-    /* Density (default) */
-    --row-h: 22px;
-    --gap: 14px;
-    --pad: 14px;
-    --fs: 11px;
-    --fs-s: 10px;
-    --fs-xs: 9px;
-
-    /* Board-prototype token aliases — the TASKING board components (ported
-       from docs/pkm-redesign/project/styles-board.css) were written against
-       a --bg/--ink-3/--ink-4 vocabulary that was never defined here. Bridge
-       them onto the real Vessel tokens instead of rewriting every call site;
-       kept in this same :root block (not a separate one) so .paper's
-       overrides of the right-hand tokens propagate through automatically. */
-    --bg: var(--paper);
-    --bg-2: var(--paper-2);
-    --bg-3: var(--paper-edge);
-    --ink-3: var(--ink-mute);
-    --ink-4: var(--ink-faint);
 }
 
 /* Bone (light). Toggled by `.paper` on <html>. Re-binds bare properties only;
@@ -170,16 +87,14 @@
 .paper {
     --scrim: rgb(14 26 58 / 0.26);
     color-scheme: light;
-    --paper: #f4efe4;
-    --paper-2: #fbf8f2;
-    --paper-edge: #eae3d3;
+    --ground: #f4efe4;
+    --raise: #fbf8f2;
+    --sink: #eae3d3;
     --ink: #0e1a3a;
     --ink-2: #343b50;
-    --ink-mute: #5f6372;
-    --ink-faint: #a9a89f;
+    --mute: #5f6372;
+    --faint: #a9a89f;
     --accent: #1747e6;
-    --accent-deep: #0f36b8;
-    --cool: #1747e6;
     --warn: #b3401f;
     --hot: #b3401f;
     --quire-sepia: #7a5c45;
@@ -193,39 +108,15 @@
     --code-literal: #7a561c;
     --quire-indigo: #7a4f8c;
     --rule: #ddd5c3;
-    --rule-soft: #e6dfd0;
-    --grid: rgba(14, 26, 58, 0.05);
-    --highlight: rgba(23, 71, 230, 0.09);
-    --bar-bg: #eae3d3;
-    --bar-fg: #343b50;
-    --bar-rule: rgba(14, 26, 58, 0.12);
+    --accent-tint: rgba(23, 71, 230, 0.09);
     --elev-1: 0 1px 2px rgba(14, 26, 58, 0.08);
     --elev-2: 0 8px 24px rgba(14, 26, 58, 0.12);
     --elev-3: 0 24px 60px rgba(14, 26, 58, 0.18);
     --elev-4: 0 40px 100px rgba(14, 26, 58, 0.24);
 }
 
-/* Density presets — applied via [data-density] on <html>. */
-[data-density="compact"] {
-    --row-h: 18px;
-    --gap: 10px;
-    --pad: 10px;
-    --fs: 10px;
-    --fs-s: 9px;
-    --fs-xs: 8px;
-}
-
-[data-density="spacious"] {
-    --row-h: 28px;
-    --gap: 18px;
-    --pad: 18px;
-    --fs: 12px;
-    --fs-s: 11px;
-    --fs-xs: 10px;
-}
-
 body {
-    background: var(--paper);
+    background: var(--ground);
     color: var(--ink);
     font-family: var(--font-sans);
     font-size: 14px;
@@ -291,12 +182,12 @@ body {
 .cl-link {
     color: var(--accent);
     text-decoration: none;
-    border-bottom: 1px solid var(--accent-deep);
+    border-bottom: 1px solid var(--accent);
     cursor: pointer;
 }
 
 .cl-link:hover {
-    background: var(--highlight);
+    background: var(--accent-tint);
 }
 
 /* Block links (Folio rail entries): the card carries its own type, so no
@@ -509,7 +400,7 @@ body {
 .folio-math--interactive:focus-visible {
     outline: 1px solid var(--accent);
     outline-offset: 2px;
-    background: var(--highlight);
+    background: var(--accent-tint);
 }
 
 .cl-mobile-top {
