@@ -16,7 +16,7 @@ import { type Kind, kindColorVar, resolveKindFromPath } from "#/lib/kind";
 
 /** Kind-coded node glyph: square=PROJECT, triangle=TODO/TASK, ring=JOURNAL,
  *  dashed ring=AI_JOURNAL, dot=other. */
-export function nodeShape(kind: Kind): {
+function nodeShape(kind: Kind): {
   d: string;
   filled: boolean;
   dashed?: boolean;
