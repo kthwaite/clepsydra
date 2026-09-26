@@ -394,6 +394,52 @@ describe("BaseDefinitionWorkspace", () => {
     expect(name).toHaveFocus();
   });
 
+  it("renders the validation column only while diagnostics exist", async () => {
+    const { container } = renderWorkspace();
+    const layout = () =>
+      container.querySelector("[data-definition-layout]") as HTMLElement;
+    const validation = () =>
+      screen.queryByRole("complementary", { name: /^Validation/ });
+
+    expect(validation()).toBeNull();
+    expect(layout()).not.toHaveAttribute("data-validation-column");
+
+    const user = userEvent.setup();
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+
+    expect(validation()).toBeInTheDocument();
+    expect(layout()).toHaveAttribute("data-validation-column");
+    expect(name).toHaveFocus();
+
+    await user.type(name, "Reading");
+
+    expect(validation()).toBeNull();
+    expect(layout()).not.toHaveAttribute("data-validation-column");
+    expect(name).toHaveFocus();
+  });
+
+  it("shows the validation column for server diagnostics on load", () => {
+    baseState.data = {
+      ...detail,
+      diagnostics: [
+        {
+          slug: "reading-log",
+          severity: "warning",
+          path: "views[0].sort[0]",
+          message: "sort field is unavailable",
+        },
+      ],
+    };
+    const { container } = renderWorkspace();
+    expect(
+      screen.getByRole("complementary", { name: /^Validation/ }),
+    ).toBeInTheDocument();
+    expect(container.querySelector("[data-definition-layout]")).toHaveAttribute(
+      "data-validation-column",
+    );
+  });
+
   it("saves the exact membership filter edited in the workspace", async () => {
     const filter = { field: "id", op: "eq", value: "page-1" } as const;
     updateMock.mockResolvedValue(

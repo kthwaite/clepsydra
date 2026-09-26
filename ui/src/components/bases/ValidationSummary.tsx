@@ -1,4 +1,5 @@
-import { AlertTriangle } from "lucide-react";
+import { Tick } from "#/components/codex/Tick";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type { BaseDiagnostic } from "./BaseDefinitionWorkspace";
 import { diagnosticRows } from "./diagnostic-rows";
 
@@ -37,64 +38,60 @@ export function ValidationSummary({
   return (
     <aside
       aria-labelledby="validation-summary-heading"
-      className="border border-border bg-card p-4"
+      className="flex flex-col gap-[18px] self-start rounded-2xl bg-raise px-[22px] pt-5 pb-[22px]"
     >
-      <h2
-        id="validation-summary-heading"
-        className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-warn"
-      >
-        <AlertTriangle aria-hidden="true" className="h-4 w-4" />
-        Validation
+      <h2 id="validation-summary-heading" className="flex items-center gap-2.5">
+        <Tick className="bg-hot" />
+        <span className="font-serif text-[20px] italic text-ink">
+          Validation
+        </span>
+        <span className="text-[12.5px] text-mute tabular-nums">
+          {diagnostics.length}
+        </span>
       </h2>
-      <div className="mt-3 grid gap-4">
-        {sections.map((section) => {
-          const entries = diagnostics.filter(
-            (diagnostic) => sectionFor(diagnostic.path) === section,
-          );
-          if (entries.length === 0) return null;
-          return (
-            <section key={section}>
-              <h3 className="font-mono text-xs font-semibold text-foreground">
-                {sectionLabels[section]}
-              </h3>
-              <ul className="mt-1 grid gap-1">
-                {diagnosticRows(entries).map(({ diagnostic, key }) => (
-                  <li key={key}>
-                    {diagnostic.path ? (
-                      <button
-                        type="button"
-                        data-diagnostic-path={diagnostic.path}
-                        onClick={() =>
-                          focusDiagnostic(diagnostic.path as string)
-                        }
-                        className={
-                          diagnostic.severity === "error"
-                            ? "w-full text-left text-sm text-destructive underline decoration-transparent underline-offset-2 hover:decoration-current focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-                            : "w-full text-left text-sm text-warn underline decoration-transparent underline-offset-2 hover:decoration-current focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-                        }
-                      >
-                        <span>{diagnostic.message}</span>{" "}
-                        <span className="font-mono text-xs opacity-80">
-                          {diagnostic.path}
-                        </span>
-                      </button>
-                    ) : (
-                      <p
-                        role={
-                          diagnostic.severity === "error" ? "alert" : undefined
-                        }
-                        className="text-sm text-foreground"
-                      >
+      {sections.map((section) => {
+        const entries = diagnostics.filter(
+          (diagnostic) => sectionFor(diagnostic.path) === section,
+        );
+        if (entries.length === 0) return null;
+        return (
+          <section key={section} className="flex flex-col gap-1.5 pl-[17px]">
+            <h3 className="text-[12.5px] font-normal text-mute">
+              {sectionLabels[section]}
+            </h3>
+            <ul className="flex flex-col gap-2.5">
+              {diagnosticRows(entries).map(({ diagnostic, key }) => (
+                <li key={key}>
+                  {diagnostic.path ? (
+                    <button
+                      type="button"
+                      data-diagnostic-path={diagnostic.path}
+                      onClick={() => focusDiagnostic(diagnostic.path as string)}
+                      className={`group flex w-full flex-col gap-[3px] rounded-md text-left ${FOCUS_RING_NATIVE}`}
+                    >
+                      <span className="text-[13.5px] leading-[1.45] text-hot underline decoration-transparent underline-offset-2 group-hover:decoration-current">
                         {diagnostic.message}
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          );
-        })}
-      </div>
+                      </span>{" "}
+                      <span className="break-all text-[12px] text-mute">
+                        {diagnostic.path}
+                      </span>
+                    </button>
+                  ) : (
+                    <p
+                      role={
+                        diagnostic.severity === "error" ? "alert" : undefined
+                      }
+                      className="text-[13.5px] leading-[1.45] text-ink"
+                    >
+                      {diagnostic.message}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
     </aside>
   );
 }

@@ -88,14 +88,14 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
 
   if (detail.isLoading) {
     return (
-      <p role="status" className="cl-mono text-[11px] text-ink-mute">
+      <p role="status" className="text-[13px] text-mute">
         Loading Base…
       </p>
     );
   }
   if (!definition || !activeView) {
     return (
-      <p role="alert" className="cl-mono text-[11px] text-hot">
+      <p role="alert" className="text-[13px] text-hot">
         No Base named “{slug}” is available.
       </p>
     );
@@ -164,7 +164,7 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
         </Select>
       ) : null}
       {blocker ? (
-        <p role="alert" className="cl-mono text-[11px] text-hot">
+        <p role="alert" className="text-[13px] text-hot">
           {blocker}
         </p>
       ) : null}

@@ -1,9 +1,18 @@
 import { CopyButton } from "#/components/ui/CopyButton";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
+import { DefinitionSectionHeading } from "./DefinitionHeader";
 import type { BaseDraft } from "./definition-model";
+
+const LABEL = "text-[12.5px] text-mute";
+const FIELD = cn(
+  "mt-1.5 w-full rounded-[10px] bg-sink px-3 text-[14px] text-ink placeholder:text-mute aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-hot",
+  FOCUS_RING_NATIVE,
+);
 
 interface GeneralEditorProps {
   slug: string;
@@ -37,22 +46,16 @@ export function GeneralEditor({
 
   return (
     <section aria-labelledby="general-editor-heading">
-      <h2
+      <DefinitionSectionHeading
         id="general-editor-heading"
-        className="text-sm font-bold uppercase tracking-widest text-foreground"
-      >
-        General
-      </h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Naming and file identity for this saved view.
-      </p>
+        title="General"
+        description="Naming and file identity for this saved view."
+      />
 
-      <div className="mt-5 grid gap-5">
+      <div className="mt-[22px] ml-[17px] grid max-w-2xl gap-5">
         <div className="flex flex-col">
-          <label htmlFor="base-name">
-            <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-              Name
-            </span>
+          <label htmlFor="base-name" className={LABEL}>
+            Name
           </label>
           <input
             id="base-name"
@@ -65,17 +68,10 @@ export function GeneralEditor({
             aria-describedby={
               nameDiagnostics.length > 0 ? "base-name-error" : undefined
             }
-            className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+            className={cn(FIELD, "h-10")}
           />
           {nameDiagnostics.length > 0 ? (
-            <p
-              id="base-name-error"
-              className={
-                nameInvalid
-                  ? "mt-1 text-xs text-destructive"
-                  : "mt-1 text-xs text-warn"
-              }
-            >
+            <p id="base-name-error" className="mt-1.5 text-[12.5px] text-hot">
               {nameDiagnostics
                 .map((diagnostic) => diagnostic.message)
                 .join(" ")}
@@ -84,9 +80,7 @@ export function GeneralEditor({
         </div>
 
         <label className="flex flex-col">
-          <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            Description
-          </span>
+          <span className={LABEL}>Description</span>
           <textarea
             ref={(element) => registerFocusTarget("description", element)}
             value={draft.description ?? ""}
@@ -97,15 +91,13 @@ export function GeneralEditor({
               }))
             }
             rows={4}
-            className="mt-2 w-full resize-y border border-input bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+            className={cn(FIELD, "resize-y py-2.5 leading-6")}
           />
         </label>
 
         <label className="flex flex-col">
-          <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            Title template
-          </span>
-          <span className="mt-1 text-xs leading-5 text-muted-foreground">
+          <span className={LABEL}>Title template</span>
+          <span className="mt-1 text-[12.5px] leading-5 text-mute">
             Proposes a title for new members, interpolating {"{field}"}{" "}
             placeholders from the draft. Authors can always override it.
           </span>
@@ -125,16 +117,12 @@ export function GeneralEditor({
                 titleTemplate: event.target.value || undefined,
               }))
             }
-            className="mt-2 w-full border border-input bg-background px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+            className={cn(FIELD, "h-10")}
           />
           {templateDiagnostics.length > 0 ? (
             <p
               id="base-title-template-error"
-              className={
-                templateInvalid
-                  ? "mt-1 text-xs text-destructive"
-                  : "mt-1 text-xs text-warn"
-              }
+              className="mt-1.5 text-[12.5px] text-hot"
             >
               {templateDiagnostics
                 .map((diagnostic) => diagnostic.message)
@@ -143,18 +131,14 @@ export function GeneralEditor({
           ) : null}
         </label>
 
-        <dl className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
-          <div>
-            <dt className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-              Slug
-            </dt>
-            <dd className="mt-2 font-mono text-sm text-foreground">{slug}</dd>
+        <dl className="grid gap-4 rounded-[14px] bg-sink px-[18px] py-4 sm:grid-cols-2">
+          <div className="min-w-0">
+            <dt className={LABEL}>Slug</dt>
+            <dd className="mt-1.5 break-all text-[14px] text-ink">{slug}</dd>
           </div>
-          <div>
-            <dt className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-              Base file
-            </dt>
-            <dd className="mt-2 flex min-w-0 items-center gap-2 font-mono text-sm text-foreground">
+          <div className="min-w-0">
+            <dt className={LABEL}>Base file</dt>
+            <dd className="mt-1 flex min-w-0 items-center gap-2 text-[14px] text-ink">
               <span className="break-all">{path}</span>
               <CopyButton getText={() => path} label="Copy base file path" />
             </dd>
