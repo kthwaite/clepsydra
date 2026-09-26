@@ -511,50 +511,54 @@ export function BaseDefinitionWorkspace({
         </div>
       )}
 
-      {/* The validation column exists only while there are diagnostics, so
-          a clean definition gives its editor the full width. */}
+      {/* Validation appears only while there are diagnostics, under the
+          section nav: the editor keeps its width, so the field being fixed
+          does not move. */}
       <div
         data-definition-layout
         data-validation-column={hasValidation || undefined}
-        className={cn(
-          "mt-11 grid gap-8 lg:gap-14",
-          hasValidation
-            ? "lg:grid-cols-[184px_minmax(0,1fr)] xl:grid-cols-[184px_minmax(0,1fr)_300px]"
-            : "lg:grid-cols-[184px_minmax(0,1fr)]",
-        )}
+        className="mt-11 grid gap-8 lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-14"
       >
-        <nav
-          aria-label="Definition sections"
-          className="flex flex-col gap-0.5 self-start text-[14px]"
-        >
-          {sectionOrder.map((section) => {
-            const current = selectedSection === section.id;
-            return (
-              <button
-                key={section.id}
-                type="button"
-                aria-current={current ? "page" : undefined}
-                onClick={() => setSelectedSection(section.id)}
-                className={cn(
-                  "flex h-10 w-full items-center gap-2.5 rounded-xl px-3.5 text-left transition-colors",
-                  current
-                    ? "bg-raise font-medium text-ink"
-                    : "text-mute hover:bg-sink hover:text-ink",
-                  FOCUS_RING_NATIVE,
-                )}
-              >
-                <span
-                  aria-hidden="true"
+        <div className="flex min-w-0 flex-col gap-6 self-start lg:sticky lg:top-6">
+          <nav
+            aria-label="Definition sections"
+            className="flex flex-col gap-0.5 self-start text-[14px]"
+          >
+            {sectionOrder.map((section) => {
+              const current = selectedSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  aria-current={current ? "page" : undefined}
+                  onClick={() => setSelectedSection(section.id)}
                   className={cn(
-                    "h-[5px] w-[5px] flex-shrink-0 rounded-[1px]",
-                    current ? "bg-accent" : "bg-transparent",
+                    "flex h-10 w-full items-center gap-2.5 rounded-xl px-3.5 text-left transition-colors",
+                    current
+                      ? "bg-raise font-medium text-ink"
+                      : "text-mute hover:bg-sink hover:text-ink",
+                    FOCUS_RING_NATIVE,
                   )}
-                />
-                {section.label}
-              </button>
-            );
-          })}
-        </nav>
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "h-[5px] w-[5px] flex-shrink-0 rounded-[1px]",
+                      current ? "bg-accent" : "bg-transparent",
+                    )}
+                  />
+                  {section.label}
+                </button>
+              );
+            })}
+          </nav>
+          {hasValidation ? (
+            <ValidationSummary
+              diagnostics={visibleDiagnostics}
+              focusDiagnostic={focusDiagnostic}
+            />
+          ) : null}
+        </div>
         <div className="min-w-0">
           {selectedSection === "general" && (
             <GeneralEditor slug={slug} {...editorProps} />
@@ -629,14 +633,6 @@ export function BaseDefinitionWorkspace({
             </>
           )}
         </div>
-        {hasValidation ? (
-          <div className="lg:col-start-2 xl:col-start-auto">
-            <ValidationSummary
-              diagnostics={visibleDiagnostics}
-              focusDiagnostic={focusDiagnostic}
-            />
-          </div>
-        ) : null}
       </div>
 
       <Dialog

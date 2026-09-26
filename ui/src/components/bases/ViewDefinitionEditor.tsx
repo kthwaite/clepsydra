@@ -463,6 +463,13 @@ export function ViewDefinitionEditor({
               className="mt-2 w-full table-fixed border-separate border-spacing-y-[3px]"
               aria-label="Visible column order"
             >
+              {/* table-fixed sizes columns from the first row, which is the
+                  sr-only header: the colgroup gives the name the slack. */}
+              <colgroup>
+                <col className="w-9" />
+                <col />
+                <col className="w-[6.5rem]" />
+              </colgroup>
               <thead className="sr-only">
                 <tr>
                   <th scope="col">Order</th>

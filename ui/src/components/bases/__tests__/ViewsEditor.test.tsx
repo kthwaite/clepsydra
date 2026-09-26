@@ -495,6 +495,10 @@ describe("ViewsEditor", () => {
         .getAllByRole("rowheader")
         .map((cell) => cell.textContent),
     ).toEqual(["title", "rating", "status"]);
+    // table-fixed takes widths from the first row — the sr-only header — so
+    // without a colgroup the three columns split evenly and names sat mid-row.
+    const cols = Array.from(table.querySelectorAll("colgroup > col"));
+    expect(cols.map((col) => col.className)).toEqual(["w-9", "", "w-[6.5rem]"]);
   });
 
   it.each([

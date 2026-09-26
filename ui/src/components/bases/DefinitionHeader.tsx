@@ -52,7 +52,10 @@ export function DefinitionHeader({
         <span aria-hidden="true" className="text-faint">
           ·
         </span>{" "}
-        revision <span title="Current revision">{revision}</span>
+        revision{" "}
+        <span title={revision}>
+          {revision.length > 12 ? `${revision.slice(0, 8)}…` : revision}
+        </span>
       </span>
       <span className="flex-1" />
       <div className="flex flex-wrap items-center justify-end gap-2.5">
