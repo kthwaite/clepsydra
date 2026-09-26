@@ -10,7 +10,19 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([]);
+/** Files still carrying Vessel chrome; each task of phase 5.1 removes its own. */
+const PENDING = new Set<string>([
+  "../tasking/BacklogView.tsx",
+  "../tasking/CycleView.tsx",
+  "../tasking/TimelineView.tsx",
+  "../tasking/TaskEditPanel.tsx",
+  "../tasking/fields.tsx",
+  "../tasking/InlineEditPopover.tsx",
+  "../tasking/NewTaskModal.tsx",
+  "../tasking/NewCycleModal.tsx",
+  "../tasking/OpenCycleModal.tsx",
+  "../tasking/SealCycleModal.tsx",
+]);
 
 /** Tasking board screen (phase 4.3). */
 const TASKING_FILES = [
@@ -24,6 +36,16 @@ const TASKING_FILES = [
   "../tasking/board-presentation.tsx",
   "../tasking/TaskingScreen.tsx",
   "../tasking/BoardModalFrame.tsx",
+  "../tasking/BacklogView.tsx",
+  "../tasking/CycleView.tsx",
+  "../tasking/TimelineView.tsx",
+  "../tasking/TaskEditPanel.tsx",
+  "../tasking/fields.tsx",
+  "../tasking/InlineEditPopover.tsx",
+  "../tasking/NewTaskModal.tsx",
+  "../tasking/NewCycleModal.tsx",
+  "../tasking/OpenCycleModal.tsx",
+  "../tasking/SealCycleModal.tsx",
 ];
 
 /** Slate prose elements restyled in phase 4.4a. */
