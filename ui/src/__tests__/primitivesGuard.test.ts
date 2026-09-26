@@ -10,32 +10,7 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-/** Files still carrying Vessel chrome; phase 5.2 empties this. */
-const PENDING = new Set<string>([
-  "../bases/BaseDefinitionWorkspace.tsx",
-  "../bases/DefinitionHeader.tsx",
-  "../bases/ValidationSummary.tsx",
-  "../bases/GeneralEditor.tsx",
-  "../bases/ViewsEditor.tsx",
-  "../bases/ViewDefinitionEditor.tsx",
-  "../bases/PropertiesEditor.tsx",
-  "../bases/PropertyDefinitionEditor.tsx",
-  "../bases/PreviewPropertiesEditor.tsx",
-  "../bases/DisplayLabelsEditor.tsx",
-  "../bases/BaseFilterEditor.tsx",
-  "../bases/FilterComparisonEditor.tsx",
-  "../bases/TagConditionEditor.tsx",
-  "../bases/OrderedSortEditor.tsx",
-  "../bases/TemplateSourceEditor.tsx",
-  "../bases/BasePreview.tsx",
-  "../bases/GeneratedPreviewDialog.tsx",
-  "../bases/BaseEmbedInspector.tsx",
-  "../bases/BaseMemberIntake.tsx",
-  "../bases/ordered-list.tsx",
-  "../../editor/elements/BaseEmbedElement.tsx",
-  "../../editor/elements/GeneratedRegionElement.tsx",
-  "../../editor/elements/EmbeddedBaseTable.tsx",
-]);
+const PENDING = new Set<string>([]);
 
 /** Tasking board screen (phase 4.3). */
 const TASKING_FILES = [

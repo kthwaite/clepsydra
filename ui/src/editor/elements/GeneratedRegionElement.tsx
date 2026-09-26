@@ -349,6 +349,8 @@ export function GeneratedRegionElement({
               Generated region Markdown
               <textarea
                 autoFocus
+                // The source is code: data-code-editor keeps it monospace.
+                data-code-editor=""
                 rows={20}
                 spellCheck={false}
                 value={repair}

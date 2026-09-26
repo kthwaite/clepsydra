@@ -293,8 +293,9 @@ ul {
 }
 
 /* Code is the only monospace (spec decision 3). Element selectors carry the
-   `.cl-mono` class too, so they outrank the stopgap above. */
-:where(pre, code, kbd, samp),
+   `.cl-mono` class too, so they outrank the stopgap above. Source editors
+   (TOML, template markdown) opt in with `data-code-editor`. */
+:where(pre, code, kbd, samp, [data-code-editor]),
 pre.cl-mono,
 code.cl-mono,
 kbd.cl-mono,

@@ -36,6 +36,12 @@ describe("Stone & Lamp fonts", () => {
     expect(prop(body, "font-feature-settings") ?? "").not.toContain("tnum");
   });
 
+  it("sets source editors marked data-code-editor in mono, like code", () => {
+    expect(mainCss).toMatch(
+      /:where\(pre, code, kbd, samp, \[data-code-editor\]\)[^{]*\{\s*font-family: var\(--font-mono\)/,
+    );
+  });
+
   it("remaps .cl-mono and .cl-cap to sans (stopgap until the phase 5 sweep)", () => {
     expect(prop(rule(".cl-mono"), "font-family")).toBe("var(--font-sans)");
     const cap = rule(".cl-cap");
@@ -56,7 +62,7 @@ describe("Stone & Lamp fonts", () => {
 
   it("keeps code monospace, including code marked .cl-mono", () => {
     const code = rule(
-      ":where(pre, code, kbd, samp), pre.cl-mono, code.cl-mono, kbd.cl-mono, samp.cl-mono",
+      ":where(pre, code, kbd, samp, [data-code-editor]), pre.cl-mono, code.cl-mono, kbd.cl-mono, samp.cl-mono",
     );
     expect(prop(code, "font-family")).toBe("var(--font-mono)");
   });

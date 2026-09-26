@@ -86,4 +86,19 @@ describe("stored generated region interaction", () => {
     );
     expect(screen.queryByTestId("generated-region")).toBeNull();
   });
+
+  it("keeps the repair source monospace as a code editor", () => {
+    const broken = {
+      type: "generated-region",
+      status: "invalid",
+      rawBlock: "<!-- clep:generated\nnot toml\n-->x<!-- /clep:generated -->",
+      parseError: "bad descriptor",
+      children: [{ text: "" }],
+    } as unknown as Descendant;
+    render(<SnapshotHarness value={[broken]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Repair source" }));
+    expect(
+      screen.getByRole("textbox", { name: "Generated region Markdown" }),
+    ).toHaveAttribute("data-code-editor");
+  });
 });

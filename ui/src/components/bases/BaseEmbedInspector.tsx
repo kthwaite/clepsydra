@@ -482,6 +482,8 @@ export function BaseEmbedInspector({
             <textarea
               ref={sourceRef}
               id="base-embed-source"
+              // The source is code: data-code-editor keeps it monospace.
+              data-code-editor=""
               rows={12}
               value={source}
               onChange={(event) => setSource(event.target.value)}

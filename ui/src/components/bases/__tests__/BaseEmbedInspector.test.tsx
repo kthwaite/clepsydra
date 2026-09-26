@@ -458,6 +458,13 @@ describe("BaseEmbedInspector structured mode", () => {
     );
   });
 
+  it("marks the TOML repair source as a code editor, so it stays mono", async () => {
+    renderInspector(invalid('````base\nbase = "tasks"\n````\n'));
+    expect(
+      await screen.findByRole("textbox", { name: "Base embed TOML" }),
+    ).toHaveAttribute("data-code-editor");
+  });
+
   it("resets the session when the inspected node identity is replaced", async () => {
     const first = configured();
     const callbacks = renderInspector(first);
