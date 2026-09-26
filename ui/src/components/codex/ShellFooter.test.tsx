@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { save } = vi.hoisted(() => ({
@@ -18,6 +18,7 @@ vi.mock("#/components/codex/ReadingProgressContext", () => ({
   useReadingProgress: () => ({ progress: 0.42 }),
 }));
 
+import { FooterControls } from "#/components/codex/FooterControls";
 import { ShellFooter } from "#/components/codex/ShellFooter";
 import { useFooterContextStore } from "#/store/footerContext";
 
@@ -67,5 +68,34 @@ describe("ShellFooter", () => {
     for (const gone of ["VESSEL", "FILE", "CORPUS", "UTC", "up "]) {
       expect(text).not.toContain(gone);
     }
+  });
+});
+
+describe("footer controls slot", () => {
+  it("shows a screen's controls on the right of the footer", () => {
+    render(
+      <>
+        <ShellFooter view="gazetteer" />
+        <FooterControls>
+          <span>1–20 of 40</span>
+        </FooterControls>
+      </>,
+    );
+    expect(
+      within(screen.getByRole("contentinfo")).getByText("1–20 of 40"),
+    ).toBeVisible();
+  });
+
+  it("drops the controls when their screen unmounts", () => {
+    const view = render(
+      <>
+        <ShellFooter view="gazetteer" />
+        <FooterControls>
+          <span>1–20 of 40</span>
+        </FooterControls>
+      </>,
+    );
+    view.rerender(<ShellFooter view="folio" />);
+    expect(screen.queryByText("1–20 of 40")).toBeNull();
   });
 });
