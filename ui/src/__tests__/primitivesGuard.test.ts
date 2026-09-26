@@ -10,42 +10,7 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([
-  "../docs/DocsArticle.tsx",
-  "../docs/DocsLayout.tsx",
-  "../docs/DocsMdxComponents.tsx",
-  "../docs/DocsScreen.tsx",
-  "../docs/DocsSidebar.tsx",
-  "../docs/DocsToc.tsx",
-  "../codex/Constellation.tsx",
-  "../codex/MobileConstellation.tsx",
-  "../ForceGraph.tsx",
-  "../../routes/graph.tsx",
-  "../codex/MobileGazetteer.tsx",
-  "../codex/LocationModal.tsx",
-  "../codex/BootSequence.tsx",
-  "../../routes/__root.tsx",
-  "../FeatureFlagsProvider.tsx",
-  "../FeatureGate.tsx",
-  "../OfflineUnavailable.tsx",
-  "../RouteError.tsx",
-  "../../routes/pages/$.tsx",
-  "../page-tree/FolderActionsMenu.tsx",
-  "../page-tree/PageActionsMenu.tsx",
-  "../page-tree/MutationPreviewDialog.tsx",
-  "../attachments/AttachmentManager.tsx",
-  "../attachments/PlaintextAttachmentDialog.tsx",
-  "../blocks/BlockTransclusion.tsx",
-  "../FileTree.tsx",
-  "../MarkdownRenderer.tsx",
-  "../agenda/AgendaItemList.tsx",
-  "../../routes/agenda.tsx",
-  "../codex/FeedRiver.tsx",
-  "../codex/FeedRiverPanel.tsx",
-  "../codex/ReadingContinues.tsx",
-  "../tasking/board-constants.tsx",
-  "spark.tsx",
-]);
+const PENDING = new Set<string>([]);
 
 /** Tasking board screen (phase 4.3). */
 const TASKING_FILES = [
@@ -264,6 +229,7 @@ const REST_FILES = [
   "../MarkdownRenderer.tsx",
   "../agenda/AgendaItemList.tsx",
   "../../routes/agenda.tsx",
+  "../TabContent.tsx",
 ];
 
 /** Mobile companion shell (phase 4b-1). */
@@ -304,6 +270,7 @@ const FORBIDDEN: Array<[string, RegExp]> = [
   // Phase 5.6: the .cl-btn stopgap CSS is gone, and Vessel-only variables
   // (cool = accent, paper, bar-*, ink-3, bg) have Stone & Lamp role names.
   ["cl-btn", /\bcl-btn\b/],
+  ["cl-marg", /\bcl-marg\b/],
   ["Vessel var", /var\(--(ink-3|bg|paper|cool|bar-)/],
   ["cool", /\b(bg|text|border|fill|stroke)-cool\b/],
 ];

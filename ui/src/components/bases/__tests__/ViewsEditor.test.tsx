@@ -986,6 +986,8 @@ describe("ViewsEditor", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /unsupported layout.*board.*only table/i,
     );
+    // Hot text keeps AA only over a faint hot wash, never on sink.
+    expect(screen.getByRole("alert")).toHaveClass("bg-hot/5");
     expect(
       screen.getByRole("button", { name: selectTriggerName("Layout") }),
     ).toHaveTextContent("board");

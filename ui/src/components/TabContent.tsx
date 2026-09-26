@@ -24,7 +24,7 @@ export function TabContent() {
     return (
       <Suspense
         fallback={
-          <div className="cl-marg p-6">… plotting the constellation …</div>
+          <p className="p-6 text-[14px] text-mute">Plotting the constellation…</p>
         }
       >
         <Constellation />

@@ -439,15 +439,6 @@ samp.cl-mono {
     color: var(--ink-mute);
 }
 
-/* Margin notes — sans italic */
-.cl-marg {
-    font-family: var(--font-sans);
-    font-style: italic;
-    font-size: 13px;
-    color: var(--ink-mute);
-    line-height: 1.4;
-}
-
 /* Underlined link */
 .cl-link {
     color: var(--accent);

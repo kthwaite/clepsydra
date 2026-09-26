@@ -436,7 +436,7 @@ export function ViewDefinitionEditor({
       {unsupportedLayout && layoutDiagnostics.length === 0 ? (
         <p
           role="alert"
-          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-hot"
+          className="rounded-xl bg-hot/5 px-4 py-2.5 text-[13px] text-hot"
         >
           Unsupported layout “{view.layout}”. The guided editor supports only
           table layouts. Choose Table to repair it.
