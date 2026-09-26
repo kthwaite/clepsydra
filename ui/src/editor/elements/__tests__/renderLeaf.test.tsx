@@ -68,7 +68,7 @@ describe("renderLeaf", () => {
   it("colours a known token leaf with its mapped CSS var", () => {
     const { container } = render(leaf({ token: "keyword" }));
     const span = container.querySelector("span[style]");
-    expect(span?.getAttribute("style")).toContain("var(--cool)");
+    expect(span?.getAttribute("style")).toContain("var(--accent)");
   });
 
   it("falls back to inherit for an unknown token type", () => {
