@@ -443,7 +443,7 @@ export function ViewDefinitionEditor({
         </p>
       ) : null}
       {viewDiagnostics.length > 0 ? (
-        <ul className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-warn">
+        <ul className="rounded-xl bg-hot/5 px-4 py-2.5 text-[13px] text-warn">
           {diagnosticRows(viewDiagnostics).map(({ diagnostic, key }) => (
             <li key={key}>{diagnostic.message}</li>
           ))}
