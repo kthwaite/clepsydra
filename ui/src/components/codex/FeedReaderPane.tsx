@@ -193,7 +193,7 @@ export function FeedReaderPane({
       ) : entryQuery.isError ? (
         <div
           role="alert"
-          className="m-4 rounded-xl bg-sink px-4 py-3 text-[13.5px] text-hot"
+          className="m-4 rounded-xl bg-hot/5 px-4 py-3 text-[13.5px] text-hot"
         >
           <p>
             Entry {selectedEntryId} could not be loaded.{" "}
@@ -402,7 +402,7 @@ function ReaderArticle({
       {mutationError ? (
         <div
           role="alert"
-          className="mt-3 rounded-xl bg-sink px-4 py-3 text-[13.5px] text-hot"
+          className="mt-3 rounded-xl bg-hot/5 px-4 py-3 text-[13.5px] text-hot"
         >
           {errorMessage(mutationError, "The entry change could not be saved.")}
         </div>

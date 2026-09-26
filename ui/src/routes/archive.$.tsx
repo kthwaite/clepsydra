@@ -232,7 +232,7 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
           {currentProbe.uncapturedResourceCount > 0 ? (
             <section
               role="alert"
-              className="flex shrink-0 items-center gap-2.5 bg-hot/8 px-6 py-2"
+              className="flex shrink-0 items-center gap-2.5 bg-hot/5 px-6 py-2"
             >
               <span
                 aria-hidden="true"

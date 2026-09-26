@@ -315,7 +315,8 @@ describe("archived snapshot route", () => {
     expect(warning).toHaveTextContent(/legacy or incomplete snapshot/i);
     expect(warning).toHaveTextContent(/omitted 3 styles or images/i);
     expect(warning).toHaveTextContent(/recapture.*current extension/i);
-    expect(warning).toHaveClass("bg-hot/8");
+    // 5% keeps hot text at AA (4.66:1) on bone ground.
+    expect(warning).toHaveClass("bg-hot/5");
     expect(warning.querySelector("p")).toHaveClass("text-hot");
     expect(
       screen.getByTitle("Archived snapshot: A captured page"),

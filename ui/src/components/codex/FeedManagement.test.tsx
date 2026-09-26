@@ -1319,6 +1319,8 @@ describe("FeedManagement — Stone & Lamp", () => {
     renderManagement();
 
     expect(screen.getByText("Manifest diagnostics")).toBeVisible();
+    // Hot text keeps AA on bone ground only over a 5% hot tint.
+    expect(document.querySelector("ul.list-disc")).toHaveClass("bg-hot/5");
     expect(
       screen.getByText(
         /subscriptions live in feeds\.md\. edits here rewrite that page\./i,

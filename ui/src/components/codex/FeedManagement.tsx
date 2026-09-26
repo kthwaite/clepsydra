@@ -302,7 +302,7 @@ export function FeedManagement() {
         {diagnostics.length ? (
           <section role="alert" className="flex flex-col gap-3">
             <AsideEyebrow tone="hot">Manifest diagnostics</AsideEyebrow>
-            <ul className="list-disc rounded-xl bg-hot/10 py-3.5 pr-4 pl-[34px] text-[13px] leading-[1.55] text-hot">
+            <ul className="list-disc rounded-xl bg-hot/5 py-3.5 pr-4 pl-[34px] text-[13px] leading-[1.55] text-hot">
               {diagnostics.map((diagnostic) => (
                 <li key={`${diagnostic.line}:${diagnostic.message}`}>
                   Line {diagnostic.line} · {diagnostic.message}
@@ -630,7 +630,7 @@ function FeedRow({
           className={feed.last_error ? "pr-3 pb-3 pl-[52px]" : undefined}
         >
           {feed.last_error ? (
-            <p className="rounded-[10px] bg-hot/10 px-3 py-2 text-[13px] text-hot">
+            <p className="rounded-[10px] bg-hot/5 px-3 py-2 text-[13px] text-hot">
               {feed.last_error}
             </p>
           ) : null}
@@ -865,7 +865,7 @@ function DeleteFeedDialog({
 const DIALOG_BODY =
   "flex flex-col gap-[22px] px-6 pt-7 pb-6 md:px-8 md:pt-[30px] md:pb-7";
 const DIALOG_FOOTER = "flex flex-wrap justify-end gap-2 pt-1";
-const ALERT = "rounded-xl bg-hot/10 px-4 py-3 text-[13.5px] text-hot";
+const ALERT = "rounded-xl bg-hot/5 px-4 py-3 text-[13.5px] text-hot";
 
 function DialogHeader({
   eyebrow,

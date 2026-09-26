@@ -212,6 +212,8 @@ describe("FeedReaderPane", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent(/entry 101/i);
     expect(screen.getByRole("alert")).toHaveTextContent(/archive unavailable/i);
+    // Hot text on sink is 4.48:1 in bone; the faint hot tint keeps AA.
+    expect(screen.getByRole("alert")).toHaveClass("bg-hot/5");
     await userEvent
       .setup()
       .click(screen.getByRole("button", { name: /retry/i }));
