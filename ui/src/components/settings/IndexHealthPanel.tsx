@@ -111,7 +111,7 @@ export function IndexHealthPanel() {
 
   return (
     <div className="flex flex-col gap-12">
-      <Section label="Index diagnostics" compact className="[&_h2]:text-[21px]">
+      <Section label="Index diagnostics" compact headingLevel={4} className="[&_h4]:text-[21px]">
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
             <p className="min-w-0 max-w-2xl flex-1 basis-64 text-[14px] text-mute">
@@ -141,7 +141,7 @@ export function IndexHealthPanel() {
         </div>
       </Section>
 
-      <Section label="Index maintenance" compact className="[&_h2]:text-[21px]">
+      <Section label="Index maintenance" compact headingLevel={4} className="[&_h4]:text-[21px]">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
           <p className="min-w-0 max-w-2xl flex-1 basis-64 text-[14px] text-mute">
             Rebuild the derived index from vault files. Page content is not

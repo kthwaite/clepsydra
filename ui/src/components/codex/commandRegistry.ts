@@ -228,7 +228,7 @@ export const STATIC_COMMANDS: readonly StaticCommandDescriptor[] = [
   },
   {
     id: "app.themeToggle",
-    title: "Toggle dark mode",
+    title: "Toggle bone / night mode",
     shortcut: "app.themeToggle",
     action: "toggle-theme",
   },

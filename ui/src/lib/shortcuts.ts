@@ -107,7 +107,7 @@ export const SHORTCUTS = {
   },
   "app.themeToggle": {
     chord: { key: "\\", code: "Backslash", mod: true, shift: true },
-    label: "Toggle dark / bone mode",
+    label: "Toggle bone / night mode",
     group: "Workspace",
     scope: "global",
   },

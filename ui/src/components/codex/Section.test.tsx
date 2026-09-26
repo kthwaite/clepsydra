@@ -3,6 +3,17 @@ import { describe, expect, it } from "vitest";
 import { Section } from "#/components/codex/Section";
 
 describe("Section", () => {
+  it("sets the eyebrow at a caller-chosen heading level", () => {
+    render(
+      <Section label="Mode" headingLevel={4}>
+        <p>body</p>
+      </Section>,
+    );
+    expect(
+      screen.getByRole("heading", { level: 4, name: "Mode" }),
+    ).toBeVisible();
+  });
+
   it("renders the eyebrow as a heading, caption and children", () => {
     render(
       <Section label="Recent" caption="2 of 2">

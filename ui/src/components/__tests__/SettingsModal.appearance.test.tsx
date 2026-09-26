@@ -80,6 +80,16 @@ describe("SettingsModal appearance", () => {
     ).toBeVisible();
   });
 
+  it("nests section eyebrows under the pane title", () => {
+    render(<SettingsModal />);
+    expect(
+      screen.getByRole("heading", { level: 4, name: "Mode" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { level: 4, name: "Density" }),
+    ).toBeVisible();
+  });
+
   it("previews the selected density with hidden sample rows", () => {
     const { container } = render(<SettingsModal />);
     const preview = container.ownerDocument.querySelector(

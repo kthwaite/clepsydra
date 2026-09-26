@@ -17,7 +17,7 @@ export function OfflinePanel() {
     : "No offline copy yet.";
 
   return (
-    <Section label="Offline copy" compact className="[&_h2]:text-[21px]">
+    <Section label="Offline copy" compact headingLevel={4} className="[&_h4]:text-[21px]">
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <div className="min-w-0 max-w-2xl flex-1 basis-64">
           <p className="text-[14px] text-mute">

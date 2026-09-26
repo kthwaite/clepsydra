@@ -10,23 +10,7 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([
-  "../SettingsModal.tsx",
-  "../settings/IndexHealthPanel.tsx",
-  "../settings/OfflinePanel.tsx",
-  "../codex/LocationForm.tsx",
-  "../rubbish/RubbishBin.tsx",
-  "../repairs/RepairFilters.tsx",
-  "../repairs/RepairIssueDetail.tsx",
-  "../repairs/RepairIssueList.tsx",
-  "../repairs/RepairWorkspace.tsx",
-  "../conflicts/ConflictDiffView.tsx",
-  "../conflicts/ConflictsPanel.tsx",
-  "../conflicts/DiffRows.tsx",
-  "../codex/Stats.tsx",
-  "../codex/ShortcutHelpModal.tsx",
-  "../StatCard.tsx",
-]);
+const PENDING = new Set<string>([]);
 
 /** Tasking board screen (phase 4.3). */
 const TASKING_FILES = [

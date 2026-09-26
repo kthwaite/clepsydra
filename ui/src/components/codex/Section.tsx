@@ -19,6 +19,7 @@ export function Section({
   tight = false,
   compact = false,
   wrapHeader = false,
+  headingLevel = 2,
   className,
   children,
 }: {
@@ -30,9 +31,12 @@ export function Section({
   /** Rail size: 18px muted eyebrow, tighter gaps, 17px body indent. */
   compact?: boolean;
   wrapHeader?: boolean;
+  /** Eyebrow heading level; nested panes (Settings) use 4. */
+  headingLevel?: 2 | 3 | 4;
   className?: string;
   children: ReactNode;
 }) {
+  const Heading = `h${headingLevel}` as const;
   return (
     <section
       className={cn(
@@ -49,14 +53,14 @@ export function Section({
         )}
       >
         <Tick variant={PIP_TICK[pip]} />
-        <h2
+        <Heading
           className={cn(
             "truncate font-serif italic leading-none",
             compact ? "text-[18px] text-mute" : "text-[22px] text-ink",
           )}
         >
           {label}
-        </h2>
+        </Heading>
         {caption ? (
           <span
             data-section-caption

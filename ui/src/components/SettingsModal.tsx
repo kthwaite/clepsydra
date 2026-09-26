@@ -277,7 +277,7 @@ function OperatorPreferences() {
 
   return (
     <>
-      <Section label="Mode" compact className="[&_h2]:text-[21px]">
+      <Section label="Mode" compact headingLevel={4} className="[&_h4]:text-[21px]">
         <div className="flex flex-wrap items-center gap-x-7 gap-y-3">
           <SegmentedControl
             label="Mode"
@@ -296,7 +296,7 @@ function OperatorPreferences() {
         </div>
       </Section>
 
-      <Section label="Density" compact className="[&_h2]:text-[21px]">
+      <Section label="Density" compact headingLevel={4} className="[&_h4]:text-[21px]">
         <div className="flex flex-col gap-[22px]">
           <SegmentedControl
             label="Density"
@@ -354,7 +354,7 @@ function LocationSettings() {
   const { data: location } = useLocation();
   const configured = location?.latitude != null && location?.longitude != null;
   return (
-    <Section label="Vault location" compact className="[&_h2]:text-[21px]">
+    <Section label="Vault location" compact headingLevel={4} className="[&_h4]:text-[21px]">
       <div className="flex flex-col gap-5">
         <div className="flex flex-col gap-2">
           <p className="max-w-2xl text-[14px] text-mute">
@@ -393,7 +393,7 @@ function CorpusPanel() {
     ["Last collated", formatRelativeTime(stats?.last_indexed_at)],
   ];
   return (
-    <Section label="Corpus" compact className="[&_h2]:text-[21px]">
+    <Section label="Corpus" compact headingLevel={4} className="[&_h4]:text-[21px]">
       <dl className="flex max-w-[420px] flex-col gap-1.5 text-[14px]">
         {rows.map(([k, v]) => (
           <div key={k} className="flex items-baseline justify-between gap-4">
@@ -416,7 +416,7 @@ function SettingsCard({
   trailing?: ReactNode;
 }) {
   return (
-    <Section label={title} compact className="[&_h2]:text-[21px]">
+    <Section label={title} compact headingLevel={4} className="[&_h4]:text-[21px]">
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <p className="min-w-0 max-w-2xl flex-1 basis-64 text-[14px] text-mute">
           {description}
