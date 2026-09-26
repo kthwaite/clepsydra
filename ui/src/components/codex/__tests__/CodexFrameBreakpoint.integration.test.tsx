@@ -379,8 +379,9 @@ describe("CodexFrame real breakpoint transitions", () => {
 
     act(() => matchMediaController.setMatches(false));
     expect(
-      screen.getByText("CONSTELLATION", { selector: ".cl-cap" }),
+      screen.getByRole("heading", { level: 1, name: "Constellation" }),
     ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Hubs" })).toBeVisible();
     act(() => matchMediaController.setMatches(true));
 
     expect(
