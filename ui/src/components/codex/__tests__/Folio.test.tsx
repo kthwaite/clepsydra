@@ -1784,10 +1784,13 @@ describe("Folio page archival wiring", () => {
     usePageEditorMock.mockReturnValue(editableEditor());
 
     render(<TabContent />);
-    await user.click(screen.getByRole("button", { name: "Document details" }));
+    await user.click(screen.getByRole("button", { name: "Page details" }));
     const detailsDialog = screen.getByRole("dialog", {
-      name: "Document details",
+      name: "Page details",
     });
+    await user.click(
+      within(detailsDialog).getByRole("tab", { name: "Properties" }),
+    );
     await user.click(
       within(detailsDialog).getByRole("button", { name: "Manage paths" }),
     );
@@ -1836,11 +1839,18 @@ describe("Folio mobile presentation", () => {
     ).not.toBeInTheDocument();
     expect(useCollapsibleRailMock).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Document details" }));
+    const pageBar = screen.getByRole("navigation", { name: "Page controls" });
+    expect(pageBar).toHaveTextContent("Saved");
+    expect(screen.getByRole("main")).not.toHaveTextContent("Saved");
+
+    await user.click(screen.getByRole("button", { name: "Page details" }));
     const detailsDialog = screen.getByRole("dialog", {
-      name: "Document details",
+      name: "Page details",
     });
     expect(detailsDialog).toBeVisible();
+    await user.click(
+      within(detailsDialog).getByRole("tab", { name: "Properties" }),
+    );
     expect(screen.getByText("notes/alpha.md")).toBeVisible();
     expect(within(detailsDialog).queryByTestId("folio-properties")).toBeNull();
     expect(folioPropertiesMock).toHaveBeenLastCalledWith({
@@ -1851,12 +1861,31 @@ describe("Folio mobile presentation", () => {
     });
 
     await user.click(
-      screen.getByRole("button", { name: "Page relationships" }),
+      within(detailsDialog).getByRole("tab", { name: /^Linked · \d+$/ }),
     );
+    expect(within(detailsDialog).getByText("Linked from")).toBeVisible();
+  });
+
+  it("labels the page bar with the page's quire", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "t1",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+          quireId: "q1",
+        },
+      ],
+      activeTabId: "t1",
+      quires: {
+        q1: { id: "q1", name: "Research", color: "ochre", collapsed: false },
+      },
+    });
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
     expect(
-      screen.getByRole("dialog", { name: "Page relationships" }),
-    ).toBeVisible();
-    expect(screen.getByText("Linked from")).toBeVisible();
+      screen.getByRole("navigation", { name: "Page controls" }),
+    ).toHaveTextContent("Research");
   });
 
   it("rehydrates unsaved body state across breakpoint changes", async () => {

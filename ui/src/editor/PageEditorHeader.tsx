@@ -125,7 +125,7 @@ export function PageEditorHeader({
       ) : null}
       <div className="flex items-start gap-2">
         {readOnlyTitle !== undefined ? (
-          <h1 className="min-w-0 w-full flex-1 font-serif text-[clamp(44px,4.2vw,60px)] font-normal leading-[1.02] tracking-[-0.015em] text-ink">
+          <h1 className="min-w-0 w-full flex-1 font-serif text-[clamp(44px,4.2vw,60px)] font-normal leading-[1.02] max-md:text-[38px] max-md:leading-[1.04] tracking-[-0.015em] text-ink">
             {readOnlyTitle}
           </h1>
         ) : (
@@ -143,7 +143,7 @@ export function PageEditorHeader({
               }
             }}
             placeholder={filename(path)}
-            className="field-sizing-content block min-w-0 w-full max-w-full flex-1 resize-none overflow-hidden whitespace-pre-wrap break-words bg-transparent font-serif text-[clamp(44px,4.2vw,60px)] font-normal leading-[1.02] tracking-[-0.015em] text-ink outline-none placeholder:text-faint max-md:min-h-11"
+            className="field-sizing-content block min-w-0 w-full max-w-full flex-1 resize-none overflow-hidden whitespace-pre-wrap break-words bg-transparent font-serif text-[clamp(44px,4.2vw,60px)] font-normal leading-[1.02] max-md:text-[38px] max-md:leading-[1.04] tracking-[-0.015em] text-ink outline-none placeholder:text-faint max-md:min-h-11"
           />
         )}
         {onOpenRawMarkdown ? (

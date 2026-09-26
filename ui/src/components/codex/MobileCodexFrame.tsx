@@ -70,39 +70,42 @@ export function MobileCodexFrame({
 
   return (
     <>
-      <header className="cl-mobile-top order-0 flex h-14 min-w-0 flex-shrink-0 items-center gap-2.5 bg-ground pr-2.5 pl-5">
-        {view === "atrium" && (
-          <span className="flex min-w-0 items-center gap-2.5 overflow-hidden">
-            <img
-              src={`${import.meta.env.BASE_URL}favicon.svg`}
-              alt=""
-              className="h-[22px] w-[22px] rounded-[6px]"
-            />
-            <span className="font-serif text-[21px] leading-none text-ink">
-              Clepsydra
+      {/* Folio carries its own page bar (MobileFolioLayout). */}
+      {view !== "folio" && (
+        <header className="cl-mobile-top order-0 flex h-14 min-w-0 flex-shrink-0 items-center gap-2.5 bg-ground pr-2.5 pl-5">
+          {view === "atrium" && (
+            <span className="flex min-w-0 items-center gap-2.5 overflow-hidden">
+              <img
+                src={`${import.meta.env.BASE_URL}favicon.svg`}
+                alt=""
+                className="h-[22px] w-[22px] rounded-[6px]"
+              />
+              <span className="font-serif text-[21px] leading-none text-ink">
+                Clepsydra
+              </span>
             </span>
-          </span>
-        )}
-        <span className="flex-1" />
-        <fieldset className="m-0 flex min-w-0 shrink-0 items-center border-0 p-0">
-          <legend className="sr-only">Global actions</legend>
-          <StatusDot />
-          <IconButton
-            aria-label="New note"
-            onPress={openInscribe}
-            className="h-11 w-11 text-mute"
-          >
-            <Plus />
-          </IconButton>
-          <IconButton
-            aria-label="Settings"
-            onPress={() => openSettings("appearance")}
-            className="h-11 w-11 text-mute"
-          >
-            <Settings />
-          </IconButton>
-        </fieldset>
-      </header>
+          )}
+          <span className="flex-1" />
+          <fieldset className="m-0 flex min-w-0 shrink-0 items-center border-0 p-0">
+            <legend className="sr-only">Global actions</legend>
+            <StatusDot />
+            <IconButton
+              aria-label="New note"
+              onPress={openInscribe}
+              className="h-11 w-11 text-mute"
+            >
+              <Plus />
+            </IconButton>
+            <IconButton
+              aria-label="Settings"
+              onPress={() => openSettings("appearance")}
+              className="h-11 w-11 text-mute"
+            >
+              <Settings />
+            </IconButton>
+          </fieldset>
+        </header>
+      )}
 
       {bottomSlot
         ? createPortal(

@@ -130,6 +130,7 @@ import {
   validateTextPointSnapshot,
 } from "#/store/folioRestoration";
 import { useFooterContext } from "#/store/footerContext";
+import { quireColorVar } from "#/store/quires";
 import {
   registerWorkspaceTransitionGuard,
   runWorkspaceTransition,
@@ -322,6 +323,10 @@ export function Folio({ tabId, path }: FolioProps) {
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
   const setTabPageId = useWorkspaceStore((state) => state.setTabPageId);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
+  const tabQuire = useWorkspaceStore((s) => {
+    const quireId = s.tabs.find((tab) => tab.id === tabId)?.quireId;
+    return quireId ? s.quires[quireId] : undefined;
+  });
   const closeArchivedPageTabs = useWorkspaceStore(
     (state) => state.closeArchivedPageTabs,
   );
@@ -1035,6 +1040,17 @@ export function Folio({ tabId, path }: FolioProps) {
     );
   }
 
+  const saveState =
+    folioReadOnly && !archiveTagEditor && editor.revisionConflict ? (
+      <span className="text-[12.5px] text-hot">Page changed on disk</span>
+    ) : (
+      <SaveIndicator
+        status={editor.saveStatus}
+        error={editor.saveError}
+        revisionConflict={editor.revisionConflict}
+        onReloadAfterConflict={editor.reloadAfterConflict}
+      />
+    );
   const dossierHeader = (
     <>
       <div className="flex items-baseline justify-between gap-3">
@@ -1052,20 +1068,7 @@ export function Folio({ tabId, path }: FolioProps) {
               : "not saved yet"}
           </span>
         </span>
-        <div className="flex items-center gap-3">
-          {folioReadOnly && !archiveTagEditor && editor.revisionConflict ? (
-            <span className="text-xs text-destructive">
-              Page changed on disk
-            </span>
-          ) : (
-            <SaveIndicator
-              status={editor.saveStatus}
-              error={editor.saveError}
-              revisionConflict={editor.revisionConflict}
-              onReloadAfterConflict={editor.reloadAfterConflict}
-            />
-          )}
-        </div>
+        {!mobile && <div className="flex items-center gap-3">{saveState}</div>}
       </div>
     </>
   );
@@ -1644,8 +1647,12 @@ export function Folio({ tabId, path }: FolioProps) {
           relationships={relationships}
           contents={contents}
           onBack={onMobileBack}
-          group={null}
-          status={null}
+          group={
+            tabQuire
+              ? { name: tabQuire.name, color: quireColorVar(tabQuire.color) }
+              : null
+          }
+          status={saveState}
           linkedCount={linkedFrom.length}
         />
         {overlays}

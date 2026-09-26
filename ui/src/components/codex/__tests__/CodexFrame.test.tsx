@@ -543,6 +543,25 @@ describe("CodexFrame responsive shell", () => {
     }
   });
 
+  it("leaves the top bar to the page on Folio", () => {
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/workspace";
+    workspaceState.tabs = [{ id: "a", type: "page", path: "notes/a.md" }];
+    workspaceState.activeTabId = "a";
+    renderFrame();
+    expect(screen.queryByRole("banner")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("navigation", { name: "Mobile roots" }),
+    ).toBeVisible();
+  });
+
+  it("keeps the top bar on the empty launcher", () => {
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/workspace";
+    renderFrame();
+    expect(screen.getByRole("banner")).toBeVisible();
+  });
+
   it("fits five 44px targets at 320px with visible labels", () => {
     mobileLayoutState.matches = true;
     renderFrame();
