@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { FooterControlsHost } from "#/components/codex/FooterControls";
 import { Gazetteer, type GazetteerFilters } from "./Gazetteer";
 
 const { content, useContentIndexMock, heightState } = vi.hoisted(() => ({
@@ -141,5 +142,146 @@ describe("Gazetteer header (desktop)", () => {
       "placeholder",
       "Filter pages",
     );
+  });
+});
+
+const COMPACT_10 = 48 + 32 * 10; // 368px: ten compact rows, seven comfortable
+
+describe("Gazetteer table (desktop)", () => {
+  it("marks the table's density and switches it", async () => {
+    render(<Gazetteer filters={makeFilters()} />);
+    expect(screen.getByRole("table")).toHaveAttribute(
+      "data-density",
+      "compact",
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("switch", { name: "Compact" }));
+    expect(screen.getByRole("table")).toHaveAttribute(
+      "data-density",
+      "comfortable",
+    );
+  });
+
+  it("fits the page size to the table's height", () => {
+    heightState.value = COMPACT_10;
+    render(<Gazetteer filters={makeFilters({ page: 3 })} />);
+    expect(useContentIndexMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 10, offset: 20 }),
+      { enabled: true },
+    );
+  });
+
+  it("waits for the first measurement before fetching, and keeps a deep-linked page", () => {
+    heightState.value = null;
+    const onPageChange = vi.fn();
+    const filters = makeFilters({ page: 4, onPageChange });
+    const view = render(<Gazetteer filters={filters} />);
+    expect(useContentIndexMock).toHaveBeenLastCalledWith(expect.anything(), {
+      enabled: false,
+    });
+    heightState.value = COMPACT_10;
+    view.rerender(<Gazetteer filters={filters} />);
+    expect(useContentIndexMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 10, offset: 30 }),
+      { enabled: true },
+    );
+    expect(onPageChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps the first visible row when the page size changes, replacing history", async () => {
+    heightState.value = COMPACT_10;
+    const onPageChange = vi.fn();
+    render(<Gazetteer filters={makeFilters({ page: 4, onPageChange })} />);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("switch", { name: "Compact" }));
+    expect(onPageChange).toHaveBeenCalledWith(5, true);
+  });
+
+  it("numbers rows from the page's first row", () => {
+    heightState.value = COMPACT_10;
+    content.data = {
+      items: Array.from({ length: 10 }, (_, i) => entry(i)),
+      total: 45,
+    };
+    render(<Gazetteer filters={makeFilters({ page: 2 })} />);
+    const first = screen.getAllByRole("row")[1];
+    expect(within(first).getByText("011")).toBeVisible();
+  });
+
+  it("marks the sorted column", () => {
+    render(<Gazetteer filters={makeFilters({ sort: "title" })} />);
+    expect(screen.getByRole("columnheader", { name: "Title" })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
+    expect(
+      screen.getByRole("columnheader", { name: "Edited" }),
+    ).not.toHaveAttribute("aria-sort");
+  });
+
+  it("puts the row range and page links in the shell footer", async () => {
+    heightState.value = COMPACT_10;
+    content.data = {
+      items: Array.from({ length: 10 }, (_, i) => entry(i)),
+      total: 45,
+    };
+    const onPageChange = vi.fn();
+    render(
+      <>
+        <Gazetteer filters={makeFilters({ onPageChange })} />
+        <FooterControlsHost />
+      </>,
+    );
+    expect(screen.getByText("1–10 of 45")).toBeVisible();
+    const nav = screen.getByRole("navigation", {
+      name: "Gazetteer pagination",
+    });
+    expect(within(nav).getByRole("button", { name: "Page 1" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(nav).getByRole("button", { name: "Page 5" })).toBeVisible();
+    expect(
+      within(nav).getByRole("button", { name: "Previous page" }),
+    ).toBeDisabled();
+    await userEvent
+      .setup()
+      .click(within(nav).getByRole("button", { name: "Next page" }));
+    expect(onPageChange).toHaveBeenCalledWith(2);
+  });
+
+  it("keeps no pager in the page body", () => {
+    render(<Gazetteer filters={makeFilters()} />);
+    expect(
+      screen.queryByRole("navigation", { name: "Gazetteer pagination" }),
+    ).toBeNull();
+  });
+
+  it("says plainly when nothing matches", () => {
+    content.data = { items: [], total: 0 };
+    render(<Gazetteer filters={makeFilters()} />);
+    expect(screen.getByText("No pages match.")).toBeVisible();
+  });
+});
+
+describe("Gazetteer errors (desktop)", () => {
+  it("keeps the header and filters up when the index query fails", () => {
+    content.error = new Error("Unknown Kind: RECIPE");
+    content.data = undefined;
+    content.isSuccess = false;
+    try {
+      render(<Gazetteer filters={makeFilters()} />);
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Unknown Kind: RECIPE",
+      );
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Gazetteer" }),
+      ).toBeVisible();
+      expect(screen.getByTestId("filter-bar-input")).toBeVisible();
+    } finally {
+      content.error = null;
+    }
   });
 });

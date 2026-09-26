@@ -396,14 +396,10 @@ export interface ContentIndexOptions {
   offset?: number;
 }
 
-export function useContentIndex({
-  q,
-  tags,
-  kind,
-  project,
-  limit,
-  offset,
-}: ContentIndexOptions = {}) {
+export function useContentIndex(
+  { q, tags, kind, project, limit, offset }: ContentIndexOptions = {},
+  { enabled = true }: { enabled?: boolean } = {},
+) {
   const query = {
     q,
     tags: tags && tags.length > 0 ? tags.join(",") : undefined,
@@ -412,9 +408,12 @@ export function useContentIndex({
     limit,
     offset,
   };
-  return $api.useQuery("get", "/api/vault/index/content-index", {
-    params: { query },
-  });
+  return $api.useQuery(
+    "get",
+    "/api/vault/index/content-index",
+    { params: { query } },
+    { enabled },
+  );
 }
 
 export { useOutlinks } from "./outlinks";

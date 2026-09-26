@@ -59,6 +59,9 @@ vi.mock("#/api/index", () => ({
 vi.mock("#/api/pages", () => ({
   useAssignBulk: () => ({ isPending: false, mutate: bulkMutateMock }),
 }));
+vi.mock("#/hooks/useElementHeight", () => ({
+  useElementHeight: () => [() => {}, 0],
+}));
 vi.mock("#/hooks/useMobileLayout", () => ({
   useMobileLayout: () => layoutState.mobile,
 }));
@@ -283,14 +286,17 @@ describe("Gazetteer controller", () => {
 
     const view = render(createElement(Gazetteer, { filters }));
 
-    expect(useContentIndexMock).toHaveBeenLastCalledWith({
-      q: undefined,
-      tags: undefined,
-      kind: undefined,
-      project: undefined,
-      limit: 20,
-      offset: 20,
-    });
+    expect(useContentIndexMock).toHaveBeenLastCalledWith(
+      {
+        q: undefined,
+        tags: undefined,
+        kind: undefined,
+        project: undefined,
+        limit: 20,
+        offset: 20,
+      },
+      { enabled: true },
+    );
     expect(onPageChange).not.toHaveBeenCalled();
 
     contentState.items = [];
@@ -300,7 +306,7 @@ describe("Gazetteer controller", () => {
     view.rerender(createElement(Gazetteer, { filters }));
 
     expect(onPageChange).toHaveBeenCalledOnce();
-    expect(onPageChange).toHaveBeenCalledWith(1);
+    expect(onPageChange).toHaveBeenCalledWith(1, true);
   });
 
   it("offers the shared Kind and Project vocabularies through the desktop FilterBar", async () => {
