@@ -227,7 +227,7 @@ export function MobileGazetteer({
       >
         <Button
           aria-label="Previous page"
-          className="h-11 rounded-full"
+          className="h-11 min-h-11 min-w-11 rounded-full"
           isDisabled={page <= 1}
           onPress={() => onPageChange(page - 1)}
         >
@@ -243,7 +243,7 @@ export function MobileGazetteer({
         </span>
         <Button
           aria-label="Next page"
-          className="h-11 rounded-full"
+          className="h-11 min-h-11 min-w-11 rounded-full"
           isDisabled={page >= pageCount}
           onPress={() => onPageChange(page + 1)}
         >
