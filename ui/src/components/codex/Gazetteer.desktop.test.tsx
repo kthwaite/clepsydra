@@ -199,6 +199,20 @@ describe("Gazetteer table (desktop)", () => {
     expect(onPageChange).toHaveBeenCalledWith(5, true);
   });
 
+  it("fetches only the re-paged page when the page size changes", async () => {
+    heightState.value = COMPACT_10;
+    render(<Gazetteer filters={makeFilters({ page: 4 })} />);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("switch", { name: "Compact" }));
+    const sevenRowCalls = useContentIndexMock.mock.calls
+      .map(([options]) => options as { limit: number; offset: number })
+      .filter((options) => options.limit === 7);
+    expect(sevenRowCalls.length).toBeGreaterThan(0);
+    // Page 5 of 7-row pages; never page 4 (offset 21) at the new size.
+    for (const options of sevenRowCalls) expect(options.offset).toBe(28);
+  });
+
   it("numbers rows from the page's first row", () => {
     heightState.value = COMPACT_10;
     content.data = {

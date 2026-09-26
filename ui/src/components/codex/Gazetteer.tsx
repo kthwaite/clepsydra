@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import { formatApiError } from "#/api/error";
 import { useContentIndex, useTags } from "#/api/index";
 import { useAssignBulk } from "#/api/pages";
@@ -122,6 +122,19 @@ export function Gazetteer({ initialTag, filters }: Props) {
   // Desktop waits one layout pass for the table's height so the first fetch
   // already has the right page size.
   const measured = isMobile || tableHeight !== null;
+  // The page size the URL's page was last shown at. When the size changes,
+  // the page holding the same first row is shown at once — before the URL
+  // catches up — so the old page is never fetched at the new size.
+  const [basis, setBasis] = useState<{ size: number; page: number } | null>(
+    null,
+  );
+  const shownPage =
+    !isMobile &&
+    basis !== null &&
+    basis.page === requestedPage &&
+    basis.size !== pageSize
+      ? repage(requestedPage, basis.size, pageSize)
+      : requestedPage;
   const contentQuery = useContentIndex(
     filters
       ? {
@@ -130,7 +143,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
           kind,
           project,
           limit: pageSize,
-          offset: (requestedPage - 1) * pageSize,
+          offset: (shownPage - 1) * pageSize,
         }
       : { kind, project, limit: 500 },
     { enabled: measured },
@@ -184,8 +197,8 @@ export function Gazetteer({ initialTag, filters }: Props) {
     : Math.max(content?.total ?? 0, items.length);
   const pageCount = Math.max(1, Math.ceil(filteredCount / pageSize));
   const currentPage = contentQuery.isSuccess
-    ? Math.min(requestedPage, pageCount)
-    : requestedPage;
+    ? Math.min(shownPage, pageCount)
+    : shownPage;
   const rows = useMemo(() => {
     if (filters) return rowsForPage;
     const start = (currentPage - 1) * pageSize;
@@ -197,15 +210,18 @@ export function Gazetteer({ initialTag, filters }: Props) {
       setPage(currentPage, true);
   }, [measured, contentQuery.isSuccess, currentPage, page, setPage]);
 
-  const lastSize = useRef<number | null>(null);
   useLayoutEffect(() => {
     if (isMobile || !measured) return;
-    const before = lastSize.current;
-    lastSize.current = pageSize;
-    if (before === null || before === pageSize) return;
-    const next = repage(requestedPage, before, pageSize);
-    if (next !== requestedPage) setPage(next, true);
-  }, [isMobile, measured, pageSize, requestedPage, setPage]);
+    if (shownPage !== requestedPage) {
+      setPage(shownPage, true);
+      return;
+    }
+    setBasis((prev) =>
+      prev?.size === pageSize && prev.page === requestedPage
+        ? prev
+        : { size: pageSize, page: requestedPage },
+    );
+  }, [isMobile, measured, pageSize, requestedPage, shownPage, setPage]);
   const selected = [...selectedPaths];
   // A gap is keyed by the page before it: stable, unlike its index.
   const pageLinks = pageItems(currentPage, pageCount).map((item, i, all) => ({
