@@ -60,6 +60,7 @@ describe("TOKEN_COLOR", () => {
     }
     expect(TOKEN_COLOR.keyword).toBe("var(--accent)");
     expect(TOKEN_COLOR.comment).toBe("var(--mute)");
-    expect(TOKEN_COLOR.number).toBe("var(--quire-ochre)");
+    expect(TOKEN_COLOR.number).toBe("var(--code-literal)");
+    expect(TOKEN_COLOR.string).toBe("var(--code-string)");
   });
 });

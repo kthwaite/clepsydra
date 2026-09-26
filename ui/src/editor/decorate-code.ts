@@ -2,7 +2,8 @@ import { type NodeEntry, type Range, Element as SlateElement } from "slate";
 import { loadRefractor, type Refractor } from "#/editor/refractor-lazy";
 
 /** Prism token type → Stone & Lamp colour token, applied by renderLeaf:
- *  keywords cobalt, literals ochre, strings verdigris, comments mute. */
+ *  keywords cobalt, literals ochre and strings green (code-only tokens that
+ *  keep AA on sink), comments mute. */
 export const TOKEN_COLOR: Record<string, string> = {
   keyword: "var(--accent)",
   builtin: "var(--accent)",
@@ -10,13 +11,13 @@ export const TOKEN_COLOR: Record<string, string> = {
   tag: "var(--accent)",
   function: "var(--ink)",
   "class-name": "var(--ink)",
-  string: "var(--quire-verdigris)",
-  "attr-value": "var(--quire-verdigris)",
-  regex: "var(--quire-verdigris)",
-  number: "var(--quire-ochre)",
-  boolean: "var(--quire-ochre)",
-  constant: "var(--quire-ochre)",
-  "attr-name": "var(--quire-ochre)",
+  string: "var(--code-string)",
+  "attr-value": "var(--code-string)",
+  regex: "var(--code-string)",
+  number: "var(--code-literal)",
+  boolean: "var(--code-literal)",
+  constant: "var(--code-literal)",
+  "attr-name": "var(--code-literal)",
   operator: "var(--ink-2)",
   comment: "var(--mute)",
   punctuation: "var(--mute)",

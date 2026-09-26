@@ -117,6 +117,9 @@
     --quire-slate: #93afc6;
     --quire-madder: #e08a80;
     --quire-ochre: #d2a95a;
+    /* Code strings and literals: the quire hues, which read at AA on sink. */
+    --code-string: #7fc0a8;
+    --code-literal: #d2a95a;
     --quire-indigo: #b996cc;
     --rule: #34312c;
     --rule-soft: #2b2925;
@@ -184,6 +187,10 @@
     --quire-slate: #4e6a80;
     --quire-madder: #a2463f;
     --quire-ochre: #8a6424;
+    /* Code strings and literals: darker than the quire hues, which fall
+       below AA for 13px text on sink in bone. */
+    --code-string: #2f6b58;
+    --code-literal: #7a561c;
     --quire-indigo: #7a4f8c;
     --rule: #ddd5c3;
     --rule-soft: #e6dfd0;
