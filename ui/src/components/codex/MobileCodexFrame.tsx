@@ -5,7 +5,8 @@ import { useCodexView } from "#/components/codex/useCodexView";
 import {
   enabledNavItems,
   goToView,
-  MOBILE_NAV,
+  MOBILE_BAR,
+  type MobileSlot,
   VIEW_REGISTRY,
 } from "#/components/codex/viewRegistry";
 import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
@@ -34,7 +35,12 @@ export function MobileCodexFrame({
   const openTab = useOpenTab();
   const activateTab = useActivateTabWithFolioHistory();
   const leaveWorkspace = useLeaveFolioWorkspace();
-  const navItems = enabledNavItems(MOBILE_NAV, features);
+  const navItems = enabledNavItems(
+    MOBILE_BAR.filter(
+      (s): s is Exclude<MobileSlot, "search"> => s !== "search",
+    ),
+    features,
+  );
 
   return (
     <>
@@ -102,7 +108,7 @@ export function MobileCodexFrame({
                         leaveWorkspace,
                       })
                     }
-                    aria-label={mobile.name}
+                    aria-label={mobile.label}
                     aria-current={active ? "page" : undefined}
                     className={cn(
                       "cl-mono min-h-12 flex-1 px-2 py-2 text-[10px] uppercase tracking-[0.12em]",
