@@ -4,15 +4,28 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { Button } from "react-aria-components";
-import { useFeedEntry, useFeeds } from "#/api/feeds";
+import { type EntryView, useFeedEntry, useFeeds } from "#/api/feeds";
 import { FeedFacetSelect } from "#/components/codex/FeedFacetSelect";
 import { canonicalFeedGroups } from "#/components/codex/FeedGroupComboBox";
 import { FeedManagement } from "#/components/codex/FeedManagement";
 import { FeedReaderPane } from "#/components/codex/FeedReaderPane";
 import { FeedRiver, type FeedRiverFilters } from "#/components/codex/FeedRiver";
+import { Tick } from "#/components/codex/Tick";
 import { FeatureGate } from "#/components/FeatureGate";
+import { Button } from "#/components/ui/button";
+import { SegmentedControl } from "#/components/ui/segmented-control";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
+import { useFooterContext } from "#/store/footerContext";
+
+const VIEW_OPTIONS = [
+  { id: "all", label: "All" },
+  { id: "unread", label: "Unread" },
+  { id: "saved", label: "Saved" },
+] as const;
+
+function isEntryView(value: string): value is EntryView {
+  return VIEW_OPTIONS.some((option) => option.id === value);
+}
 
 type FeedsSearch = FeedRiverFilters & {
   manage: boolean;
@@ -103,6 +116,16 @@ function FeedsPage() {
   };
   const groups = feedsQuery.data?.groups ?? [];
   const feeds = groups.flatMap((group) => group.feeds);
+  const unreadCount = feedsQuery.data?.counts?.unread;
+  const sourceSummary = `${feeds.length} ${feeds.length === 1 ? "source" : "sources"}`;
+  const headerMeta = feedsQuery.data
+    ? unreadCount === undefined
+      ? sourceSummary
+      : `${unreadCount} unread · ${sourceSummary}`
+    : null;
+  useFooterContext(
+    search.entry === undefined ? ["Feeds"] : ["Feeds", `Entry ${search.entry}`],
+  );
 
   const updateSearch = (patch: Partial<FeedsSearch>, replace = false) => {
     void navigate({
@@ -266,49 +289,50 @@ function FeedsPage() {
   return (
     <div
       data-feeds-page=""
-      className="grid w-full auto-rows-min gap-3 px-2 py-2 md:h-full md:grid-rows-[auto_minmax(0,1fr)] md:contain-paint md:overflow-hidden md:px-4 md:py-3"
+      className="grid w-full auto-rows-min gap-5 px-4 pt-6 pb-4 md:h-full md:grid-rows-[auto_minmax(0,1fr)] md:contain-paint md:overflow-hidden md:px-10 md:pt-10 md:pb-6"
     >
       <section
         aria-label="Feed controls"
-        className="cl-grid-texture flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border border-rule bg-paper-2 px-3 py-2 md:px-4"
+        className="flex min-w-0 flex-col gap-6"
       >
-        <span
-          aria-hidden="true"
-          className="h-[7px] w-[7px] shrink-0 bg-accent"
-        />
-        <h1 className="font-sans text-[17px] font-black leading-none tracking-[-0.02em] text-ink">
-          Feeds
-        </h1>
-        <span className="cl-mono hidden text-[9px] uppercase tracking-[0.24em] text-ink-mute sm:inline">
-          Codex / incoming ledger
-        </span>
+        <div className="flex min-w-0 flex-wrap items-end gap-x-8 gap-y-3">
+          <div className="flex flex-col gap-2.5">
+            <span className="flex items-center gap-2.5">
+              <Tick />
+              <span className="font-serif text-[19px] italic text-mute">
+                Gather
+              </span>
+            </span>
+            <h1 className="font-serif text-[44px] leading-none tracking-[-0.015em] text-ink md:text-[56px]">
+              Feeds
+            </h1>
+          </div>
+          {headerMeta ? (
+            <span className="pb-2 text-[14px] text-mute">{headerMeta}</span>
+          ) : null}
+          <Button
+            variant="secondary"
+            className="ml-auto shrink-0 rounded-full"
+            onPress={() => updateSearch({ manage: !search.manage })}
+          >
+            {search.manage ? "Return to river" : "Manage subscriptions"}
+          </Button>
+        </div>
 
         {search.manage ? null : (
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <div className="flex">
-              <Button
-                aria-pressed={search.view === "unread"}
-                className={`cl-btn justify-center border-r-0 px-2 py-1 text-[9px] outline-none focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-accent ${search.view === "unread" ? "cl-btn-hot bg-highlight" : ""}`}
-                onPress={() =>
-                  updateSearch({
-                    view: search.view === "unread" ? "all" : "unread",
-                  })
+          <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+            <SegmentedControl
+              label="Show"
+              value={search.view}
+              options={VIEW_OPTIONS}
+              onChange={(next) => {
+                if (isEntryView(next) && next !== search.view) {
+                  updateSearch({ view: next });
                 }
-              >
-                Hide read
-              </Button>
-              <Button
-                aria-pressed={search.view === "saved"}
-                className={`cl-btn justify-center px-2 py-1 text-[9px] outline-none focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-accent ${search.view === "saved" ? "cl-btn-hot bg-highlight" : ""}`}
-                onPress={() =>
-                  updateSearch({
-                    view: search.view === "saved" ? "all" : "saved",
-                  })
-                }
-              >
-                Saved
-              </Button>
-            </div>
+              }}
+              className="mr-2"
+              itemClassName="h-[30px] px-3.5 text-[13.5px]"
+            />
 
             <FeedFacetSelect
               multiple
@@ -358,34 +382,24 @@ function FeedsPage() {
               }
             />
             {hasActiveFacets ? (
-              <Button
-                className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                onPress={onClearFacets}
-              >
+              <Button variant="ghost" size="sm" onPress={onClearFacets}>
                 Clear filters
               </Button>
             ) : null}
           </div>
         )}
-
-        <Button
-          className={`cl-btn ml-auto shrink-0 px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent ${search.manage ? "cl-btn-hot" : ""}`}
-          onPress={() => updateSearch({ manage: !search.manage })}
-        >
-          {search.manage ? "Return to river" : "Manage subscriptions"}
-        </Button>
       </section>
 
       {search.manage ? (
         <FeedManagement />
       ) : (
-        <div className="grid min-h-0 gap-3.5 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div className="grid min-h-0 gap-8 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <section
             ref={listRegionRef}
             tabIndex={-1}
             aria-label="Entry list"
             hidden={isMobile && search.entry !== undefined}
-            className="min-h-0 overflow-y-auto border border-rule bg-paper-2 p-3.5"
+            className="min-h-0 overflow-y-auto rounded-2xl bg-raise p-3 outline-none md:p-4"
           >
             <FeedRiver
               filters={filters}

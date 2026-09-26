@@ -18,7 +18,7 @@ function openList(label: string) {
 }
 
 describe("FeedFacetSelect", () => {
-  it("summarizes an empty selection as all", () => {
+  it("summarizes an empty selection as any", () => {
     render(
       <FeedFacetSelect
         label="Group"
@@ -30,7 +30,7 @@ describe("FeedFacetSelect", () => {
     );
 
     const trigger = screen.getByRole("button", { name: /group filter/i });
-    expect(trigger).toHaveTextContent(/all/i);
+    expect(trigger).toHaveTextContent("Groupany");
   });
 
   it("names a single selection and counts several", () => {
