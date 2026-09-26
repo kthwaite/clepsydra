@@ -193,6 +193,26 @@ describe("AgendaItemList", () => {
     );
   });
 
+  it("separates rows with space, not rules: ink titles, mute sources", () => {
+    render(<AgendaItemList items={[todoFixture, taskFixture]} />);
+
+    const list = screen.getByRole("list");
+    expect(list.className).not.toMatch(/\bborder|\bdivide/);
+    expect(screen.getByText("Ship the source row")).toHaveClass("text-ink");
+    expect(screen.getByText("Render source-specific rows")).toHaveClass(
+      "text-ink",
+    );
+    const source = screen.getByRole("button", { name: "Source Folio" });
+    expect(source).toHaveClass("text-mute");
+    expect(source.className).not.toMatch(/text-\[(9|10|11)px\]/);
+  });
+
+  it("renders the empty message in mute", () => {
+    render(<AgendaItemList items={[]} emptyMessage="Nothing scheduled." />);
+
+    expect(screen.getByText("Nothing scheduled.")).toHaveClass("text-mute");
+  });
+
   it("disables only the Todo control while its mutation is pending", () => {
     mocks.toggleTodoPending = true;
 

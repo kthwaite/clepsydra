@@ -13,6 +13,19 @@ import {
   TaskStatusButton,
 } from "#/components/ui/task-status-button";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+
+/** The source link under each row: mute, underlined in faint, cobalt on
+ *  hover — the Atrium AgendaTile's idiom. */
+const SOURCE_LINK = cn(
+  "min-w-0 cursor-pointer truncate rounded-sm text-left text-mute underline decoration-faint underline-offset-2 hover:text-accent",
+  FOCUS_RING_NATIVE,
+);
+const ROW = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3";
+const TITLE = "block text-[15.5px] leading-[1.4] text-ink";
+const META =
+  "mt-1 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[12.5px] text-mute";
 
 export function priorityLabel(priority: string): string {
   switch (priority.toUpperCase()) {
@@ -36,7 +49,7 @@ function AgendaTodoRow({ todo }: { todo: AgendaTodo }) {
   const source = todo.page_title ?? todo.page_path;
 
   return (
-    <li className="flex items-start gap-2 px-2 py-2">
+    <li className={ROW}>
       <TaskStatusButton
         status={todo.status}
         onToggle={() =>
@@ -51,15 +64,15 @@ function AgendaTodoRow({ todo }: { todo: AgendaTodo }) {
       />
 
       <div className="min-w-0 flex-1">
-        <span className="text-sm text-foreground">{todo.content}</span>
+        <span className={TITLE}>{todo.content}</span>
 
-        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-          {due && <Badge size="sm">{due}</Badge>}
+        <div className={META}>
+          {due && <span className="tabular-nums">{due}</span>}
           {priority && <Badge size="sm">{priority.toUpperCase()}</Badge>}
           <button
             type="button"
             onClick={() => openTab("page", todo.page_path)}
-            className="text-[10px] text-muted-foreground underline decoration-border hover:text-foreground"
+            className={SOURCE_LINK}
           >
             {source}
           </button>
@@ -75,7 +88,7 @@ function AgendaTaskRow({ task }: { task: AgendaTask }) {
   const taskPriorityLabel = PRI_LABEL[task.priority];
 
   return (
-    <li className="flex items-start gap-2 px-2 py-2">
+    <li className={ROW}>
       <Select
         aria-label={`Status for ${task.code}: ${task.title}`}
         selectedKey={task.status}
@@ -97,11 +110,11 @@ function AgendaTaskRow({ task }: { task: AgendaTask }) {
       </Select>
 
       <div className="min-w-0 flex-1">
-        <span className="text-sm text-foreground">{task.title}</span>
+        <span className={TITLE}>{task.title}</span>
 
-        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+        <div className={META}>
           <Badge size="sm">{task.code}</Badge>
-          {task.due && <Badge size="sm">{task.due}</Badge>}
+          {task.due && <span className="tabular-nums">{task.due}</span>}
           <Badge size="sm">
             {task.priority}
             {taskPriorityLabel ? ` ${taskPriorityLabel}` : ""}
@@ -111,7 +124,7 @@ function AgendaTaskRow({ task }: { task: AgendaTask }) {
           <button
             type="button"
             onClick={() => openTab("page", task.path)}
-            className="text-[10px] text-muted-foreground underline decoration-border hover:text-foreground"
+            className={SOURCE_LINK}
           >
             {task.path}
           </button>
@@ -129,13 +142,11 @@ export function AgendaItemList({
   emptyMessage?: string;
 }) {
   if (items.length === 0) {
-    return (
-      <p className="px-2 py-4 text-xs text-muted-foreground">{emptyMessage}</p>
-    );
+    return <p className="m-0 py-2 text-[14px] text-mute">{emptyMessage}</p>;
   }
 
   return (
-    <ul className="divide-y divide-border border-y border-border">
+    <ul className="m-0 flex list-none flex-col gap-[18px] p-0">
       {items.map((item) =>
         item.kind === "todo" ? (
           <AgendaTodoRow

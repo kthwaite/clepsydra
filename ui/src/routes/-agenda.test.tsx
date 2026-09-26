@@ -291,7 +291,7 @@ describe("AgendaScreen", () => {
     expect(screen.queryByRole("tab", { name: "Inbox" })).toBeNull();
   });
 
-  it("renders separate Overdue and Due Today sections without duplicate rows", () => {
+  it("renders separate Overdue and Due today sections without duplicate rows", () => {
     render(
       <ControlledAgendaScreen
         data={response({
@@ -302,7 +302,7 @@ describe("AgendaScreen", () => {
     );
 
     const overdue = screen.getByRole("heading", { name: "Overdue" });
-    const dueToday = screen.getByRole("heading", { name: "Due Today" });
+    const dueToday = screen.getByRole("heading", { name: "Due today" });
     const overdueSection = overdue.closest("section");
     const dueTodaySection = dueToday.closest("section");
     if (!overdueSection || !dueTodaySection) {
@@ -351,6 +351,39 @@ describe("AgendaScreen", () => {
     expect(within(thursdaySection).getByText("Thursday Todo")).toBeVisible();
     expect(within(thursdaySection).getByText("Thursday Task")).toBeVisible();
     expect(within(fridaySection).getByText("Friday Task")).toBeVisible();
+  });
+
+  it("labels upcoming days with fixed month names", async () => {
+    const user = userEvent.setup();
+    render(
+      <ControlledAgendaScreen
+        data={response({
+          upcoming: [
+            { date: "2026-09-01", items: [task("September Task", 4)] },
+          ],
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Upcoming" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Tue 1 Sep" }),
+    ).toBeInTheDocument();
+  });
+
+  it("names its filter chips in sentence case", () => {
+    render(<ControlledAgendaScreen data={response({})} />);
+
+    expect(screen.getByTestId("filter-bar-chip-type")).toHaveTextContent(
+      "Type",
+    );
+    expect(screen.getByTestId("filter-bar-chip-todoStatus")).toHaveTextContent(
+      "Todo status",
+    );
+    expect(screen.getByTestId("filter-bar-chip-taskStatus")).toHaveTextContent(
+      "Task status",
+    );
   });
 
   it("renders the Todo-only Undated response", async () => {
