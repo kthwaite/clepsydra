@@ -29,6 +29,7 @@ import {
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { useMobileChrome } from "#/store/mobileChrome";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
@@ -60,6 +61,7 @@ export function MobileCodexFrame({
     (s) => s.tabs.filter((tab) => tab.type === "page").length,
   );
   const [pagesOpen, setPagesOpen] = useState(false);
+  const ownBar = useMobileChrome((s) => s.ownBar);
   const root = VIEW_REGISTRY[view].navRoot;
 
   const press = (slot: MobileSlot) => {
@@ -71,7 +73,7 @@ export function MobileCodexFrame({
   return (
     <>
       {/* Folio carries its own page bar (MobileFolioLayout). */}
-      {view !== "folio" && (
+      {!(view === "folio" && ownBar) && (
         <header className="cl-mobile-top order-0 flex h-14 min-w-0 flex-shrink-0 items-center gap-2.5 bg-ground pr-2.5 pl-5">
           {view === "atrium" && (
             <span className="flex min-w-0 items-center gap-2.5 overflow-hidden">

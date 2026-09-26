@@ -1888,6 +1888,23 @@ describe("Folio mobile presentation", () => {
     ).toHaveTextContent("Research");
   });
 
+  it("shows a save conflict compactly in the page bar", () => {
+    usePageEditorMock.mockReturnValue({
+      ...editableEditor(),
+      saveStatus: "error",
+      revisionConflict: { current_revision: "r2" },
+      reloadAfterConflict: vi.fn(async () => {}),
+    });
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const pageBar = screen.getByRole("navigation", { name: "Page controls" });
+    expect(within(pageBar).getByText("Page changed on disk")).toHaveClass(
+      "sr-only",
+    );
+    expect(
+      within(pageBar).getByRole("button", { name: "Reload from disk" }),
+    ).toBeVisible();
+  });
+
   it("rehydrates unsaved body state across breakpoint changes", async () => {
     const user = userEvent.setup();
     const editor = editableEditor();

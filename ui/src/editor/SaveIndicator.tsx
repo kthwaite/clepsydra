@@ -7,6 +7,9 @@ interface SaveIndicatorProps {
   error?: string | null;
   revisionConflict?: RevisionConflict | null;
   onReloadAfterConflict?: () => Promise<void>;
+  /** Narrow bars: the conflict keeps its dot and Reload action; the words
+   *  "Page changed on disk" stay for screen readers only. */
+  compact?: boolean;
 }
 
 function Dot({ className }: { className: string }) {
@@ -25,6 +28,7 @@ export function SaveIndicator({
   error,
   revisionConflict,
   onReloadAfterConflict,
+  compact = false,
 }: SaveIndicatorProps) {
   return (
     <div className="flex items-center gap-1.5 text-[12.5px] text-mute">
@@ -50,7 +54,10 @@ export function SaveIndicator({
         (revisionConflict && onReloadAfterConflict ? (
           <>
             <Dot className="bg-hot" />
-            <span className="text-hot" title={error ?? undefined}>
+            <span
+              className={cn("text-hot", compact && "sr-only")}
+              title={error ?? undefined}
+            >
               Page changed on disk
             </span>
             <button

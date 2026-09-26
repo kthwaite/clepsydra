@@ -1,9 +1,10 @@
 import { AlignLeft, ChevronLeft } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { IconButton } from "#/components/ui/icon-button";
 import { BottomSheet } from "#/components/ui/sheet";
 import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
+import { useMobileChrome } from "#/store/mobileChrome";
 
 export interface MobileFolioLayoutProps {
   header: ReactNode;
@@ -41,6 +42,12 @@ export function MobileFolioLayout({
   linkedCount,
 }: MobileFolioLayoutProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const setOwnBar = useMobileChrome((s) => s.setOwnBar);
+  // The frame hides its bar only while this page bar is on screen.
+  useEffect(() => {
+    setOwnBar(true);
+    return () => setOwnBar(false);
+  }, [setOwnBar]);
   const { progress } = useReadingProgress();
   const read = Math.round(Math.max(0, Math.min(1, progress)) * 100);
 
@@ -66,7 +73,7 @@ export function MobileFolioLayout({
           </span>
         )}
         <span className="min-w-0 flex-1" />
-        <span className="shrink-0">{status}</span>
+        <span className="min-w-0 shrink">{status}</span>
         <IconButton
           aria-label="Page details"
           aria-haspopup="dialog"

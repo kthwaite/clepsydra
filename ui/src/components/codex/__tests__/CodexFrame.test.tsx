@@ -222,6 +222,7 @@ vi.mock("#/store/workspace", () => {
 
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { useConnectionStore } from "#/offline/connectionStore";
+import { useMobileChrome } from "#/store/mobileChrome";
 
 function renderFrame(forceView?: "folio" | "archive") {
   return render(
@@ -543,11 +544,22 @@ describe("CodexFrame responsive shell", () => {
     }
   });
 
+  it("keeps the top bar while Folio has no page bar (loading, locked, error)", () => {
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/workspace";
+    workspaceState.tabs = [{ id: "a", type: "page", path: "notes/a.md" }];
+    workspaceState.activeTabId = "a";
+    useMobileChrome.setState({ ownBar: false });
+    renderFrame();
+    expect(screen.getByRole("banner")).toBeVisible();
+  });
+
   it("leaves the top bar to the page on Folio", () => {
     mobileLayoutState.matches = true;
     locationState.pathname = "/workspace";
     workspaceState.tabs = [{ id: "a", type: "page", path: "notes/a.md" }];
     workspaceState.activeTabId = "a";
+    useMobileChrome.setState({ ownBar: true });
     renderFrame();
     expect(screen.queryByRole("banner")).not.toBeInTheDocument();
     expect(

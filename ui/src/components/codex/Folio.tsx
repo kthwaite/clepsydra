@@ -1049,6 +1049,7 @@ export function Folio({ tabId, path }: FolioProps) {
         error={editor.saveError}
         revisionConflict={editor.revisionConflict}
         onReloadAfterConflict={editor.reloadAfterConflict}
+        compact={mobile}
       />
     );
   const dossierHeader = (

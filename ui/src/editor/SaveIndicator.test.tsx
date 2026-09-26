@@ -27,4 +27,19 @@ describe("SaveIndicator", () => {
       /text-muted-foreground|text-destructive|text-foreground/,
     );
   });
+
+  it("keeps only the dot and the Reload action visible when compact", () => {
+    render(
+      <SaveIndicator
+        compact
+        status="error"
+        revisionConflict={{} as never}
+        onReloadAfterConflict={async () => {}}
+      />,
+    );
+    expect(screen.getByText("Page changed on disk")).toHaveClass("sr-only");
+    expect(
+      screen.getByRole("button", { name: "Reload from disk" }),
+    ).toBeVisible();
+  });
 });

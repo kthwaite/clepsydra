@@ -7,6 +7,7 @@ vi.mock("#/components/codex/ReadingProgressContext", () => ({
   useReadingProgress: () => ({ progress: 0.38, setProgress: () => {} }),
 }));
 
+import { useMobileChrome } from "#/store/mobileChrome";
 import {
   MobileFolioLayout,
   type MobileFolioLayoutProps,
@@ -86,6 +87,13 @@ describe("MobileFolioLayout", () => {
     expect(
       screen.queryByRole("dialog", { name: "Page details" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("claims the top bar while mounted", () => {
+    const { unmount } = renderLayout();
+    expect(useMobileChrome.getState().ownBar).toBe(true);
+    unmount();
+    expect(useMobileChrome.getState().ownBar).toBe(false);
   });
 
   it("draws reading progress above the bottom bar", () => {
