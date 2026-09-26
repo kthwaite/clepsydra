@@ -952,13 +952,20 @@ describe("ViewsEditor", () => {
     expect(latest<DraftView[]>(onChange)[0].aggregates).toEqual([
       { fn: "sum", field: "rating" },
     ]);
+    const removeAggregate = screen.getByRole("button", {
+      name: "Remove aggregate 1",
+    });
+    expect(removeAggregate).not.toHaveTextContent("Remove aggregate 1");
+    expect(removeAggregate.querySelector("svg")).not.toBeNull();
+    await user.click(removeAggregate);
+    expect(latest<DraftView[]>(onChange)[0].aggregates).toEqual([]);
   });
 
   it("keeps the per-view filter exact and labels its AND semantics", async () => {
     const onChange = renderViews();
     const user = userEvent.setup();
     expect(
-      screen.getByText("Additional filter; always ANDed with base membership."),
+      screen.getByText("Always combined with base membership."),
     ).toBeInTheDocument();
     await chooseMenuAction(user, "Add rule", "Match all group");
     await chooseMenuAction(user, "Add to Match all", "Condition");
@@ -1086,9 +1093,9 @@ describe("ViewsEditor", () => {
       }),
     ).toBeDisabled();
 
-    await user.click(
-      screen.getByRole("button", { name: "Reset label status" }),
-    );
+    const reset = screen.getByRole("button", { name: "Reset label status" });
+    expect(reset).toHaveTextContent(/^Reset$/);
+    await user.click(reset);
     expect(onChange).toHaveBeenLastCalledWith([{ ...initial, labels: {} }]);
     expect(screen.getByLabelText("Field to label")).toHaveFocus();
     expect(screen.getByLabelText("Field to label")).toBeEnabled();

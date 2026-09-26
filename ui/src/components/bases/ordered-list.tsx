@@ -18,6 +18,8 @@ import {
   useState,
 } from "react";
 import { IconButton } from "#/components/ui/icon-button";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 export type ReorderEdge = "top" | "bottom";
 
@@ -83,8 +85,11 @@ export function useIdentifiedRows<Value>(
   return { createRow, rows, setRows };
 }
 
-const HANDLE_CLASS =
-  "inline-flex h-7 w-7 cursor-grab items-center justify-center border border-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 active:cursor-grabbing [&_svg]:h-4 [&_svg]:w-4";
+/** The grip is decoration until touched: faint at rest, mute on hover. */
+const HANDLE_CLASS = cn(
+  "inline-flex h-8 w-[22px] shrink-0 cursor-grab items-center justify-center rounded-md text-faint transition-colors hover:text-mute active:cursor-grabbing [&_svg]:size-[15px]",
+  FOCUS_RING_NATIVE,
+);
 
 interface ReorderableOptions<Element extends HTMLElement> {
   /** Drag payload discriminator; rows of different lists must not interchange. */

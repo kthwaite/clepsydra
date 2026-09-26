@@ -1,7 +1,10 @@
 import { Copy, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
@@ -161,16 +164,17 @@ export function ViewsEditor({
   }
 
   return (
-    <section aria-labelledby="views-editor-heading">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+    <section aria-labelledby="views-editor-heading" className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+        <div className="min-w-0 flex-1">
           <h2
             id="views-editor-heading"
-            className="text-sm font-bold uppercase tracking-widest text-foreground"
+            className="flex items-center gap-2.5 font-serif text-[22px] italic leading-none text-ink"
           >
+            <Tick />
             Views
           </h2>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          <p className="mt-1.5 pl-[17px] text-[14px] leading-normal text-mute">
             Each saved view owns its table columns, sort order, grouping,
             aggregates, and an additional membership filter.
           </p>
@@ -181,18 +185,21 @@ export function ViewsEditor({
       </div>
 
       {views.length === 0 ? (
-        <div className="mt-5 border-y border-border py-6">
-          <p className="text-sm font-medium text-foreground">
+        <div className="mt-6 ml-[17px] rounded-xl bg-sink px-4 py-3.5">
+          <p className="text-[14px] font-medium text-ink">
             No views configured
           </p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          <p className="mt-0.5 text-[12.5px] leading-normal text-mute">
             This file has no saved views. Add one when you are ready; opening
             the editor does not change the definition.
           </p>
         </div>
       ) : (
-        <div className="mt-5 grid gap-6 xl:grid-cols-[13rem_minmax(0,1fr)]">
-          <ol aria-label="Saved views" className="border-t border-border">
+        <div className="mt-6 grid gap-x-10 gap-y-6 pl-[17px] xl:grid-cols-[13.5rem_minmax(0,1fr)]">
+          <ol
+            aria-label="Saved views"
+            className="flex flex-col gap-1 self-start"
+          >
             {views.map((item, index) => {
               const selectedItem = item.id === selected?.id;
               const itemDiagnostics = diagnostics.filter((diagnostic) =>
@@ -203,6 +210,7 @@ export function ViewsEditor({
                   key={item.id}
                   id={item.id}
                   label={`${item.name || "Untitled view"} view`}
+                  selected={selectedItem}
                   index={index}
                   count={views.length}
                   onMove={move}
@@ -229,11 +237,14 @@ export function ViewsEditor({
                     aria-label={`Select ${item.name}`}
                     aria-current={selectedItem ? "true" : undefined}
                     onClick={() => select(item.id)}
-                    className="block w-full truncate px-2 py-1 text-left font-mono text-xs text-muted-foreground hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 aria-[current=true]:border-l-2 aria-[current=true]:border-l-primary aria-[current=true]:text-foreground"
+                    className={cn(
+                      "block h-8 w-full truncate rounded-md px-1 text-left text-[14px] text-mute transition-colors hover:text-ink aria-[current=true]:font-medium aria-[current=true]:text-ink",
+                      FOCUS_RING_NATIVE,
+                    )}
                   >
                     {item.name || "Untitled view"}
                   </button>
-                  <div className="mt-1 flex flex-wrap gap-1 px-1">
+                  <div className="flex flex-wrap">
                     <MoveButtons
                       label={item.name}
                       index={index}
@@ -290,6 +301,7 @@ export function ViewsEditor({
 function ViewRow({
   id,
   label,
+  selected,
   index,
   count,
   onMove,
@@ -298,6 +310,7 @@ function ViewRow({
 }: {
   id: string;
   label: string;
+  selected: boolean;
   index: number;
   count: number;
   onMove(from: number, to: number): void;
@@ -315,7 +328,13 @@ function ViewRow({
   });
 
   return (
-    <li ref={rowRef} className="border-b border-border py-2">
+    <li
+      ref={rowRef}
+      className={cn(
+        "rounded-xl py-1.5 pr-1.5 pl-1",
+        selected ? "bg-raise" : "hover:bg-raise/60",
+      )}
+    >
       <div className="flex items-start gap-1">
         <ReorderHandle
           label={label}

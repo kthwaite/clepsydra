@@ -1,4 +1,4 @@
-import { Trash2 } from "lucide-react";
+import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import type { PropertyType, SortKey } from "#/api/bases";
 import { Button } from "#/components/ui/button";
@@ -120,7 +120,10 @@ export function OrderedSortEditor({
 
   return (
     <>
-      <ol className="mt-3 grid gap-2" aria-label="Ordered sort keys">
+      <ol
+        className="flex flex-col gap-2 empty:hidden"
+        aria-label="Ordered sort keys"
+      >
         {sortRows.map(({ id, value: sort }, index) => {
           const sortPath = `${diagnosticRoot}[${index}].field`;
           const sortDiagnostics = diagnostics.filter(
@@ -140,7 +143,7 @@ export function OrderedSortEditor({
               onMove={move}
               onReorder={dropSort}
             >
-              <div>
+              <div className="min-w-0">
                 <Select
                   label={`Sort field ${index + 1}`}
                   triggerRef={(element) => registerFocus(sortPath, element)}
@@ -175,7 +178,7 @@ export function OrderedSortEditor({
                   <span
                     id={errorId}
                     role="alert"
-                    className="mt-1 block text-xs normal-case tracking-normal text-destructive"
+                    className="mt-1.5 block text-[12.5px] text-hot"
                   >
                     {sortDiagnostics
                       .map((diagnostic) => diagnostic.message)
@@ -197,7 +200,7 @@ export function OrderedSortEditor({
                 <SelectItem id="asc">Ascending</SelectItem>
                 <SelectItem id="desc">Descending</SelectItem>
               </Select>
-              <div className="flex flex-wrap justify-end gap-1">
+              <div className="flex justify-end sm:mb-1">
                 <MoveButtons
                   label={`sort ${index + 1}`}
                   index={index}
@@ -209,14 +212,14 @@ export function OrderedSortEditor({
                   variant="ghost"
                   onPress={() => remove(index)}
                 >
-                  <Trash2 />
+                  <X />
                 </IconButton>
               </div>
             </SortRow>
           );
         })}
       </ol>
-      <Button className="mt-3" size="sm" variant="secondary" onPress={append}>
+      <Button className="mt-2.5" size="sm" variant="secondary" onPress={append}>
         Add sort
       </Button>
       {announceMove ? null : <ReorderAnnouncement message={own.announcement} />}
@@ -254,13 +257,15 @@ function SortRow({
   return (
     <li
       ref={rowRef}
-      className="grid items-end gap-2 border-b border-border pb-3 sm:grid-cols-[auto_minmax(0,1fr)_9rem_auto]"
+      className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)] items-end gap-x-1.5 gap-y-2 sm:grid-cols-[auto_minmax(0,1fr)_8.5rem_auto]"
     >
-      <ReorderHandle
-        label={`sort ${index + 1}`}
-        setHandle={setHandle}
-        onKeyDown={onHandleKeyDown}
-      />
+      <span className="row-span-3 self-start pt-[27px] sm:row-span-1 sm:self-end sm:pt-0 sm:pb-1">
+        <ReorderHandle
+          label={`sort ${index + 1}`}
+          setHandle={setHandle}
+          onKeyDown={onHandleKeyDown}
+        />
+      </span>
       {children}
     </li>
   );
