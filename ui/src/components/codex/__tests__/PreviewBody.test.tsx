@@ -51,7 +51,10 @@ describe("PreviewBody", () => {
     expect(
       await screen.findByText("The clepsydra measured flowing time."),
     ).toBeInTheDocument();
-    expect(screen.getByText(/5 wd/)).toHaveTextContent("5 wd · ↘2");
+    expect(screen.getByText("Note")).toBeInTheDocument();
+    expect(screen.getByText(/5 words/)).toHaveTextContent(
+      "5 words · 2 backlinks",
+    );
     expect(screen.getByText("Reading status")).toBeInTheDocument();
     expect(screen.getByText("#history #horology")).toBeInTheDocument();
   });
@@ -171,6 +174,18 @@ describe("PreviewBody", () => {
     expect(screen.getByText("Properties unavailable")).toBeInTheDocument();
   });
 
+  it("counts one word and one backlink in the singular", () => {
+    render(
+      <PreviewBody
+        path="notes/one.md"
+        page={{ meta: { title: "One" }, body: "Clepsydra" }}
+        backlinks={[{}]}
+      />,
+    );
+
+    expect(screen.getByText(/1 word/)).toHaveTextContent("1 word · 1 backlink");
+  });
+
   it("never reveals projected values or failure state for protected pages", () => {
     render(
       <PreviewBody
@@ -184,6 +199,9 @@ describe("PreviewBody", () => {
     expect(
       screen.getByText("Protected note · open to unlock"),
     ).toBeInTheDocument();
+    expect(screen.getByText(/Locked/)).toHaveTextContent(
+      "Locked · 0 backlinks",
+    );
     expect(screen.queryByText("secret")).not.toBeInTheDocument();
     expect(screen.queryByText("classified")).not.toBeInTheDocument();
     expect(screen.queryByText("+2 more")).not.toBeInTheDocument();

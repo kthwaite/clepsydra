@@ -107,7 +107,7 @@ export function WikilinkInlineEditor({
         onKeyDown={handleKeyDown}
         onBlur={() => finish("preserve")}
         spellCheck={false}
-        className="min-w-[4ch] bg-transparent px-[2px] font-mono text-[0.95em] text-ink outline-none"
+        className="min-w-[4ch] rounded-[3px] bg-accent-tint px-[2px] text-ink outline-none"
         style={{ width: `${Math.max(draft.length, 4)}ch` }}
       />
     </span>

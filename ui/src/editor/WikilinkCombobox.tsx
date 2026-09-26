@@ -86,7 +86,7 @@ export function WikilinkCombobox({
               <div className="font-medium">
                 {page.title ?? page.canonical_name}
               </div>
-              <div className="text-xs text-muted-foreground">{page.path}</div>
+              <div className="text-[12.5px] text-mute">{page.path}</div>
             </>
           );
         }

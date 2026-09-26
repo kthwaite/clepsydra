@@ -9,6 +9,7 @@ import { PreviewBody } from "#/components/codex/PreviewBody";
 import { KindIcon } from "#/components/KindIcon";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { resolveKind } from "#/lib/kind";
 import {
   cancelHoverClose,
@@ -111,32 +112,32 @@ function PreviewWindow({ win }: { win: PW }) {
         if (!win.pinned) scheduleHoverClose();
       }}
       onPointerDown={() => raise(win.id)}
-      className="fixed cursor-default border-[1.5px] border-ink bg-paper text-ink shadow-[0_14px_40px_rgba(0,0,0,0.7),0_0_0_1px_var(--color-bg)] font-body"
+      className="fixed cursor-default overflow-hidden rounded-2xl bg-raise text-ink shadow-lg"
     >
       {/* titlebar */}
       <div
         onPointerDown={onTitlePointerDown}
-        className="flex cursor-grab items-center gap-1.5 border-b border-ink bg-paper-2 px-2 py-1 active:cursor-grabbing"
+        className="flex cursor-grab items-center gap-2 bg-sink py-1.5 pr-1.5 pl-4 active:cursor-grabbing"
       >
-        <KindIcon kind={kind} size={11} className="flex-shrink-0" />
-        <span className="cl-mono flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-          ⟦ {shortFolio(win.path)} ⟧
+        <KindIcon kind={kind} size={14} className="flex-shrink-0" />
+        <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] text-mute">
+          {shortFolio(win.path)}
         </span>
         <IconBtn
           label={win.pinned ? "unpin" : "pin"}
           onClick={() => (win.pinned ? close(win.id) : pin(win.id))}
           active={win.pinned}
         >
-          <Pin size={11} fill={win.pinned ? "currentColor" : "none"} />
+          <Pin size={14} fill={win.pinned ? "currentColor" : "none"} />
         </IconBtn>
         <IconBtn label="minimize" onClick={() => minimize(win.id)}>
-          <Minus size={11} />
+          <Minus size={14} />
         </IconBtn>
         <IconBtn label="open" onClick={() => openTab("page", win.path, title)}>
-          <Maximize2 size={10} />
+          <Maximize2 size={13} />
         </IconBtn>
         <IconBtn label="close" onClick={() => close(win.id)}>
-          <X size={11} />
+          <X size={14} />
         </IconBtn>
       </div>
 
@@ -158,26 +159,32 @@ function Tray({ windows }: { windows: PW[] }) {
   const restore = usePreviewStore((state) => state.restore);
   const close = usePreviewStore((state) => state.close);
   return (
-    <div className="fixed bottom-2 left-2 z-[950] flex max-w-[60vw] flex-wrap gap-1.5">
+    <div className="fixed bottom-3 left-3 z-[950] flex max-w-[60vw] flex-wrap gap-2">
       {windows.map((w) => (
         <div
           key={w.id}
-          className="flex items-center gap-1.5 border border-ink bg-paper-2 px-2 py-1 shadow-[0_6px_18px_rgba(0,0,0,0.6)]"
+          className="flex h-9 items-center gap-1 rounded-full bg-raise pr-1.5 pl-4 shadow-md"
         >
           <button
             type="button"
             onClick={() => restore(w.id)}
-            className="cl-mono cursor-pointer text-[10px] text-ink hover:text-accent"
+            className={cn(
+              "cursor-pointer rounded-full text-[13px] text-ink hover:text-accent",
+              FOCUS_RING_NATIVE,
+            )}
           >
-            ⟦ {shortFolio(w.path)} ⟧
+            {shortFolio(w.path)}
           </button>
           <button
             type="button"
             onClick={() => close(w.id)}
             aria-label="close"
-            className="cursor-pointer text-ink-mute hover:text-hot"
+            className={cn(
+              "flex h-7 w-7 cursor-pointer items-center justify-center rounded-full text-mute hover:bg-sink hover:text-hot",
+              FOCUS_RING_NATIVE,
+            )}
           >
-            <X size={10} />
+            <X size={13} />
           </button>
         </div>
       ))}
@@ -204,8 +211,11 @@ function IconBtn({
       onClick={onClick}
       onPointerDown={(e) => e.stopPropagation()}
       className={cn(
-        "flex cursor-pointer items-center p-[1px]",
-        active ? "text-accent" : "text-ink-mute hover:text-ink",
+        "flex h-7 w-7 cursor-pointer items-center justify-center rounded-full",
+        FOCUS_RING_NATIVE,
+        active
+          ? "bg-accent-tint text-accent"
+          : "text-mute hover:bg-raise hover:text-ink",
       )}
     >
       {children}

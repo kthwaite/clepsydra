@@ -27,6 +27,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { Tick } from "#/components/codex/Tick";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 export type MissingWikilinkPopoverProps = {
   target: string;
@@ -126,24 +129,32 @@ export function MissingWikilinkPopover({
               ref={refs.setFloating}
               style={floatingStyles}
               contentEditable={false}
-              className="z-50 w-64 border border-ink bg-paper p-3 shadow-[4px_4px_0_0_var(--color-ink)]"
+              className="z-50 flex w-[272px] flex-col gap-1.5 rounded-2xl bg-raise p-4 text-[14px] text-ink shadow-lg"
               {...getFloatingProps({
                 "aria-labelledby": targetId,
                 "aria-describedby": descriptionId,
               })}
             >
-              <p className="cl-cap text-[9px] text-ink-mute">Missing page</p>
-              <p id={targetId} className="mt-1 font-medium text-ink">
+              <p className="flex items-center gap-2.5">
+                <Tick variant="faint" />
+                <span className="font-serif text-[18px] italic text-mute">
+                  Missing page
+                </span>
+              </p>
+              <p id={targetId} className="pl-[17px] font-medium text-ink">
                 {target}
               </p>
-              <p id={descriptionId} className="mt-1 text-xs text-ink-mute">
+              <p id={descriptionId} className="pl-[17px] text-[13px] text-mute">
                 Page does not exist.
               </p>
               {!readOnly ? (
                 <button
                   type="button"
                   disabled={creating}
-                  className="cl-mono mt-3 cursor-pointer border border-ink bg-paper-2 px-2 py-1 text-[10px] text-ink hover:bg-paper-edge hover:text-accent disabled:cursor-not-allowed disabled:text-ink-mute"
+                  className={cn(
+                    "mt-2 ml-[17px] inline-flex h-8 cursor-pointer items-center self-start rounded-full bg-accent px-3.5 text-[13px] font-medium text-raise hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-45",
+                    FOCUS_RING_NATIVE,
+                  )}
                   onClick={async () => {
                     if (await onCreate()) {
                       suppressRestoredFocusOpen();
@@ -155,7 +166,7 @@ export function MissingWikilinkPopover({
                 </button>
               ) : null}
               {error ? (
-                <p role="alert" className="mt-2 text-xs text-danger">
+                <p role="alert" className="pl-[17px] text-[13px] text-hot">
                   {error}
                 </p>
               ) : null}

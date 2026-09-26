@@ -30,10 +30,12 @@ import {
 } from "slate";
 import { HistoryEditor } from "slate-history";
 import { ReactEditor } from "slate-react";
+import { Tick } from "#/components/codex/Tick";
 import { TASK_PROPERTY_KEYS, type TaskPropertyKey } from "#/editor/properties";
 import type { ListItemElement } from "#/editor/schema/types";
 import type { TaskPropertyPopoverController } from "#/editor/taskPropertyContext";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 // ---------------------------------------------------------------------------
 // Draft — the buffered edit, seeded at open and written on commit
@@ -212,19 +214,20 @@ export function useTaskPropertyPopoverController(
 // ---------------------------------------------------------------------------
 
 const PRIORITY_CHOICES: ReadonlyArray<{ value: string; label: string }> = [
-  { value: "A", label: "HIGH" },
-  { value: "B", label: "MED" },
-  { value: "C", label: "LOW" },
+  { value: "A", label: "High" },
+  { value: "B", label: "Medium" },
+  { value: "C", label: "Low" },
 ];
 
-const LABEL_CLASS =
-  "cl-mono block text-[9px] uppercase tracking-widest text-ink-mute";
+const LABEL_CLASS = "block text-[12.5px] text-mute";
 
 const INPUT_CLASS =
-  "cl-mono min-w-0 flex-1 border border-rule bg-paper px-1 py-0.5 text-[11px] text-ink outline-none focus:border-accent";
+  "h-9 min-w-0 flex-1 rounded-[10px] bg-sink px-3 text-[14px] text-ink outline-none focus:ring-[1.5px] focus:ring-inset focus:ring-accent";
 
-const SMALL_BUTTON_CLASS =
-  "cl-mono border px-1 py-0.5 text-[10px] leading-none tracking-wider";
+const CLEAR_BUTTON_CLASS = cn(
+  "flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[17px] text-mute hover:bg-sink hover:text-ink",
+  FOCUS_RING_NATIVE,
+);
 
 export interface TaskPropertyPopoverProps {
   anchor: HTMLElement;
@@ -310,68 +313,69 @@ export function TaskPropertyPopover({
           ref={refs.setFloating}
           style={floatingStyles}
           contentEditable={false}
-          className="z-50 w-56 border border-ink bg-paper-2 p-3 shadow-[4px_4px_0_0_var(--color-ink)]"
+          className="z-50 flex w-[272px] flex-col gap-3 rounded-2xl bg-raise px-4 pt-4 pb-[18px] text-[14px] text-ink shadow-lg"
           {...getFloatingProps({
             "aria-labelledby": titleId,
             onKeyDown: handleKeyDown,
           })}
         >
-          <p id={titleId} className="cl-cap text-[9px] text-ink-mute">
-            Todo properties
+          <p id={titleId} className="flex items-center gap-2.5">
+            <Tick />
+            <span className="font-serif text-[19px] italic text-mute">
+              Todo properties
+            </span>
           </p>
 
-          <label className={cn(LABEL_CLASS, "mt-3")} htmlFor={dueId}>
-            Due
-          </label>
-          <div className="mt-1 flex items-center gap-1">
-            <input
-              ref={dueFieldRef}
-              id={dueId}
-              type="date"
-              value={draft.due}
-              onChange={(event) => setField("due", event.target.value)}
-              className={INPUT_CLASS}
-            />
-            <button
-              type="button"
-              aria-label="Clear due"
-              onClick={() => setField("due", "")}
-              className={cn(
-                SMALL_BUTTON_CLASS,
-                "border-rule text-ink-mute hover:border-ink-mute hover:text-ink",
-              )}
-            >
-              ×
-            </button>
+          <div className="flex flex-col gap-1.5 pl-[17px]">
+            <label className={LABEL_CLASS} htmlFor={dueId}>
+              Due
+            </label>
+            <div className="flex items-center gap-1.5">
+              <input
+                ref={dueFieldRef}
+                id={dueId}
+                type="date"
+                value={draft.due}
+                onChange={(event) => setField("due", event.target.value)}
+                className={INPUT_CLASS}
+              />
+              <button
+                type="button"
+                aria-label="Clear due"
+                onClick={() => setField("due", "")}
+                className={CLEAR_BUTTON_CLASS}
+              >
+                ×
+              </button>
+            </div>
           </div>
 
-          <label className={cn(LABEL_CLASS, "mt-3")} htmlFor={scheduledId}>
-            Scheduled
-          </label>
-          <div className="mt-1 flex items-center gap-1">
-            <input
-              id={scheduledId}
-              type="date"
-              value={draft.scheduled}
-              onChange={(event) => setField("scheduled", event.target.value)}
-              className={INPUT_CLASS}
-            />
-            <button
-              type="button"
-              aria-label="Clear scheduled"
-              onClick={() => setField("scheduled", "")}
-              className={cn(
-                SMALL_BUTTON_CLASS,
-                "border-rule text-ink-mute hover:border-ink-mute hover:text-ink",
-              )}
-            >
-              ×
-            </button>
+          <div className="flex flex-col gap-1.5 pl-[17px]">
+            <label className={LABEL_CLASS} htmlFor={scheduledId}>
+              Scheduled
+            </label>
+            <div className="flex items-center gap-1.5">
+              <input
+                id={scheduledId}
+                type="date"
+                value={draft.scheduled}
+                onChange={(event) => setField("scheduled", event.target.value)}
+                className={INPUT_CLASS}
+              />
+              <button
+                type="button"
+                aria-label="Clear scheduled"
+                onClick={() => setField("scheduled", "")}
+                className={CLEAR_BUTTON_CLASS}
+              >
+                ×
+              </button>
+            </div>
           </div>
 
-          <fieldset className="mt-3 border-0 p-0">
-            <legend className={LABEL_CLASS}>Priority</legend>
-            <div className="mt-1 flex gap-1">
+          <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0 pl-[17px]">
+            <legend className={cn(LABEL_CLASS, "mb-1.5 p-0")}>Priority</legend>
+            <div className="flex gap-1 rounded-[20px] bg-sink p-1">
               {PRIORITY_CHOICES.map((choice) => {
                 const active = draft.priority === choice.value;
                 return (
@@ -384,11 +388,11 @@ export function TaskPropertyPopover({
                       setField("priority", active ? "" : choice.value)
                     }
                     className={cn(
-                      SMALL_BUTTON_CLASS,
-                      "flex-1",
+                      "h-[30px] flex-1 cursor-pointer rounded-[15px] text-[13.5px]",
+                      FOCUS_RING_NATIVE,
                       active
-                        ? "border-accent text-accent"
-                        : "border-rule text-ink-mute hover:border-ink-mute hover:text-ink",
+                        ? "bg-raise font-medium text-ink shadow-sm"
+                        : "text-mute hover:text-ink",
                     )}
                   >
                     {choice.label}
