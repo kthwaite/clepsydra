@@ -41,21 +41,28 @@ function wordFor(status: IndicatorStatus, lastFullSync: string | null) {
   }
 }
 
-/** Footer sync state: a dot plus one word (spec decision 12). */
-export function SyncIndicator() {
+/** Sync state shared by the footer indicator and the mobile status dot. */
+export function useSyncState() {
   const sse = useConnectionStore((s) => s.status);
   const online = useOnlineStatus();
   const lastFullSync = useOfflineStore((s) => s.lastFullSync);
   const status: IndicatorStatus = online ? sse : "offline";
-  const title = status === "offline" ? offlineLabel(lastFullSync) : undefined;
+  return {
+    status,
+    word: wordFor(status, lastFullSync),
+    title: status === "offline" ? offlineLabel(lastFullSync) : undefined,
+    dot: DOT[status],
+  };
+}
+
+/** Footer sync state: a dot plus one word (spec decision 12). */
+export function SyncIndicator() {
+  const { word, title, dot } = useSyncState();
 
   return (
     <span className="flex items-center gap-1.5" title={title}>
-      <span
-        aria-hidden
-        className={cn("h-1.5 w-1.5 rounded-full", DOT[status])}
-      />
-      <span>{wordFor(status, lastFullSync)}</span>
+      <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", dot)} />
+      <span>{word}</span>
     </span>
   );
 }
