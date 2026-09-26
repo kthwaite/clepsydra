@@ -552,6 +552,7 @@ describe("Folio AI conversation presentation", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /no valid conversation markers/i,
     );
+    expect(screen.getByRole("alert")).toHaveClass("bg-hot/5", "text-hot");
     expect(screen.getByText("Ordinary markdown remains visible")).toBeVisible();
   });
 

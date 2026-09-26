@@ -1149,8 +1149,11 @@ export function Folio({ tabId, path }: FolioProps) {
           {conversationDiagnostics &&
           (conversationDiagnostics.malformedMarkerLines.length > 0 ||
             conversationDiagnostics.validMarkers === 0) ? (
-            <div className="ai-conversation-warning" role="alert">
-              <span>
+            <div
+              className="my-4 flex flex-wrap items-center justify-between gap-3 rounded-[12px] bg-hot/5 px-4 py-3 text-[13.5px] leading-[1.5] text-hot"
+              role="alert"
+            >
+              <span className="min-w-0 flex-1">
                 {conversationDiagnostics.malformedMarkerLines.length > 0
                   ? `Conversation marker${
                       conversationDiagnostics.malformedMarkerLines.length === 1
@@ -1165,9 +1168,9 @@ export function Folio({ tabId, path }: FolioProps) {
                     )} could not be read. The original text is preserved.`
                   : "This AI conversation has no valid conversation markers. The original Markdown is preserved."}
               </span>
-              <button type="button" onClick={() => setConversationMode("edit")}>
+              <Button size="sm" onPress={() => setConversationMode("edit")}>
                 Edit
-              </button>
+              </Button>
             </div>
           ) : null}
         </>
@@ -1202,7 +1205,6 @@ export function Folio({ tabId, path }: FolioProps) {
         <article
           className={cn(
             "codex-prose mt-9 font-sans text-[17px] leading-[1.7] text-ink-2",
-            isAiConversation && `ai-conversation--${conversationMode}`,
           )}
         >
           {offlineReadOnly ? (

@@ -260,9 +260,8 @@ body {
 }
 
 /* =============================================================================
-   .cl-* primitives — re-pointed to the VESSEL mono-tactical language.
-   Class names preserved so existing components inherit the new aesthetic;
-   they will be migrated to purpose-built components over later phases.
+   Shell-wide classes. `src/__tests__/deadCss.test.ts` fails on any class here that no
+   source file uses.
    ============================================================================= */
 
 .cl-root {
@@ -279,164 +278,13 @@ body {
     color: inherit;
 }
 
-/* Stopgap (spec §6 phase 1): Vessel's tracked caps labels read as plain sans
-   until each call site is restyled in the phase 5 sweep. */
-.cl-cap {
-    font-family: var(--font-sans);
-    text-transform: none;
-    letter-spacing: normal;
-    font-weight: 500;
-}
-
-.cl-cap-tight {
-    letter-spacing: 0.1em;
-}
-
-.cl-cap-wide {
-    letter-spacing: 0.3em;
-}
-
-/* Stopgap (spec §6 phase 1): `.cl-mono` has 501 uses; point it at sans so
-   the chrome leaves mono in one commit. Code keeps mono via the rule below. */
-.cl-mono {
-    font-family: var(--font-sans);
-}
-
-/* Code is the only monospace (spec decision 3). Element selectors carry the
-   `.cl-mono` class too, so they outrank the stopgap above. Source editors
-   (TOML, template markdown) opt in with `data-code-editor`. */
-:where(pre, code, kbd, samp, [data-code-editor]),
-pre.cl-mono,
-code.cl-mono,
-kbd.cl-mono,
-samp.cl-mono {
+/* Code is the only monospace (spec decision 3). Source editors (TOML,
+   template markdown) opt in with `data-code-editor`. */
+:where(pre, code, kbd, samp, [data-code-editor]) {
     font-family: var(--font-mono);
     font-feature-settings:
         "calt" 0,
         "liga" 0;
-}
-
-/* Serif/slab dropped — map to the sans face so any lingering refs read sanely. */
-.cl-slab {
-    font-family: var(--font-sans);
-}
-
-.cl-serif {
-    font-family: var(--font-sans);
-}
-
-/* Hairline rules */
-.cl-rule {
-    border: 0;
-    border-top: 1px solid var(--rule);
-}
-
-.cl-rule-soft {
-    border: 0;
-    border-top: 1px solid var(--rule-soft);
-}
-
-.cl-rule-double {
-    border: 0;
-    border-top: 1px solid var(--rule);
-    box-shadow: 0 3px 0 -2px var(--rule);
-    height: 4px;
-}
-
-/* Dashed separator — dossier divider (6px dash). */
-.cl-rule-dash {
-    border: 0;
-    border-top: 1px dashed var(--rule);
-}
-
-/* Flat field — overlays/grain dropped, so this is just the base surface. */
-.cl-paper {
-    background: var(--paper);
-}
-
-.cl-grid {
-    background-image:
-        linear-gradient(var(--grid) 1px, transparent 1px),
-        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-    background-size: 24px 24px;
-}
-
-.cl-grid-fine {
-    background-image:
-        linear-gradient(var(--grid) 1px, transparent 1px),
-        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-    background-size: 8px 8px;
-}
-
-/* Frames */
-.cl-frame {
-    border: 1px solid var(--rule);
-}
-
-/* Faint dossier grid texture (hero, cards). Sits behind content via ::before. */
-.cl-grid-texture {
-    position: relative;
-    overflow: hidden;
-}
-
-.cl-grid-texture>* {
-    position: relative;
-}
-
-.cl-grid-texture::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image:
-        repeating-linear-gradient(0deg, transparent 0 23px, var(--rule-soft) 23px 24px),
-        repeating-linear-gradient(90deg, transparent 0 23px, var(--rule-soft) 23px 24px);
-    opacity: 0.5;
-    pointer-events: none;
-}
-
-.cl-frame-double {
-    border: 1px solid var(--rule);
-    box-shadow:
-        0 0 0 3px var(--paper),
-        0 0 0 4px var(--rule);
-}
-
-/* Stamp — classification cachet (mono, tracked). */
-.cl-stamp {
-    display: inline-block;
-    border: 1px solid var(--hot);
-    color: var(--hot);
-    padding: 3px 8px;
-    font-family: var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.18em;
-    font-weight: 600;
-    font-size: 10px;
-}
-
-/* Dingbats retained for any inline usage. */
-.cl-fleuron::before {
-    content: "❦";
-}
-
-.cl-asterism::before {
-    content: "⁂";
-}
-
-.cl-section-mark::before {
-    content: "§";
-}
-
-.cl-pilcrow::before {
-    content: "¶";
-}
-
-/* Numeric / coordinate inline */
-.cl-coord {
-    font-family: var(--font-mono);
-    font-size: 0.82em;
-    letter-spacing: 0.04em;
-    color: var(--ink-mute);
 }
 
 /* Underlined link */
@@ -457,25 +305,6 @@ samp.cl-mono {
 .cl-link.cl-link-plain:hover {
     color: inherit;
     border-bottom: 0;
-    background: transparent;
-}
-
-/* Passive page references read as prose, not as highlighted Markdown syntax. */
-.cl-wikilink {
-    font-family: Georgia, "Times New Roman", serif;
-}
-
-.cl-link.cl-wikilink {
-    color: inherit;
-    border-bottom: 0;
-}
-
-.cl-link.cl-wikilink.text-ink-mute {
-    color: var(--ink-mute);
-}
-
-.cl-link.cl-wikilink:hover {
-    color: var(--accent);
     background: transparent;
 }
 
@@ -567,28 +396,6 @@ samp.cl-mono {
 }
 
 /* Blink cursor */
-@keyframes cl-blink {
-
-    0%,
-    49% {
-        opacity: 1;
-    }
-
-    50%,
-    100% {
-        opacity: 0;
-    }
-}
-
-.cl-cursor {
-    display: inline-block;
-    width: 0.55em;
-    height: 1em;
-    background: currentColor;
-    vertical-align: text-bottom;
-    animation: cl-blink 1s steps(1) infinite;
-}
-
 /* Feed rows that were just read hold their place, then collapse away, so the
    river never reorders under the pointer that read them. */
 @keyframes cl-feed-exit {
@@ -615,56 +422,6 @@ samp.cl-mono {
     overflow: hidden;
     pointer-events: none;
     animation: cl-feed-exit 700ms ease-in forwards;
-}
-
-/* ASCII engraving */
-.cl-ascii {
-    font-family: var(--font-mono);
-    font-size: 8px;
-    line-height: 1;
-    white-space: pre;
-    letter-spacing: 0;
-    color: var(--ink);
-    opacity: 0.55;
-    user-select: none;
-}
-
-.cl-ascii-faint {
-    opacity: 0.32;
-}
-
-/* Dot-leader for table-of-contents lines */
-.cl-leader {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    min-width: 0;
-}
-
-.cl-leader> :first-child {
-    white-space: nowrap;
-    flex-shrink: 0;
-    min-width: 0;
-}
-
-.cl-leader-dots {
-    flex: 1 1 12px;
-    min-width: 12px;
-    border-bottom: 1px dotted var(--rule-soft);
-    transform: translateY(-3px);
-}
-
-.cl-leader> :last-child {
-    flex-shrink: 0;
-}
-
-/* Page corner stamp */
-.cl-folio {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    color: var(--ink-mute);
-    text-transform: uppercase;
 }
 
 /* View transition — restrained fade + lift, keyed on route. */
@@ -694,168 +451,6 @@ samp.cl-mono {
 /* Code blocks get more breathing room above and below than the base gap. */
 :where(.codex-prose [data-slate-editor] .cl-codeblock) {
     margin-block: 1.25em;
-}
-
-/* AI conversation Folios use an editorial speaker gutter rather than chat
-   bubbles. Read and Edit share one Slate tree and the same prose measure. */
-.ai-conversation-controls {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-gap);
-    margin-block: var(--space-gap);
-    font-family: var(--font-mono);
-    font-size: var(--text-fs-s);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-}
-
-.ai-conversation-controls__modes {
-    display: inline-flex;
-    border: 1px solid var(--rule);
-}
-
-.ai-conversation-controls button {
-    min-block-size: 2rem;
-    border: 0;
-    border-inline-end: 1px solid var(--rule);
-    padding-inline: var(--space-pad);
-    background: var(--paper);
-    color: var(--ink-mute);
-}
-
-.ai-conversation-controls button:last-child {
-    border-inline-end: 0;
-}
-
-.ai-conversation-controls button:hover {
-    color: var(--ink);
-}
-
-.ai-conversation-controls button[aria-pressed="true"],
-.ai-conversation-controls__add {
-    background: var(--paper-2);
-    color: var(--accent);
-}
-
-.ai-conversation-controls button:focus-visible,
-.ai-conversation-warning button:focus-visible,
-.ai-conversation-turn__participant-select>button:focus-visible,
-.ai-conversation-turn button:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-}
-
-.ai-conversation-warning {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-gap);
-    border-block: 1px solid var(--warn);
-    padding-block: calc(var(--space-pad) / 2);
-    color: var(--ink-2);
-    font-family: var(--font-mono);
-    font-size: var(--text-fs);
-    line-height: 1.5;
-}
-
-.ai-conversation-warning button {
-    flex: none;
-    border: 1px solid var(--warn);
-    padding: calc(var(--space-pad) / 2) var(--space-pad);
-    color: var(--warn);
-    text-transform: uppercase;
-}
-
-.ai-conversation-turn {
-    display: grid;
-    grid-template-columns: 7.5rem minmax(0, 1fr);
-    gap: var(--space-gap);
-    align-items: start;
-}
-
-.ai-conversation-turn__participant {
-    padding-block-start: calc(var(--space-pad) / 2);
-    color: var(--ink-mute);
-    font-family: var(--font-mono);
-    font-size: var(--text-fs);
-    font-style: normal;
-    letter-spacing: 0.12em;
-    line-height: 1.4;
-    text-transform: uppercase;
-}
-
-.ai-conversation-turn__content {
-    min-width: 0;
-    padding-inline-start: var(--space-pad);
-}
-
-.ai-conversation-turn[data-role="assistant"] .ai-conversation-turn__content {
-    border-inline-start: 2px solid var(--accent);
-}
-
-.ai-conversation--read .ai-conversation-turn {
-    padding-block: var(--space-gap);
-}
-
-.ai-conversation--edit .ai-conversation-turn {
-    padding-block: calc(var(--space-gap) / 2);
-    border-block-start: 1px solid var(--rule-soft);
-}
-
-.ai-conversation--edit .ai-conversation-turn__participant-select>button {
-    width: 100%;
-    border: 1px solid var(--rule);
-    padding: calc(var(--space-pad) / 2);
-    background: var(--paper-2);
-    color: var(--ink);
-}
-
-.ai-conversation-turn__actions {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    margin-block-start: calc(var(--space-gap) / 2);
-}
-
-.ai-conversation-turn__actions button {
-    min-block-size: 2rem;
-    border: 1px solid var(--rule);
-    border-inline-end: 0;
-    color: var(--ink-mute);
-}
-
-.ai-conversation-turn__actions button:last-child {
-    border-inline-end: 1px solid var(--rule);
-}
-
-@media (width < 48rem) {
-
-    .ai-conversation-controls,
-    .ai-conversation-warning {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .ai-conversation-controls__modes {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .ai-conversation-controls button,
-    .ai-conversation-warning button,
-    .ai-conversation-turn__actions button,
-    .ai-conversation--edit .ai-conversation-turn__participant-select>button {
-        min-block-size: 44px;
-    }
-
-    .ai-conversation-turn {
-        grid-template-columns: minmax(0, 1fr);
-        gap: calc(var(--space-gap) / 2);
-    }
-
-    .ai-conversation-turn__content {
-        padding-inline-start: var(--space-pad);
-    }
 }
 
 /* Folio TeX previews — KaTeX output is kept within the prose measure. */
