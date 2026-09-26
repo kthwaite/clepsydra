@@ -16,7 +16,7 @@ import {
   Text,
 } from "slate";
 import { ReactEditor } from "slate-react";
-import { assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AttachmentsApi from "#/api/attachments";
 import type {
   BacklinkEntry,
@@ -311,8 +311,9 @@ vi.mock("#/api/aiJournal", () => ({
   useAiJournalToday: () => ({ data: null, isLoading: false }),
   useAiJournalRecent: () => ({ data: [] }),
 }));
+const projectsState = vi.hoisted(() => ({ list: [] as string[] }));
 vi.mock("#/lib/useProjects", () => ({
-  useProjects: () => [],
+  useProjects: () => projectsState.list,
 }));
 
 import { TabContent } from "#/components/TabContent";
@@ -1509,6 +1510,31 @@ describe("Folio kind assignment", () => {
     await user.click(kind);
     expect(screen.queryByRole("option", { name: "Quote" })).toBeNull();
     expect(screen.getByRole("option", { name: "Note" })).toBeVisible();
+  });
+});
+
+describe("Folio project field", () => {
+  afterEach(() => {
+    projectsState.list = [];
+  });
+
+  it("opens the project list on click, like Kind", async () => {
+    const user = userEvent.setup();
+    projectsState.list = ["clepsydra", "falls"];
+    mobileLayoutState.matches = false;
+    usePageEditorMock.mockReturnValue(editableEditor());
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    await user.click(screen.getByRole("combobox", { name: "Project" }));
+    expect(screen.getByRole("option", { name: "clepsydra" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "falls" })).toBeVisible();
   });
 });
 

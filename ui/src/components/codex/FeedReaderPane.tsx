@@ -525,7 +525,21 @@ function ReaderArticle({
           id={titleId}
           className="font-serif text-[32px] leading-[1.08] tracking-[-0.01em] text-ink md:text-[40px]"
         >
-          {entry.title}
+          {originalUrl ? (
+            <a
+              href={originalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className={cn(
+                "rounded-[4px] decoration-accent decoration-2 underline-offset-[6px] hover:underline",
+                FOCUS_RING_NATIVE,
+              )}
+            >
+              {entry.title}
+            </a>
+          ) : (
+            entry.title
+          )}
         </h2>
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-mute">
           {feedName ? <span className="text-ink-2">{feedName}</span> : null}

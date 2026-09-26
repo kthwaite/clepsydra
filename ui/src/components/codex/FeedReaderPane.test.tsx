@@ -261,6 +261,30 @@ describe("FeedReaderPane", () => {
     expect(article.querySelector("iframe")).not.toBeInTheDocument();
   });
 
+  it("links the title to the source in a new tab", () => {
+    renderPane();
+
+    const heading = screen.getByRole("heading", { name: "Stored dispatch" });
+    const title = within(heading).getByRole("link", {
+      name: "Stored dispatch",
+    });
+    expect(title).toHaveAttribute(
+      "href",
+      "https://source.example/posts/stored",
+    );
+    expect(title).toHaveAttribute("target", "_blank");
+    expect(title).toHaveAttribute("rel", "noreferrer");
+    expect(title).toHaveClass("focus-visible:ring-2");
+  });
+
+  it("keeps an unsafe source title as plain text", () => {
+    paneMocks.query.data = { ...storedEntry, url: "javascript:alert(1)" };
+    renderPane();
+
+    const heading = screen.getByRole("heading", { name: "Stored dispatch" });
+    expect(within(heading).queryByRole("link")).not.toBeInTheDocument();
+  });
+
   it("copies the safe entry as Markdown and shows settled clipboard state", async () => {
     const page = renderPane();
 

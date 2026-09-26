@@ -1130,6 +1130,8 @@ describe("feeds route controls", () => {
     expect(routePage).toHaveClass("md:h-full");
     expect(routePage).toHaveClass("md:contain-paint");
     expect(routePage).not.toHaveClass("md:h-dvh");
+    // The feeds frame sits directly under the shell navbar.
+    expect(routePage?.className).not.toMatch(/(^|\s)(md:)?pt-(?!0\b)/);
     expect(reader.parentElement).toHaveClass("md:h-full");
     expect(reader).toHaveClass("md:h-full", "overflow-y-auto");
     expect(screen.getByRole("region", { name: "Entry list" })).toHaveClass(

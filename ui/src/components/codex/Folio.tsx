@@ -1321,6 +1321,7 @@ export function Folio({ tabId, path }: FolioProps) {
               key={project ?? ""}
               value={project}
               options={projects}
+              menuTrigger="focus"
               onAssign={(slug) =>
                 assign.mutate(
                   { params: { path: { path } }, body: { project: slug } },
