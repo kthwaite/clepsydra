@@ -3,7 +3,7 @@ import type { ReferenceIssue } from "#/api/index";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
 
-const KIND_LABELS: Record<ReferenceIssue["kind"], string> = {
+export const KIND_LABELS: Record<ReferenceIssue["kind"], string> = {
   unresolved_page_link: "Unresolved link",
   ambiguous_page_link: "Ambiguous link",
   broken_block_ref: "Broken block",
@@ -61,7 +61,7 @@ export function RepairIssueList({
   }
 
   return (
-    <ul aria-label="Reference issues" className="divide-y divide-rule">
+    <ul aria-label="Reference issues" className="flex flex-col gap-0.5">
       {issues.map((issue, index) => {
         const isSelected = selectedFingerprint === issue.fingerprint;
         const actionable = issue.actions.some(
@@ -75,10 +75,10 @@ export function RepairIssueList({
               onPress={() => onSelect(issue.fingerprint)}
               onKeyDown={(event) => handleKeyDown(event, index)}
               className={cn(
-                "h-auto w-full justify-start border-0 border-l-2 px-3 py-3 text-left normal-case tracking-normal",
+                "h-auto w-full justify-start rounded-xl px-3.5 py-2.5 text-left font-normal",
                 isSelected
-                  ? "border-l-accent bg-highlight text-ink"
-                  : "border-l-transparent text-ink hover:bg-paper-edge",
+                  ? "bg-accent-tint text-ink data-[hovered]:bg-accent-tint"
+                  : "text-ink data-[hovered]:text-ink",
               )}
             >
               <span
@@ -87,26 +87,28 @@ export function RepairIssueList({
                   if (button) rowRefs.current.set(issue.fingerprint, button);
                   else rowRefs.current.delete(issue.fingerprint);
                 }}
-                className="min-w-0 flex-1"
+                className="flex min-w-0 flex-1 flex-col gap-1"
               >
-                <span className="flex items-center justify-between gap-3">
-                  <span className="truncate text-sm font-semibold">
+                <span className="flex min-w-0 items-baseline gap-3">
+                  <span className="min-w-0 flex-1 truncate text-[14.5px] font-medium text-ink">
                     {issueLabel(issue)}
                   </span>
                   <span
                     className={cn(
-                      "cl-mono shrink-0 text-[9px] uppercase tracking-[0.14em]",
-                      actionable ? "text-cool" : "text-ink-mute",
+                      "shrink-0 text-[12.5px]",
+                      actionable ? "text-accent" : "text-mute",
                     )}
                   >
                     {actionable ? "Repair" : "Inspect"}
                   </span>
                 </span>
-                <span className="mt-1 flex min-w-0 items-center gap-2 text-[10px] text-ink-mute">
-                  <span className="cl-mono shrink-0 uppercase tracking-[0.12em]">
+                <span className="flex min-w-0 items-baseline gap-2 text-[12.5px] text-mute">
+                  <span className="shrink-0 text-ink-2">
                     {KIND_LABELS[issue.kind]}
                   </span>
-                  <span aria-hidden="true">·</span>
+                  <span aria-hidden="true" className="text-faint">
+                    ·
+                  </span>
                   <span className="truncate">{issue.source_path}</span>
                 </span>
               </span>

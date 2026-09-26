@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReferenceIssueFilters } from "#/api/index";
 import { useReferenceIssues } from "#/api/index";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
@@ -156,26 +157,32 @@ export function RepairWorkspace({
     setSelectedFingerprint(null);
   }
 
+  const total = issuesQuery.data?.total ?? 0;
+
   return (
-    <main className="mx-auto flex h-full min-h-screen w-full max-w-[1440px] flex-col bg-paper text-ink">
-      <header className="border-b border-rule bg-paper-2 px-3 py-4 md:px-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="cl-mono text-[9px] uppercase tracking-[0.22em] text-ink-mute">
-              Vault index / evidence-led repair
+    <main className="mx-auto flex h-full min-h-screen w-full max-w-[1440px] flex-col bg-ground text-ink">
+      <header className="px-4 pt-7 md:px-10">
+        <div className="flex flex-wrap items-end gap-x-7 gap-y-3">
+          <div className="flex flex-col gap-2.5">
+            <p className="flex items-center gap-2.5">
+              <Tick />
+              <span className="font-serif text-[19px] italic leading-none text-mute">
+                Vault index
+              </span>
             </p>
-            <h1 className="mt-1 text-2xl font-black tracking-tight">
+            <h1 className="font-serif text-[44px] leading-none tracking-[-0.015em] text-ink md:text-[56px]">
               Reference repair
             </h1>
           </div>
-          <p className="cl-mono text-[10px] tabular-nums text-ink-mute">
-            {issuesQuery.data?.total ?? 0} issues
+          <p className="pb-1.5 text-[14px] tabular-nums text-mute">
+            {total} {total === 1 ? "issue" : "issues"} · inspect the evidence,
+            preview, then apply
           </p>
         </div>
         {target ? (
           <p
             role="status"
-            className="mt-3 border-l-2 border-cool bg-paper px-3 py-2 text-sm text-ink-2"
+            className="mt-4 rounded-xl bg-accent-tint px-4 py-2.5 text-[14px] text-ink-2"
           >
             Opened from unresolved target: <code>{target}</code>. Review the
             matching evidence before repairing it.
@@ -188,14 +195,14 @@ export function RepairWorkspace({
       {issuesQuery.isPending ? (
         <div
           role="status"
-          className="cl-mono flex flex-1 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute"
+          className="flex flex-1 items-center justify-center p-8 text-[13.5px] text-mute"
         >
           Loading reference issues…
         </div>
       ) : issuesQuery.isError ? (
         <div
           role="alert"
-          className="flex flex-1 items-center justify-center p-8 text-sm text-hot"
+          className="flex flex-1 items-center justify-center p-8 text-[14px] text-hot"
         >
           Reference issues could not load. {issuesQuery.error?.message}
         </div>
@@ -208,15 +215,16 @@ export function RepairWorkspace({
           className="flex flex-1 items-center justify-center p-8 text-center outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
         >
           <div>
-            <p className="text-sm font-semibold">No reference issues match.</p>
-            <p className="mt-1 text-xs text-ink-mute">
+            <p className="font-serif text-[22px] text-ink">
+              No reference issues match.
+            </p>
+            <p className="mt-1.5 text-[13.5px] text-mute">
               Clear filters to inspect the complete repair ledger.
             </p>
             {(queryFilters.offset ?? 0) > 0 ? (
               <Button
                 className="mt-3"
                 size="sm"
-                variant="ghost"
                 onPress={() =>
                   changePage(
                     Math.max(
@@ -232,10 +240,10 @@ export function RepairWorkspace({
           </div>
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(18rem,0.82fr)_minmax(24rem,1.18fr)]">
+        <div className="grid min-h-0 flex-1 gap-6 px-4 pt-5 pb-6 md:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)] md:px-10 xl:grid-cols-[440px_minmax(0,1fr)] xl:gap-10">
           <section
             aria-label="Issue ledger"
-            className="flex min-h-0 flex-col border-r-0 border-rule md:border-r"
+            className="-mx-3.5 flex min-h-0 min-w-0 flex-col"
           >
             <div className="min-h-0 flex-1 overflow-y-auto">
               <RepairIssueList
@@ -248,7 +256,7 @@ export function RepairWorkspace({
             </div>
             <nav
               aria-label="Issue pages"
-              className="flex items-center justify-between gap-2 border-t border-rule bg-paper-2 px-3 py-2"
+              className="flex items-center gap-2 px-3.5 pt-3 text-[13px] text-mute"
             >
               <Button
                 size="sm"
@@ -266,7 +274,7 @@ export function RepairWorkspace({
               >
                 Previous
               </Button>
-              <span className="cl-mono text-[10px] tabular-nums text-ink-mute">
+              <span className="flex-1 text-center tabular-nums">
                 {(queryFilters.offset ?? 0) + 1}–
                 {Math.min(
                   (queryFilters.offset ?? 0) + (queryFilters.limit ?? 100),
@@ -276,7 +284,6 @@ export function RepairWorkspace({
               </span>
               <Button
                 size="sm"
-                variant="ghost"
                 aria-label="Next page"
                 isDisabled={
                   (queryFilters.offset ?? 0) + (queryFilters.limit ?? 100) >=
@@ -298,7 +305,7 @@ export function RepairWorkspace({
               ref={detailRef}
               aria-label="Repair detail"
               tabIndex={-1}
-              className="min-h-0 overflow-y-auto p-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent lg:p-5"
+              className="min-h-0 min-w-0 overflow-y-auto rounded-2xl bg-raise px-6 py-6 outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ground xl:px-8"
             >
               {selectedIssue ? (
                 <RepairIssueDetail
@@ -310,8 +317,10 @@ export function RepairWorkspace({
               ) : (
                 <div className="flex h-full min-h-48 items-center justify-center text-center">
                   <div>
-                    <p className="text-sm font-semibold">Select an issue</p>
-                    <p className="mt-1 max-w-sm text-xs text-ink-mute">
+                    <p className="font-serif text-[22px] text-ink">
+                      Select an issue
+                    </p>
+                    <p className="mt-1.5 max-w-sm text-[13.5px] text-mute">
                       Inspect source evidence, prepare a preview, then apply the
                       exact repair.
                     </p>

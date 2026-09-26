@@ -1,9 +1,21 @@
-import { Checkbox, CheckboxGroup, Label } from "react-aria-components";
+import { ChevronDown } from "lucide-react";
+import type { Key } from "react-aria-components";
+import {
+  Select as AriaSelect,
+  Checkbox,
+  CheckboxGroup,
+  Input,
+  Label,
+  SelectValue,
+  TextField,
+} from "react-aria-components";
 import type { ReferenceIssue, ReferenceIssueFilters } from "#/api/index";
 import { Button } from "#/components/ui/button";
-import { Select, SelectItem } from "#/components/ui/select";
-import { TextField } from "#/components/ui/text-field";
-import { KINDS, type Kind, kindLabel } from "#/lib/kind";
+import { Popover } from "#/components/ui/popover";
+import { SelectItem, SelectListBox } from "#/components/ui/select";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
+import { KINDS, type Kind, kindDisplayLabel } from "#/lib/kind";
 
 const ISSUE_KINDS: { id: ReferenceIssue["kind"]; label: string }[] = [
   { id: "unresolved_page_link", label: "Unresolved links" },
@@ -15,31 +27,65 @@ const ISSUE_KINDS: { id: ReferenceIssue["kind"]; label: string }[] = [
 ];
 
 const ACTIONABILITY_OPTIONS = [
-  { id: "all", label: "All issues" },
+  { id: "all", label: "All" },
   { id: "actionable", label: "Actionable only" },
   { id: "navigation", label: "Navigation only" },
 ] as const;
 
-function FilterCheckbox({
-  value,
-  children,
-}: {
-  value: string;
-  children: string;
-}) {
+const PAGE_KIND_OPTIONS = [
+  { id: "", label: "All" },
+  ...KINDS.map((kind: Kind) => ({ id: kind, label: kindDisplayLabel(kind) })),
+];
+
+/** An issue-kind toggle: a pill that tints cobalt when on. */
+function FilterChip({ value, children }: { value: string; children: string }) {
   return (
     <Checkbox
       aria-label={children}
       value={value}
-      className="group flex min-h-7 items-center gap-1.5 text-[10px] text-ink outline-none"
+      className={cn(
+        "flex h-8 cursor-pointer items-center rounded-full bg-sink px-3.5 text-[13.5px] text-ink-2 transition-colors data-[hovered]:bg-sink/70 data-[selected]:bg-accent-tint data-[selected]:text-accent",
+        FOCUS_RING,
+      )}
     >
-      <span className="flex h-3.5 w-3.5 items-center justify-center border border-rule bg-paper group-data-[selected]:border-accent group-data-[selected]:bg-accent group-data-[focus-visible]:outline group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-offset-2 group-data-[focus-visible]:outline-ring">
-        <span className="hidden text-[9px] font-black text-primary-foreground group-data-[selected]:block">
-          ✓
-        </span>
-      </span>
       {children}
     </Checkbox>
+  );
+}
+
+/** A compact "Label · value" select trigger, as in the Repairs mockup. */
+function FilterSelect<T extends { id: string; label: string }>({
+  label,
+  items,
+  selectedKey,
+  onSelectionChange,
+}: {
+  label: string;
+  items: readonly T[];
+  selectedKey: string;
+  onSelectionChange: (key: Key | null) => void;
+}) {
+  return (
+    <AriaSelect
+      selectedKey={selectedKey}
+      onSelectionChange={onSelectionChange}
+      className="relative"
+    >
+      <Label className="sr-only">{label}</Label>
+      <Button variant="ghost" size="sm" className="gap-1.5 px-3 text-ink">
+        <span aria-hidden>{label} ·</span>
+        <SelectValue className="max-w-40 truncate" />
+        <ChevronDown aria-hidden className="size-3.5 text-mute" />
+      </Button>
+      <Popover
+        hideArrow
+        className="min-w-(--trigger-width) rounded-xl bg-raise text-ink shadow-lg"
+      >
+        <SelectListBox items={items}>
+          {(item) => <SelectItem id={item.id}>{item.label}</SelectItem>}
+        </SelectListBox>
+      </Popover>
+    </AriaSelect>
   );
 }
 
@@ -59,7 +105,7 @@ export function RepairFilters({ filters, onChange }: RepairFiltersProps) {
   return (
     <section
       aria-label="Repair filters"
-      className="grid gap-3 border-b border-rule bg-paper-2 px-3 py-3 lg:grid-cols-[minmax(18rem,1.6fr)_minmax(9rem,0.8fr)_minmax(9rem,0.8fr)_minmax(9rem,0.8fr)_auto] lg:items-end"
+      className="flex flex-wrap items-center gap-2 px-4 pt-5 md:px-10"
     >
       <CheckboxGroup
         aria-label="Issue kinds"
@@ -70,32 +116,34 @@ export function RepairFilters({ filters, onChange }: RepairFiltersProps) {
             kind: kind.length ? (kind as ReferenceIssue["kind"][]) : undefined,
           })
         }
-        className="min-w-0"
+        className="flex min-w-0 flex-wrap gap-1.5"
       >
-        <Label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-          Issue kinds
-        </Label>
-        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-          {ISSUE_KINDS.map((kind) => (
-            <FilterCheckbox key={kind.id} value={kind.id}>
-              {kind.label}
-            </FilterCheckbox>
-          ))}
-        </div>
+        {ISSUE_KINDS.map((kind) => (
+          <FilterChip key={kind.id} value={kind.id}>
+            {kind.label}
+          </FilterChip>
+        ))}
       </CheckboxGroup>
 
+      <span aria-hidden className="hidden flex-1 lg:block" />
+
       <TextField
-        label="Project"
         value={filters.project ?? ""}
         onChange={(project) =>
           onChange({ ...filters, project: project || undefined })
         }
-        placeholder="All projects"
-        className="w-full"
-      />
+        className="flex h-8 items-center gap-2 rounded-full bg-sink pl-3.5 pr-2 text-[13.5px] text-mute focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-ground"
+      >
+        <Label>Project</Label>
+        <Input
+          placeholder="All"
+          className="w-24 min-w-0 bg-transparent text-ink outline-none placeholder:text-mute"
+        />
+      </TextField>
 
-      <Select
+      <FilterSelect
         label="Page kind"
+        items={PAGE_KIND_OPTIONS}
         selectedKey={filters.pageKind ?? ""}
         onSelectionChange={(key) =>
           onChange({
@@ -103,17 +151,11 @@ export function RepairFilters({ filters, onChange }: RepairFiltersProps) {
             pageKind: typeof key === "string" && key ? key : undefined,
           })
         }
-        items={[
-          { id: "", label: "All page kinds" },
-          ...KINDS.map((kind: Kind) => ({ id: kind, label: kindLabel(kind) })),
-        ]}
-        className="w-full"
-      >
-        {(item) => <SelectItem id={item.id}>{item.label}</SelectItem>}
-      </Select>
+      />
 
-      <Select
+      <FilterSelect
         label="Repairability"
+        items={ACTIONABILITY_OPTIONS}
         selectedKey={
           filters.actionable === true
             ? "actionable"
@@ -132,19 +174,17 @@ export function RepairFilters({ filters, onChange }: RepairFiltersProps) {
                   : undefined,
           })
         }
-        items={ACTIONABILITY_OPTIONS}
-        className="w-full"
-      >
-        {(item) => <SelectItem id={item.id}>{item.label}</SelectItem>}
-      </Select>
+      />
 
       <Button
         size="sm"
         variant="ghost"
+        aria-label="Clear filters"
         isDisabled={!hasFilters}
         onPress={() => onChange({})}
+        className="text-accent data-[hovered]:text-accent"
       >
-        Clear filters
+        Clear
       </Button>
     </section>
   );
