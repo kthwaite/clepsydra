@@ -47,7 +47,7 @@ function countLabel(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
-export function planSummary(plan: ReferenceRepairPreview["plan"]): string {
+function planSummary(plan: ReferenceRepairPreview["plan"]): string {
   return `${countLabel(plan.text_edits.length, "text edit")} · ${countLabel(
     plan.file_ops.length,
     "file operation",
