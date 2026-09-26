@@ -178,7 +178,7 @@ export function AgendaRow({
           {agendaItemTitle(item)}
         </span>
       </Checkbox>
-      <span className="flex pl-6">{metaLine}</span>
+      <span className="-mt-2.5 flex pl-[26px]">{metaLine}</span>
     </div>
   );
 }
