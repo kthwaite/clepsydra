@@ -10,7 +10,47 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([]);
+/** Files still carrying Vessel chrome; phase 5.3 empties this. */
+const PENDING = new Set<string>([
+  "../../editor/elements/CodeBlockElement.tsx",
+  "../../editor/elements/CodeLangPicker.tsx",
+  "../../editor/schema/elements/table.tsx",
+  "../../editor/schema/elements/list.tsx",
+  "../../editor/schema/elements/journalTime.tsx",
+  "../../editor/elements/LinkElement.tsx",
+  "../../editor/elements/WikilinkElement.tsx",
+  "../../editor/schema/elements/footnoteDef.tsx",
+  "../../editor/schema/elements/conversationTurn.tsx",
+  "../../editor/elements/MathElement.tsx",
+  "../../editor/elements/FootnoteRefElement.tsx",
+  "../../editor/schema/elements/image.tsx",
+  "../../editor/schema/elements/thematicBreak.tsx",
+  "../../editor/elements/renderLeaf.tsx",
+  "../../editor/elements/LiveBaseTemplate.tsx",
+  "../../editor/TaskPropertyPopover.tsx",
+  "../../editor/SelectionBubbleMenu.tsx",
+  "../../editor/MissingWikilinkPopover.tsx",
+  "../../editor/WikilinkInlineEditor.tsx",
+  "../../editor/WikilinkCombobox.tsx",
+  "../../editor/SlashCombobox.tsx",
+  "../../editor/BlockRefCombobox.tsx",
+  "../../editor/vim/VimStatusBar.tsx",
+  "../codex/PreviewMarkdown.tsx",
+  "../codex/PreviewBody.tsx",
+  "../codex/LinkPreviewLayer.tsx",
+  "../codex/CLink.tsx",
+  "../codex/SheafContextMenu.tsx",
+  "../codex/JournalMeta.tsx",
+  "../codex/MeetingMeta.tsx",
+  "../codex/PersonCombo.tsx",
+  "../codex/recipe/RecipeFolioBody.tsx",
+  "../codex/RawMarkdownEditor.tsx",
+  "../codex/LockedFolio.tsx",
+  "../codex/NoteProtectionDialog.tsx",
+  "../codex/EncryptionSetupDialog.tsx",
+  "../codex/InscribeModal.tsx",
+  "../codex/CaptureAsideModal.tsx",
+]);
 
 /** Tasking board screen (phase 4.3). */
 const TASKING_FILES = [
@@ -113,6 +153,48 @@ const BASES_FILES = [
   "../../editor/elements/EmbeddedBaseTable.tsx",
 ];
 
+/** Folio and editor rest (phase 5.3). */
+const FOLIO_5_3_FILES = [
+  "../../editor/elements/CodeBlockElement.tsx",
+  "../../editor/elements/CodeLangPicker.tsx",
+  "../../editor/schema/elements/table.tsx",
+  "../../editor/schema/elements/list.tsx",
+  "../../editor/schema/elements/journalTime.tsx",
+  "../../editor/elements/LinkElement.tsx",
+  "../../editor/elements/WikilinkElement.tsx",
+  "../../editor/schema/elements/footnoteDef.tsx",
+  "../../editor/schema/elements/conversationTurn.tsx",
+  "../../editor/elements/MathElement.tsx",
+  "../../editor/elements/FootnoteRefElement.tsx",
+  "../../editor/schema/elements/image.tsx",
+  "../../editor/schema/elements/thematicBreak.tsx",
+  "../../editor/elements/renderLeaf.tsx",
+  "../../editor/elements/LiveBaseTemplate.tsx",
+  "../../editor/TaskPropertyPopover.tsx",
+  "../../editor/SelectionBubbleMenu.tsx",
+  "../../editor/MissingWikilinkPopover.tsx",
+  "../../editor/WikilinkInlineEditor.tsx",
+  "../../editor/WikilinkCombobox.tsx",
+  "../../editor/SlashCombobox.tsx",
+  "../../editor/BlockRefCombobox.tsx",
+  "../../editor/vim/VimStatusBar.tsx",
+  "../codex/PreviewMarkdown.tsx",
+  "../codex/PreviewBody.tsx",
+  "../codex/LinkPreviewLayer.tsx",
+  "../codex/CLink.tsx",
+  "../codex/SheafContextMenu.tsx",
+  "../codex/JournalMeta.tsx",
+  "../codex/MeetingMeta.tsx",
+  "../codex/PersonCombo.tsx",
+  "../codex/recipe/RecipeFolioBody.tsx",
+  "../codex/RawMarkdownEditor.tsx",
+  "../codex/LockedFolio.tsx",
+  "../codex/NoteProtectionDialog.tsx",
+  "../codex/EncryptionSetupDialog.tsx",
+  "../codex/InscribeModal.tsx",
+  "../codex/CaptureAsideModal.tsx",
+];
+
 /** Mobile companion shell (phase 4b-1). */
 const MOBILE_FILES = [
   "../codex/MobileCodexFrame.tsx",
@@ -165,6 +247,7 @@ const files = [
   ...FOLIO_FILES,
   ...BASES_FILES,
   ...MOBILE_FILES,
+  ...FOLIO_5_3_FILES,
 ].filter((f) => {
   try {
     readFileSync(path.join(uiDir, f));
