@@ -567,6 +567,21 @@ the server’s typed move operation: successful and unchanged paths are cleared
 from the selection, while failed paths remain available for correction rather
 than being presented as successful.
 
+## On a phone
+
+Below 768px wide Clepsydra becomes a reading companion.
+
+- The bottom bar has five slots: **Today**, **Agenda**, **Tasks**,
+  **Search** and **Folio**. Folio shows how many pages are open; tap it for
+  the open pages, grouped like the desktop tab row. Tap a page to read it,
+  or × to close it.
+- **Search** replaces the command palette and Contents. Below the results,
+  **Go to** chips open Gazetteer, Bases, Feeds, Academic, Constellation and
+  Rubbish; **Contents…** lists every screen.
+- The top bar holds a status dot, **New note** and **Settings**. The dot is
+  cobalt when synced, pulses while saving, and turns grey offline or red
+  when the server connection drops. Its name is read by screen readers.
+
 ## Install on iPhone and read offline
 
 Clepsydra is a Progressive Web App. Installed to the home screen it keeps
@@ -575,12 +590,12 @@ the whole vault readable without a connection.
 1. Open the vault URL in Safari (for example the tailnet address).
 2. Tap Share, then **Add to Home Screen**, then **Add**.
 3. Launch Clepsydra from the home screen once while online. The status
-   dot in the frame shows **Live**; Settings → Advanced → **Offline copy**
-   reports the page count and last sync time.
+   dot in the top bar reads **Synced**; Settings → Advanced → **Offline
+   copy** reports the page count and last sync time.
 
 Offline, pages, links, the tree, tags, journals, the board, and search all
 work from the copy. The body is read-only with an **Offline — read only**
-notice, and the status dot reads **Offline — vault as of HH:MM**. Pages
+notice, and the status dot reads **Offline since HH:MM**. Pages
 changed on the server while you were away are re-synced automatically when
 the connection returns; **Sync now** in Settings forces a full pass.
 
