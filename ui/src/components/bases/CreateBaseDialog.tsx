@@ -166,11 +166,11 @@ export function CreateBaseDialog({
         />
         <section
           aria-labelledby="base-membership-heading"
-          className="border border-border bg-card px-3 py-3"
+          className="rounded-xl bg-sink px-4 py-4"
         >
           <h3
             id="base-membership-heading"
-            className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
+            className="font-serif text-[19px] italic text-ink"
           >
             Membership
           </h3>
@@ -181,7 +181,7 @@ export function CreateBaseDialog({
               onChange={setFilter}
             />
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">
+          <p className="mt-3 text-[12.5px] text-mute">
             Default view: All · Table · Title
           </p>
         </section>

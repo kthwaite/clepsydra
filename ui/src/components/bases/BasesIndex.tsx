@@ -10,6 +10,7 @@ import {
 } from "#/api/bases";
 import { fetchClient } from "#/api/client";
 import { formatApiError, isApiConflict } from "#/api/error";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { useCopyToClipboard } from "#/hooks/useCopyToClipboard";
@@ -51,15 +52,11 @@ function BrokenBaseEntry({ diagnostic }: { diagnostic: BaseDiagnostic }) {
   const path = diagnostic.path ?? `bases/${diagnostic.slug}.base.toml`;
 
   return (
-    <article className="flex flex-wrap items-start justify-between gap-3 border-b border-border py-4">
+    <article className="flex flex-wrap items-start justify-between gap-3 rounded-xl bg-sink px-4 py-4">
       <div className="min-w-0">
-        <h3 className="font-mono text-sm font-semibold text-foreground">
-          {diagnostic.slug}
-        </h3>
-        <p className="mt-1 text-sm text-destructive">{diagnostic.message}</p>
-        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-          {path}
-        </p>
+        <h3 className="text-[14px] font-medium text-ink">{diagnostic.slug}</h3>
+        <p className="mt-1 text-[13px] text-hot">{diagnostic.message}</p>
+        <p className="mt-1 break-all text-[12.5px] text-mute">{path}</p>
       </div>
       <Button
         variant="secondary"
@@ -132,16 +129,19 @@ export function BasesIndexView({
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl p-4">
-      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-4">
+    <div className="mx-auto w-full max-w-5xl px-10 pb-10">
+      <header className="flex flex-wrap items-end justify-between gap-6 pt-10">
         <div className="max-w-2xl">
-          <p className="font-mono text-xs uppercase tracking-widest text-primary">
-            Vault registry
-          </p>
-          <h1 className="mt-2 text-2xl font-bold tracking-tight text-foreground">
+          <span className="flex items-center gap-2.5">
+            <Tick />
+            <span className="font-serif text-[19px] italic text-mute">
+              Registry
+            </span>
+          </span>
+          <h1 className="mt-2 font-serif text-[52px] leading-none tracking-[-0.015em] text-ink">
             Bases
           </h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          <p className="mt-3 max-w-xl text-[14px] leading-6 text-mute">
             Each base is a saved, non-owning view of pages. Deleting a base
             never deletes the pages or properties it describes.
           </p>
@@ -155,47 +155,42 @@ export function BasesIndexView({
       {operationError && (
         <p
           role="alert"
-          className="mt-4 border border-destructive px-3 py-2 text-sm text-destructive"
+          className="mt-6 rounded-xl bg-sink px-4 py-2.5 text-[13px] text-hot"
         >
           {operationError}
         </p>
       )}
 
       {bases.length === 0 ? (
-        <section className="border-b border-border py-10">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-foreground">
+        <section className="mt-8 rounded-xl bg-sink px-6 py-8">
+          <h2 className="font-serif text-[21px] italic text-ink">
             No saved bases
           </h2>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+          <p className="mt-2 max-w-xl text-[14px] leading-6 text-mute">
             Create a saved, non-owning view to bring related pages together
             while leaving their files and properties in place.
           </p>
         </section>
       ) : (
-        <section
-          aria-label="Saved bases"
-          className="mt-4 border-t border-border"
-        >
+        <section aria-label="Saved bases" className="mt-8 flex flex-col gap-1">
           {bases.map((base) => (
             <article
               key={base.slug}
-              className="grid gap-3 border-b border-border py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+              className="grid gap-3 rounded-xl px-4 py-4 hover:bg-sink md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <h2 className="text-base font-semibold text-foreground">
+                  <h2 className="text-[16px] font-medium text-ink">
                     {base.name}
                   </h2>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {base.slug}
-                  </span>
+                  <span className="text-[12.5px] text-mute">{base.slug}</span>
                 </div>
                 {base.description && (
-                  <p className="mt-1 text-sm text-muted-foreground">
+                  <p className="mt-1 text-[14px] text-mute">
                     {base.description}
                   </p>
                 )}
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-mute tabular-nums">
                   <span>{countLabel(base.match_count)}</span>
                   <span>
                     {base.views.length}{" "}
@@ -245,15 +240,16 @@ export function BasesIndexView({
         <section aria-labelledby="broken-bases-heading" className="mt-8">
           <h2
             id="broken-bases-heading"
-            className="text-xs font-bold uppercase tracking-widest text-warn"
+            className="flex items-center gap-2.5 font-serif text-[19px] italic text-warn"
           >
+            <Tick />
             Base files needing repair
           </h2>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-2 text-[14px] text-mute">
             These files could not be parsed. They are not shown as saved bases
             and cannot open in the structured editor.
           </p>
-          <div className="mt-3 border-t border-border">
+          <div className="mt-3 flex flex-col gap-1">
             {diagnostics.map((diagnostic, index) => (
               <BrokenBaseEntry
                 key={`${diagnostic.slug}-${diagnostic.path ?? index}`}
@@ -295,7 +291,7 @@ export function BasesIndexView({
           </>
         }
       >
-        <p className="text-sm leading-6 text-muted-foreground">
+        <p className="text-[14px] leading-6 text-mute">
           This cannot be undone. The base does not own content, so its matched
           pages and their properties remain unchanged.
         </p>
@@ -330,8 +326,8 @@ export function BasesIndex() {
 
   if (basesQuery.isPending) {
     return (
-      <div className="mx-auto max-w-5xl p-4">
-        <p role="status" className="font-mono text-xs text-muted-foreground">
+      <div className="mx-auto max-w-5xl px-10 pt-10">
+        <p role="status" className="text-[13px] text-mute">
           Loading bases…
         </p>
       </div>
@@ -340,8 +336,8 @@ export function BasesIndex() {
 
   if (queryError) {
     return (
-      <div className="mx-auto max-w-5xl p-4">
-        <p role="alert" className="text-sm text-destructive">
+      <div className="mx-auto max-w-5xl px-10 pt-10">
+        <p role="alert" className="text-[13px] text-hot">
           {formatApiError(queryError, "Bases could not be loaded.")}
         </p>
       </div>

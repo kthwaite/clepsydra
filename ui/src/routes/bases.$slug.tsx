@@ -48,7 +48,7 @@ function BasesRoute() {
     return <Outlet />;
   }
   return (
-    <div className="mx-auto max-w-5xl p-4">
+    <div className="px-10 pb-10">
       {/* Keyed by slug so view selection and sort overrides reset when
           navigating between bases (param-only navigation reuses the node). */}
       <BaseTable

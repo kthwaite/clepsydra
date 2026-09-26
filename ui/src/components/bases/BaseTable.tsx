@@ -83,15 +83,15 @@ export function BaseTable({
   const { detailLoading, detailMissing, definition, ...viewProps } = controller;
 
   if (detailLoading) {
-    return <p className="cl-mono p-4 text-[12px] text-ink-mute">Loading…</p>;
+    return <p className="p-4 text-[13px] text-mute">Loading…</p>;
   }
   if (detailMissing || !definition) {
     return (
-      <p className="cl-mono p-4 text-[12px] text-ink-mute">
+      <p className="p-4 text-[13px] text-mute">
         No base named “{slug}” (or it declares no views).
       </p>
     );
   }
 
-  return <BaseTableView definition={definition} {...viewProps} />;
+  return <BaseTableView definition={definition} screen {...viewProps} />;
 }

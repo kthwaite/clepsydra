@@ -52,6 +52,23 @@ function deferred<T>() {
 }
 
 describe("BasesIndexView", () => {
+  it("titles the registry in serif under a Registry eyebrow", () => {
+    render(
+      <BasesIndexView
+        bases={[readingLog]}
+        diagnostics={[]}
+        onCreate={vi.fn()}
+        onOpen={vi.fn()}
+        onConfigure={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Bases" }),
+    ).toHaveClass("font-serif");
+    expect(screen.getByText("Registry")).toBeVisible();
+  });
+
   it("explains non-owning bases and offers creation when empty", () => {
     render(
       <BasesIndexView

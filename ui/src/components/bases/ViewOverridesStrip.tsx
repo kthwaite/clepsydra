@@ -32,7 +32,7 @@ function Chip({ text, onRemove }: { text: string; onRemove(): void }) {
       size="sm"
       aria-label={`Remove ${text}`}
       onPress={onRemove}
-      className="cl-mono gap-1 border border-rule px-2 py-0.5 text-[10px] uppercase tracking-[0.1em]"
+      className="h-7 gap-1.5 rounded-full bg-accent-tint px-3 text-[12.5px] text-accent"
     >
       {text} <span aria-hidden="true">×</span>
     </Button>
@@ -59,7 +59,7 @@ export function ViewOverridesStrip(props: ViewOverridesStripProps) {
       <div
         role="group"
         aria-label="View overrides"
-        className="flex flex-wrap items-center gap-1 border-b border-rule pb-1"
+        className="flex flex-wrap items-center gap-1.5"
       >
         {primarySort ? (
           <Chip
@@ -110,7 +110,7 @@ export function ViewOverridesStrip(props: ViewOverridesStripProps) {
       {message ? (
         <p
           role="alert"
-          className="cl-mono flex items-center gap-2 border border-warn px-3 py-2 text-[11px] text-warn"
+          className="flex items-center gap-2 rounded-xl bg-sink px-4 py-2.5 text-[13px] text-warn"
         >
           <span>{message}</span>
           {save.phase === "conflict" ? (

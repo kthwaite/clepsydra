@@ -31,11 +31,22 @@ import type {
   QueryRow,
   SortKey,
 } from "#/api/bases";
+import { FooterControls } from "#/components/codex/FooterControls";
+import { Tick } from "#/components/codex/Tick";
 import { Button, buttonStyles } from "#/components/ui/button";
+import { Switch } from "#/components/ui/switch";
+import { useTableCompact } from "#/hooks/useTableCompact";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { ArchiveRowDialog } from "./ArchiveRowDialog";
 import { BaseHeaderMenu } from "./BaseHeaderMenu";
 import { BaseMemberDraft } from "./BaseMemberDraft";
+import {
+  FilterPicker,
+  GroupPicker,
+  type PickerColumn,
+  SortPicker,
+} from "./BasePickers";
 import {
   CellContextTrigger,
   RowActionsButton,
@@ -96,6 +107,9 @@ export interface BaseTableViewProps {
   onSortChange: (sort: SortKey[] | undefined) => void;
   onOpenPage: (path: string) => void;
   configureSlug?: string;
+  /** The standalone `/bases/$slug` screen: serif header, Compact switch,
+   *  view pickers and footer context. Embeds never set it. */
+  screen?: boolean;
   /** Compact folds the Base chrome into one toolbar for an embedded view. */
   chrome?: "full" | "compact";
   /** Controls owned by the surface hosting the table, shown in its toolbar. */
@@ -225,7 +239,10 @@ function BodyExcerptCell({
     <button
       type="button"
       aria-label={`Open body excerpt for ${pageLabel} in Folio`}
-      className="cl-mono block w-full min-w-0 cursor-pointer truncate px-1 py-0.5 text-left text-[12px] text-ink-2 underline-offset-2 hover:text-accent hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring text-wrap"
+      className={cn(
+        "block w-full min-w-0 cursor-pointer truncate rounded-md px-1 py-0.5 text-left text-mute hover:text-accent text-wrap",
+        FOCUS_RING_NATIVE,
+      )}
       onClick={() => onOpenPage(path)}
     >
       {value}
@@ -270,7 +287,7 @@ function AggregateChips({
         return (
           <span
             key={aggregateRow?.id ?? label}
-            className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
+            className="inline-flex h-6 items-center gap-1.5 rounded-full bg-sink px-2.5 text-[12px] text-ink-2 tabular-nums"
           >
             {label} {formatCellValue(value as CellValue)}
           </span>
@@ -357,6 +374,7 @@ export const BaseTableView = forwardRef<
     onOpenPage,
     configureSlug,
     chrome = "full",
+    screen = false,
     toolbarActions,
     rowWindow,
     onCommitCell,
@@ -397,6 +415,9 @@ export const BaseTableView = forwardRef<
   ref,
 ) {
   const compact = chrome === "compact";
+  // Embeds are always dense (user ruling); the screen follows its switch.
+  const [compactRows, setCompactRows] = useTableCompact("bases", false);
+  const dense = !screen || compactRows;
   const equivalentActiveView = asciiCaseFold(activeView);
   const view = definition.views?.find(
     (candidate) => asciiCaseFold(candidate.name) === equivalentActiveView,
@@ -475,6 +496,33 @@ export const BaseTableView = forwardRef<
     SYSTEM_COLUMNS[column] !== undefined
       ? GROUPABLE_SYSTEM[column] === true
       : canGroup(properties.get(column)?.type);
+  const columnAllowsSorting = (column: string) => {
+    const property = properties.get(column);
+    return (
+      !readOnly &&
+      (SYSTEM_COLUMNS[column] !== undefined
+        ? SYSTEM_COLUMNS[column]
+        : property != null && canSort(property.type))
+    );
+  };
+  /** One source for the header `⋯` menus and the view-bar pickers. */
+  const pickerColumn = (column: string): PickerColumn => {
+    const property = properties.get(column);
+    const label = displayLabelForColumn(column);
+    return {
+      column,
+      label,
+      allowsSorting: columnAllowsSorting(column),
+      groupable: groupableColumn(column),
+      presets: headerFilterPresets(
+        column,
+        quickFilterType(column, property),
+        property,
+        label,
+      ),
+      optionOverflow: headerOptionOverflow(property),
+    };
+  };
   const [activeCell, setActiveCell] = useState<ActiveCell | null>(null);
   const activeViewIdentityRef = useRef(equivalentActiveView);
   const nextForwardFocusToken = useRef(0);
@@ -852,6 +900,7 @@ export const BaseTableView = forwardRef<
     <Table
       key={cacheIdentity}
       aria-label={label}
+      data-density={dense ? "compact" : "comfortable"}
       sortDescriptor={readOnly ? undefined : sortDescriptor}
       onSortChange={
         readOnly
@@ -864,16 +913,17 @@ export const BaseTableView = forwardRef<
                 },
               ])
       }
-      className="w-full border-collapse"
+      className={cn(
+        "w-full border-collapse",
+        dense
+          ? "text-[12.5px] [--title:13.5px]"
+          : "text-[13px] [--title:14.5px]",
+      )}
     >
       <TableHeader>
         {visibleColumns.map((column) => {
-          const property = properties.get(column);
-          const allowsSorting =
-            !readOnly &&
-            (SYSTEM_COLUMNS[column] !== undefined
-              ? SYSTEM_COLUMNS[column]
-              : property != null && canSort(property.type));
+          const capability = pickerColumn(column);
+          const allowsSorting = capability.allowsSorting;
           return (
             <Column
               key={column}
@@ -881,10 +931,11 @@ export const BaseTableView = forwardRef<
               isRowHeader={column === visibleColumns[0]}
               allowsSorting={allowsSorting}
               className={cn(
-                "cl-mono border-b border-rule px-1 py-1 text-left text-[10px] uppercase tracking-[0.12em] text-ink-mute",
+                "px-3 text-left text-[12.5px] font-normal text-mute",
+                dense ? "h-[34px]" : "h-10",
                 allowsSorting && "cursor-pointer data-[hovered]:text-ink",
                 // The scroller moves the rows under the header, not past it.
-                compact && "sticky top-0 z-[1] bg-paper",
+                compact && "sticky top-0 z-[1] bg-ground",
               )}
             >
               {({ sortDirection }) => {
@@ -894,7 +945,7 @@ export const BaseTableView = forwardRef<
                     {label}
                     {sortDirection && (
                       <span aria-hidden="true">
-                        {sortDirection === "ascending" ? "▲" : "▼"}
+                        {sortDirection === "ascending" ? "↑" : "↓"}
                       </span>
                     )}
                   </span>
@@ -905,18 +956,11 @@ export const BaseTableView = forwardRef<
                     column={column}
                     label={label}
                     allowsSorting={allowsSorting}
-                    groupable={groupableColumn(column)}
+                    groupable={capability.groupable}
                     groupedByThis={effectiveGroup === column}
                     hideable={column !== "title" && visibleColumns.length > 1}
-                    presets={headerFilterPresets(
-                      column,
-                      quickFilterType(column, properties.get(column)),
-                      properties.get(column),
-                      label,
-                    )}
-                    optionOverflow={headerOptionOverflow(
-                      properties.get(column),
-                    )}
+                    presets={capability.presets}
+                    optionOverflow={capability.optionOverflow}
                     onSortChange={onSortChange}
                     onAddQuickFilter={onAddQuickFilter ?? noop}
                     onSetGroup={onSetGroup ?? noop}
@@ -948,12 +992,18 @@ export const BaseTableView = forwardRef<
         {(row) => (
           <Row
             id={row.id}
-            className="group border-b border-rule/50 data-[hovered]:bg-highlight"
+            className={cn(
+              "group data-[hovered]:*:bg-sink",
+              dense ? "h-8" : "h-[42px]",
+            )}
           >
             {visibleColumns.map((column) => {
               const property = properties.get(column);
               return (
-                <Cell key={column} className="px-1 py-0.5 align-top">
+                <Cell
+                  key={column}
+                  className="px-3 align-middle first:rounded-l-[10px] last:rounded-r-[10px]"
+                >
                   {/* One menu serves the row; each cell forwards its context
                     events to the `⋯` button that owns it. */}
                   <div className="flex min-w-0 items-center">
@@ -964,7 +1014,7 @@ export const BaseTableView = forwardRef<
                     >
                       {column === "title" ? (
                         readOnly || memberDraftOpen ? (
-                          <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink">
+                          <span className="block truncate px-1 py-0.5 text-[length:var(--title)] font-medium text-ink">
                             {row.title ?? row.path}
                           </span>
                         ) : (
@@ -980,7 +1030,10 @@ export const BaseTableView = forwardRef<
                             }
                             type="button"
                             data-row-title={String(row.id)}
-                            className="cl-mono cursor-pointer truncate text-left text-[12px] text-ink underline-offset-2 hover:text-accent hover:underline"
+                            className={cn(
+                              "cursor-pointer truncate rounded-md text-left text-[length:var(--title)] font-medium text-ink hover:text-accent",
+                              FOCUS_RING_NATIVE,
+                            )}
                             onClick={() => onOpenPage(row.path)}
                           >
                             {row.title ?? row.path}
@@ -1072,7 +1125,7 @@ export const BaseTableView = forwardRef<
                         />
                       ) : (
                         // System fields and undeclared keys are read-only.
-                        <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink-2">
+                        <span className="block truncate px-1 py-0.5 text-mute tabular-nums">
                           {formatCellValue(
                             (row.columns as Record<string, CellValue>)[
                               column
@@ -1189,6 +1242,127 @@ export const BaseTableView = forwardRef<
     rowWindow.loadMore();
   }, [rowWindow]);
 
+  const rowCount =
+    output?.shape === "flat"
+      ? output.total
+      : output?.shape === "grouped"
+        ? output.groups.reduce((n, g) => n + g.total, 0)
+        : undefined;
+  const rowCountLabel =
+    rowCount === undefined
+      ? undefined
+      : `${rowCount.toLocaleString("en-US")} ${rowCount === 1 ? "row" : "rows"}`;
+  const viewTabClass = (active: boolean) =>
+    cn(
+      "relative flex items-center px-0.5 text-[13.5px]",
+      screen ? "h-11" : "h-8",
+      active
+        ? "font-medium text-ink after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent"
+        : "text-mute hover:text-ink",
+    );
+  const viewsNav = (
+    <nav aria-label="Views" className="flex flex-wrap items-stretch gap-x-5">
+      {(definition.views ?? []).map((v) =>
+        readOnly ? (
+          <span
+            key={v.name}
+            className={viewTabClass(
+              asciiCaseFold(v.name) === equivalentActiveView,
+            )}
+          >
+            {v.name}
+          </span>
+        ) : (
+          <button
+            ref={
+              asciiCaseFold(v.name) === equivalentActiveView
+                ? activeViewControlRef
+                : undefined
+            }
+            key={v.name}
+            type="button"
+            className={cn(
+              viewTabClass(asciiCaseFold(v.name) === equivalentActiveView),
+              "cursor-pointer",
+              FOCUS_RING_NATIVE,
+            )}
+            aria-current={
+              asciiCaseFold(v.name) === equivalentActiveView
+                ? "page"
+                : undefined
+            }
+            onClick={() => onViewChange(v.name)}
+          >
+            {v.name}
+          </button>
+        ),
+      )}
+    </nav>
+  );
+  const collapseAll =
+    groups && groups.length > 0 ? (
+      <Button
+        variant="ghost"
+        size="sm"
+        onPress={() =>
+          anyGroupExpanded
+            ? groupCollapse.collapseAll(groupIdentities)
+            : groupCollapse.expandAll()
+        }
+      >
+        {anyGroupExpanded ? "Collapse all" : "Expand all"}
+      </Button>
+    ) : null;
+  const fieldsPopover =
+    !readOnly && onHideColumn && onShowColumn ? (
+      <FieldsPopover
+        columns={columns}
+        hidden={hiddenColumns}
+        labelFor={displayLabelForColumn}
+        onHideColumn={onHideColumn}
+        onShowColumn={onShowColumn}
+        onShowAll={onShowHiddenColumns ?? noop}
+      />
+    ) : null;
+  const configureLink = !readOnly && configureSlug && (
+    <Link
+      to="/bases/$slug/edit"
+      params={{ slug: configureSlug }}
+      className={buttonStyles(
+        "secondary",
+        "sm",
+        screen ? undefined : "ml-auto",
+      )}
+      aria-label={`Configure ${definition.name}`}
+    >
+      <Settings aria-hidden="true" className="h-3.5 w-3.5" />
+      Configure
+    </Link>
+  );
+  const addMemberButton = (variant: "primary" | "secondary") =>
+    !readOnly ? (
+      <>
+        {/* Reset React Aria's press responder after an in-flight operation. */}
+        <Button
+          key={memberSaving ? "add-busy" : "add-ready"}
+          variant={variant}
+          size="sm"
+          className={screen || configureSlug ? undefined : "ml-auto"}
+          isDisabled={memberAddDisabled}
+          aria-describedby={memberBlocker ? memberBlockerId : undefined}
+          onPress={onAddMember}
+        >
+          Add member
+        </Button>
+        {memberBlocker ? (
+          <span id={memberBlockerId} className="sr-only">
+            {memberBlocker}
+          </span>
+        ) : null}
+      </>
+    ) : null;
+  const pickerColumns = columns.map(pickerColumn);
+
   return (
     <section
       ref={viewRootRef}
@@ -1196,121 +1370,110 @@ export const BaseTableView = forwardRef<
       tabIndex={-1}
       className="flex flex-col gap-3"
     >
-      <div
-        className={cn(
-          "flex flex-wrap items-center border-b border-rule",
-          compact ? "gap-2 pb-1.5" : "gap-3 pb-2",
-        )}
-      >
-        {compact ? (
-          // An embed sits inside someone else's document: naming the Base is
-          // still needed, claiming a heading level is not.
-          <p className="cl-mono truncate text-[11px] uppercase tracking-[0.14em] text-ink">
-            {definition.name}
-          </p>
-        ) : (
-          <h1 className="cl-mono text-[13px] uppercase tracking-[0.14em] text-ink">
-            {definition.name}
-          </h1>
-        )}
-        <nav aria-label="Views" className="flex flex-wrap gap-1">
-          {(definition.views ?? []).map((v) =>
-            readOnly ? (
-              <span
-                key={v.name}
-                className={cn(
-                  "cl-mono border px-2 py-0.5 text-[11px] uppercase tracking-[0.08em]",
-                  asciiCaseFold(v.name) === equivalentActiveView
-                    ? "border-accent text-accent"
-                    : "border-rule text-ink-mute",
-                )}
-              >
-                {v.name}
+      {screen ? (
+        <>
+          <header
+            className={cn(
+              "flex flex-wrap items-end gap-x-7 gap-y-4",
+              dense ? "pt-7" : "pt-10",
+            )}
+          >
+            <div className="flex flex-col gap-2">
+              <span className="flex items-center gap-2.5">
+                <Tick />
+                <span className="font-serif text-[19px] italic text-mute">
+                  Base
+                </span>
               </span>
-            ) : (
-              <button
-                ref={
-                  asciiCaseFold(v.name) === equivalentActiveView
-                    ? activeViewControlRef
-                    : undefined
-                }
-                key={v.name}
-                type="button"
+              <h1
                 className={cn(
-                  "cl-mono border px-2 py-0.5 text-[11px] uppercase tracking-[0.08em] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                  asciiCaseFold(v.name) === equivalentActiveView
-                    ? "border-accent text-accent"
-                    : "border-rule text-ink-mute hover:text-ink",
+                  "font-serif leading-none tracking-[-0.015em] text-ink",
+                  dense ? "text-[44px]" : "text-[52px]",
                 )}
-                aria-current={
-                  asciiCaseFold(v.name) === equivalentActiveView
-                    ? "page"
-                    : undefined
-                }
-                onClick={() => onViewChange(v.name)}
               >
-                {v.name}
-              </button>
-            ),
-          )}
-        </nav>
-        {groups && groups.length > 0 ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onPress={() =>
-              anyGroupExpanded
-                ? groupCollapse.collapseAll(groupIdentities)
-                : groupCollapse.expandAll()
-            }
-          >
-            {anyGroupExpanded ? "Collapse all" : "Expand all"}
-          </Button>
-        ) : null}
-        {!readOnly && onHideColumn && onShowColumn ? (
-          <FieldsPopover
-            columns={columns}
-            hidden={hiddenColumns}
-            labelFor={displayLabelForColumn}
-            onHideColumn={onHideColumn}
-            onShowColumn={onShowColumn}
-            onShowAll={onShowHiddenColumns ?? noop}
-          />
-        ) : null}
-        {!readOnly && configureSlug && (
-          <Link
-            to="/bases/$slug/edit"
-            params={{ slug: configureSlug }}
-            className={buttonStyles("secondary", "sm", "ml-auto")}
-            aria-label={`Configure ${definition.name}`}
-          >
-            <Settings aria-hidden="true" className="h-3.5 w-3.5" />
-            Configure
-          </Link>
-        )}
-        {!readOnly ? (
-          <>
-            {/* Reset React Aria's press responder after an in-flight operation. */}
-            <Button
-              key={memberSaving ? "add-busy" : "add-ready"}
-              variant="secondary"
-              size="sm"
-              className={configureSlug ? undefined : "ml-auto"}
-              isDisabled={memberAddDisabled}
-              aria-describedby={memberBlocker ? memberBlockerId : undefined}
-              onPress={onAddMember}
-            >
-              Add member
-            </Button>
-            {memberBlocker ? (
-              <span id={memberBlockerId} className="sr-only">
-                {memberBlocker}
+                {definition.name}
+              </h1>
+            </div>
+            {rowCountLabel ? (
+              <span className="pb-1.5 text-[14px] text-mute">
+                {rowCountLabel}
               </span>
             ) : null}
-          </>
-        ) : null}
-        {toolbarActions}
-      </div>
+            <div className="flex-1" />
+            <Switch isSelected={compactRows} onChange={setCompactRows}>
+              Compact
+            </Switch>
+            {configureLink}
+            {addMemberButton("primary")}
+            {toolbarActions}
+          </header>
+          <div className="flex min-h-11 flex-wrap items-stretch gap-x-6 gap-y-2">
+            {viewsNav}
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              {!readOnly ? (
+                <>
+                  <FilterPicker
+                    columns={pickerColumns}
+                    activeCount={overrides.quickFilters.length}
+                    onAddQuickFilter={onAddQuickFilter ?? noop}
+                  />
+                  <SortPicker
+                    columns={pickerColumns}
+                    sort={sort?.[0] ?? view?.sort?.[0]}
+                    overridden={sort !== undefined}
+                    onSortChange={onSortChange}
+                  />
+                  <GroupPicker
+                    columns={pickerColumns}
+                    group={effectiveGroup}
+                    savedGroup={view?.group_by ?? undefined}
+                    overridden={overrides.group !== undefined}
+                    onSetGroup={onSetGroup ?? noop}
+                  />
+                </>
+              ) : null}
+              {fieldsPopover}
+              {collapseAll}
+            </div>
+          </div>
+          <FooterControls>
+            <span>{`bases/${definition.slug}.base.toml`}</span>
+            {rowCountLabel ? (
+              <>
+                <span aria-hidden className="text-faint">
+                  ·
+                </span>
+                <span>{rowCountLabel}</span>
+              </>
+            ) : null}
+          </FooterControls>
+        </>
+      ) : (
+        <div
+          className={cn(
+            "flex flex-wrap items-center",
+            compact ? "gap-2 pb-1.5" : "gap-3 pb-2",
+          )}
+        >
+          {compact ? (
+            // An embed sits inside someone else's document: naming the Base is
+            // still needed, claiming a heading level is not.
+            <p className="truncate text-[13px] font-medium text-ink">
+              {definition.name}
+            </p>
+          ) : (
+            <h1 className="text-[15px] font-medium text-ink">
+              {definition.name}
+            </h1>
+          )}
+          {viewsNav}
+          {collapseAll}
+          {fieldsPopover}
+          {configureLink}
+          {addMemberButton("secondary")}
+          {toolbarActions}
+        </div>
+      )}
       <ViewOverridesStrip
         sort={sort}
         overrides={overrides}
@@ -1343,7 +1506,7 @@ export const BaseTableView = forwardRef<
       {memberNotice ? (
         <p
           role="status"
-          className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-2"
+          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-mute"
         >
           {memberNotice}
         </p>
@@ -1352,7 +1515,7 @@ export const BaseTableView = forwardRef<
       {viewError ? (
         <p
           role="alert"
-          className="cl-mono border border-warn px-3 py-2 text-[11px] text-warn"
+          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-warn"
         >
           View failed: {viewError}
         </p>
@@ -1360,7 +1523,7 @@ export const BaseTableView = forwardRef<
       {rowActionError ? (
         <p
           role="alert"
-          className="cl-mono border border-warn px-3 py-2 text-[11px] text-warn"
+          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-warn"
         >
           {rowActionError}
         </p>
@@ -1369,7 +1532,7 @@ export const BaseTableView = forwardRef<
         <p
           role="status"
           aria-label="View loading"
-          className="cl-mono px-1 py-2 text-[11px] text-ink-mute"
+          className="px-1 py-2 text-[13px] text-mute"
         >
           Loading…
         </p>
@@ -1378,7 +1541,7 @@ export const BaseTableView = forwardRef<
         <p
           role="status"
           aria-label={compact ? "Result window" : "Result limit"}
-          className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-2"
+          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-mute"
         >
           {capStatus}
         </p>
@@ -1387,7 +1550,7 @@ export const BaseTableView = forwardRef<
         <p
           role="status"
           aria-label="Empty view"
-          className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-mute"
+          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-mute"
         >
           No pages match this view.
         </p>
@@ -1400,7 +1563,7 @@ export const BaseTableView = forwardRef<
             onApproachEnd={approachEnd}
           >
             {groups ? (
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1">
                 {groups.map((group, index) => {
                   const key =
                     group.key == null
@@ -1412,29 +1575,37 @@ export const BaseTableView = forwardRef<
                   const panelId = `${groupPanelIdBase}-group-${index}`;
                   return (
                     <section key={cacheIdentity}>
-                      <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
+                      <header
+                        className={cn(
+                          "flex flex-wrap items-center gap-3",
+                          dense ? "pt-3 pb-1" : "pt-5 pb-1",
+                        )}
+                      >
                         <Button
                           variant="ghost"
                           size="sm"
                           aria-expanded={expanded}
                           aria-controls={panelId}
                           onPress={() => groupCollapse.toggle(identity)}
-                          className="cl-mono h-auto gap-1 px-1 py-0 font-normal text-[12px] uppercase tracking-[0.1em] text-ink"
+                          className={cn(
+                            "h-auto gap-2 px-1 py-0 font-serif font-normal italic text-ink",
+                            dense ? "text-[18px]" : "text-[21px]",
+                          )}
                         >
                           {expanded ? (
                             <ChevronDown
                               aria-hidden="true"
-                              className="h-3 w-3"
+                              className="h-4 w-4 text-mute"
                             />
                           ) : (
                             <ChevronRight
                               aria-hidden="true"
-                              className="h-3 w-3"
+                              className="h-4 w-4 text-mute"
                             />
                           )}
                           {key}
                         </Button>
-                        <span className="cl-mono text-[10px] text-ink-mute">
+                        <span className="text-[12.5px] text-mute tabular-nums">
                           {group.rows.length < group.total
                             ? `${group.rows.length} of ${group.total} rows`
                             : `${group.total} row${group.total === 1 ? "" : "s"}`}
@@ -1472,11 +1643,9 @@ export const BaseTableView = forwardRef<
             <footer
               role="group"
               aria-label="Totals"
-              className="mt-1 flex flex-wrap items-baseline gap-2 border-t border-rule pt-1"
+              className="mt-2 flex flex-wrap items-center gap-2"
             >
-              <span className="cl-mono text-[10px] uppercase tracking-[0.1em] text-ink-mute">
-                Totals
-              </span>
+              <span className="text-[12.5px] text-mute">Totals</span>
               <AggregateChips
                 values={output.aggregates}
                 definition={definition}
@@ -1493,7 +1662,7 @@ export const BaseTableView = forwardRef<
           // The row reads as "+ Add member…"; its name stays plain for
           // assistive technology and matches the toolbar action.
           aria-label={`Add member to ${definition.name}`}
-          className="cl-mono w-full justify-start border border-dashed border-rule px-2 py-1.5 text-[11px] text-ink-mute hover:text-ink"
+          className="w-full justify-start rounded-[10px] px-3 text-[13px] text-mute hover:text-ink"
           isDisabled={memberAddDisabled}
           aria-describedby={memberBlocker ? memberBlockerId : undefined}
           onPress={onAddMember}
