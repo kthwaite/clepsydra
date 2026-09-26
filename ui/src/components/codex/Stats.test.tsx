@@ -115,10 +115,10 @@ describe("Stats", () => {
       ["Unresolved", "12"],
       ["Orphans", "3"],
       ["Isolated", "2"],
-      ["Attach", "44"],
-      ["Captures · today", "0"],
-      ["Edited · today", "0"],
-      ["New · 7d", "0"],
+      ["Attachments", "44"],
+      ["Captured today", "0"],
+      ["Edited today", "0"],
+      ["New this week", "0"],
       ["Unfiled", "1"],
     ]) {
       expectInventoryCell(inventory, label, value);

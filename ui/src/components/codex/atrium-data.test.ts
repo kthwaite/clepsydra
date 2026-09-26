@@ -217,9 +217,9 @@ describe("deriveInventory", () => {
   it("derives today/7d cells from item timestamps", () => {
     const cells = deriveInventory(stats, tags, items, now);
     const byLabel = Object.fromEntries(cells.map((c) => [c.label, c]));
-    expect(byLabel["Captures · today"].value).toBe("1"); // created 05-02
-    expect(byLabel["Edited · today"].value).toBe("2"); // updated 05-02 x2
-    expect(byLabel["New · 7d"].value).toBe("2"); // created 05-02 and 04-29
+    expect(byLabel["Captured today"].value).toBe("1"); // created 05-02
+    expect(byLabel["Edited today"].value).toBe("2"); // updated 05-02 x2
+    expect(byLabel["New this week"].value).toBe("2"); // created 05-02 and 04-29
     expect(byLabel.Unfiled.value).toBe("1"); // one item with no tags
   });
 
@@ -227,7 +227,7 @@ describe("deriveInventory", () => {
     const cells = deriveInventory(undefined, undefined, items, now);
     const labels = cells.map((c) => c.label);
     expect(labels).not.toContain("Notes");
-    expect(labels).toContain("Captures · today");
+    expect(labels).toContain("Captured today");
   });
 });
 

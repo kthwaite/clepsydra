@@ -244,7 +244,7 @@ export function deriveInventory(
       sub: "no links in or out",
     });
     cells.push({
-      label: "Attach",
+      label: "Attachments",
       value: n(stats.attachments),
       sub: "files",
     });
@@ -264,9 +264,9 @@ export function deriveInventory(
     if (!it.tags || it.tags.length === 0) unfiled += 1;
   }
 
-  cells.push({ label: "Captures · today", value: n(capturesToday) });
-  cells.push({ label: "Edited · today", value: n(editedToday) });
-  cells.push({ label: "New · 7d", value: n(new7d), sub: `+${new7d} / 7d` });
+  cells.push({ label: "Captured today", value: n(capturesToday) });
+  cells.push({ label: "Edited today", value: n(editedToday) });
+  cells.push({ label: "New this week", value: n(new7d) });
   cells.push({
     label: "Unfiled",
     value: n(unfiled),
