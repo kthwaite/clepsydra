@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
  *  observer continuously; callers key queries on the result). */
 export function useElementHeight<T extends HTMLElement>(
   debounceMs = 150,
-): [(node: T | null) => void, number | null] {
+): [(node: T | null) => void, number | null, () => void] {
   const [element, setElement] = useState<T | null>(null);
   const [height, setHeight] = useState<number | null>(null);
 
@@ -13,6 +13,11 @@ export function useElementHeight<T extends HTMLElement>(
     setElement(node);
     if (node) setHeight(node.getBoundingClientRect().height);
   }, []);
+
+  /** Measure now, skipping the debounce (a known layout change). */
+  const remeasure = useCallback(() => {
+    if (element) setHeight(element.getBoundingClientRect().height);
+  }, [element]);
 
   useEffect(() => {
     if (!element || typeof ResizeObserver === "undefined") return;
@@ -31,5 +36,5 @@ export function useElementHeight<T extends HTMLElement>(
     };
   }, [element, debounceMs]);
 
-  return [ref, height];
+  return [ref, height, remeasure];
 }

@@ -49,4 +49,18 @@ describe("useElementHeight", () => {
     act(() => vi.advanceTimersByTime(60));
     expect(seen.at(-1)).toBe(500);
   });
+
+  it("re-measures at once on request, skipping the debounce", () => {
+    let api: [unknown, number | null, () => void] | undefined;
+    function Remeasure() {
+      const [ref, h, remeasure] = useElementHeight<HTMLDivElement>();
+      api = [ref, h, remeasure];
+      return <div ref={ref} />;
+    }
+    height = 300;
+    render(<Remeasure />);
+    height = 420;
+    act(() => api?.[2]());
+    expect(api?.[1]).toBe(420);
+  });
 });

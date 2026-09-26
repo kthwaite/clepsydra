@@ -13,7 +13,7 @@ const { content, useContentIndexMock, heightState } = vi.hoisted(() => ({
     isSuccess: true,
   },
   useContentIndexMock: vi.fn(),
-  heightState: { value: 0 as number | null },
+  heightState: { value: 0 as number | null, next: null as number | null },
 }));
 
 vi.mock("#/api/index", () => ({
@@ -38,7 +38,13 @@ vi.mock("#/lib/useProjects", () => ({
   useProjectValues: () => ["atlas"],
 }));
 vi.mock("#/hooks/useElementHeight", () => ({
-  useElementHeight: () => [() => {}, heightState.value],
+  useElementHeight: () => [
+    () => {},
+    heightState.value,
+    () => {
+      if (heightState.next !== null) heightState.value = heightState.next;
+    },
+  ],
 }));
 
 function entry(i: number) {
@@ -68,6 +74,7 @@ function makeFilters(over: Partial<GazetteerFilters> = {}): GazetteerFilters {
 beforeEach(() => {
   localStorage.clear();
   heightState.value = 0;
+  heightState.next = null;
   content.data = {
     items: Array.from({ length: 20 }, (_, i) => entry(i)),
     total: 45,
@@ -211,6 +218,51 @@ describe("Gazetteer table (desktop)", () => {
     expect(sevenRowCalls.length).toBeGreaterThan(0);
     // Page 5 of 7-row pages; never page 4 (offset 21) at the new size.
     for (const options of sevenRowCalls) expect(options.offset).toBe(28);
+  });
+
+  it("re-sizes pages once per Compact toggle, after the header settles", async () => {
+    heightState.value = COMPACT_10;
+    // Comfortable spacing grows the header by 40px: 328px holds six
+    // comfortable rows; the stale 368px would claim seven.
+    heightState.next = COMPACT_10 - 40;
+    const onPageChange = vi.fn();
+    render(<Gazetteer filters={makeFilters({ onPageChange })} />);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("switch", { name: "Compact" }));
+    const limits = useContentIndexMock.mock.calls.map(
+      ([options]) => (options as { limit: number }).limit,
+    );
+    expect(limits).not.toContain(7);
+    expect(limits.at(-1)).toBe(6);
+  });
+
+  it("announces the row range when the page changes", () => {
+    heightState.value = COMPACT_10;
+    content.data = {
+      items: Array.from({ length: 10 }, (_, i) => entry(i)),
+      total: 45,
+    };
+    render(
+      <>
+        <Gazetteer filters={makeFilters()} />
+        <FooterControlsHost />
+      </>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("1–10 of 45");
+  });
+
+  it("does not clamp the page against placeholder data", () => {
+    heightState.value = COMPACT_10;
+    const onPageChange = vi.fn();
+    content.data = { items: [], total: 0 };
+    (content as { isPlaceholderData?: boolean }).isPlaceholderData = true;
+    try {
+      render(<Gazetteer filters={makeFilters({ page: 4, onPageChange })} />);
+      expect(onPageChange).not.toHaveBeenCalled();
+    } finally {
+      (content as { isPlaceholderData?: boolean }).isPlaceholderData = false;
+    }
   });
 
   it("numbers rows from the page's first row", () => {

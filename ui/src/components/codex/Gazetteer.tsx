@@ -115,10 +115,19 @@ export function Gazetteer({ initialTag, filters }: Props) {
   const tags = tagsQuery.data ?? [];
   const requestedPage = Math.max(1, Math.floor(page));
   const isMobile = useMobileLayout();
-  const [tableRef, tableHeight] = useElementHeight<HTMLDivElement>();
+  const [tableRef, tableHeight, remeasure] = useElementHeight<HTMLDivElement>();
+  // The density the page size was sized for. Compact also resizes the
+  // header, so a toggle re-measures before the page size follows it:
+  // one resize, not a stale size and then the settled one.
+  const [sizedCompact, setSizedCompact] = useState(compact);
+  useLayoutEffect(() => {
+    if (sizedCompact === compact) return;
+    remeasure();
+    setSizedCompact(compact);
+  }, [compact, sizedCompact, remeasure]);
   const pageSize = isMobile
     ? MOBILE_GAZETTEER_PAGE_SIZE
-    : rowsThatFit(tableHeight ?? 0, compact);
+    : rowsThatFit(tableHeight ?? 0, sizedCompact);
   // Desktop waits one layout pass for the table's height so the first fetch
   // already has the right page size.
   const measured = isMobile || tableHeight !== null;
@@ -206,9 +215,21 @@ export function Gazetteer({ initialTag, filters }: Props) {
   }, [currentPage, filters, pageSize, rowsForPage]);
 
   useLayoutEffect(() => {
-    if (measured && contentQuery.isSuccess && currentPage !== page)
+    if (
+      measured &&
+      contentQuery.isSuccess &&
+      !contentQuery.isPlaceholderData &&
+      currentPage !== page
+    )
       setPage(currentPage, true);
-  }, [measured, contentQuery.isSuccess, currentPage, page, setPage]);
+  }, [
+    measured,
+    contentQuery.isSuccess,
+    contentQuery.isPlaceholderData,
+    currentPage,
+    page,
+    setPage,
+  ]);
 
   useLayoutEffect(() => {
     if (isMobile || !measured) return;
@@ -624,7 +645,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
         )}
       </div>
       <FooterControls>
-        <span>
+        <span role="status">
           {rangeLabel(currentPage, pageSize, rows.length, filteredCount)}
         </span>
         <nav

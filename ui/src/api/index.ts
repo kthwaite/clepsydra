@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   type QueryClient,
   type UseMutationResult,
   type UseQueryResult,
@@ -412,7 +413,9 @@ export function useContentIndex(
     "get",
     "/api/vault/index/content-index",
     { params: { query } },
-    { enabled },
+    // A new page or page size keeps the old rows up until the new ones land,
+    // rather than flashing an empty table.
+    { enabled, placeholderData: keepPreviousData },
   );
 }
 
