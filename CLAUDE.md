@@ -57,7 +57,7 @@ The OpenAPI spec is the typed bridge between backend and frontend: utoipa annota
 
 ### Frontend
 
-UI conventions — stack, path alias, editor (Slate) architecture, the Vessel design language, and TypeScript code style — live in `ui/CLAUDE.md`, which loads automatically when working under `ui/`.
+UI conventions — stack, path alias, editor (Slate) architecture, the Stone & Lamp design language, and TypeScript code style — live in `ui/CLAUDE.md`, which loads automatically when working under `ui/`.
 
 ## Code Style
 
