@@ -3,6 +3,7 @@ import {
   dayOfYear,
   formatAbsoluteDate,
   formatClock,
+  formatDayMonth,
   formatDurationHM,
   formatRelativeTime,
   formatTimeHM,
@@ -153,5 +154,16 @@ describe("formatAbsoluteDate", () => {
     expect(out).toMatch(/2026/);
     // Full month name should be "April" (not "Apr") in en-* locales; allow either by checking it's not numeric.
     expect(out).not.toMatch(/^\d+\/\d+\/\d+$/);
+  });
+});
+
+describe("formatDayMonth", () => {
+  it("formats an ISO day with fixed English short months", () => {
+    expect(formatDayMonth("2026-09-21")).toBe("21 Sep");
+    expect(formatDayMonth("2026-10-04")).toBe("4 Oct");
+  });
+
+  it("returns anything that is not an ISO day unchanged", () => {
+    expect(formatDayMonth("soon")).toBe("soon");
   });
 });

@@ -424,9 +424,9 @@ describe("CycleView — header", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders window as MM.DD — MM.DD", () => {
+  it("renders the window as day and short month", () => {
     renderCycleView(ACTIVE_CYCLE, []);
-    expect(screen.getByText(/05\.26 — 06\.08/)).toBeInTheDocument();
+    expect(screen.getByText(/26 May – 8 Jun/)).toBeInTheDocument();
   });
 
   it("renders canonical Backlog copy without retired scheduling language", () => {

@@ -23,6 +23,7 @@ import { useMemo } from "react";
 import type { BoardCycle, BoardTask } from "#/api/board";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { formatDayMonth } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import { Tick } from "../codex/Tick";
 import {
@@ -89,19 +90,9 @@ function tlBandFill(state: string): string {
   return "bg-raise"; // PLANNED (and any other state)
 }
 
-/** ISO day → "26 May". */
-function fmtDay(iso: string): string {
-  const ms = parseDay(iso);
-  if (ms === null) return iso;
-  return new Date(ms).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  });
-}
-
 function bandWhen(c: BoardCycle): string {
-  if (c.start) return fmtDay(c.start);
-  if (c.end) return `to ${fmtDay(c.end)}`;
+  if (c.start) return formatDayMonth(c.start);
+  if (c.end) return `to ${formatDayMonth(c.end)}`;
   return "";
 }
 

@@ -83,6 +83,13 @@ describe("Task Board display vocabulary", () => {
     expect(onChange).toHaveBeenCalledWith("P0");
   });
 
+  it("formats a Cycle window as day and short month", () => {
+    expect(fmtCycleWindow("2026-09-21", "2026-10-04")).toBe("21 Sep – 4 Oct");
+    expect(fmtCycleWindow("2026-09-14", "2026-09-27")).toBe("14–27 Sep");
+    expect(fmtCycleWindow("2026-09-14", null)).toBe("From 14 Sep");
+    expect(fmtCycleWindow(null, "2026-09-27")).toBe("Until 27 Sep");
+  });
+
   it("uses neutral copy for an undated Cycle window", () => {
     expect(fmtCycleWindow(null, null)).toBe("No dates");
   });

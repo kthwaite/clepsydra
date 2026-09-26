@@ -319,6 +319,21 @@ describe("TimelineView — axis bands", () => {
     );
   });
 
+  it("band dates use Sep, not ICU's en-GB Sept", () => {
+    const septCycles: BoardCycle[] = [
+      { ...TL_CYCLES[0], start: "2026-09-21", end: "2026-10-04" },
+    ];
+    wrap(
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[{ ...TL_TASK_ALPHA, due: "2026-09-25" }]}
+        projects={TL_SCOPES}
+        cycles={septCycles}
+      />,
+    );
+    expect(screen.getByTestId("tl-band-C-01")).toHaveTextContent("21 Sep ·");
+  });
+
   it("bands with undated cycles are skipped", () => {
     const mixedCycles: BoardCycle[] = [
       ...TL_CYCLES,

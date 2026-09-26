@@ -13,7 +13,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { BoardCycle, BoardTask } from "#/api/board";
 import { isoAddDays } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
@@ -167,20 +175,20 @@ afterEach(() => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("newCyclePrefill", () => {
-  it("label CYCLE 1 when no existing cycles", () => {
+  it("label Cycle 1 when no existing cycles", () => {
     const pf = newCyclePrefill([], NOW);
-    expect(pf.label).toBe("CYCLE 1");
+    expect(pf.label).toBe("Cycle 1");
   });
 
-  it("label increments by cycle count (one cycle exists → CYCLE 2)", () => {
+  it("label increments by cycle count (one cycle exists → Cycle 2)", () => {
     const pf = newCyclePrefill(
       [{ code: "S-brave-finch-7q3zd", end: "2026-06-10" }],
       NOW,
     );
-    expect(pf.label).toBe("CYCLE 2");
+    expect(pf.label).toBe("Cycle 2");
   });
 
-  it("label = CYCLE (count + 1), independent of code format (petname codes carry no numbers)", () => {
+  it("label = Cycle (count + 1), independent of code format (petname codes carry no numbers)", () => {
     const pf = newCyclePrefill(
       [
         { code: "C-01", end: "2026-06-08" },
@@ -188,7 +196,7 @@ describe("newCyclePrefill", () => {
       ],
       NOW,
     );
-    expect(pf.label).toBe("CYCLE 3");
+    expect(pf.label).toBe("Cycle 3");
   });
 
   it("start = day after latest cycle end (not now)", () => {
@@ -218,9 +226,9 @@ describe("newCyclePrefill", () => {
     expect(pf.start).toBe(isoAddDays(NOW, 1));
   });
 
-  it("single cycle: label is CYCLE 2 regardless of the existing code's number", () => {
+  it("single cycle: label is Cycle 2 regardless of the existing code's number", () => {
     const pf = newCyclePrefill([{ code: "S-5", end: "2026-07-01" }], NOW);
-    expect(pf.label).toBe("CYCLE 2");
+    expect(pf.label).toBe("Cycle 2");
   });
 });
 
@@ -328,12 +336,12 @@ describe("NewCycleModal — render", () => {
     expect(modal).not.toHaveTextContent(/cadence/i);
   });
 
-  it("prefills label with CYCLE N", () => {
+  it("prefills label with Cycle N", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
     wrapQC(<NewCycleModal cycles={[CYCLE_ACTIVE, CYCLE_PLANNED]} now={NOW} />);
     const label = screen.getByTestId<HTMLInputElement>("new-cycle-label");
     // cycles have suffix 1 and 2 → next is 3
-    expect(label.value).toBe("CYCLE 3");
+    expect(label.value).toBe("Cycle 3");
   });
 
   it("code input renders empty with a server-minted placeholder", () => {
@@ -407,7 +415,7 @@ describe("NewCycleModal — render", () => {
   it("shows only the formatted cycle window in the sub-header", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
     wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
-    expect(screen.getByText("06.12 — 06.18")).toBeInTheDocument();
+    expect(screen.getByText("12–18 Jun")).toBeInTheDocument();
     expect(screen.queryByText(/cadence window/i)).not.toBeInTheDocument();
   });
 });
@@ -430,10 +438,31 @@ describe("NewCycleModal — submit payload", () => {
         (postCalls[0][1] as RequestInit).body as string,
       ) as Record<string, unknown>;
       expect(body).not.toHaveProperty("code");
-      expect(body.label).toBe("CYCLE 3");
+      expect(body.label).toBe("Cycle 3");
       expect(body.start).toBe("2026-06-23");
       expect(body.end).toBe("2026-06-29");
       expect(body.state).toBe("PLANNED");
+    });
+  });
+
+  it("sends a typed name as typed, not upper-cased", async () => {
+    const stub = makeCreateStub();
+    vi.stubGlobal("fetch", stub);
+    useBoardStore.setState({ cycleModal: { kind: "new" } });
+    wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
+
+    const name = screen.getByTestId("new-cycle-label");
+    await userEvent.clear(name);
+    await userEvent.type(name, "Stone and Lamp, phase 5");
+    await userEvent.click(screen.getByTestId("new-cycle-commit"));
+
+    await waitFor(() => {
+      const post = stub.mock.calls.find(
+        ([, opts]) => (opts as RequestInit)?.method === "POST",
+      );
+      assert(post);
+      const body = JSON.parse((post[1] as RequestInit).body as string);
+      expect(body.label).toBe("Stone and Lamp, phase 5");
     });
   });
 

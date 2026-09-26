@@ -38,7 +38,7 @@ export interface NewCyclePrefill {
 /**
  * Pure helper — computes default field values for a new cycle.
  *
- * - label = "CYCLE " + (cycle count + 1)
+ * - label = "Cycle " + (cycle count + 1)
  * - start = day after latest cycle end (fallback: now)
  * - end   = start + 6 days
  *
@@ -67,17 +67,10 @@ export function newCyclePrefill(
   const end = isoAddDays(start, 6);
 
   return {
-    label: `CYCLE ${n}`,
+    label: `Cycle ${n}`,
     start,
     end,
   };
-}
-
-/** "YYYY-MM-DD" → "MM.DD" display string. */
-function fmtMD(iso: string): string {
-  const parts = iso.split("-");
-  if (parts.length === 3) return `${parts[1]}.${parts[2]}`;
-  return iso;
 }
 
 // ── NewCycleModal ─────────────────────────────────────────────────────────────
@@ -126,16 +119,13 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
 
   if (!isOpen) return null;
 
-  const windowLabel =
-    start && end
-      ? `${fmtMD(start)} — ${fmtMD(end)}`
-      : fmtCycleWindow(start, end);
+  const windowLabel = fmtCycleWindow(start, end);
 
   const commit = () => {
     create.mutate(
       {
         code: code.trim() || undefined,
-        label: (label.trim() || "CYCLE").toUpperCase(),
+        label: label.trim() || "Cycle",
         start,
         end,
         goal: goal.trim() || undefined,
