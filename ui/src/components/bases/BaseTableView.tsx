@@ -1426,6 +1426,7 @@ export const BaseTableView = forwardRef<
                   <GroupPicker
                     columns={pickerColumns}
                     group={effectiveGroup}
+                    savedGroup={view?.group_by ?? undefined}
                     overridden={overrides.group !== undefined}
                     onSetGroup={onSetGroup ?? noop}
                   />

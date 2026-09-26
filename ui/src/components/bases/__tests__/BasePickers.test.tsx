@@ -140,6 +140,7 @@ describe("GroupPicker", () => {
       <GroupPicker
         columns={columns}
         group="status"
+        savedGroup="status"
         overridden={false}
         onSetGroup={onSetGroup}
       />,
@@ -162,6 +163,7 @@ describe("GroupPicker", () => {
       <GroupPicker
         columns={columns}
         group={undefined}
+        savedGroup={undefined}
         overridden
         onSetGroup={onSetGroup}
       />,
@@ -185,6 +187,7 @@ describe("GroupPicker", () => {
       <GroupPicker
         columns={columns.filter((c) => !c.groupable)}
         group="status"
+        savedGroup="status"
         overridden={false}
         onSetGroup={onSetGroup}
       />,
@@ -194,5 +197,41 @@ describe("GroupPicker", () => {
       screen.getByRole("menuitemradio", { name: "No grouping" }),
     );
     expect(onSetGroup).toHaveBeenCalledWith({ kind: "flat" });
+  });
+
+  it("does nothing when re-picking the view's own grouping", async () => {
+    const user = userEvent.setup();
+    const onSetGroup = vi.fn();
+    render(
+      <GroupPicker
+        columns={columns}
+        group={undefined}
+        savedGroup={undefined}
+        overridden={false}
+        onSetGroup={onSetGroup}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Group" }));
+    await user.click(
+      screen.getByRole("menuitemradio", { name: "No grouping" }),
+    );
+    expect(onSetGroup).not.toHaveBeenCalled();
+  });
+
+  it("drops the override when picking the view's own grouping", async () => {
+    const user = userEvent.setup();
+    const onSetGroup = vi.fn();
+    render(
+      <GroupPicker
+        columns={columns}
+        group={undefined}
+        savedGroup="status"
+        overridden
+        onSetGroup={onSetGroup}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Group" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Status" }));
+    expect(onSetGroup).toHaveBeenCalledWith(undefined);
   });
 });

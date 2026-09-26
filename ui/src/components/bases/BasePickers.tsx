@@ -143,12 +143,15 @@ export function SortPicker({
 export function GroupPicker({
   columns,
   group,
+  savedGroup,
   overridden,
   onSetGroup,
 }: {
   columns: PickerColumn[];
   /** The effective grouping column: the override, else the saved view's. */
   group: string | undefined;
+  /** The saved view's own grouping column, if it has one. */
+  savedGroup: string | undefined;
   overridden: boolean;
   onSetGroup(group: GroupOverride | undefined): void;
 }) {
@@ -169,10 +172,21 @@ export function GroupPicker({
         selectedKeys={[group ? `by:${group}` : "flat"]}
         onAction={(key) => {
           const id = String(key);
-          if (id === "flat") onSetGroup({ kind: "flat" });
-          else if (id === "inherit") onSetGroup(undefined);
-          else if (id.startsWith("by:"))
-            onSetGroup({ kind: "by", field: id.slice(3) });
+          if (id === "inherit") {
+            onSetGroup(undefined);
+            return;
+          }
+          const field = id.startsWith("by:") ? id.slice(3) : undefined;
+          if (id !== "flat" && field === undefined) return;
+          // Choosing what the saved view already does is not an override:
+          // it drops one if present, and otherwise changes nothing.
+          if (field === savedGroup) {
+            if (overridden) onSetGroup(undefined);
+            return;
+          }
+          onSetGroup(
+            field === undefined ? { kind: "flat" } : { kind: "by", field },
+          );
         }}
       >
         <MenuItem id="flat">No grouping</MenuItem>
