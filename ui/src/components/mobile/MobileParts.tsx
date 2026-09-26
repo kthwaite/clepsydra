@@ -97,7 +97,7 @@ function dueOf(item: AgendaItem): string | undefined {
 }
 
 /** The line under an agenda row: overdue date, or the item's source. */
-export function agendaMeta(
+function agendaMeta(
   item: AgendaItem,
   today: string,
   withDate = false,

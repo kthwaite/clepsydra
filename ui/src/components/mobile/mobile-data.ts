@@ -38,7 +38,7 @@ export type AgendaBucketKey =
   | "later"
   | "undated";
 
-export interface AgendaBucket {
+interface AgendaBucket {
   key: AgendaBucketKey;
   label: string;
   items: AgendaItem[];
