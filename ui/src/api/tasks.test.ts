@@ -148,3 +148,16 @@ describe("useToggleTaskStatus", () => {
     });
   });
 });
+
+describe("useAgenda errors", () => {
+  it("reports a failed fetch in place instead of throwing to the route", async () => {
+    getMock.mockResolvedValue({ data: undefined, error: { error: "boom" } });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, throwOnError: true } },
+    });
+    const { result } = renderHook(() => useAgenda("2026-09-25"), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+  });
+});

@@ -1,7 +1,26 @@
+import { render, screen } from "@testing-library/react";
+import type { ComponentType } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tanstack/react-router", () => ({
-  createFileRoute: () => (options: Record<string, unknown>) => ({ options }),
+  createFileRoute: () => (options: Record<string, unknown>) => ({
+    options,
+    useSearch: () => ({}),
+  }),
+  useNavigate: () => vi.fn(),
+  Navigate: () => <p>Redirected</p>,
+}));
+
+const layout = vi.hoisted(() => ({ mobile: false }));
+vi.mock("#/hooks/useMobileLayout", () => ({
+  useMobileLayout: () => layout.mobile,
+}));
+vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
+vi.mock("#/components/tasking/TaskingScreen", () => ({
+  TaskingScreen: () => <p>Board screen</p>,
+}));
+vi.mock("#/components/mobile/MobileTasking", () => ({
+  MobileTasking: () => <p>Mobile Tasks</p>,
 }));
 
 import {
@@ -80,5 +99,25 @@ describe("Tasking route filters", () => {
 
     expect(navigation.to).toBe("/tasking");
     expect(navigation.replace).toBe(false);
+  });
+});
+
+describe("Tasking route by layout", () => {
+  const Page = () => {
+    const C = Route.options.component as ComponentType;
+    return <C />;
+  };
+
+  it("renders the board on desktop", () => {
+    layout.mobile = false;
+    render(<Page />);
+    expect(screen.getByText("Board screen")).toBeVisible();
+  });
+
+  it("renders mobile Tasks on a phone instead of redirecting", () => {
+    layout.mobile = true;
+    render(<Page />);
+    expect(screen.getByText("Mobile Tasks")).toBeVisible();
+    expect(screen.queryByText("Redirected")).not.toBeInTheDocument();
   });
 });

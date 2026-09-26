@@ -8,6 +8,7 @@ import type { AgendaItem, AgendaResponse } from "#/api/tasks";
 import { useAgenda } from "#/api/tasks";
 import { AgendaItemList } from "#/components/agenda/AgendaItemList";
 import { FilterBar } from "#/components/filters/FilterBar";
+import { MobileAgenda } from "#/components/mobile/MobileAgenda";
 import {
   PRI_LABEL,
   PRI_ORDER,
@@ -15,6 +16,7 @@ import {
 } from "#/components/tasking/board-constants";
 import { SectionHeading } from "#/components/ui/section-heading";
 import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
+import { useMobileLayout } from "#/hooks/useMobileLayout";
 import {
   type FilterField,
   type FilterState,
@@ -85,6 +87,7 @@ function AgendaPage() {
   const navigate = useNavigate();
   const today = localDateKey(new Date());
   const agenda = useAgenda(today);
+  const mobile = useMobileLayout();
 
   const filterState = useMemo(
     () => parseFilterSearch(search, AGENDA_FILTER_URL),
@@ -97,6 +100,8 @@ function AgendaPage() {
     },
     [navigate, filterState],
   );
+
+  if (mobile) return <MobileAgenda agenda={agenda} today={today} />;
 
   return (
     <AgendaScreen

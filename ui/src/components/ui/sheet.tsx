@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Dialog, Modal, ModalOverlay } from "react-aria-components";
 import { cn } from "#/lib/cn";
 
-export interface BottomSheetProps {
+interface BottomSheetProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   "aria-label": string;
