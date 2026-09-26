@@ -10,7 +10,31 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([]);
+/** Files still carrying Vessel chrome; phase 5.2 empties this. */
+const PENDING = new Set<string>([
+  "../bases/BaseDefinitionWorkspace.tsx",
+  "../bases/DefinitionHeader.tsx",
+  "../bases/ValidationSummary.tsx",
+  "../bases/GeneralEditor.tsx",
+  "../bases/ViewsEditor.tsx",
+  "../bases/ViewDefinitionEditor.tsx",
+  "../bases/PropertiesEditor.tsx",
+  "../bases/PropertyDefinitionEditor.tsx",
+  "../bases/PreviewPropertiesEditor.tsx",
+  "../bases/DisplayLabelsEditor.tsx",
+  "../bases/BaseFilterEditor.tsx",
+  "../bases/FilterComparisonEditor.tsx",
+  "../bases/TagConditionEditor.tsx",
+  "../bases/OrderedSortEditor.tsx",
+  "../bases/TemplateSourceEditor.tsx",
+  "../bases/BasePreview.tsx",
+  "../bases/GeneratedPreviewDialog.tsx",
+  "../bases/BaseEmbedInspector.tsx",
+  "../bases/BaseMemberIntake.tsx",
+  "../bases/ordered-list.tsx",
+  "../../editor/elements/BaseEmbedElement.tsx",
+  "../../editor/elements/GeneratedRegionElement.tsx",
+]);
 
 /** Tasking board screen (phase 4.3). */
 const TASKING_FILES = [
@@ -81,6 +105,35 @@ const BASES_FILES = [
   "../bases/BasesIndex.tsx",
   "../bases/CreateBaseDialog.tsx",
   "../../routes/bases.$slug.tsx",
+  // Phase 5.2: definition workspace and embed.
+  "../bases/BaseDefinitionWorkspace.tsx",
+  "../bases/DefinitionHeader.tsx",
+  "../bases/ValidationSummary.tsx",
+  "../bases/GeneralEditor.tsx",
+  "../bases/ViewsEditor.tsx",
+  "../bases/ViewDefinitionEditor.tsx",
+  "../bases/PropertiesEditor.tsx",
+  "../bases/PropertyDefinitionEditor.tsx",
+  "../bases/PreviewPropertiesEditor.tsx",
+  "../bases/DisplayLabelsEditor.tsx",
+  "../bases/BaseFilterEditor.tsx",
+  "../bases/FilterComparisonEditor.tsx",
+  "../bases/TagConditionEditor.tsx",
+  "../bases/OrderedSortEditor.tsx",
+  "../bases/TemplateSourceEditor.tsx",
+  "../bases/BasePreview.tsx",
+  "../bases/BaseRenderedMarkdown.tsx",
+  "../bases/GeneratedPreviewDialog.tsx",
+  "../bases/BaseEmbedInspector.tsx",
+  "../bases/BaseHeaderMenu.tsx",
+  "../bases/BaseRowMenu.tsx",
+  "../bases/ArchiveRowDialog.tsx",
+  "../bases/BaseMemberIntake.tsx",
+  "../bases/ordered-list.tsx",
+  "../bases/filter-actions.tsx",
+  "../../editor/elements/BaseEmbedElement.tsx",
+  "../../editor/elements/GeneratedRegionElement.tsx",
+  "../../editor/baseEmbedEditing.tsx",
 ];
 
 /** Mobile companion shell (phase 4b-1). */
