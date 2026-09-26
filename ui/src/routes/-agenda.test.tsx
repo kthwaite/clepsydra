@@ -41,6 +41,11 @@ vi.mock("#/api/board", () => ({
 }));
 
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => api.openTab }));
+
+const layout = vi.hoisted(() => ({ mobile: false }));
+vi.mock("#/hooks/useMobileLayout", () => ({
+  useMobileLayout: () => layout.mobile,
+}));
 vi.mock("#/lib/useProjects", () => ({
   useProjectValues: () => ["Atlas", "Zephyr"],
 }));
@@ -560,5 +565,34 @@ describe("AgendaScreen", () => {
 
     await user.click(screen.getByTestId("filter-bar-add"));
     expect(screen.getByTestId("filter-bar-field-blocked")).toBeVisible();
+  });
+});
+
+describe("Agenda route on a phone", () => {
+  afterEach(() => {
+    layout.mobile = false;
+  });
+
+  it("renders the mobile Agenda without the filter bar", () => {
+    layout.mobile = true;
+    api.agenda.mockReturnValue({
+      data: {
+        overdue: [],
+        today: [todo("Water plants", 1)],
+        upcoming: [],
+        undated: [],
+      },
+      isLoading: false,
+      isError: false,
+    });
+    const Page = Route.options.component as React.ComponentType;
+    render(<Page />);
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Agenda" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("checkbox", { name: "Water plants" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
   });
 });
