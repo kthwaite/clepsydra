@@ -11,7 +11,6 @@ const OUT_OF_SCOPE = new Set<string>([]);
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
 const PENDING = new Set<string>([
-  "../bases/BaseMemberDraft.tsx",
   "../bases/BasesIndex.tsx",
   "../bases/CreateBaseDialog.tsx",
 ]);

@@ -9,7 +9,10 @@ import {
 import type { BaseMemberDiagnostic, PropertyDefinition } from "#/api/bases";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { buttonStyles } from "#/components/ui/button";
 import { TagInput } from "#/components/ui/tag-input";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type { Kind } from "#/lib/kind";
 import { type CellValue, useInitialFocus } from "./cells/types";
 import { EditableCell } from "./EditableCell";
@@ -336,7 +339,7 @@ export function BaseMemberDraft({
   return (
     <form
       aria-label="New base member"
-      className="border border-rule bg-paper"
+      className="rounded-xl bg-sink"
       onKeyDown={handleKeyDown}
     >
       <fieldset disabled={isSaving} className="m-0 border-0 p-0">
@@ -375,7 +378,7 @@ export function BaseMemberDraft({
                 }}
                 className="min-w-32 flex-1"
               >
-                <span className="cl-mono block text-[10px] uppercase tracking-[0.08em] text-ink-mute">
+                <span className="block text-[12.5px] text-mute">
                   {fieldLabel(field.key)}
                 </span>
                 {field.kind === "title" ? (
@@ -385,7 +388,10 @@ export function BaseMemberDraft({
                     aria-describedby={describedBy}
                     value={draft.title}
                     onChange={(event) => updateTitle(event.target.value)}
-                    className="cl-mono w-full border border-rule bg-transparent px-1.5 py-0.5 text-[12px] text-ink outline-none hover:border-accent focus:border-accent"
+                    className={cn(
+                      "h-8 w-full rounded-lg bg-raise px-2.5 text-[13px] text-ink",
+                      FOCUS_RING_NATIVE,
+                    )}
                   />
                 ) : (
                   <DraftFieldControl
@@ -397,7 +403,7 @@ export function BaseMemberDraft({
                   />
                 )}
                 {describedBy ? (
-                  <div className="cl-mono mt-1 text-[10px] text-ink-mute">
+                  <div className="mt-1 text-[12.5px] text-mute">
                     {requirement ? (
                       <span id={requirementId}>{requirement}</span>
                     ) : null}
@@ -430,7 +436,11 @@ export function BaseMemberDraft({
               disabled={isSaveDisabled}
               onPointerDown={handleSavePointerDown}
               onClick={submit}
-              className="cl-mono border border-accent px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink outline-none hover:bg-highlight focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:cursor-not-allowed disabled:text-ink-mute"
+              className={buttonStyles(
+                "primary",
+                "sm",
+                "disabled:cursor-not-allowed disabled:opacity-50",
+              )}
             >
               Save
             </button>
@@ -438,7 +448,11 @@ export function BaseMemberDraft({
               type="button"
               aria-label="Cancel new member"
               onClick={onCancel}
-              className="cl-mono border border-rule px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none hover:border-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:cursor-not-allowed disabled:text-ink-mute"
+              className={buttonStyles(
+                "secondary",
+                "sm",
+                "disabled:cursor-not-allowed disabled:opacity-50",
+              )}
             >
               Cancel
             </button>
@@ -446,10 +460,7 @@ export function BaseMemberDraft({
         </div>
       </fieldset>
       {alertMessage ? (
-        <div
-          role="alert"
-          className="border-t border-rule px-2 py-1 text-[11px] text-hot"
-        >
+        <div role="alert" className="px-4 py-2.5 text-[13px] text-hot">
           {alertMessage}
         </div>
       ) : null}
