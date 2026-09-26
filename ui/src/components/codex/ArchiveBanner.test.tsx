@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ArchiveBanner } from "#/components/codex/ArchiveBanner";
+import { formatCapturedAt, formatDayMonthYear } from "#/lib/time";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
@@ -43,7 +44,9 @@ describe("ArchiveBanner", () => {
     expect(
       screen.getByRole("heading", { name: "The Shape of Time" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("2026-08-12T14:05:00Z")).toBeInTheDocument();
+    expect(
+      screen.getByText(formatCapturedAt("2026-08-12T14:05:00Z")),
+    ).toHaveAttribute("dateTime", "2026-08-12T14:05:00Z");
     expect(screen.getByRole("link", { name: /open live page/i })).toMatchObject(
       {
         href: "https://example.com/articles/time",
@@ -115,7 +118,9 @@ describe("ArchiveBanner", () => {
 
     expect(screen.getByText("Example Review")).toBeInTheDocument();
     expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
-    expect(screen.getByText("2026-08-10T09:00:00Z")).toBeInTheDocument();
+    expect(
+      screen.getByText(formatDayMonthYear("2026-08-10T09:00:00Z")),
+    ).toHaveAttribute("dateTime", "2026-08-10T09:00:00Z");
 
     rerender(
       <ArchiveBanner
@@ -127,6 +132,6 @@ describe("ArchiveBanner", () => {
 
     expect(screen.queryByText("Example Review")).not.toBeInTheDocument();
     expect(screen.queryByText("Ada Lovelace")).not.toBeInTheDocument();
-    expect(screen.queryByText("2026-08-10T09:00:00Z")).not.toBeInTheDocument();
+    expect(screen.queryByText("Published")).not.toBeInTheDocument();
   });
 });
