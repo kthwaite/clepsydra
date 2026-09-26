@@ -535,9 +535,11 @@ describe("Folio AI conversation presentation", () => {
     renderFolio(pageEditor({ bodyMarkdown: malformed }));
     expect(screen.getByRole("alert")).toHaveTextContent("marker");
     expect(screen.getByText(/keep this text/)).toBeVisible();
-    await user.click(
-      within(screen.getByRole("alert")).getByRole("button", { name: "Edit" }),
-    );
+    const recover = within(screen.getByRole("alert")).getByRole("button", {
+      name: "Edit",
+    });
+    expect(recover).toHaveClass("max-md:h-11");
+    await user.click(recover);
     expect(
       within(
         screen.getByRole("group", { name: "Conversation mode" }),

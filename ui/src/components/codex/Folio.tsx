@@ -1168,7 +1168,11 @@ export function Folio({ tabId, path }: FolioProps) {
                     )} could not be read. The original text is preserved.`
                   : "This AI conversation has no valid conversation markers. The original Markdown is preserved."}
               </span>
-              <Button size="sm" onPress={() => setConversationMode("edit")}>
+              <Button
+                size="sm"
+                className="max-md:h-11"
+                onPress={() => setConversationMode("edit")}
+              >
                 Edit
               </Button>
             </div>

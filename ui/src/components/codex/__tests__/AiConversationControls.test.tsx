@@ -30,7 +30,7 @@ describe("AiConversationControls", () => {
       />,
     );
     const add = screen.getByRole("button", { name: "Add turn" });
-    expect(add).toHaveClass("rounded-full");
+    expect(add).toHaveClass("rounded-full", "max-md:h-11");
     await userEvent.setup().click(add);
     expect(onAddTurn).toHaveBeenCalledOnce();
   });

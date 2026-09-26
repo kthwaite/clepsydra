@@ -41,7 +41,12 @@ export function AiConversationControls({
         </button>
       </fieldset>
       {mode === "edit" ? (
-        <Button variant="primary" size="sm" onPress={onAddTurn}>
+        <Button
+          variant="primary"
+          size="sm"
+          className="max-md:h-11"
+          onPress={onAddTurn}
+        >
           Add turn
         </Button>
       ) : null}
