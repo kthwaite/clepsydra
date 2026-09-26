@@ -4,8 +4,9 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
-import { DesktopOnlyRoute } from "#/components/codex/DesktopOnlyRoute";
+import { MobileTasking } from "#/components/mobile/MobileTasking";
 import { TaskingScreen } from "#/components/tasking/TaskingScreen";
+import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import type { FilterState } from "#/lib/filters/model";
 import {
@@ -61,6 +62,7 @@ async function resolveDossierPath(name: string): Promise<string | null> {
 
 function TaskingRoute() {
   const openTab = useOpenTab();
+  const mobile = useMobileLayout();
   const search = Route.useSearch();
   const navigate = useNavigate();
 
@@ -92,15 +94,15 @@ function TaskingRoute() {
     [openTab],
   );
 
+  if (mobile) return <MobileTasking />;
+
   return (
-    <DesktopOnlyRoute name="Tasking">
-      <TaskingScreen
-        onOpenPage={onOpenPage}
-        onOpenDossier={onOpenDossier}
-        filterState={filterState}
-        onFilterChange={onFilterChange}
-      />
-    </DesktopOnlyRoute>
+    <TaskingScreen
+      onOpenPage={onOpenPage}
+      onOpenDossier={onOpenDossier}
+      filterState={filterState}
+      onFilterChange={onFilterChange}
+    />
   );
 }
 

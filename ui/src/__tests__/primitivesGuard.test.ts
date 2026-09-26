@@ -84,6 +84,7 @@ const MOBILE_FILES = [
   "../mobile/MobileParts.tsx",
   "../mobile/MobileToday.tsx",
   "../mobile/MobileAgenda.tsx",
+  "../mobile/MobileTasking.tsx",
 ];
 
 const FORBIDDEN: Array<[string, RegExp]> = [
