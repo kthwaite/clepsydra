@@ -2,13 +2,16 @@ import { Plus, Trash2 } from "lucide-react";
 import { useId, useState } from "react";
 import {
   TextField as AriaTextField,
+  Input,
   Label,
   TextArea,
 } from "react-aria-components";
+import { Tick } from "#/components/codex/Tick";
 import { MarkdownRenderer } from "#/components/MarkdownRenderer";
 import { Button } from "#/components/ui/button";
 import { SegmentedControl } from "#/components/ui/segmented-control";
-import { TextField } from "#/components/ui/text-field";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
 import type { RecipeDocument, RecipeGroup } from "#/recipe/recipeCodec";
 import {
   itemsFromText,
@@ -23,6 +26,31 @@ export type RecipeFolioBodyProps = {
   onModeChange: (mode: "read" | "edit") => void;
   onDocumentChange: (document: RecipeDocument) => void;
 };
+
+/** Section eyebrow (spec §5.4): italic serif, muted, after a tick. */
+const EYEBROW =
+  "m-0 font-serif text-[22px] leading-none font-normal text-mute italic";
+
+/** A component group's name ("For the sauce"). */
+const GROUP_HEADING =
+  "m-0 mt-3.5 mb-2 font-serif text-[18px] font-normal text-ink-2 italic";
+
+function Eyebrow({
+  id,
+  className,
+  children,
+}: {
+  id?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <h2 id={id} className={cn("flex items-center gap-2.5", className)}>
+      <Tick />
+      <span className={EYEBROW}>{children}</span>
+    </h2>
+  );
+}
 
 const recipeModeOptions = [
   { id: "read", label: "Read" },
@@ -41,7 +69,7 @@ export function RecipeFolioBody({
 
   return (
     <div className="recipe-folio-body" data-folio-heading-root>
-      <div className="mb-5 flex justify-end border-b border-rule-soft pb-3">
+      <div className="mb-6 flex justify-end">
         <SegmentedControl
           label="Recipe mode"
           value={mode}
@@ -66,7 +94,7 @@ export function RecipeFolioBody({
             onChange={(description) =>
               onDocumentChange({ ...document, description })
             }
-            placeholder="what the dish is, yield, timing"
+            placeholder="What the dish is, yield, timing"
             rows={4}
           />
 
@@ -90,7 +118,7 @@ export function RecipeFolioBody({
             headingId={stepsId}
             singular="step"
             groupLabel="Step"
-            itemPlaceholder="what to do first"
+            itemPlaceholder="What to do first"
             rows={10}
             groups={document.stepGroups}
             toText={textFromSteps}
@@ -101,12 +129,7 @@ export function RecipeFolioBody({
           />
 
           <section aria-labelledby={notesId} className="grid gap-3">
-            <h2
-              id={notesId}
-              className="cl-mono m-0 text-[11px] font-bold uppercase tracking-[0.16em] text-ink-mute"
-            >
-              Notes
-            </h2>
+            <Eyebrow id={notesId}>Notes</Eyebrow>
             <RecipeTextArea
               label="Notes"
               hideLabel
@@ -114,7 +137,7 @@ export function RecipeFolioBody({
               onChange={(notesMarkdown) =>
                 onDocumentChange({ ...document, notesMarkdown })
               }
-              placeholder="substitutions, make-ahead, storage"
+              placeholder="Substitutions, make-ahead, storage"
               rows={7}
             />
           </section>
@@ -155,11 +178,7 @@ function RecipeReadGroup({
 }) {
   return (
     <>
-      {name === null ? null : (
-        <h3 className="cl-mono m-0 pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-ink-mute">
-          {name}
-        </h3>
-      )}
+      {name === null ? null : <h3 className={GROUP_HEADING}>{name}</h3>}
       {children}
     </>
   );
@@ -176,77 +195,98 @@ function RecipeReadView({
   stepsId: string;
   notesId: string;
 }) {
+  // Steps number straight through the groups: "Bake" picks up where "Dough"
+  // left off, so step 3 is the third thing to do.
+  const stepGroups = visibleGroups(document.stepGroups);
+  const stepStarts: number[] = [];
+  let next = 1;
+  for (const group of stepGroups) {
+    stepStarts.push(next);
+    next += group.items.length;
+  }
+
   return (
     <div className="grid gap-8">
       {document.description ? (
-        <section aria-label="Description" className="text-ink-2">
+        <section
+          aria-label="Description"
+          className="text-[17px] leading-[1.7] text-ink-2"
+        >
           <MarkdownRenderer content={document.description} />
         </section>
       ) : null}
 
       <div className="grid gap-8 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] md:gap-12">
         <section aria-labelledby={ingredientsId}>
-          <h2
-            id={ingredientsId}
-            className="cl-mono m-0 border-b border-rule pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-ink-mute"
-          >
-            Ingredients
-          </h2>
-          {withOccurrenceKeys(
-            visibleGroups(document.ingredientGroups),
-            recipeGroupIdentity,
-          ).map(({ key: groupKey, value: group }) => (
-            <RecipeReadGroup key={groupKey} name={group.name}>
-              <ul className="m-0 list-disc space-y-2 py-4 pl-5 marker:text-accent">
-                {withOccurrenceKeys(group.items, (item) => item).map(
-                  ({ key: itemKey, value: item }) => (
-                    <li key={itemKey} className="pl-1 text-ink-2">
-                      {item}
-                    </li>
-                  ),
-                )}
-              </ul>
-            </RecipeReadGroup>
-          ))}
+          <Eyebrow id={ingredientsId}>Ingredients</Eyebrow>
+          <div className="pl-[17px]">
+            {withOccurrenceKeys(
+              visibleGroups(document.ingredientGroups),
+              recipeGroupIdentity,
+            ).map(({ key: groupKey, value: group }) => (
+              <RecipeReadGroup key={groupKey} name={group.name}>
+                <ul className="m-0 flex list-none flex-col gap-[9px] p-0 pt-3.5 text-[16px] leading-normal text-ink-2 [h3+&]:pt-0">
+                  {withOccurrenceKeys(group.items, (item) => item).map(
+                    ({ key: itemKey, value: item }) => (
+                      <li key={itemKey} className="flex items-baseline gap-3">
+                        <span
+                          aria-hidden
+                          className="h-[5px] w-[5px] shrink-0 -translate-y-[3px] rounded-full bg-accent"
+                        />
+                        <span className="min-w-0">{item}</span>
+                      </li>
+                    ),
+                  )}
+                </ul>
+              </RecipeReadGroup>
+            ))}
+          </div>
         </section>
 
         <section aria-labelledby={stepsId}>
-          <h2
-            id={stepsId}
-            className="cl-mono m-0 border-b border-rule pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-ink-mute"
-          >
-            Steps
-          </h2>
-          {withOccurrenceKeys(
-            visibleGroups(document.stepGroups),
-            recipeGroupIdentity,
-          ).map(({ key: groupKey, value: group }) => (
-            <RecipeReadGroup key={groupKey} name={group.name}>
-              <ol className="m-0 list-decimal space-y-4 py-4 pl-7 marker:font-heading marker:text-base marker:font-bold marker:text-accent">
-                {withOccurrenceKeys(group.items, (item) => item).map(
-                  ({ key: itemKey, value: item }) => (
-                    <li
-                      key={itemKey}
-                      className="whitespace-pre-line pl-2 text-ink-2"
+          <Eyebrow id={stepsId}>Steps</Eyebrow>
+          <div className="pl-[17px]">
+            {withOccurrenceKeys(stepGroups, recipeGroupIdentity).map(
+              ({ key: groupKey, value: group }, groupIndex) => {
+                const start = stepStarts[groupIndex] ?? 1;
+                return (
+                  <RecipeReadGroup key={groupKey} name={group.name}>
+                    <ol
+                      start={start}
+                      className="m-0 flex list-none flex-col gap-2.5 p-0 pt-3.5 text-[16px] leading-[1.55] text-ink-2 [h3+&]:pt-0"
                     >
-                      {item}
-                    </li>
-                  ),
-                )}
-              </ol>
-            </RecipeReadGroup>
-          ))}
+                      {withOccurrenceKeys(group.items, (item) => item).map(
+                        ({ key: itemKey, value: item }, itemIndex) => (
+                          <li
+                            key={itemKey}
+                            className="grid grid-cols-[26px_minmax(0,1fr)] items-baseline gap-2.5"
+                          >
+                            <span
+                              aria-hidden
+                              className="font-serif text-[24px] leading-none text-accent"
+                            >
+                              {start + itemIndex}
+                            </span>
+                            <span className="whitespace-pre-line">{item}</span>
+                          </li>
+                        ),
+                      )}
+                    </ol>
+                  </RecipeReadGroup>
+                );
+              },
+            )}
+          </div>
         </section>
       </div>
 
-      <section aria-labelledby={notesId} className="border-t border-rule pt-5">
-        <h2
-          id={notesId}
-          className="cl-mono m-0 mb-3 text-[11px] font-bold uppercase tracking-[0.16em] text-ink-mute"
-        >
+      <section aria-labelledby={notesId}>
+        <Eyebrow id={notesId} className="mb-3">
           Notes
-        </h2>
-        <MarkdownRenderer content={document.notesMarkdown} />
+        </Eyebrow>
+        <div className="pl-[17px] text-ink-2">
+          <MarkdownRenderer content={document.notesMarkdown} />
+        </div>
       </section>
     </div>
   );
@@ -301,13 +341,8 @@ function RecipeGroupsEditor({
 
   return (
     <section aria-labelledby={headingId} className="grid gap-3">
-      <div className="flex items-center justify-between gap-3 border-b border-rule pb-2">
-        <h2
-          id={headingId}
-          className="cl-mono m-0 text-[11px] font-bold uppercase tracking-[0.16em] text-ink-mute"
-        >
-          {heading}
-        </h2>
+      <div className="flex items-center justify-between gap-3">
+        <Eyebrow id={headingId}>{heading}</Eyebrow>
         <Button
           variant="secondary"
           size="sm"
@@ -333,16 +368,25 @@ function RecipeGroupsEditor({
         return (
           <div
             key={`${singular}-group-${index}`}
-            className="grid gap-2 border-l-2 border-rule-soft pl-3"
+            className="grid gap-2 rounded-2xl bg-sink p-3"
           >
             <div className="flex items-end justify-between gap-2">
-              <TextField
-                label={`${groupLabel} group ${index} name`}
+              <AriaTextField
                 value={group.name ?? ""}
                 onChange={(name) => replace(index, { name })}
-                placeholder="for the sauce"
-                className="min-w-0 flex-1"
-              />
+                className="flex min-w-0 flex-1 flex-col"
+              >
+                <Label className="text-[12.5px] text-mute">
+                  {`${groupLabel} group ${index} name`}
+                </Label>
+                <Input
+                  placeholder="For the sauce"
+                  className={cn(
+                    "mt-1.5 h-10 w-full rounded-full bg-raise px-4 font-serif text-[18px] text-ink italic placeholder:text-mute",
+                    FOCUS_RING,
+                  )}
+                />
+              </AriaTextField>
               <Button
                 variant="ghost"
                 size="icon"
@@ -353,6 +397,7 @@ function RecipeGroupsEditor({
               </Button>
             </div>
             <RecipeItemsTextArea
+              inset
               label={`${groupLabel} group ${index} items`}
               items={group.items}
               placeholder={itemPlaceholder}
@@ -373,6 +418,7 @@ function RecipeGroupsEditor({
  * caret whenever normalisation changed the text, so the local draft governs
  * until focus leaves. */
 function RecipeItemsTextArea({
+  inset = false,
   label,
   items,
   placeholder,
@@ -381,6 +427,8 @@ function RecipeItemsTextArea({
   fromText,
   onItemsChange,
 }: {
+  /** Sits inside a sink group panel, so the field raises instead. */
+  inset?: boolean;
   label: string;
   items: string[];
   placeholder: string;
@@ -393,6 +441,7 @@ function RecipeItemsTextArea({
 
   return (
     <RecipeTextArea
+      inset={inset}
       label={label}
       hideLabel
       value={draft ?? toText(items)}
@@ -408,6 +457,7 @@ function RecipeItemsTextArea({
 }
 
 function RecipeTextArea({
+  inset = false,
   label,
   value,
   onChange,
@@ -416,6 +466,7 @@ function RecipeTextArea({
   placeholder,
   hideLabel = false,
 }: {
+  inset?: boolean;
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -431,19 +482,22 @@ function RecipeTextArea({
       onBlur={onBlur}
       className="group flex min-w-0 flex-col"
     >
-      <Label
-        className={
-          hideLabel
-            ? "sr-only"
-            : "cl-mono text-[11px] font-bold uppercase tracking-[0.16em] text-ink-mute"
-        }
-      >
-        {label}
-      </Label>
+      {hideLabel ? (
+        <Label className="sr-only">{label}</Label>
+      ) : (
+        <Label className="flex items-center gap-2.5">
+          <Tick />
+          <span className={EYEBROW}>{label}</span>
+        </Label>
+      )}
       <TextArea
         rows={rows}
         placeholder={placeholder}
-        className="mt-2 w-full resize-y border border-input bg-background px-3 py-2 font-sans text-sm leading-relaxed text-ink outline-none data-[focused]:border-ring data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-ring data-[focus-visible]:outline-offset-2"
+        className={cn(
+          "mt-3 w-full shrink-0 resize-y rounded-xl px-4 py-3 text-[15px] leading-relaxed text-ink placeholder:text-mute",
+          inset ? "bg-raise" : "bg-sink",
+          FOCUS_RING,
+        )}
       />
     </AriaTextField>
   );

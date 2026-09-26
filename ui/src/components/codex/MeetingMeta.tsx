@@ -6,6 +6,7 @@ import type { CellValue } from "#/components/bases/cells/types";
 import { EditableCell } from "#/components/bases/EditableCell";
 import { CLink } from "#/components/codex/CLink";
 import { PersonCombo } from "#/components/codex/PersonCombo";
+import { Button } from "#/components/ui/button";
 import {
   findPageByName,
   useCreatePerson,
@@ -13,6 +14,7 @@ import {
 } from "#/hooks/usePeople";
 import { ATTENDEES_KEY, asWikilink, readAttendees } from "#/lib/attendance";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type { KindMetaExtrasProps } from "#/lib/kindPresentation";
 import {
   floorToQuarterHour,
@@ -28,14 +30,15 @@ import {
  *  declared property, without requiring the vault to declare a Base for it. */
 const OCCURRED_AT_DEFINITION = { type: "datetime" } as const;
 
-/** Icon-sized ghost button: invisible frame until hovered. */
-const GHOST_ICON_BUTTON = cn(
-  "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center border border-transparent text-ink-mute transition-colors",
-  "hover:border-rule hover:text-hot",
-  "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-transparent disabled:hover:text-ink-mute",
+/** 24px round icon button inside an attendee chip. */
+const CHIP_ICON_BUTTON = cn(
+  "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors",
+  "hover:bg-ground",
+  "disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent",
+  FOCUS_RING_NATIVE,
 );
 
-const LABEL = "cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute";
+const LABEL = "text-[13px] text-mute";
 
 /** MEETING header band: when the meeting happened, which person pages it
  *  names, and whether it is a 1:1. These are facts of the note rather than
@@ -112,127 +115,124 @@ export function MeetingMeta({
     <section
       aria-label="Meeting details"
       data-testid="meeting-header"
-      className="mb-3 flex flex-wrap items-start gap-x-8 gap-y-2"
+      className="mb-3 grid grid-cols-[92px_minmax(0,1fr)] items-start gap-x-4 gap-y-[18px]"
     >
-      <div className="flex min-w-[12rem] flex-col gap-1">
-        <div className={LABEL}>Occurred</div>
-        <div className="flex items-center gap-1">
-          <div className="min-w-0 flex-1">
-            <EditableCell
-              value={occurredAt}
-              definition={OCCURRED_AT_DEFINITION}
-              ariaLabel="occurred at"
-              commitOnBlur
-              onCommit={(value) => void setOccurredAt(value)}
-            />
-          </div>
-          {!isDraft && !occurredAt && (
-            <button
-              type="button"
-              className="cl-btn"
-              disabled={saving}
-              onClick={() =>
-                void setOccurredAt(localIso(floorToQuarterHour(new Date())))
-              }
-            >
-              Now
-            </button>
-          )}
+      <div className={cn(LABEL, "pt-2")}>Occurred</div>
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="min-w-0 max-w-[18rem] flex-1">
+          <EditableCell
+            value={occurredAt}
+            definition={OCCURRED_AT_DEFINITION}
+            ariaLabel="occurred at"
+            commitOnBlur
+            onCommit={(value) => void setOccurredAt(value)}
+          />
         </div>
+        {!isDraft && !occurredAt && (
+          <Button
+            size="sm"
+            isDisabled={saving}
+            onPress={() =>
+              void setOccurredAt(localIso(floorToQuarterHour(new Date())))
+            }
+          >
+            Now
+          </Button>
+        )}
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <span id={attendeesLabelId} className={LABEL}>
-            Attendees
-          </span>
-          <button
-            type="button"
-            aria-pressed={oneOnOne}
-            title={oneOnOne ? "Tagged 1:1 — untag" : "Tag as a 1:1"}
-            className={cn(
-              "cl-btn px-1.5 py-0 text-[9px]",
-              oneOnOne && "cl-btn-hot",
-            )}
-            onClick={() => onTagsChange(withOneOnOne(tags, !oneOnOne))}
-          >
-            1:1
-          </button>
-        </div>
+      <div className="flex flex-col items-start gap-2 pt-1.5">
+        <span id={attendeesLabelId} className={LABEL}>
+          Attendees
+        </span>
+        <button
+          type="button"
+          aria-pressed={oneOnOne}
+          title={oneOnOne ? "Tagged 1:1 — untag" : "Tag as a 1:1"}
+          className={cn(
+            "h-6 cursor-pointer rounded-full px-2.5 text-[12.5px] transition-colors",
+            FOCUS_RING_NATIVE,
+            oneOnOne
+              ? "bg-accent-tint text-accent"
+              : "bg-sink text-mute hover:text-ink",
+          )}
+          onClick={() => onTagsChange(withOneOnOne(tags, !oneOnOne))}
+        >
+          1:1
+        </button>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          {attendees.length === 0 ? (
-            <span className="cl-mono text-[11px] text-ink-mute">
-              no attendees
-            </span>
-          ) : (
-            <ul aria-labelledby={attendeesLabelId} className="contents">
-              {attendees.map((attendee) => {
-                const target = findPageByName(pages, attendee);
-                return (
-                  <li
-                    key={attendee}
-                    className="cl-mono inline-flex max-w-[14rem] min-w-0 items-center gap-1 border border-rule px-1.5 py-0.5 text-[11px] text-ink"
-                  >
-                    {target ? (
-                      <CLink
-                        path={target.path}
-                        className="cl-mono min-w-0 truncate text-[12px] text-ink hover:text-accent"
+      <div className="flex min-w-0 flex-col gap-2.5">
+        {attendees.length === 0 ? (
+          <span className="pt-1.5 text-[13.5px] text-mute">No attendees</span>
+        ) : (
+          <ul
+            aria-labelledby={attendeesLabelId}
+            className="m-0 flex list-none flex-wrap gap-1.5 p-0"
+          >
+            {attendees.map((attendee) => {
+              const target = findPageByName(pages, attendee);
+              return (
+                <li
+                  key={attendee}
+                  className="inline-flex h-[30px] max-w-[16rem] min-w-0 items-center gap-0.5 rounded-full bg-sink pr-1 pl-3 text-[14px]"
+                >
+                  {target ? (
+                    <CLink
+                      path={target.path}
+                      className="min-w-0 truncate text-ink hover:text-accent"
+                    >
+                      {attendee}
+                    </CLink>
+                  ) : (
+                    <span className="flex min-w-0 items-center gap-1">
+                      <span
+                        className="truncate text-mute italic"
+                        title="No page carries this name yet"
                       >
                         {attendee}
-                      </CLink>
-                    ) : (
-                      <span className="flex min-w-0 items-center gap-1">
-                        <span
-                          className="cl-mono truncate text-[12px] text-ink-mute"
-                          title="no page carries this name yet"
-                        >
-                          {attendee}
-                        </span>
-                        {!isDraft && (
-                          <button
-                            type="button"
-                            className={GHOST_ICON_BUTTON}
-                            disabled={creating !== null}
-                            aria-label={`create ${attendee}`}
-                            title="create the person page"
-                            onClick={() => void create(attendee)}
-                          >
-                            <Plus size={11} aria-hidden />
-                          </button>
-                        )}
                       </span>
-                    )}
-                    <button
-                      type="button"
-                      className={GHOST_ICON_BUTTON}
-                      disabled={saving || isDraft}
-                      aria-label={`remove ${attendee}`}
-                      onClick={() =>
-                        void write(
-                          attendees.filter((entry) => entry !== attendee),
-                        )
-                      }
-                    >
-                      <X size={11} aria-hidden />
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                      {!isDraft && (
+                        <button
+                          type="button"
+                          className={cn(CHIP_ICON_BUTTON, "text-accent")}
+                          disabled={creating !== null}
+                          aria-label={`create ${attendee}`}
+                          title="Create the person page"
+                          onClick={() => void create(attendee)}
+                        >
+                          <Plus size={12} strokeWidth={2} aria-hidden />
+                        </button>
+                      )}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className={cn(CHIP_ICON_BUTTON, "text-mute hover:text-hot")}
+                    disabled={saving || isDraft}
+                    aria-label={`remove ${attendee}`}
+                    onClick={() =>
+                      void write(
+                        attendees.filter((entry) => entry !== attendee),
+                      )
+                    }
+                  >
+                    <X size={12} strokeWidth={2} aria-hidden />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
-          {!isDraft && (
-            <div className="w-56 min-w-[10rem]">
-              <PersonCombo onPick={add} exclude={attendees} disabled={saving} />
-            </div>
-          )}
-        </div>
+        {!isDraft && (
+          <div className="w-60 max-w-full">
+            <PersonCombo onPick={add} exclude={attendees} disabled={saving} />
+          </div>
+        )}
 
         {createError && (
-          <div className="cl-mono mt-1 text-[10px] text-hot">
-            ⁂ {createError}
-          </div>
+          <div className="text-[12.5px] text-hot">{createError}</div>
         )}
       </div>
     </section>

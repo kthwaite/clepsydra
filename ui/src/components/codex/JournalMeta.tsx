@@ -1,8 +1,10 @@
-import { Circle, CircleDot } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useAiJournalRecent } from "#/api/aiJournal";
 import { useJournalRecent } from "#/api/journal";
+import { Button } from "#/components/ui/button";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import {
   aiJournalDateFromPath,
   aiJournalPathForDate,
@@ -11,11 +13,11 @@ import {
   journalPathForDate,
   nearestEntry,
   relativeDays,
-  shortDate,
 } from "#/lib/journal";
 import type { KindMetaExtrasProps } from "#/lib/kindPresentation";
 import {
   dayOfYear,
+  formatDayMonth,
   isLeapYear,
   localDateKey,
   parseLocalDate,
@@ -24,6 +26,9 @@ import { useWorkspaceStore } from "#/store/workspace";
 
 const FASTI_ROWS = 14;
 const FETCH_DAYS = 30;
+
+/** Round sink step buttons either side of Today (36px, as mocked). */
+const NAV_ICON = "h-9 w-9 bg-sink text-ink-2";
 
 type StreamEntry = { path: string; journal_date: string };
 
@@ -90,69 +95,75 @@ function JournalStreamMeta({
   const yearDays = isLeapYear(date.getFullYear()) ? 366 : 365;
 
   return (
-    <div>
-      <div className="flex gap-1">
-        <button
-          type="button"
-          className="cl-btn"
-          disabled={!prevKey}
-          onClick={() => prevKey && goTo(prevKey)}
+    <div className="flex flex-col gap-5">
+      <div className="flex gap-1.5">
+        <Button
+          size="icon"
+          className={NAV_ICON}
+          isDisabled={!prevKey}
+          onPress={() => prevKey && goTo(prevKey)}
           aria-label="previous entry"
         >
-          ‹
-        </button>
-        <button
-          type="button"
-          className="cl-btn"
-          disabled={dateKey === todayKey}
-          onClick={() => goTo(todayKey)}
+          <ChevronLeft size={14} strokeWidth={2} aria-hidden />
+        </Button>
+        <Button
+          size="sm"
+          className="h-9 rounded-full px-4 text-[14px] font-normal"
+          isDisabled={dateKey === todayKey}
+          onPress={() => goTo(todayKey)}
         >
           Today
-        </button>
-        <button
-          type="button"
-          className="cl-btn"
-          disabled={!nextKey}
-          onClick={() => nextKey && goTo(nextKey)}
+        </Button>
+        <Button
+          size="icon"
+          className={NAV_ICON}
+          isDisabled={!nextKey}
+          onPress={() => nextKey && goTo(nextKey)}
           aria-label="next entry"
         >
-          ›
-        </button>
+          <ChevronRight size={14} strokeWidth={2} aria-hidden />
+        </Button>
       </div>
 
-      <div className="mt-2 border-l border-rule pl-2">
+      <div className="flex flex-col">
         {rows.map((r) => {
           const active = r.dateKey === dateKey;
-          const navigable = r.path !== null || r.dateKey === todayKey;
+          const written = r.path !== null;
+          const navigable = written || r.dateKey === todayKey;
           return (
             <button
               key={r.dateKey}
               type="button"
               disabled={!navigable}
+              aria-current={active ? "date" : undefined}
               onClick={() => navigable && goTo(r.dateKey)}
               className={cn(
-                "grid w-full grid-cols-[auto_1fr_auto] items-baseline gap-[6px] py-[1px] text-left text-[10px]",
-                active
-                  ? "text-ink"
-                  : navigable
-                    ? "cursor-pointer text-ink-mute hover:text-ink"
-                    : "text-ink-mute opacity-50",
+                "-ml-2 grid h-[26px] grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-2 rounded-full pr-2.5 pl-2 text-left transition-colors",
+                FOCUS_RING_NATIVE,
+                active && "bg-sink",
+                navigable && !active && "cursor-pointer hover:bg-sink/60",
               )}
             >
-              {r.path !== null ? (
-                <CircleDot size={10} className="text-accent" aria-hidden />
-              ) : (
-                <Circle size={10} aria-hidden />
-              )}
+              <span
+                aria-hidden
+                className={cn(
+                  "h-[7px] w-[7px] rounded-full",
+                  written ? "bg-accent" : "ring-[1.3px] ring-faint ring-inset",
+                )}
+              />
               <span
                 className={cn(
-                  "cl-serif",
-                  active ? "font-semibold not-italic" : "italic",
+                  "font-serif text-[16.5px] leading-none",
+                  active
+                    ? "text-ink"
+                    : navigable
+                      ? "text-ink-2 italic"
+                      : "text-mute italic",
                 )}
               >
-                {shortDate(r.dateKey)}
+                {formatDayMonth(r.dateKey)}
               </span>
-              <span className="cl-mono text-[9px]">
+              <span className="text-[12.5px] text-mute">
                 {relativeDays(r.dateKey, todayKey)}
               </span>
             </button>
@@ -160,42 +171,32 @@ function JournalStreamMeta({
         })}
       </div>
 
-      <div className="cl-mono mt-3 flex flex-col gap-1 text-[11px]">
-        <div className="flex justify-between">
-          <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-            Day
-          </span>
-          <span className="text-ink-2">
-            {dayOfYear(date)} / {yearDays}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-            State
-          </span>
-          <span className="text-ink-2">
-            {isDraft ? "unwritten" : "written"}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-            {spec.counterpart.label}
-          </span>
+      <dl className="m-0 grid grid-cols-[76px_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-[13.5px] leading-[1.4]">
+        <dt className="text-mute">Day</dt>
+        <dd className="m-0 text-ink">
+          <span className="font-serif text-[18px]">{dayOfYear(date)}</span>
+          <span className="text-mute"> of {yearDays}</span>
+        </dd>
+        <dt className="text-mute">State</dt>
+        <dd className="m-0 text-ink">{isDraft ? "Unwritten" : "Written"}</dd>
+        <dt className="text-mute">{spec.counterpart.label}</dt>
+        <dd className="m-0">
           <button
             type="button"
             className={cn(
-              "text-ink-2",
+              "rounded-sm text-left",
+              FOCUS_RING_NATIVE,
               counterpartNavigable
-                ? "cursor-pointer underline decoration-dotted hover:text-ink"
-                : "opacity-50",
+                ? "cursor-pointer text-accent hover:underline hover:underline-offset-[3px]"
+                : "text-mute",
             )}
             disabled={!counterpartNavigable}
             onClick={openCounterpart}
           >
-            {counterpartPath !== null ? "written · open" : "unwritten"}
+            {counterpartPath !== null ? "Written · open" : "Unwritten"}
           </button>
-        </div>
-      </div>
+        </dd>
+      </dl>
     </div>
   );
 }

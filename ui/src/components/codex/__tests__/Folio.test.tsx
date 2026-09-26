@@ -1483,7 +1483,7 @@ describe("Folio kind assignment", () => {
 
     const kind = screen.getByRole("combobox", { name: "Kind" });
     expect(kind).toBeDisabled();
-    expect(kind).toHaveValue("JOURNAL");
+    expect(kind).toHaveValue("Journal");
     expect(screen.getByText("· fixed")).toBeInTheDocument();
     expect(kind).toHaveAccessibleDescription("Journal kind cannot be changed.");
   });
@@ -1505,7 +1505,7 @@ describe("Folio kind assignment", () => {
     render(<Folio tabId="t1" path="quotes/example.md" />);
 
     const kind = screen.getByRole("combobox", { name: "Kind" });
-    expect(kind).toHaveValue("QUOTE");
+    expect(kind).toHaveValue("Quote");
     await user.click(kind);
     expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
     expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();

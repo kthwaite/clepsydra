@@ -1,5 +1,8 @@
 import { useId } from "react";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 export interface RawMarkdownEditorProps {
   value: string;
@@ -20,25 +23,29 @@ export function RawMarkdownEditor({
   const diagnosticId = useId();
 
   return (
-    <section
-      aria-label="Raw Markdown editor"
-      className="mt-5 border border-rule bg-background p-3 sm:p-4"
-    >
-      <div className="mb-2">
-        <label
-          htmlFor={textareaId}
-          className="cl-mono block text-[10px] font-semibold uppercase tracking-[0.14em] text-ink"
-        >
-          Raw Markdown
-        </label>
-        <p className="cl-marg mt-1 mb-0 text-xs text-ink-mute">
+    <section aria-label="Raw Markdown editor" className="mt-5">
+      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="flex items-center gap-2.5">
+          <Tick />
+          <label
+            htmlFor={textareaId}
+            className="font-serif text-[20px] leading-none text-ink italic"
+          >
+            Raw Markdown
+          </label>
+        </span>
+        <p className="m-0 text-[13px] text-mute">
           Edits stay local until Apply.
         </p>
       </div>
       <textarea
         id={textareaId}
+        data-code-editor=""
         aria-describedby={diagnostic ? diagnosticId : undefined}
-        className="min-h-[18rem] w-full resize-y border border-rule bg-background p-3 font-mono text-sm leading-6 text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent sm:min-h-[24rem]"
+        className={cn(
+          "min-h-[18rem] w-full shrink-0 resize-y rounded-xl bg-sink p-4 text-[13.5px] leading-6 text-ink sm:min-h-[24rem]",
+          FOCUS_RING_NATIVE,
+        )}
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
         spellCheck={false}
@@ -47,7 +54,7 @@ export function RawMarkdownEditor({
         <p
           id={diagnosticId}
           role="alert"
-          className="mt-2 mb-0 text-sm text-destructive"
+          className="mt-2 mb-0 text-[13.5px] text-hot"
         >
           {diagnostic}
         </p>
