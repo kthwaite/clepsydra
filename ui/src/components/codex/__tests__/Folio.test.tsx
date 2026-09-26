@@ -200,7 +200,7 @@ vi.mock("#/components/page-tree/PageActionsMenu", () => ({
             })
           }
         >
-          Archive Page
+          Archive page
         </button>
       </>
     );
@@ -1770,7 +1770,7 @@ describe("Folio page archival wiring", () => {
       render(<Folio tabId="tab-alpha" path="notes/alpha.md" />);
 
       expect(
-        await screen.findByRole("button", { name: "Archive Page" }),
+        await screen.findByRole("button", { name: "Archive page" }),
       ).toBeVisible();
       expect(
         screen.queryByRole("button", { name: /move or rename page/i }),
@@ -1810,7 +1810,7 @@ describe("Folio page archival wiring", () => {
     render(<TabContent />);
     await user.click(screen.getByRole("button", { name: "Manage paths" }));
     await user.click(
-      await screen.findByRole("button", { name: "Archive Page" }),
+      await screen.findByRole("button", { name: "Archive page" }),
     );
 
     await waitFor(() => expect(useWorkspaceStore.getState().tabs).toEqual([]));
@@ -1837,7 +1837,7 @@ describe("Folio page archival wiring", () => {
     );
     await user.click(
       await within(detailsDialog).findByRole("button", {
-        name: "Archive Page",
+        name: "Archive page",
       }),
     );
 

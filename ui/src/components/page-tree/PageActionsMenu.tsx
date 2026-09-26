@@ -9,6 +9,14 @@ import { MutationPreviewDialog } from "#/components/page-tree/MutationPreviewDia
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { TextField } from "#/components/ui/text-field";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+
+/** A Folio rail action: 13.5px Geist, mute until hovered. */
+const RAIL_ACTION = cn(
+  "cursor-pointer rounded text-left text-[13.5px] transition-colors",
+  FOCUS_RING_NATIVE,
+);
 
 interface FrozenMovePreview {
   request: MutationPreviewRequest;
@@ -134,7 +142,7 @@ function MovePageAction({
     <>
       <button
         type="button"
-        className="cl-mono cursor-pointer text-left text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+        className={cn(RAIL_ACTION, "text-mute hover:text-ink")}
         onClick={openMove}
       >
         Move or rename page
@@ -243,10 +251,10 @@ function ArchivePageAction({
     <>
       <button
         type="button"
-        className="cl-mono cursor-pointer text-left text-[10px] uppercase tracking-[0.1em] text-destructive hover:underline"
+        className={cn(RAIL_ACTION, "text-hot hover:underline")}
         onClick={openArchive}
       >
-        Archive Page
+        Archive page
       </button>
 
       <Dialog
@@ -254,7 +262,7 @@ function ArchivePageAction({
         onOpenChange={(open) => {
           if (!open) closeArchive();
         }}
-        title="Archive Page"
+        title="Archive page"
         description={`Current path: ${path}`}
         isDismissable={!archivePage.isPending}
         footer={
@@ -276,7 +284,7 @@ function ArchivePageAction({
           </>
         }
       >
-        <div className="space-y-2 text-sm">
+        <div className="space-y-2 text-[14px]">
           <p>This page will be removed from normal views.</p>
           <p>
             Inbound links remain byte-identical and become unresolved after
@@ -284,7 +292,7 @@ function ArchivePageAction({
           </p>
           <p>You can restore this page from the Rubbish Bin.</p>
           {error ? (
-            <p className="text-xs text-destructive" role="alert">
+            <p className="text-[13px] text-hot" role="alert">
               {error}
             </p>
           ) : null}

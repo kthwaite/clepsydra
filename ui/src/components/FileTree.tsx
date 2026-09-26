@@ -41,9 +41,8 @@ function FileTreeItems({
               {({ isExpanded, isFocusVisible, level }) => (
                 <div
                   className={cn(
-                    "flex w-full items-center gap-1 truncate py-0.5 pr-2 text-foreground hover:bg-accent",
-                    isFocusVisible &&
-                      "outline outline-2 outline-ring outline-offset-[-2px]",
+                    "flex w-full items-center gap-1.5 truncate rounded-lg py-1 pr-2 text-ink hover:bg-sink",
+                    isFocusVisible && "ring-2 ring-inset ring-accent",
                   )}
                   style={{ paddingInlineStart: `${(level - 1) * 16}px` }}
                 >
@@ -52,17 +51,17 @@ function FileTreeItems({
                       <Button slot="chevron" className="contents">
                         <ChevronRight
                           className={cn(
-                            "h-3 w-3 text-muted-foreground transition-transform",
+                            "h-3 w-3 text-mute transition-transform",
                             isExpanded && "rotate-90",
                           )}
                         />
                       </Button>
-                      <Folder className="h-3.5 w-3.5 text-muted-foreground" />
+                      <Folder className="h-3.5 w-3.5 text-mute" />
                     </>
                   ) : (
                     <>
                       <span className="w-3" />
-                      <File className="h-3.5 w-3.5 text-muted-foreground" />
+                      <File className="h-3.5 w-3.5 text-mute" />
                     </>
                   )}
                   <span className="truncate">{child.name}</span>
@@ -110,27 +109,25 @@ export function FileTree() {
   }, [pages, folderPaths]);
 
   if (isLoadingPages || isLoadingFolders) {
-    return (
-      <p className="px-2 py-1 text-xs text-muted-foreground">Loading...</p>
-    );
+    return <p className="px-2 py-1 text-[13px] text-mute">Loading...</p>;
   }
 
   if (pagesError || foldersError) {
     return (
-      <p className="px-2 py-1 text-xs text-destructive">Failed to load pages</p>
+      <p className="px-2 py-1 text-[13px] text-hot">Failed to load pages</p>
     );
   }
 
   const hasItems = (treeData.get(ROOT_ID)?.children.length ?? 0) > 0;
   if (!hasItems) {
-    return <p className="px-2 py-1 text-xs text-muted-foreground">No pages</p>;
+    return <p className="px-2 py-1 text-[13px] text-mute">No pages</p>;
   }
 
   return (
     <Tree
       aria-label="File tree"
       selectionMode="none"
-      className="text-sm"
+      className="text-[13.5px]"
       onAction={(key) => {
         const node = treeData.get(String(key));
         if (!node || node.isFolder || !node.page) return;

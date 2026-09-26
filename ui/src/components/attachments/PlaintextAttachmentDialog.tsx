@@ -61,12 +61,12 @@ export function PlaintextAttachmentDialog({
       }
     >
       {action ? (
-        <div className="space-y-3 text-sm">
-          <p className="text-warning">
+        <div className="space-y-3">
+          <p className="text-warn">
             The attachment bytes, filename, path, MIME type, and size are not
             encrypted.
           </p>
-          <ul className="space-y-1 break-all font-mono text-xs text-ink-mute">
+          <ul className="m-0 list-none space-y-1 break-all rounded-[12px] bg-ground px-3 py-2 text-[13px] text-mute">
             <li>Filename: {upload?.name ?? attachment?.name}</li>
             <li>
               {upload ? "Destination path" : "Attachment path"}:{" "}
@@ -79,17 +79,17 @@ export function PlaintextAttachmentDialog({
             ) : null}
           </ul>
           {action.kind === "insert" ? (
-            <p className="text-ink-mute">
+            <p className="text-mute">
               Only the Markdown reference becomes part of the protected note
               body. The existing attachment remains plaintext at its vault path.
             </p>
           ) : (
-            <p className="text-ink-mute">
+            <p className="text-mute">
               Uploading stores this file outside the protected note body.
             </p>
           )}
           {error ? (
-            <p role="alert" className="text-danger">
+            <p role="alert" className="text-[13px] text-hot">
               {error}
             </p>
           ) : null}

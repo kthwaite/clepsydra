@@ -122,6 +122,9 @@ describe("MutationPreviewDialog", () => {
     );
 
     expect(screen.getByText(/1 path will be deleted/i)).toBeVisible();
+    // Operation kinds read in sentence case, not CSS caps.
+    expect(screen.getByText("Rename")).toBeVisible();
+    expect(screen.getByText("Delete")).toBeVisible();
     expect(screen.getByText(/1 link rewrite/i)).toBeVisible();
     expect(screen.getByText("notes/old.md")).toBeVisible();
     expect(screen.getByText("archive/new.md")).toBeVisible();

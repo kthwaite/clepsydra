@@ -10,8 +10,8 @@ import { BlockTransclusion } from "#/components/blocks/BlockTransclusion";
 import { MathExpression } from "#/components/MathExpression";
 import { MermaidCodeBlock } from "#/components/MermaidCodeBlock";
 import { CopyButton } from "#/components/ui/CopyButton";
-import { useOpenTab } from "#/hooks/useOpenTab";
 import { expandPrefixedUrl } from "#/editor/prefixedExternalLinks";
+import { useOpenTab } from "#/hooks/useOpenTab";
 import { classifyLinkResource } from "#/lib/linkResource";
 import {
   BLOCK_REFERENCE_SCHEME,
@@ -49,14 +49,14 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
     <div className="group relative">
       <pre
         ref={ref}
-        className="overflow-x-auto border border-border bg-muted p-4 font-mono text-sm"
+        className="overflow-x-auto rounded-[12px] bg-sink p-4 text-[13px] leading-[1.6] text-ink"
       >
         {children}
       </pre>
       <CopyButton
         getText={() => ref.current?.textContent ?? ""}
         label="Copy code"
-        className="absolute right-2 top-2 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+        className="absolute right-3 top-3 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
       />
     </div>
   );
@@ -197,8 +197,10 @@ export function MarkdownRenderer({
           );
         },
         table: ({ children, ...props }) => (
+          // Tone and space, not rules (spec decision 5): a raised panel with
+          // the header row on sink and no cell borders — as the Folio table.
           <table
-            className="w-full border-collapse border border-border"
+            className="w-full border-separate border-spacing-0 rounded-[14px] bg-raise text-[0.9em] leading-[1.5]"
             {...props}
           >
             {children}
@@ -206,14 +208,14 @@ export function MarkdownRenderer({
         ),
         th: ({ children, ...props }) => (
           <th
-            className="border border-border bg-muted px-3 py-1.5 text-left text-sm font-bold"
+            className="bg-sink px-4 py-2.5 text-left align-bottom text-[13px] font-normal text-mute first:rounded-tl-[14px] last:rounded-tr-[14px]"
             {...props}
           >
             {children}
           </th>
         ),
         td: ({ children, ...props }) => (
-          <td className="border border-border px-3 py-1.5 text-sm" {...props}>
+          <td className="px-4 py-2.5 align-top text-ink-2" {...props}>
             {children}
           </td>
         ),
@@ -232,7 +234,10 @@ export function MarkdownRenderer({
             );
           }
           return (
-            <code className="bg-muted px-1 py-0.5 font-mono text-sm" {...props}>
+            <code
+              className="rounded-[6px] bg-sink px-1 py-0.5 text-[0.88em]"
+              {...props}
+            >
               {children}
             </code>
           );
@@ -257,7 +262,7 @@ export function MarkdownRenderer({
         ),
         blockquote: ({ children, ...props }) => (
           <blockquote
-            className="border-l-4 border-border pl-4 italic text-muted-foreground"
+            className="my-4 pl-5 font-serif text-[1.2em] italic leading-[1.4] text-ink-2"
             {...props}
           >
             {children}
