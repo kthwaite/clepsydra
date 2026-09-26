@@ -9,7 +9,7 @@
  *   - Hold toggle on/off payloads
  *   - Checklist: read-only, shows d/total, OPEN PAGE button calls handler
  *   - Archive two-step: pending edits save before DELETE, then the panel closes
- *   - Scrim click closes panel
+ *   - No dimming scrim; a transparent click-outside layer closes the panel
  *   - Escape closes panel
  */
 
@@ -236,7 +236,8 @@ describe("TaskEditPanel — render", () => {
     }
     expect(screen.getByText("Checklist")).toBeInTheDocument();
     expect(screen.getByText("Blocker")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Active" })).toBeInTheDocument();
+    const holdToggle = screen.getByRole("button", { name: "Not blocked" });
+    expect(holdToggle).toHaveAttribute("aria-pressed", "false");
   });
 
   it("offers No project and Backlog without changing their select values", async () => {
@@ -293,7 +294,10 @@ describe("TaskEditPanel — render", () => {
     const blocker = screen.getByRole("textbox", { name: "Blocker" });
     expect(blocker).toHaveValue("BLOCKED — waiting on API");
     expect(blocker).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Blocked" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Blocked" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("does not show hold reason input when task is not held", () => {
@@ -377,16 +381,15 @@ describe("TaskEditPanel — render", () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("TaskEditPanel — checklist read-only", () => {
-  it("shows d / total done hint text", () => {
+  it("shows the 'd of total done' hint text", () => {
     wrap();
     // FULL_TASK has checks: [2, 5]
-    expect(screen.getByText(/2 \/ 5 done/)).toBeInTheDocument();
+    expect(screen.getByText("2 of 5 done")).toBeInTheDocument();
   });
 
-  it("shows 'none' hint when checks is empty", () => {
+  it("shows the 'No items' hint when checks is empty", () => {
     wrap({ task: { ...FULL_TASK, checks: [] } });
-    // hint shows "none"
-    expect(screen.getByText("none")).toBeInTheDocument();
+    expect(screen.getByText("No items")).toBeInTheDocument();
   });
 
   it("renders OPEN PAGE → button", () => {
@@ -1274,11 +1277,31 @@ describe("TaskEditPanel — archive two-step", () => {
 // Scrim + escape close
 // ══════════════════════════════════════════════════════════════════════════════
 
-describe("TaskEditPanel — scrim and escape close", () => {
-  it("scrim click calls onClose", async () => {
+describe("TaskEditPanel — undimmed dock and escape close", () => {
+  it("renders no dimming scrim: the board stays undimmed", () => {
+    const { container } = wrap();
+    expect(screen.queryByTestId("edit-panel-scrim")).not.toBeInTheDocument();
+    const dimmers = Array.from(container.querySelectorAll("*")).filter((el) =>
+      /\bbg-(scrim|black)\b|bg-black\//.test(el.getAttribute("class") ?? ""),
+    );
+    expect(dimmers).toEqual([]);
+  });
+
+  it("remains a labelled modal dialog and closes on Escape", async () => {
     const onClose = vi.fn();
     wrap({ onClose });
-    await userEvent.click(screen.getByTestId("edit-panel-scrim"));
+    const dialog = screen.getByRole("dialog", { name: "Edit task" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    await userEvent.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("a click outside the dock (transparent dismiss layer) calls onClose", async () => {
+    const onClose = vi.fn();
+    wrap({ onClose });
+    const dismiss = screen.getByTestId("edit-panel-dismiss");
+    expect(dismiss).toHaveClass("bg-transparent");
+    await userEvent.click(dismiss);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

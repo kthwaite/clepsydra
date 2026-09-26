@@ -1,13 +1,15 @@
 /**
  * Shared form-field primitives for the Tasking board panels
- * (NewTaskModal + TaskEditPanel).
+ * (NewTaskModal, TaskEditPanel and the cycle modals).
  *
- * Mirrors the .ed-field / .ed-select / .cap-input / .cap-radio classes from
- * docs/pkm-redesign/project/styles-board.css, translated to Tailwind tokens.
+ * Stone & Lamp (spec §5.5): a sentence-case mute label over a sink input;
+ * choice rows are segmented tracks on sink with the selected option raised.
  */
 
 import { useLayoutEffect, useRef } from "react";
 import { Radio, RadioGroup } from "#/components/ui/radio-group";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import {
   COL_ORDER,
   type ColLabelFn,
@@ -18,7 +20,7 @@ import {
 
 // ── EdField ───────────────────────────────────────────────────────────────────
 
-/** Small labelled field wrapper (mono caps label + optional right hint). */
+/** Labelled field wrapper: mute label, optional right-hand hint. */
 export function EdField({
   label,
   hint,
@@ -29,16 +31,10 @@ export function EdField({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-[5px]">
-      <div className="flex items-baseline justify-between gap-[8px]">
-        <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-[var(--ink-mute)]">
-          {label}
-        </span>
-        {hint && (
-          <span className="cl-mono text-[9px] uppercase tracking-[0.1em] text-[var(--ink-4)]">
-            {hint}
-          </span>
-        )}
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[12.5px] text-mute">{label}</span>
+        {hint && <span className="text-[12px] text-mute">{hint}</span>}
       </div>
       {children}
     </div>
@@ -47,21 +43,28 @@ export function EdField({
 
 // ── input classes ─────────────────────────────────────────────────────────────
 
-export const INPUT_CLS =
-  "cl-mono w-full border border-[var(--rule)] bg-transparent px-[9px] py-[7px] text-[var(--fs-s)] text-[var(--ink)] tracking-[0.04em] outline-none placeholder:text-[var(--ink-4)] focus:border-[var(--hot)]";
+/** Sink input: 38px tall on one line, 10px radius, no hairline. */
+export const INPUT_CLS = cn(
+  "w-full min-w-0 rounded-[10px] bg-sink px-3 py-2 text-[14px] leading-5.5 text-ink placeholder:text-mute disabled:opacity-45",
+  FOCUS_RING_NATIVE,
+);
 
 // ── radio-row classes / styles ────────────────────────────────────────────────
 
-export const RADIO_CLS_BASE =
-  "cl-mono border border-[var(--rule)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] cursor-pointer flex-1 text-center transition-[background,color,border-color] duration-[120ms] ml-0 data-[hovered]:bg-transparent data-[hovered]:text-[var(--ink-3)] data-[selected]:border-[var(--rule)] data-[selected]:bg-transparent data-[selected]:font-normal data-[selected]:text-[var(--ink-3)]";
+/** One option in a segmented choice row (radio or plain button). */
+export const RADIO_CLS_BASE = cn(
+  "flex h-7.5 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-[9px] px-1.5 py-0 text-[13px] text-mute transition-colors hover:text-ink",
+  FOCUS_RING_NATIVE,
+);
 
-export const RADIO_CLS_ON =
-  "bg-[var(--ink)] text-[var(--bg)] border-[var(--ink)] data-[hovered]:bg-[var(--ink)] data-[hovered]:text-[var(--bg)] data-[hovered]:border-[var(--ink)] data-[selected]:bg-[var(--ink)] data-[selected]:text-[var(--bg)] data-[selected]:border-[var(--ink)]";
+/** The selected option of a plain-button choice row: raised on the track.
+ *  React Aria radios get the same look from their data-selected state. */
+export const RADIO_CLS_ON = "bg-raise font-medium text-ink shadow-sm";
 
-const RADIO_CLS_OFF_HOVER =
-  "hover:text-[var(--ink)] hover:border-[var(--ink-3)] data-[hovered]:bg-transparent data-[hovered]:text-[var(--ink)] data-[hovered]:border-[var(--ink-3)]";
+/** The sink track a choice row sits in (pair with RADIO_CLS_BASE). */
+export const CHOICE_TRACK_CLS = "flex w-full gap-0.5 rounded-xl bg-sink p-0.75";
 
-/** Priority on-state fills with the priority colour (cap-radio.pri-*.on). */
+/** Priority fills in the priority colour (kept for the board's chips). */
 export const PRI_ON_STYLE: Record<string, React.CSSProperties> =
   Object.fromEntries(
     PRI_ORDER.map((p) => {
@@ -70,22 +73,6 @@ export const PRI_ON_STYLE: Record<string, React.CSSProperties> =
       // fill is light enough to take ink.
       const color = p === "P3" ? "var(--ink)" : "var(--ground)";
       return [p, { background: bar, borderColor: bar, color }];
-    }),
-  );
-
-/**
- * Priority off-state outlines with the priority colour, except P3 whose
- * border stays the neutral rule colour rather than a barely-visible mute
- * outline (explicit exception).
- */
-export const PRI_OFF_STYLE: Record<string, React.CSSProperties> =
-  Object.fromEntries(
-    PRI_ORDER.map((p) => {
-      const { text } = priColor(p);
-      return [
-        p,
-        { color: text, borderColor: p === "P3" ? "var(--rule)" : text },
-      ];
     }),
   );
 
@@ -123,7 +110,7 @@ function TaskRadio({
 // ── radio rows ────────────────────────────────────────────────────────────────
 
 /**
- * 5-column DISPOSITION radio row (board status columns).
+ * 5-option status row (board status columns).
  * data-testid: `${testIdPrefix}-status-${colId}`.
  */
 export function DispositionRow({
@@ -143,13 +130,14 @@ export function DispositionRow({
       aria-label="Status"
       value={value}
       onChange={onChange}
-      optionsClassName="gap-[6px]"
+      segmented
+      optionsClassName={CHOICE_TRACK_CLS}
     >
       {COL_ORDER.map((colId) => (
         <TaskRadio
           key={colId}
           value={colId}
-          className={`${RADIO_CLS_BASE} ${value === colId ? RADIO_CLS_ON : RADIO_CLS_OFF_HOVER}`}
+          className={RADIO_CLS_BASE}
           data-testid={`${testIdPrefix}-status-${colId}`}
         >
           {colLabel(colId)}
@@ -160,7 +148,7 @@ export function DispositionRow({
 }
 
 /**
- * 4-column PRIORITY radio row (P0–P3, coloured).
+ * 4-option priority row (P0–P3, each with its colour dot).
  * data-testid: `${testIdPrefix}-priority-${pri}`.
  */
 export function PriorityRow({
@@ -177,17 +165,26 @@ export function PriorityRow({
       aria-label="Priority"
       value={value}
       onChange={onChange}
-      optionsClassName="gap-[6px]"
+      segmented
+      optionsClassName={CHOICE_TRACK_CLS}
     >
       {PRI_ORDER.map((p) => (
         <TaskRadio
           key={p}
           value={p}
           className={RADIO_CLS_BASE}
-          style={value === p ? PRI_ON_STYLE[p] : PRI_OFF_STYLE[p]}
           data-testid={`${testIdPrefix}-priority-${p}`}
         >
-          {p} {PRI_LABEL[p]}
+          <span
+            aria-hidden
+            data-testid={`${testIdPrefix}-priority-dot-${p}`}
+            className="h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ background: priColor(p).bar }}
+          />
+          {/* The id stays in the accessible name ("P0 Critical"); the
+              visible label is the plain word, per the mockup. */}
+          <span className="sr-only">{p}</span>
+          {` ${PRI_LABEL[p]}`}
         </TaskRadio>
       ))}
     </RadioGroup>

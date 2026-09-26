@@ -193,28 +193,23 @@ describe("NewTaskModal — render", () => {
     });
     expect(fieldRadio).toBeChecked();
     const fieldLabel = fieldRadio.closest("label");
+    // Selected option is raised on the sink segmented track
+    expect(fieldLabel).toHaveAttribute("data-selected", "true");
     expect(fieldLabel).toHaveClass(
-      "ml-0",
-      "data-[selected]:border-[var(--ink)]",
-      "data-[selected]:bg-[var(--ink)]",
-      "data-[selected]:font-normal",
-      "data-[selected]:text-[var(--bg)]",
+      "data-[selected]:bg-raise",
+      "data-[selected]:text-ink",
     );
-    expect(fieldLabel).not.toHaveClass(
-      "-ml-px",
-      "data-[hovered]:bg-accent",
-      "data-[selected]:bg-accent",
-      "data-[selected]:font-bold",
-    );
-    // Active state: has bg-[var(--ink)] class from RADIO_CLS_ON
-    expect(fieldLabel?.className).toContain("bg-[var(--ink)]");
+    expect(fieldLabel?.parentElement).toHaveClass("bg-sink");
+    expect(fieldLabel?.className).not.toContain("bg-[var(--ink)]");
   });
 
   it("defaults Status to Inbox when no status preset", () => {
     wrap();
     const intakeRadio = screen.getByTestId("new-task-status-INTAKE");
-    expect(intakeRadio.closest("label")?.className).toContain(
-      "bg-[var(--ink)]",
+    expect(intakeRadio).toBeChecked();
+    expect(intakeRadio.closest("label")).toHaveAttribute(
+      "data-selected",
+      "true",
     );
   });
 
@@ -241,20 +236,15 @@ describe("NewTaskModal — render", () => {
     const p2 = within(priority).getByRole("radio", { name: "P2 Medium" });
     expect(p2).toBeChecked();
     const p2Label = p2.closest("label");
-    // Active state: filled with the Medium priority tone
-    expect(p2Label).toHaveStyle({ background: "var(--mute)" });
-    expect(p2Label).toHaveClass(
-      "ml-0",
-      "data-[hovered]:bg-transparent",
-      "data-[selected]:bg-transparent",
-      "data-[selected]:font-normal",
-    );
-    expect(p2Label).not.toHaveClass(
-      "-ml-px",
-      "data-[hovered]:bg-accent",
-      "data-[selected]:bg-accent",
-      "data-[selected]:font-bold",
-    );
+    // Selected state: raised on the track; the priority tone is a dot, not a fill
+    expect(p2Label).toHaveAttribute("data-selected", "true");
+    expect(p2Label).toHaveClass("data-[selected]:bg-raise");
+    expect(p2Label).not.toHaveStyle({ background: "var(--mute)" });
+    expect(screen.getByTestId("new-task-priority-dot-P2")).toHaveStyle({
+      background: "var(--mute)",
+    });
+    // Visible copy is the plain word; the id stays in the accessible name
+    expect(p2Label).toHaveTextContent("P2 Medium");
 
     const user = userEvent.setup();
     p2.focus();
