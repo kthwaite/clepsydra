@@ -52,17 +52,13 @@ export const INPUT_CLS = cn(
 // ── radio-row classes / styles ────────────────────────────────────────────────
 
 /** One option in a segmented choice row (radio or plain button). */
-export const RADIO_CLS_BASE = cn(
+const RADIO_CLS_BASE = cn(
   "flex h-7.5 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-[9px] px-1.5 py-0 text-[13px] text-mute transition-colors hover:text-ink",
   FOCUS_RING_NATIVE,
 );
 
-/** The selected option of a plain-button choice row: raised on the track.
- *  React Aria radios get the same look from their data-selected state. */
-export const RADIO_CLS_ON = "bg-raise font-medium text-ink shadow-sm";
-
 /** The sink track a choice row sits in (pair with RADIO_CLS_BASE). */
-export const CHOICE_TRACK_CLS = "flex w-full gap-0.5 rounded-xl bg-sink p-0.75";
+const CHOICE_TRACK_CLS = "flex w-full gap-0.5 rounded-xl bg-sink p-0.75";
 
 /** Priority fills in the priority colour (kept for the board's chips). */
 export const PRI_ON_STYLE: Record<string, React.CSSProperties> =

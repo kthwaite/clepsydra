@@ -51,7 +51,7 @@ function StateDot({ state }: { state: string }) {
   );
 }
 
-export interface CycleStripProps {
+interface CycleStripProps {
   cycles: BoardCycle[];
   /** Code of the resolved cycle ("BACKLOG" for the pseudo-cycle). */
   selectedCode: string;
