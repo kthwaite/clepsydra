@@ -107,6 +107,15 @@ function splitValues(value: string): string[] {
     .filter(Boolean);
 }
 
+/** Text search runs over loaded works only, so while more remain on the
+ *  server the count names the loaded set rather than the facet total. */
+function searchCountLabel(matches: number, loaded: number, total: number) {
+  if (loaded < total) {
+    return `${matches} ${matches === 1 ? "match" : "matches"} in ${loaded} loaded works`;
+  }
+  return `${matches} of ${total} works`;
+}
+
 function matchesSearch(work: WorkSummary, query: string): boolean {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return true;
@@ -301,9 +310,9 @@ export function AcademicLibrary({
             textAriaLabel="Search works"
             className="flex-wrap"
           />
-          {filterActive ? (
+          {query.trim() ? (
             <p className="px-1 text-[12.5px] tabular-nums text-mute">
-              {filteredWorks.length} of {total} works
+              {searchCountLabel(filteredWorks.length, items.length, total)}
             </p>
           ) : null}
 

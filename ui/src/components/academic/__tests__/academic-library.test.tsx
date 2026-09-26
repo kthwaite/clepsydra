@@ -273,6 +273,26 @@ describe("AcademicLibrary", () => {
 });
 
 describe("AcademicLibrary — shared FilterBar composition", () => {
+  it("counts search matches against the loaded works when more remain", async () => {
+    const user = userEvent.setup();
+    if (mocks.worksState.data) mocks.worksState.data.total = 350;
+    render(<ControlledAcademicLibrary />);
+
+    await user.type(screen.getByTestId("filter-bar-input"), "turing");
+    expect(screen.getByText("1 match in 2 loaded works")).toBeVisible();
+    expect(screen.queryByText("1 of 350 works")).not.toBeInTheDocument();
+  });
+
+  it("shows no match count while only facets are active", () => {
+    render(
+      <ControlledAcademicLibrary
+        initial={{ text: "", facets: { status: ["reading"] } }}
+      />,
+    );
+    expect(screen.queryByText(/ of \d+ works/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ loaded works/)).not.toBeInTheDocument();
+  });
+
   it("gives the text filter an accessible name of Search works", () => {
     render(<ControlledAcademicLibrary />);
     expect(screen.getByTestId("filter-bar-input")).toHaveAccessibleName(
