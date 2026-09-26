@@ -1507,8 +1507,8 @@ describe("Folio kind assignment", () => {
     const kind = screen.getByRole("combobox", { name: "Kind" });
     expect(kind).toHaveValue("Quote");
     await user.click(kind);
-    expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
-    expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "Quote" })).toBeNull();
+    expect(screen.getByRole("option", { name: "Note" })).toBeVisible();
   });
 });
 

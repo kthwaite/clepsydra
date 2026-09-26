@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ASSIGNABLE_KINDS,
   KINDS,
+  kindDisplayLabel,
   kindLabel,
   sortKindsByLabel,
 } from "#/lib/kind";
@@ -392,13 +393,13 @@ describe("Gazetteer controller", () => {
       screen.getByRole("combobox", { name: "Set kind for selection" }),
     );
 
-    expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Quote" })).toBeNull();
     const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual(
-      sortKindsByLabel(ASSIGNABLE_KINDS).map((k) => kindLabel(k)),
+      sortKindsByLabel(ASSIGNABLE_KINDS).map((k) => kindDisplayLabel(k)),
     );
 
-    await user.click(screen.getByRole("option", { name: "BOOK" }));
+    await user.click(screen.getByRole("option", { name: "Book" }));
     expect(bulkMutateMock).toHaveBeenCalledWith(
       {
         body: {

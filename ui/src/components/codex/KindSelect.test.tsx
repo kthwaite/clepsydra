@@ -4,21 +4,21 @@ import { describe, expect, it, vi } from "vitest";
 import { KindSelect } from "#/components/codex/KindSelect";
 
 const ALPHABETICAL_LABELS = [
-  "AI CONVERSATION",
-  "AI JOURNAL",
-  "ARCHIVE",
-  "BOOK",
-  "CAPTURE",
-  "CODE",
-  "CYCLE",
-  "JOURNAL",
-  "MEETING",
-  "NOTE",
-  "PERSON",
-  "PROJECT",
-  "RECIPE",
-  "TASK",
-  "TODO",
+  "AI conversation",
+  "AI journal",
+  "Archive",
+  "Book",
+  "Capture",
+  "Code",
+  "Cycle",
+  "Journal",
+  "Meeting",
+  "Note",
+  "Person",
+  "Project",
+  "Recipe",
+  "Task",
+  "Todo",
 ];
 
 describe("KindSelect", () => {
@@ -54,7 +54,7 @@ describe("KindSelect", () => {
     render(<KindSelect value="NOTE" inferred={false} onAssign={onAssign} />);
 
     await user.click(screen.getByRole("combobox", { name: "Kind" }));
-    await user.click(await screen.findByRole("option", { name: "BOOK" }));
+    await user.click(await screen.findByRole("option", { name: "Book" }));
     expect(onAssign).toHaveBeenCalledWith("BOOK");
   });
 
@@ -67,10 +67,10 @@ describe("KindSelect", () => {
     await user.clear(input);
     await user.type(input, "bo");
 
-    expect(await screen.findByRole("option", { name: "BOOK" })).toBeVisible();
-    expect(screen.queryByRole("option", { name: "NOTE" })).toBeNull();
+    expect(await screen.findByRole("option", { name: "Book" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "Note" })).toBeNull();
 
-    await user.click(screen.getByRole("option", { name: "BOOK" }));
+    await user.click(screen.getByRole("option", { name: "Book" }));
     expect(onAssign).toHaveBeenCalledWith("BOOK");
   });
 
@@ -140,7 +140,7 @@ describe("KindSelect", () => {
     expect(input).toHaveAttribute("placeholder", "Set kind…");
 
     await user.click(input);
-    await user.click(await screen.findByRole("option", { name: "BOOK" }));
+    await user.click(await screen.findByRole("option", { name: "Book" }));
 
     expect(onAssign).toHaveBeenCalledWith("BOOK");
     expect(input).toHaveValue("");

@@ -11,7 +11,6 @@ import {
   ASSIGNABLE_KINDS,
   type Kind,
   kindDisplayLabel,
-  kindLabel,
   sortKindsByLabel,
 } from "#/lib/kind";
 
@@ -101,7 +100,7 @@ export function KindSelect({
               <ListBoxItem
                 key={k}
                 id={k}
-                textValue={kindLabel(k)}
+                textValue={kindDisplayLabel(k)}
                 className={cn(
                   "cursor-pointer rounded-lg px-2.5 py-1.5 text-[13.5px] text-ink-2 outline-none",
                   "data-[hovered]:bg-sink data-[hovered]:text-ink",
@@ -109,7 +108,7 @@ export function KindSelect({
                   "data-[selected]:bg-accent-tint data-[selected]:text-ink",
                 )}
               >
-                {kindLabel(k)}
+                {kindDisplayLabel(k)}
               </ListBoxItem>
             ))}
           </ListBox>
