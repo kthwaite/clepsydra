@@ -12,6 +12,7 @@ import {
 } from "#/api/feeds";
 import { Button, buttonStyles } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { feedEntryBoundary, formatFeedDay, formatFeedTime } from "#/lib/time";
 import { normalizeFeedEntryTags, safeFeedEntryUrl } from "./FeedReaderPane";
 
@@ -22,6 +23,10 @@ import { normalizeFeedEntryTags, safeFeedEntryUrl } from "./FeedReaderPane";
  * over the rest, so the list never reorders under the pointer.
  */
 const READ_ROW_EXIT_MS = 700;
+
+/** Native <a> links never get React Aria's data attributes, so they take
+ *  the native focus ring and a plain hover. */
+const NATIVE_LINK_BUTTON = cn(FOCUS_RING_NATIVE, "hover:bg-accent/90");
 
 export type FeedRiverFilters = {
   view: EntryView;
@@ -414,7 +419,11 @@ export function FeedRiver({
 
       {compact && riverEntries.length > 0 ? (
         <a
-          className={buttonStyles("primary", "sm", "mt-6 w-fit")}
+          className={buttonStyles(
+            "primary",
+            "sm",
+            cn(NATIVE_LINK_BUTTON, "mt-6 w-fit"),
+          )}
           href={fullReaderHref(filters)}
         >
           Continue in Feeds →
@@ -594,7 +603,7 @@ function EntryRow({
               rel="noreferrer"
               aria-label={`Open original: ${entry.title}`}
               onClick={onOpenOriginal}
-              className={buttonStyles("primary", "sm")}
+              className={buttonStyles("primary", "sm", NATIVE_LINK_BUTTON)}
             >
               Open ↗
             </a>

@@ -33,7 +33,7 @@ export function BootSequence() {
       type="button"
       onClick={endBoot}
       aria-label="Skip boot sequence"
-      className="fixed inset-0 z-[10000] flex cursor-pointer flex-col items-center justify-center gap-5 bg-ground px-6 text-center outline-none"
+      className="fixed inset-0 z-[10000] flex cursor-pointer flex-col items-center justify-center gap-5 bg-ground px-6 text-center outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
     >
       <span className="flex items-center gap-3">
         <img

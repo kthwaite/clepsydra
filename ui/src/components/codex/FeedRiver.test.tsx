@@ -701,6 +701,24 @@ describe("FeedRiver", () => {
     }
   });
 
+  it("shows keyboard focus and hover on the native button-look links", () => {
+    renderRiver({ view: "all" }, true);
+
+    const row = screen.getByRole("article", { name: /cache semantics/i });
+    for (const link of [
+      screen.getByRole("link", { name: /continue in feeds/i }),
+      within(row).getByRole("link", {
+        name: /open original: cache semantics/i,
+      }),
+    ]) {
+      expect(link).toHaveClass(
+        "focus-visible:ring-2",
+        "focus-visible:ring-accent",
+        "hover:bg-accent/90",
+      );
+    }
+  });
+
   it("opens the original from the compact title and marks the entry read", async () => {
     const user = userEvent.setup();
     renderRiver({ view: "unread" }, true);

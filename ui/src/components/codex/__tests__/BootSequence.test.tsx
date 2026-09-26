@@ -23,6 +23,17 @@ describe("BootSequence", () => {
     expect(skip).not.toHaveTextContent(/VESSEL|BIOS|operator/i);
   });
 
+  it("shows keyboard focus on the skip button inside the viewport", () => {
+    render(<BootSequence />);
+    expect(
+      screen.getByRole("button", { name: "Skip boot sequence" }),
+    ).toHaveClass(
+      "focus-visible:ring-2",
+      "focus-visible:ring-inset",
+      "focus-visible:ring-accent",
+    );
+  });
+
   it("renders nothing when not booting", () => {
     useUiStore.setState({ isBooting: false });
     const { container } = render(<BootSequence />);
