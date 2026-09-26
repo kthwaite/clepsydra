@@ -34,4 +34,15 @@ describe("BottomSheet", () => {
     await userEvent.keyboard("{Escape}");
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
+
+  it("offers a close button for assistive tech", async () => {
+    const onOpenChange = vi.fn();
+    render(
+      <BottomSheet isOpen onOpenChange={onOpenChange} aria-label="X">
+        <p>Body</p>
+      </BottomSheet>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
 });

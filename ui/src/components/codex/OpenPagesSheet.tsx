@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useState } from "react";
 import { KindIcon } from "#/components/KindIcon";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
@@ -28,6 +28,7 @@ export function OpenPagesSheet({ isOpen, onOpenChange }: OpenPagesSheetProps) {
   const runs = sheafRuns(sheafSegments(pageTabs, quires)).filter((run) =>
     run.kind === "quire" ? run.members.length > 0 : run.tabs.length > 0,
   );
+  const [confirming, setConfirming] = useState(false);
   const close = () => onOpenChange(false);
 
   return (
@@ -41,12 +42,37 @@ export function OpenPagesSheet({ isOpen, onOpenChange }: OpenPagesSheetProps) {
           <h2 className="flex-1 font-serif text-[30px] leading-none">
             Open pages
           </h2>
-          {pageTabs.length > 0 && (
-            <Button variant="ghost" size="sm" onPress={closeAllTabs}>
+          {pageTabs.length > 0 && !confirming && (
+            <Button
+              variant="ghost"
+              onPress={() => setConfirming(true)}
+              className="min-h-11"
+            >
               Close all
             </Button>
           )}
         </div>
+        {confirming && (
+          <div className="flex flex-col gap-3 rounded-xl bg-sink p-4">
+            <p className="text-[15px] text-ink">
+              Close every tab and dissolve all quires?
+            </p>
+            <div className="flex gap-2">
+              <Button variant="secondary" onPress={() => setConfirming(false)}>
+                Keep them
+              </Button>
+              <Button
+                variant="danger"
+                onPress={() => {
+                  closeAllTabs();
+                  setConfirming(false);
+                }}
+              >
+                Close all tabs
+              </Button>
+            </div>
+          </div>
+        )}
         {pageTabs.length === 0 && (
           <div className="flex flex-col items-start gap-3">
             <p className="text-[15px] text-mute">No open pages.</p>

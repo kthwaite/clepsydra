@@ -101,10 +101,25 @@ describe("OpenPagesSheet", () => {
     ]);
   });
 
-  it("closes all pages", async () => {
+  it("closes all pages only after confirming", async () => {
     render(<OpenPagesSheet isOpen onOpenChange={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Close all" }));
+    expect(useWorkspaceStore.getState().tabs).toHaveLength(4);
+    expect(
+      screen.getByText("Close every tab and dissolve all quires?"),
+    ).toBeVisible();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Close all tabs" }),
+    );
     expect(useWorkspaceStore.getState().tabs).toEqual([]);
+  });
+
+  it("keeps every page when Close all is cancelled", async () => {
+    render(<OpenPagesSheet isOpen onOpenChange={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Close all" }));
+    await userEvent.click(screen.getByRole("button", { name: "Keep them" }));
+    expect(useWorkspaceStore.getState().tabs).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "Close all" })).toBeVisible();
   });
 
   it("offers New page when nothing is open", async () => {

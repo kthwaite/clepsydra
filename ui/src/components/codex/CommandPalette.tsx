@@ -346,7 +346,12 @@ function CommandPaletteContent() {
     if (e.key === "Escape") {
       e.preventDefault();
       close();
-    } else if (e.key === "ArrowDown") {
+      return;
+    }
+    // Arrows and Enter drive the result list from the query field only; a
+    // focused row, chip or Cancel keeps its own Enter.
+    if (e.target !== inputRef.current) return;
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       setSel((s) => Math.min(s + 1, Math.max(filtered.length - 1, 0)));
     } else if (e.key === "ArrowUp") {

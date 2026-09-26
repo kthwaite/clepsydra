@@ -36,11 +36,20 @@ export function BottomSheet({
           aria-label={ariaLabel}
           className="flex min-h-0 flex-1 flex-col px-5 pt-2.5 outline-none"
         >
-          <span
-            aria-hidden
-            className="mx-auto mb-4 h-[5px] w-10 shrink-0 rounded-full bg-faint/60"
-          />
-          <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+          {({ close }) => (
+            <>
+              {/* Scrim and Escape are out of reach for VoiceOver and Switch
+              Control; this button is their exit. */}
+              <button type="button" onClick={close} className="sr-only">
+                Close
+              </button>
+              <span
+                aria-hidden
+                className="mx-auto mb-4 h-[5px] w-10 shrink-0 rounded-full bg-faint/60"
+              />
+              <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+            </>
+          )}
         </Dialog>
       </Modal>
     </ModalOverlay>

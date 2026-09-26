@@ -799,6 +799,23 @@ describe("CommandPalette on mobile", () => {
     expect(useUiStore.getState().isSearchOpen).toBe(false);
   });
 
+  it("lets Enter on a Go to chip act on the chip, not the highlighted result", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+    // The palette focuses its query field after opening; wait for that.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("textbox", { name: "Command query" }),
+      ).toHaveFocus(),
+    );
+    screen.getByRole("button", { name: "Gazetteer" }).focus();
+    await user.keyboard("{Enter}");
+    // The first highlighted command is "Open Atrium" (navigate to /).
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(openTabMock).not.toHaveBeenCalled();
+    expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+
   it("closes after a Go to chip", async () => {
     render(<CommandPalette />);
     await userEvent.click(screen.getByRole("button", { name: "Gazetteer" }));
