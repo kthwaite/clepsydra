@@ -41,7 +41,7 @@ function DiagnosticSection({
   return (
     <section className="rounded-xl bg-ground px-4 py-3.5">
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-[14px] font-medium text-ink">{title}</h3>
+        <h5 className="text-[14px] font-medium text-ink">{title}</h5>
         <span className="text-[13px] text-mute tabular-nums">{count}</span>
       </div>
       <div className="mt-2">

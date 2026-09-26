@@ -87,6 +87,10 @@ describe("IndexHealthPanel", () => {
     expect(
       screen.getByRole("heading", { name: "Index diagnostics" }),
     ).toBeVisible();
+    // Nests under the h4 section eyebrow.
+    expect(
+      screen.getByRole("heading", { level: 5, name: "Build warnings" }),
+    ).toBeVisible();
     expect(screen.getByText("Failed to parse broken.md")).toBeVisible();
     expect(screen.getByRole("button", { name: "Rebuild index" })).toBeVisible();
     expect(

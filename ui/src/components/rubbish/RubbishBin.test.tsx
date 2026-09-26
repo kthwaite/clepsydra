@@ -4,6 +4,7 @@ import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RubbishBin } from "#/components/rubbish/RubbishBin";
 import { EMPTY_FILTER_STATE, type FilterState } from "#/lib/filters/model";
+import { formatCapturedAt } from "#/lib/time";
 
 const api = vi.hoisted(() => ({
   list: vi.fn(),
@@ -133,7 +134,12 @@ describe("RubbishBin", () => {
     expect(invalidRow).not.toHaveClass("bg-sink");
 
     // Deletion time: fixed month names, machine-readable instant.
-    const timestamp = within(rows[0]).getByText(/13 Aug 2026/);
+    const timestamp = within(rows[0]).getByText(
+      formatCapturedAt(alpha.item.deleted_at),
+    );
+    expect(timestamp.textContent).toMatch(
+      /^\d{1,2} (Aug|Sep) 2026, \d\d:\d\d$/,
+    );
     expect(timestamp.tagName).toBe("TIME");
     expect(timestamp).toHaveAttribute("datetime", alpha.item.deleted_at);
   });

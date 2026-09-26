@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsModal } from "#/components/SettingsModal";
+import { formatChord, SHORTCUTS } from "#/lib/shortcuts";
 
 const mocks = vi.hoisted(() => ({
   closeSettings: vi.fn(),
@@ -71,7 +72,10 @@ describe("SettingsModal appearance", () => {
     expect(
       screen.getByText(/Bone for daylight, night for the lamp\./),
     ).toBeVisible();
-    const kbd = screen.getByText("⇧⌘\\");
+    // The platform's own chord text: Ctrl+Shift+\ off a Mac.
+    const kbd = screen.getByText(
+      formatChord(SHORTCUTS["app.themeToggle"].chord),
+    );
     expect(kbd.tagName).toBe("KBD");
     expect(
       screen.getByText(
