@@ -10,6 +10,8 @@ import {
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { useOnlineStatus } from "#/hooks/useOnlineStatus";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { BaseRenderedMarkdown } from "./BaseRenderedMarkdown";
 
 export function renderErrorMessage(error: unknown): string {
@@ -23,6 +25,9 @@ export function renderErrorMessage(error: unknown): string {
     return error.error;
   return "The operation failed. Your draft has been kept. Retry when the server is available.";
 }
+
+const LABEL = "flex flex-col gap-1.5 text-[12.5px] text-mute";
+const META = "text-[12.5px] text-mute";
 
 interface TemplateSourceEditorProps {
   slug?: string;
@@ -151,17 +156,22 @@ export function TemplateSourceEditor({
       }
     >
       <div className="grid gap-4">
-        <label className="text-xs font-bold uppercase tracking-widest">
+        <label className={LABEL}>
           Template name
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
             disabled={!!document || !!slug || saving || readonly}
-            className="mt-1 block w-full border border-input bg-background p-2 text-sm normal-case tracking-normal"
+            className={cn(
+              "h-10 w-full rounded-full bg-sink px-4 text-[14px] text-ink disabled:cursor-not-allowed disabled:opacity-45",
+              FOCUS_RING_NATIVE,
+            )}
           />
         </label>
-        <p className="text-xs text-muted-foreground">{`.clepsydra/templates/${name || "<name>"}.md.jinja`}</p>
-        <label className="text-xs font-bold uppercase tracking-widest">
+        <p
+          className={META}
+        >{`.clepsydra/templates/${name || "<name>"}.md.jinja`}</p>
+        <label className={LABEL}>
           Template source
           <textarea
             autoFocus
@@ -175,19 +185,29 @@ export function TemplateSourceEditor({
               setPreview(null);
               setPreviewPending(false);
             }}
-            className="mt-1 block w-full resize-y border border-input bg-background p-3 font-mono text-sm font-normal normal-case tracking-normal"
+            // The source is code: data-code-editor keeps it monospace.
+            data-code-editor=""
+            className={cn(
+              "block w-full resize-y rounded-xl bg-sink p-4 text-[13.5px] leading-6 text-ink disabled:cursor-not-allowed disabled:opacity-45",
+              FOCUS_RING_NATIVE,
+            )}
           />
         </label>
-        <p className="text-xs text-muted-foreground">
+        <p className={META}>
           Use page, rows and groups. Record properties are native values; body
           contains the full Markdown. Guard optional values with is defined or
           default.
         </p>
         {query.error ? (
-          <p role="alert">{renderErrorMessage(query.error)}</p>
+          <p role="alert" className="text-[13.5px] text-hot">
+            {renderErrorMessage(query.error)}
+          </p>
         ) : null}
         {error ? (
-          <div role="alert" className="text-sm text-destructive">
+          <div
+            role="alert"
+            className="flex flex-col items-start gap-2 text-[13.5px] text-hot"
+          >
             <p>{error}</p>
             {slug ? (
               <Button variant="secondary" onPress={reload}>
@@ -197,23 +217,28 @@ export function TemplateSourceEditor({
           </div>
         ) : null}
         {!online ? (
-          <p role="status">
+          <p role="status" className="text-[13.5px] text-mute">
             Offline: saved source can be read, but saving and preview are
             unavailable.
           </p>
         ) : null}
         <Button
           variant="secondary"
+          className="justify-self-start"
           onPress={previewDraft}
           isDisabled={!selection || !pagePath || !online || previewPending}
         >
           Preview draft
         </Button>
-        {previewPending ? <p role="status">Rendering draft…</p> : null}
+        {previewPending ? (
+          <p role="status" className="text-[13.5px] text-mute">
+            Rendering draft…
+          </p>
+        ) : null}
         {preview !== null ? (
           <section
             aria-label="Draft render preview"
-            className="codex-prose border border-border p-4"
+            className="codex-prose rounded-xl bg-ground p-4"
           >
             <BaseRenderedMarkdown content={preview} pagePath={pagePath} />
           </section>

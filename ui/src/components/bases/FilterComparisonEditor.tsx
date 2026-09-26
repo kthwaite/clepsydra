@@ -3,6 +3,8 @@ import type { Key } from "react-aria-components";
 import type { BaseFilter, FilterOp, PropertyType } from "#/api/bases";
 import { Header } from "#/components/ui/list-box";
 import { Select, SelectItem, SelectSection } from "#/components/ui/select";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { type DraftProperty, operatorsFor } from "./definition-model";
 import type { FilterDiagnosticScope } from "./filter-diagnostics";
 import { OPERATOR_LABELS, VALUELESS_OPERATORS } from "./operator-labels";
@@ -224,10 +226,11 @@ export function FilterComparisonEditor({
 
   if (!("field" in value)) return null;
 
-  const labelClass =
-    "text-[10px] font-bold uppercase tracking-widest text-muted-foreground";
-  const controlClass =
-    "mt-1 w-full min-w-0 border border-input bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
+  const labelClass = "text-[12.5px] text-mute";
+  const controlClass = cn(
+    "mt-1 h-10 w-full min-w-0 rounded-full bg-sink px-4 text-[14px] text-ink placeholder:text-mute disabled:cursor-not-allowed disabled:opacity-45 aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-hot",
+    FOCUS_RING_NATIVE,
+  );
   const inputType =
     capability.type === "number"
       ? "number"
@@ -311,7 +314,7 @@ export function FilterComparisonEditor({
           <span
             id={fieldErrorId}
             role="alert"
-            className="mt-1 text-xs text-destructive"
+            className="mt-1 block text-[12.5px] text-hot"
           >
             {fieldDiagnostics.map((diagnostic) => diagnostic.message).join(" ")}
           </span>
@@ -360,7 +363,7 @@ export function FilterComparisonEditor({
           <span
             id={operatorErrorId}
             role="alert"
-            className="mt-1 text-xs text-destructive"
+            className="mt-1 block text-[12.5px] text-hot"
           >
             {operatorDiagnostics
               .map((diagnostic) => diagnostic.message)
@@ -494,7 +497,7 @@ export function FilterComparisonEditor({
             <span
               id={valueErrorId}
               role="alert"
-              className="mt-1 text-xs text-destructive"
+              className="mt-1 block text-[12.5px] text-hot"
             >
               {valueDiagnostics
                 .map((diagnostic) => diagnostic.message)

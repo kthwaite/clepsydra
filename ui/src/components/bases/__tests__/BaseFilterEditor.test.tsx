@@ -95,6 +95,54 @@ function renderEditor(value?: BaseFilter, registerFocus = vi.fn()) {
 describe("BaseFilterEditor", () => {
   beforeEach(() => navigateMock.mockReset());
 
+  it("switches a nested group between all and any with its segmented combinator", async () => {
+    const user = userEvent.setup();
+    const nested: BaseFilter[] = [
+      { field: "title", op: "eq", value: "First" },
+      { field: "kind", op: "eq", value: "NOTE" },
+    ];
+    const { onChange } = renderEditor({
+      any: [{ all: nested }, { field: "status", op: "eq", value: "reading" }],
+    });
+
+    const group = screen.getByRole("group", {
+      name: "Match all of 2 conditions",
+    });
+    const combinator = within(group).getByRole("radiogroup", {
+      name: "Combine conditions",
+    });
+    expect(
+      within(combinator).getByRole("radio", { name: "All" }),
+    ).toBeChecked();
+    await user.click(within(combinator).getByRole("radio", { name: "Any" }));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      any: [{ any: nested }, { field: "status", op: "eq", value: "reading" }],
+    });
+    // Root and the switched nested group now share the name.
+    expect(
+      screen.getAllByRole("group", { name: "Match any of 2 conditions" }),
+    ).toHaveLength(2);
+  });
+
+  it("switches the root group's combinator", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      all: [{ field: "title", op: "eq", value: "First" }],
+    });
+
+    await user.click(
+      within(
+        screen.getByRole("radiogroup", { name: "Combine conditions" }),
+      ).getByRole("radio", { name: "Any" }),
+    );
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      any: [{ field: "title", op: "eq", value: "First" }],
+    });
+  });
+
   it("authors a filter without an external focus registrar", async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();

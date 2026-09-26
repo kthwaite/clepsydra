@@ -1,9 +1,12 @@
-import { Trash2 } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { X } from "lucide-react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { Aggregate, PropertyType } from "#/api/bases";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
 import { Select, SelectItem } from "#/components/ui/select";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
@@ -55,12 +58,38 @@ function fieldCapabilities(
   ];
 }
 
-const controlClass =
-  "mt-1 block w-full border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2";
-const labelClass =
-  "text-xs font-bold uppercase tracking-widest text-muted-foreground";
-const headingClass =
-  "font-mono text-xs font-semibold uppercase tracking-widest text-foreground";
+const controlClass = cn(
+  "mt-1.5 block h-10 w-full rounded-full bg-sink px-4 text-[14px] text-ink placeholder:text-mute aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-hot",
+  FOCUS_RING_NATIVE,
+);
+const labelClass = "text-[12.5px] text-mute";
+const errorClass = "mt-1.5 block text-[12.5px] text-hot";
+const warningClass = "mt-1.5 block text-[12.5px] text-warn";
+
+/** One titled block of the view editor: faint tick + italic serif title,
+ *  then the body indented to the title. Spacing and tone, no rules. */
+function ViewSection({
+  id,
+  title,
+  children,
+}: {
+  id: string;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section aria-labelledby={id} className="flex min-w-0 flex-col gap-2.5">
+      <h4
+        id={id}
+        className="flex items-center gap-2.5 font-serif text-[19px] italic leading-none text-ink"
+      >
+        <Tick variant="faint" />
+        {title}
+      </h4>
+      <div className="min-w-0 pl-[17px]">{children}</div>
+    </section>
+  );
+}
 const AGGREGATE_FUNCTION_OPTIONS = [
   "count",
   "count_filled",
@@ -127,8 +156,14 @@ function VisibleColumnRow({
     });
 
   return (
-    <tr ref={rowRef} className="border-b border-border align-top">
-      <td className="w-10 px-1 py-2 align-top sm:px-2">
+    <tr
+      ref={rowRef}
+      className={cn(
+        "[&>:first-child]:rounded-l-[10px] [&>:last-child]:rounded-r-[10px]",
+        index % 2 === 0 && "[&>*]:bg-raise/70",
+      )}
+    >
+      <td className="w-8 py-0.5 pl-1 align-middle">
         <ReorderHandle
           label={`${row.column} column`}
           setHandle={setHandle}
@@ -137,12 +172,12 @@ function VisibleColumnRow({
       </td>
       <th
         scope="row"
-        className="break-words px-2 py-2 text-left font-mono text-xs font-semibold text-foreground sm:px-3"
+        className="break-words px-1.5 py-0.5 text-left align-middle text-[14px] font-normal text-ink"
       >
         {row.column}
       </th>
-      <td className="w-28 px-1 py-2 sm:w-36 sm:px-2">
-        <fieldset className="m-0 flex flex-wrap justify-end gap-1 border-0 p-0">
+      <td className="w-[6.5rem] py-0.5 pr-1 align-middle">
+        <fieldset className="m-0 flex justify-end border-0 p-0">
           <legend className="sr-only">Actions for {row.column}</legend>
           <MoveButtons
             label={row.column}
@@ -155,7 +190,7 @@ function VisibleColumnRow({
             variant="ghost"
             onPress={() => onRemove(index)}
           >
-            <Trash2 />
+            <X />
           </IconButton>
         </fieldset>
       </td>
@@ -330,8 +365,8 @@ export function ViewDefinitionEditor({
   }
 
   return (
-    <div className="min-w-0">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+    <div className="@container flex min-w-0 flex-col gap-[26px]">
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_12.5rem]">
         <div>
           <label className={labelClass} htmlFor={`view-name-${viewIndex}`}>
             View name
@@ -354,11 +389,7 @@ export function ViewDefinitionEditor({
           {nameDiagnostics.length > 0 ? (
             <span
               id={`view-name-error-${viewIndex}`}
-              className={
-                nameInvalid
-                  ? "mt-1 block text-xs normal-case tracking-normal text-destructive"
-                  : "mt-1 block text-xs normal-case tracking-normal text-warn"
-              }
+              className={nameInvalid ? errorClass : warningClass}
             >
               {nameDiagnostics
                 .map((diagnostic) => diagnostic.message)
@@ -393,11 +424,7 @@ export function ViewDefinitionEditor({
           {layoutDiagnostics.length > 0 ? (
             <span
               id={`view-layout-error-${viewIndex}`}
-              className={
-                layoutInvalid
-                  ? "mt-1 block text-xs normal-case tracking-normal text-destructive"
-                  : "mt-1 block text-xs normal-case tracking-normal text-warn"
-              }
+              className={layoutInvalid ? errorClass : warningClass}
             >
               {layoutDiagnostics
                 .map((diagnostic) => diagnostic.message)
@@ -409,292 +436,282 @@ export function ViewDefinitionEditor({
       {unsupportedLayout && layoutDiagnostics.length === 0 ? (
         <p
           role="alert"
-          className="mt-3 border border-destructive p-3 text-sm text-destructive"
+          className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-hot"
         >
           Unsupported layout “{view.layout}”. The guided editor supports only
           table layouts. Choose Table to repair it.
         </p>
       ) : null}
       {viewDiagnostics.length > 0 ? (
-        <ul className="mt-3 border-l-2 border-warn pl-3 text-xs text-warn">
+        <ul className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-warn">
           {diagnosticRows(viewDiagnostics).map(({ diagnostic, key }) => (
             <li key={key}>{diagnostic.message}</li>
           ))}
         </ul>
       ) : null}
 
-      <section
-        className="mt-6 border-t border-border pt-4"
-        aria-labelledby={`${view.id}-columns-heading`}
-      >
-        <h4 id={`${view.id}-columns-heading`} className={headingClass}>
-          Visible columns
-        </h4>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          Columns render from left to right in this exact order.
-        </p>
-        <table
-          className="mt-3 w-full table-fixed border-collapse"
-          aria-label="Visible column order"
-        >
-          <thead>
-            <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              <th scope="col" className="w-10 px-1 py-2 sm:px-2">
-                <span className="sr-only">Order</span>
-              </th>
-              <th scope="col" className="px-2 py-2 sm:px-3">
-                Column
-              </th>
-              <th
-                scope="col"
-                className="w-28 px-1 py-2 text-right sm:w-36 sm:px-2"
-              >
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {columnRows.map((row, index) => (
-              <VisibleColumnRow
-                key={row.id}
-                row={row}
-                index={index}
-                count={columnRows.length}
-                onMove={moveColumn}
-                onReorder={dropColumn}
-                onRemove={removeColumn}
-                onHandleRef={(columnId, element) => {
-                  if (element) reorderHandles.current.set(columnId, element);
-                  else reorderHandles.current.delete(columnId);
-                }}
-              />
-            ))}
-          </tbody>
-        </table>
-
-        <div className="mt-3 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-          <Select
-            label="Column to add"
-            value={columnToAdd}
-            onChange={(key) => setColumnToAdd(key == null ? "" : String(key))}
+      <div className="grid gap-x-10 gap-y-[26px] @min-[52rem]:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-[26px]">
+          <ViewSection
+            id={`${view.id}-columns-heading`}
+            title="Visible columns"
           >
-            <SelectItem id="">Choose a field</SelectItem>
-            {unselectedColumns.map(({ key }) => (
-              <SelectItem key={key} id={key}>
-                {key}
-              </SelectItem>
-            ))}
-          </Select>
-          <Button
-            size="sm"
-            variant="secondary"
-            isDisabled={!columnToAdd}
-            aria-describedby={columnToAdd ? undefined : columnReasonId}
-            onPress={() => {
-              if (!columnToAdd) return;
-              const id = `column-${nextColumnId.current}`;
-              nextColumnId.current += 1;
-              setColumnRows((current) => [
-                ...current,
-                { id, column: columnToAdd },
-              ]);
-              onChange({ ...view, columns: [...view.columns, columnToAdd] });
-              setColumnToAdd("");
-            }}
-          >
-            Add column
-          </Button>
-          {columnToAdd ? null : (
-            <span id={columnReasonId} className="sr-only">
-              Choose a field to add
-            </span>
-          )}
-        </div>
-      </section>
-
-      <DisplayLabelsEditor
-        labels={view.labels}
-        properties={properties}
-        diagnostics={diagnostics}
-        diagnosticRoot={`${viewPath}.labels`}
-        onChange={(labels) => onChange({ ...view, labels })}
-        registerFocus={registerFocus}
-      />
-
-      <section
-        className="mt-6 border-t border-border pt-4"
-        aria-labelledby={`${view.id}-sort-heading`}
-      >
-        <h4 id={`${view.id}-sort-heading`} className={headingClass}>
-          Sort order
-        </h4>
-        <OrderedSortEditor
-          value={view.sort}
-          properties={properties}
-          diagnostics={diagnostics}
-          diagnosticRoot={`${viewPath}.sort`}
-          idPrefix={`view-${viewIndex}`}
-          onChange={(sort) => onChange({ ...view, sort })}
-          registerFocus={registerFocus}
-          announceMove={announceMove}
-        />
-      </section>
-
-      <section
-        className="mt-6 border-t border-border pt-4"
-        aria-labelledby={`${view.id}-group-heading`}
-      >
-        <h4 id={`${view.id}-group-heading`} className={headingClass}>
-          Grouping
-        </h4>
-        <Select
-          className="mt-3"
-          label="Group by"
-          triggerRef={(element) =>
-            registerFocus(`${viewPath}.group_by`, element)
-          }
-          value={view.group_by ?? ""}
-          onChange={(key) =>
-            onChange({
-              ...view,
-              group_by: key == null || key === "" ? undefined : String(key),
-            })
-          }
-        >
-          <SelectItem id="">No grouping</SelectItem>
-          {groupFields.map(({ key }) => (
-            <SelectItem key={key} id={key}>
-              {key}
-            </SelectItem>
-          ))}
-        </Select>
-      </section>
-
-      <section
-        className="mt-6 border-t border-border pt-4"
-        aria-labelledby={`${view.id}-aggregates-heading`}
-      >
-        <h4 id={`${view.id}-aggregates-heading`} className={headingClass}>
-          Aggregates
-        </h4>
-        <ol className="mt-3 grid gap-2">
-          {aggregateRows.map(({ id, value: aggregate }, index) => {
-            const fn = aggregate.fn as AggregateFunction;
-            const eligibleFields = fields.filter(({ type }) =>
-              aggregateFunctions(
-                type === "system-multi" ? undefined : type,
-              ).includes(fn),
-            );
-            return (
-              <li
-                key={id}
-                className="grid items-end gap-2 border-b border-border pb-3 sm:grid-cols-[10rem_minmax(0,1fr)_auto]"
-              >
-                <Select
-                  label={`Aggregate function ${index + 1}`}
-                  triggerRef={(element) => {
-                    registerFocus(`${viewPath}.aggregates[${index}]`, element);
-                    registerFocus(
-                      `${viewPath}.aggregates[${index}].fn`,
-                      element,
-                    );
-                  }}
-                  value={fn}
-                  onChange={(key) => {
-                    const nextFn = AGGREGATE_FUNCTION_OPTIONS.find(
-                      (option) => option === key,
-                    );
-                    if (!nextFn) return;
-                    if (nextFn === "count") {
-                      replaceAggregate(index, { fn: "count" });
-                      return;
-                    }
-                    const first = fields.find(({ type }) =>
-                      aggregateFunctions(
-                        type === "system-multi" ? undefined : type,
-                      ).includes(nextFn),
-                    );
-                    replaceAggregate(index, {
-                      fn: nextFn,
-                      field: first?.key,
-                    });
-                  }}
-                >
-                  {AGGREGATE_FUNCTION_OPTIONS.map((option) => (
-                    <SelectItem key={option} id={option}>
-                      {option}
-                    </SelectItem>
-                  ))}
-                </Select>
-                {fn !== "count" ? (
-                  <Select
-                    label={`Aggregate field ${index + 1}`}
-                    triggerRef={(element) =>
-                      registerFocus(
-                        `${viewPath}.aggregates[${index}].field`,
-                        element,
-                      )
-                    }
-                    value={aggregate.field ?? ""}
-                    onChange={(key) => {
-                      if (key == null) return;
-                      replaceAggregate(index, {
-                        fn,
-                        field: String(key),
-                      });
+            <p className="text-[13px] leading-normal text-mute">
+              Columns render from left to right in this exact order.
+            </p>
+            <table
+              className="mt-2 w-full table-fixed border-separate border-spacing-y-[3px]"
+              aria-label="Visible column order"
+            >
+              {/* table-fixed sizes columns from the first row, which is the
+                  sr-only header: the colgroup gives the name the slack. */}
+              <colgroup>
+                <col className="w-9" />
+                <col />
+                <col className="w-[6.5rem]" />
+              </colgroup>
+              <thead className="sr-only">
+                <tr>
+                  <th scope="col">Order</th>
+                  <th scope="col">Column</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {columnRows.map((row, index) => (
+                  <VisibleColumnRow
+                    key={row.id}
+                    row={row}
+                    index={index}
+                    count={columnRows.length}
+                    onMove={moveColumn}
+                    onReorder={dropColumn}
+                    onRemove={removeColumn}
+                    onHandleRef={(columnId, element) => {
+                      if (element)
+                        reorderHandles.current.set(columnId, element);
+                      else reorderHandles.current.delete(columnId);
                     }}
-                  >
-                    {eligibleFields.map(({ key }) => (
-                      <SelectItem key={key} id={key}>
-                        {key}
-                      </SelectItem>
-                    ))}
-                  </Select>
-                ) : (
-                  <span />
-                )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onPress={() => removeAggregate(index)}
-                >
-                  Remove aggregate {index + 1}
-                </Button>
-              </li>
-            );
-          })}
-        </ol>
-        <Button
-          className="mt-3"
-          size="sm"
-          variant="secondary"
-          onPress={appendAggregate}
-        >
-          Add aggregate
-        </Button>
-      </section>
+                  />
+                ))}
+              </tbody>
+            </table>
 
-      <section
-        className="mt-6 border-t border-border pt-4"
-        aria-labelledby={`${view.id}-filter-heading`}
-      >
-        <h4 id={`${view.id}-filter-heading`} className={headingClass}>
-          Additional filter
-        </h4>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          Additional filter; always ANDed with base membership.
-        </p>
-        <div className="mt-3">
-          <BaseFilterEditor
-            value={view.filter}
+            <div className="mt-2 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <Select
+                label="Column to add"
+                value={columnToAdd}
+                onChange={(key) =>
+                  setColumnToAdd(key == null ? "" : String(key))
+                }
+              >
+                <SelectItem id="">Choose a field</SelectItem>
+                {unselectedColumns.map(({ key }) => (
+                  <SelectItem key={key} id={key}>
+                    {key}
+                  </SelectItem>
+                ))}
+              </Select>
+              <Button
+                className="mb-1"
+                size="sm"
+                variant="secondary"
+                isDisabled={!columnToAdd}
+                aria-describedby={columnToAdd ? undefined : columnReasonId}
+                onPress={() => {
+                  if (!columnToAdd) return;
+                  const id = `column-${nextColumnId.current}`;
+                  nextColumnId.current += 1;
+                  setColumnRows((current) => [
+                    ...current,
+                    { id, column: columnToAdd },
+                  ]);
+                  onChange({
+                    ...view,
+                    columns: [...view.columns, columnToAdd],
+                  });
+                  setColumnToAdd("");
+                }}
+              >
+                Add column
+              </Button>
+              {columnToAdd ? null : (
+                <span id={columnReasonId} className="sr-only">
+                  Choose a field to add
+                </span>
+              )}
+            </div>
+          </ViewSection>
+
+          <DisplayLabelsEditor
+            labels={view.labels}
             properties={properties}
-            onChange={(filter) => onChange({ ...view, filter })}
-            registerFocus={registerFocus}
             diagnostics={diagnostics}
-            diagnosticRoot={`${viewPath}.filter`}
+            diagnosticRoot={`${viewPath}.labels`}
+            onChange={(labels) => onChange({ ...view, labels })}
+            registerFocus={registerFocus}
           />
         </div>
-      </section>
+
+        <div className="flex min-w-0 flex-col gap-[26px]">
+          <ViewSection id={`${view.id}-sort-heading`} title="Sort order">
+            <OrderedSortEditor
+              value={view.sort}
+              properties={properties}
+              diagnostics={diagnostics}
+              diagnosticRoot={`${viewPath}.sort`}
+              idPrefix={`view-${viewIndex}`}
+              onChange={(sort) => onChange({ ...view, sort })}
+              registerFocus={registerFocus}
+              announceMove={announceMove}
+            />
+          </ViewSection>
+
+          <ViewSection id={`${view.id}-group-heading`} title="Grouping">
+            <Select
+              label="Group by"
+              triggerRef={(element) =>
+                registerFocus(`${viewPath}.group_by`, element)
+              }
+              value={view.group_by ?? ""}
+              onChange={(key) =>
+                onChange({
+                  ...view,
+                  group_by: key == null || key === "" ? undefined : String(key),
+                })
+              }
+            >
+              <SelectItem id="">No grouping</SelectItem>
+              {groupFields.map(({ key }) => (
+                <SelectItem key={key} id={key}>
+                  {key}
+                </SelectItem>
+              ))}
+            </Select>
+          </ViewSection>
+
+          <ViewSection id={`${view.id}-aggregates-heading`} title="Aggregates">
+            <ol className="flex flex-col gap-2 empty:hidden">
+              {aggregateRows.map(({ id, value: aggregate }, index) => {
+                const fn = aggregate.fn as AggregateFunction;
+                const eligibleFields = fields.filter(({ type }) =>
+                  aggregateFunctions(
+                    type === "system-multi" ? undefined : type,
+                  ).includes(fn),
+                );
+                return (
+                  <li
+                    key={id}
+                    className="grid shrink-0 items-end gap-2 sm:grid-cols-[8.5rem_minmax(0,1fr)_auto]"
+                  >
+                    <Select
+                      label={`Aggregate function ${index + 1}`}
+                      triggerRef={(element) => {
+                        registerFocus(
+                          `${viewPath}.aggregates[${index}]`,
+                          element,
+                        );
+                        registerFocus(
+                          `${viewPath}.aggregates[${index}].fn`,
+                          element,
+                        );
+                      }}
+                      value={fn}
+                      onChange={(key) => {
+                        const nextFn = AGGREGATE_FUNCTION_OPTIONS.find(
+                          (option) => option === key,
+                        );
+                        if (!nextFn) return;
+                        if (nextFn === "count") {
+                          replaceAggregate(index, { fn: "count" });
+                          return;
+                        }
+                        const first = fields.find(({ type }) =>
+                          aggregateFunctions(
+                            type === "system-multi" ? undefined : type,
+                          ).includes(nextFn),
+                        );
+                        replaceAggregate(index, {
+                          fn: nextFn,
+                          field: first?.key,
+                        });
+                      }}
+                    >
+                      {AGGREGATE_FUNCTION_OPTIONS.map((option) => (
+                        <SelectItem key={option} id={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </Select>
+                    {fn !== "count" ? (
+                      <Select
+                        label={`Aggregate field ${index + 1}`}
+                        triggerRef={(element) =>
+                          registerFocus(
+                            `${viewPath}.aggregates[${index}].field`,
+                            element,
+                          )
+                        }
+                        value={aggregate.field ?? ""}
+                        onChange={(key) => {
+                          if (key == null) return;
+                          replaceAggregate(index, {
+                            fn,
+                            field: String(key),
+                          });
+                        }}
+                      >
+                        {eligibleFields.map(({ key }) => (
+                          <SelectItem key={key} id={key}>
+                            {key}
+                          </SelectItem>
+                        ))}
+                      </Select>
+                    ) : (
+                      <span />
+                    )}
+                    <IconButton
+                      className="mb-1"
+                      aria-label={`Remove aggregate ${index + 1}`}
+                      variant="ghost"
+                      onPress={() => removeAggregate(index)}
+                    >
+                      <X />
+                    </IconButton>
+                  </li>
+                );
+              })}
+            </ol>
+            <Button
+              className="mt-2.5"
+              size="sm"
+              variant="secondary"
+              onPress={appendAggregate}
+            >
+              Add aggregate
+            </Button>
+          </ViewSection>
+
+          <ViewSection
+            id={`${view.id}-filter-heading`}
+            title="Additional filter"
+          >
+            <p className="text-[13px] leading-normal text-mute">
+              Always combined with base membership.
+            </p>
+            <div className="mt-2.5">
+              <BaseFilterEditor
+                value={view.filter}
+                properties={properties}
+                onChange={(filter) => onChange({ ...view, filter })}
+                registerFocus={registerFocus}
+                diagnostics={diagnostics}
+                diagnosticRoot={`${viewPath}.filter`}
+              />
+            </div>
+          </ViewSection>
+        </div>
+      </div>
     </div>
   );
 }

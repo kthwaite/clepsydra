@@ -8,6 +8,7 @@ import { usePreviewBase } from "#/api/bases";
 import { formatApiError } from "#/api/error";
 import { Button } from "#/components/ui/button";
 import { BaseTableView } from "./BaseTableView";
+import { DefinitionSectionHeading } from "./DefinitionHeader";
 import { type BaseDraft, toWire } from "./definition-model";
 import { diagnosticRows } from "./diagnostic-rows";
 
@@ -113,39 +114,33 @@ export function BasePreview({
   };
 
   return (
-    <section
-      aria-labelledby="base-preview-heading"
-      className="mt-8 border-t border-border pt-5"
-    >
+    <section aria-labelledby="base-preview-heading" className="mt-10">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2
+        <div className="min-w-0">
+          <DefinitionSectionHeading
             id="base-preview-heading"
-            className="text-sm font-bold uppercase tracking-widest text-foreground"
-          >
-            Live preview
-          </h2>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Evaluates the unsaved definition after a short pause. Preview
-            failures never prevent saving the draft.
-          </p>
+            title="Live preview"
+            description="Evaluates the unsaved definition after a short pause. Preview failures never prevent saving the draft."
+          />
         </div>
-        <fieldset className="flex flex-wrap gap-3">
+        <fieldset className="flex flex-wrap gap-4">
           <legend className="sr-only">Preview scope</legend>
-          <label className="flex items-center gap-1.5 text-xs text-foreground">
+          <label className="flex items-center gap-2 text-[13.5px] text-ink">
             <input
               type="radio"
               name="preview-scope"
+              className="accent-accent"
               checked={scope === MEMBERSHIP_SCOPE}
               onChange={() => setScope(MEMBERSHIP_SCOPE)}
             />
             Base membership
           </label>
           {selectedView ? (
-            <label className="flex items-center gap-1.5 text-xs text-foreground">
+            <label className="flex items-center gap-2 text-[13.5px] text-ink">
               <input
                 type="radio"
                 name="preview-scope"
+                className="accent-accent"
                 checked={scope !== MEMBERSHIP_SCOPE}
                 onChange={() => setScope(selectedView.id)}
               />
@@ -155,72 +150,77 @@ export function BasePreview({
         </fieldset>
       </div>
 
-      <div aria-live="polite" aria-atomic="true" className="mt-3 min-h-5">
-        {loading ? (
-          <p role="status" className="font-mono text-xs text-muted-foreground">
-            Loading preview…
-          </p>
-        ) : resultStatus ? (
-          <p className="font-mono text-xs text-muted-foreground">
-            {resultStatus}
-          </p>
-        ) : empty ? (
-          <p className="text-sm text-muted-foreground">
-            No pages match this preview. Adjust membership or the selected
-            view’s additional filter.
-          </p>
-        ) : (
-          <p className="font-mono text-xs text-muted-foreground">
-            Preview updates after 250 ms.
-          </p>
-        )}
+      <div className="mt-4 ml-[17px]">
+        <div aria-live="polite" aria-atomic="true" className="min-h-5">
+          {loading ? (
+            <p role="status" className="text-[13px] text-mute">
+              Loading preview…
+            </p>
+          ) : resultStatus ? (
+            <p className="text-[13px] text-mute tabular-nums">{resultStatus}</p>
+          ) : empty ? (
+            <p className="text-[14px] text-mute">
+              No pages match this preview. Adjust membership or the selected
+              view’s additional filter.
+            </p>
+          ) : (
+            <p className="text-[13px] text-mute">
+              Preview updates after 250 ms.
+            </p>
+          )}
+        </div>
+
+        {errorMessages.length > 0 ? (
+          <div
+            role="alert"
+            className="mt-3 rounded-xl bg-sink px-4 py-3 text-[13.5px] text-hot"
+          >
+            <p className="font-medium">
+              Preview could not be evaluated cleanly.
+            </p>
+            <ul className="mt-2 grid gap-1">
+              {diagnosticRows(diagnostics).map(({ diagnostic, key }) => (
+                <li key={key}>
+                  {diagnostic.path && onDiagnosticFocus ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-auto min-h-8 text-left text-hot"
+                      onPress={() =>
+                        onDiagnosticFocus(diagnostic.path as string)
+                      }
+                    >
+                      {diagnostic.message}
+                    </Button>
+                  ) : (
+                    diagnostic.message
+                  )}
+                </li>
+              ))}
+              {response?.evaluation_error ? (
+                <li>{response.evaluation_error}</li>
+              ) : null}
+              {networkError ? <li>{networkError}</li> : null}
+            </ul>
+          </div>
+        ) : null}
+
+        {!loading && output && !empty && errorMessages.length === 0 ? (
+          <div className="mt-4 overflow-x-auto">
+            <BaseTableView
+              definition={displayDefinition}
+              activeView={displayView.name}
+              onViewChange={() => undefined}
+              output={output}
+              sort={undefined}
+              onSortChange={() => undefined}
+              onOpenPage={() => undefined}
+              onCommitCell={() => undefined}
+              readOnly
+            />
+          </div>
+        ) : null}
       </div>
-
-      {errorMessages.length > 0 ? (
-        <div
-          role="alert"
-          className="mt-3 border border-destructive p-3 text-sm text-destructive"
-        >
-          <p className="font-medium">Preview could not be evaluated cleanly.</p>
-          <ul className="mt-2 grid gap-1">
-            {diagnosticRows(diagnostics).map(({ diagnostic, key }) => (
-              <li key={key}>
-                {diagnostic.path && onDiagnosticFocus ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onPress={() => onDiagnosticFocus(diagnostic.path as string)}
-                  >
-                    {diagnostic.message}
-                  </Button>
-                ) : (
-                  diagnostic.message
-                )}
-              </li>
-            ))}
-            {response?.evaluation_error ? (
-              <li>{response.evaluation_error}</li>
-            ) : null}
-            {networkError ? <li>{networkError}</li> : null}
-          </ul>
-        </div>
-      ) : null}
-
-      {!loading && output && !empty && errorMessages.length === 0 ? (
-        <div className="mt-4 overflow-x-auto">
-          <BaseTableView
-            definition={displayDefinition}
-            activeView={displayView.name}
-            onViewChange={() => undefined}
-            output={output}
-            sort={undefined}
-            onSortChange={() => undefined}
-            onOpenPage={() => undefined}
-            onCommitCell={() => undefined}
-            readOnly
-          />
-        </div>
-      ) : null}
     </section>
   );
 }

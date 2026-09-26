@@ -7,6 +7,7 @@ import {
   type RenderSelection,
 } from "#/api/bases";
 import { invalidatePageContent } from "#/api/keys";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import type { GeneratedChangeSession } from "#/editor/usePageEditor";
@@ -151,32 +152,36 @@ export function GeneratedPreviewDialog({
       }
     >
       {busy ? (
-        <p role="status">
+        <p role="status" className="text-[13.5px] text-mute">
           {applying
             ? "Applying reviewed snapshot…"
             : "Saving pending edits and rendering preview…"}
         </p>
       ) : null}
       {error ? (
-        <p role="alert" className="text-sm text-destructive">
+        <p
+          role="alert"
+          className="rounded-xl bg-hot/10 px-3 py-2 text-[13px] text-hot"
+        >
           {error}
         </p>
       ) : null}
       {preview ? (
         <div className="grid gap-4">
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[12.5px] text-mute">
             {preview.selected_count} selected records. This is a previewed
             snapshot, not a live view.
           </p>
           {preview.modified ? (
-            <div className="border border-destructive p-3">
-              <p role="alert">
+            <div className="rounded-xl bg-hot/10 p-3.5">
+              <p role="alert" className="text-[13.5px] text-hot">
                 The saved output was edited outside regeneration. Applying will
                 replace those edits.
               </p>
-              <label className="mt-3 flex items-center gap-2 text-sm">
+              <label className="mt-3 flex items-center gap-2.5 text-[14px] text-ink">
                 <input
                   type="checkbox"
+                  className="h-4 w-4 shrink-0 accent-accent"
                   checked={overwrite}
                   onChange={(event) => setOverwrite(event.target.checked)}
                 />
@@ -187,10 +192,13 @@ export function GeneratedPreviewDialog({
           ) : null}
           <div className="grid gap-4 md:grid-cols-2">
             <section aria-label="Current generated output">
-              <h3 className="mb-2 font-mono text-xs uppercase">
-                Current output
+              <h3 className="mb-2.5 flex items-center gap-2.5">
+                <Tick variant="faint" />
+                <span className="font-serif text-[19px] italic leading-tight text-ink">
+                  Current output
+                </span>
               </h3>
-              <div className="codex-prose border border-border p-4">
+              <div className="codex-prose rounded-xl bg-ground p-4">
                 <BaseRenderedMarkdown
                   content={
                     preview.current_markdown || "No generated output yet."
@@ -200,10 +208,13 @@ export function GeneratedPreviewDialog({
               </div>
             </section>
             <section aria-label="Proposed generated output">
-              <h3 className="mb-2 font-mono text-xs uppercase">
-                Proposed output
+              <h3 className="mb-2.5 flex items-center gap-2.5">
+                <Tick variant="live" />
+                <span className="font-serif text-[19px] italic leading-tight text-ink">
+                  Proposed output
+                </span>
               </h3>
-              <div className="codex-prose border border-border p-4">
+              <div className="codex-prose rounded-xl bg-ground p-4">
                 <BaseRenderedMarkdown
                   content={preview.markdown}
                   pagePath={pagePath}
@@ -213,7 +224,7 @@ export function GeneratedPreviewDialog({
           </div>
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[13.5px] text-mute">
           Render a preview from the saved template. No output is written until
           you apply.
         </p>

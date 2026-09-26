@@ -181,8 +181,8 @@ export function TagConditionEditor({
               role={diagnostic.severity === "error" ? "alert" : undefined}
               className={
                 diagnostic.severity === "error"
-                  ? "text-xs text-destructive"
-                  : "text-xs text-muted-foreground"
+                  ? "text-[12.5px] text-hot"
+                  : "text-[12.5px] text-mute"
               }
             >
               {diagnostic.message}

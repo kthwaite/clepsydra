@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { PropertyType } from "#/api/bases";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { Select, SelectItem } from "#/components/ui/select";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
@@ -259,24 +262,22 @@ export function PropertiesEditor({
   }
 
   return (
-    <section aria-labelledby="properties-editor-heading">
-      <h2
-        id="properties-editor-heading"
-        className="text-sm font-bold uppercase tracking-widest text-foreground"
-      >
-        Properties
+    <section aria-labelledby="properties-editor-heading" className="min-w-0">
+      <h2 id="properties-editor-heading" className="flex items-center gap-2.5">
+        <Tick />
+        <span className="font-serif text-[22px] italic leading-none text-ink">
+          Properties
+        </span>
       </h2>
-      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+      <p className="mt-1.5 ml-[17px] text-[14px] leading-normal text-mute">
         Ordered declarations describe frontmatter values without owning or
         rewriting page data.
       </p>
 
-      <div className="mt-5 border-y border-border py-4">
-        <h3 className="font-mono text-xs font-semibold uppercase tracking-widest text-foreground">
-          Add declaration
-        </h3>
-        <div className="mt-3 grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_12rem_auto]">
-          <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+      <div className="mt-[22px] ml-[17px] flex flex-col gap-3 rounded-[14px] bg-sink px-[18px] pt-4 pb-[18px]">
+        <h3 className="text-[13.5px] font-medium text-ink">Add declaration</h3>
+        <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_12.5rem_auto]">
+          <label className="flex min-w-0 flex-col gap-1.5 text-[12.5px] text-mute">
             New property key
             <input
               ref={(element) => {
@@ -299,11 +300,16 @@ export function PropertiesEditor({
                     keyError(event.target.value, properties),
                   );
               }}
-              className="mt-1 block w-full border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+              className={cn(
+                "block h-10 w-full rounded-full bg-raise px-4 text-[14px] text-ink aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-hot",
+                FOCUS_RING_NATIVE,
+              )}
             />
           </label>
           <Select
             label="New property type"
+            // The add card is sink; lift the trigger so it reads as a field.
+            className="[&>button]:bg-raise"
             value={newType}
             onChange={(key) => {
               if (key == null) return;
@@ -326,7 +332,7 @@ export function PropertiesEditor({
           <p
             id="property-key-error"
             role="alert"
-            className="mt-2 text-sm text-destructive"
+            className="text-[12.5px] text-hot"
           >
             {addValidationMessage}
           </p>
@@ -334,11 +340,11 @@ export function PropertiesEditor({
       </div>
 
       {properties.length === 0 ? (
-        <div className="border-b border-border py-6">
-          <p className="text-sm font-medium text-foreground">
+        <div className="mt-[26px] ml-[17px] rounded-xl bg-raise px-4 py-3.5">
+          <p className="text-[14px] font-medium text-ink">
             No declarations yet
           </p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          <p className="mt-0.5 text-[12.5px] leading-normal text-mute">
             Add a typed key above. Pages remain valid even when their
             frontmatter contains undeclared keys.
           </p>
@@ -346,68 +352,68 @@ export function PropertiesEditor({
       ) : (
         <>
           <table
-            className="mt-4 w-full table-fixed border-collapse"
             aria-label="Ordered property declarations"
+            className="mt-5 ml-[17px] w-[calc(100%-17px)] table-fixed border-separate border-spacing-x-0 border-spacing-y-1.5"
           >
             <thead>
-              <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                <th scope="col" className="w-10 px-1 py-2 sm:px-2">
+              <tr className="text-left text-[12.5px] text-mute">
+                <th scope="col" className="w-8 py-1 font-normal">
                   <span className="sr-only">Order</span>
                 </th>
-                <th scope="col" className="px-2 py-2 sm:px-3">
+                <th
+                  scope="col"
+                  className="w-[38%] py-1 pl-1 font-normal sm:w-[9.5rem]"
+                >
                   Key
                 </th>
-                <th scope="col" className="px-2 py-2 sm:px-3">
+                <th scope="col" className="py-1 font-normal">
                   Type and configuration
                 </th>
                 <th
                   scope="col"
-                  className="w-28 px-1 py-2 text-right sm:w-48 sm:px-2"
+                  className="w-28 py-1 pr-2 text-right font-normal sm:w-[236px]"
                 >
                   Actions
                 </th>
               </tr>
             </thead>
-            <tbody>
-              {properties.map((property, index) => (
-                <PropertyDefinitionEditor
-                  key={property.id}
-                  property={property}
-                  index={index}
-                  count={properties.length}
-                  persisted={persistedPropertyIds.has(property.id)}
-                  renaming={activeRenameId === property.id}
-                  renameError={
-                    renameDiagnostic?.propertyId === property.id
-                      ? renameDiagnostic.message
-                      : undefined
-                  }
-                  onChange={replaceProperty}
-                  onMove={moveProperty}
-                  onReorder={dropProperty}
-                  onHandleRef={(propertyId, element) => {
-                    if (element)
-                      reorderHandles.current.set(propertyId, element);
-                    else reorderHandles.current.delete(propertyId);
-                  }}
-                  onRemove={removeProperty}
-                  onRename={requestRename}
-                  onStartRename={() => {
-                    setActiveRenameId(property.id);
-                    setRenameDiagnostic(undefined);
-                  }}
-                  onCancelRename={() => {
-                    setActiveRenameId((current) =>
-                      current === property.id ? undefined : current,
-                    );
-                    setRenameDiagnostic((current) =>
-                      current?.propertyId === property.id ? undefined : current,
-                    );
-                  }}
-                  registerFocus={registerFocus}
-                />
-              ))}
-            </tbody>
+            {properties.map((property, index) => (
+              <PropertyDefinitionEditor
+                key={property.id}
+                property={property}
+                index={index}
+                count={properties.length}
+                persisted={persistedPropertyIds.has(property.id)}
+                renaming={activeRenameId === property.id}
+                renameError={
+                  renameDiagnostic?.propertyId === property.id
+                    ? renameDiagnostic.message
+                    : undefined
+                }
+                onChange={replaceProperty}
+                onMove={moveProperty}
+                onReorder={dropProperty}
+                onHandleRef={(propertyId, element) => {
+                  if (element) reorderHandles.current.set(propertyId, element);
+                  else reorderHandles.current.delete(propertyId);
+                }}
+                onRemove={removeProperty}
+                onRename={requestRename}
+                onStartRename={() => {
+                  setActiveRenameId(property.id);
+                  setRenameDiagnostic(undefined);
+                }}
+                onCancelRename={() => {
+                  setActiveRenameId((current) =>
+                    current === property.id ? undefined : current,
+                  );
+                  setRenameDiagnostic((current) =>
+                    current?.propertyId === property.id ? undefined : current,
+                  );
+                }}
+                registerFocus={registerFocus}
+              />
+            ))}
           </table>
           <p
             role="status"
@@ -422,17 +428,25 @@ export function PropertiesEditor({
 
       <aside
         aria-label="Read-only system fields"
-        className="mt-6 border-t border-border pt-4"
+        className="mt-9 ml-[17px] flex flex-col gap-2"
       >
-        <h3 className="font-mono text-xs font-semibold uppercase tracking-widest text-foreground">
-          Read-only system fields
+        <h3 className="flex items-center gap-2.5">
+          <Tick variant="faint" />
+          <span className="font-serif text-[19px] italic leading-none text-mute">
+            Read-only system fields
+          </span>
         </h3>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        <p className="ml-[17px] text-[13px] text-mute">
           These bare names are supplied by Clepsydra and cannot be declared.
         </p>
-        <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-2 font-mono text-xs text-muted-foreground">
+        <ul className="mt-1 ml-[17px] flex flex-wrap gap-1.5">
           {SYSTEM_PROPERTY_FIELDS.map((field) => (
-            <li key={field}>{field}</li>
+            <li
+              key={field}
+              className="rounded-full bg-sink px-2.5 py-0.5 text-[12.5px] text-ink-2"
+            >
+              {field}
+            </li>
           ))}
         </ul>
       </aside>
@@ -471,7 +485,7 @@ export function PropertiesEditor({
           </>
         }
       >
-        <p className="text-sm leading-6 text-muted-foreground">
+        <p className="text-[14px] leading-normal text-mute">
           Removing this declaration does not remove values from pages. Page
           frontmatter remains unchanged.
         </p>
@@ -520,7 +534,7 @@ export function PropertiesEditor({
           </>
         }
       >
-        <p className="text-sm leading-6 text-muted-foreground">
+        <p className="text-[14px] leading-normal text-mute">
           This changes the declaration only. Existing page frontmatter is not
           renamed.
         </p>

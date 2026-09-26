@@ -13,6 +13,7 @@ import type {
   ConfiguredBaseEmbedElement,
   InvalidBaseEmbedElement,
 } from "#/editor/schema/types";
+import { useFolioDock } from "#/store/folioDock";
 
 function selectTriggerName(label: string) {
   return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
@@ -458,6 +459,13 @@ describe("BaseEmbedInspector structured mode", () => {
     );
   });
 
+  it("marks the TOML repair source as a code editor, so it stays mono", async () => {
+    renderInspector(invalid('````base\nbase = "tasks"\n````\n'));
+    expect(
+      await screen.findByRole("textbox", { name: "Base embed TOML" }),
+    ).toHaveAttribute("data-code-editor");
+  });
+
   it("resets the session when the inspected node identity is replaced", async () => {
     const first = configured();
     const callbacks = renderInspector(first);
@@ -670,6 +678,97 @@ describe("BaseEmbedInspector structured mode", () => {
     } else {
       expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     }
+  });
+});
+
+describe("BaseEmbedInspector docked panel", () => {
+  function renderBesideEditor() {
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    const onRestoreFocus = vi.fn();
+    const outsideClick = vi.fn();
+    render(
+      <>
+        <button type="button" onClick={outsideClick}>
+          Editor content
+        </button>
+        <BaseEmbedInspector
+          isOpen
+          node={configured()}
+          onSave={onSave}
+          onCancel={onCancel}
+          onRestoreFocus={onRestoreFocus}
+        />
+      </>,
+    );
+    return { onSave, onCancel, onRestoreFocus, outsideClick };
+  }
+
+  it("is a labelled non-modal dialog docked to the right, with no scrim", () => {
+    renderBesideEditor();
+    const panel = screen.getByRole("dialog", { name: "Configure Base embed" });
+    expect(panel).not.toHaveAttribute("aria-modal", "true");
+    expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(document.querySelector(".bg-scrim")).toBeNull();
+    expect(panel).toHaveAttribute("data-docked", "right");
+    expect(panel.className).toMatch(/\bfixed\b/);
+    expect(panel.className).toMatch(/\bright-0\b/);
+  });
+
+  it("takes the Folio's right column while open and gives it back on close", () => {
+    const { unmount } = render(
+      <BaseEmbedInspector
+        isOpen
+        node={configured()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onRestoreFocus={vi.fn()}
+      />,
+    );
+    expect(useFolioDock.getState().rightDock).toBe(true);
+    unmount();
+    expect(useFolioDock.getState().rightDock).toBe(false);
+  });
+
+  it("closes on Escape without saving and hands focus back", async () => {
+    const user = userEvent.setup();
+    const callbacks = renderBesideEditor();
+    await user.keyboard("{Escape}");
+    expect(callbacks.onSave).not.toHaveBeenCalled();
+    expect(callbacks.onCancel).toHaveBeenCalledTimes(1);
+    expect(callbacks.onRestoreFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes from its close button without saving", async () => {
+    const user = userEvent.setup();
+    const callbacks = renderBesideEditor();
+    await user.click(
+      screen.getByRole("button", { name: "Close without saving" }),
+    );
+    expect(callbacks.onSave).not.toHaveBeenCalled();
+    expect(callbacks.onCancel).toHaveBeenCalledTimes(1);
+    expect(callbacks.onRestoreFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the editor beside it interactive while open", async () => {
+    const user = userEvent.setup();
+    const callbacks = renderBesideEditor();
+    // Not hidden from assistive tech, not trapped behind a focus scope.
+    const outside = screen.getByRole("button", { name: "Editor content" });
+    expect(outside.closest("[aria-hidden='true'],[inert]")).toBeNull();
+    await user.click(outside);
+    expect(callbacks.outsideClick).toHaveBeenCalledTimes(1);
+    expect(outside).toHaveFocus();
+    // Clicking outside does not dismiss a docked panel.
+    expect(callbacks.onCancel).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("dialog", { name: "Configure Base embed" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders nothing while closed", () => {
+    renderInspector(configured(), { isOpen: false });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

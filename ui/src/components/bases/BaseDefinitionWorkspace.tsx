@@ -3,14 +3,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BaseDetailResponse } from "#/api/bases";
 import { useBase, useUpdateBase } from "#/api/bases";
 import { formatApiError, isApiConflict, isApiError } from "#/api/error";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { Dialog } from "#/components/ui/dialog";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { BaseFilterEditor } from "./BaseFilterEditor";
 import { BasePreview } from "./BasePreview";
 import {
   DefinitionHeader,
   type DefinitionSaveStatus,
+  DefinitionSectionHeading,
 } from "./DefinitionHeader";
 import {
   type BaseDraft,
@@ -95,22 +99,25 @@ function diagnosticsFromError(error: unknown): BaseDiagnostic[] {
 function RecoveryState({ slug, error }: { slug: string; error: unknown }) {
   const path = `bases/${slug}.base.toml`;
   return (
-    <div className="mx-auto w-full max-w-5xl p-4">
-      <p className="font-mono text-xs uppercase tracking-widest text-primary">
-        Base definition
-      </p>
-      <h1 className="mt-2 text-2xl font-bold tracking-tight text-foreground">
+    <div className="mx-auto w-full max-w-5xl px-10 pt-10 pb-10">
+      <span className="flex items-center gap-2.5">
+        <Tick />
+        <span className="font-serif text-[19px] italic text-mute">
+          Base definition
+        </span>
+      </span>
+      <h1 className="mt-2 font-serif text-[56px] leading-none tracking-[-0.015em] text-ink">
         {slug}
       </h1>
-      <div className="mt-6 border border-destructive p-4">
-        <p role="alert" className="text-sm text-destructive">
+      <div className="mt-8 rounded-2xl bg-raise px-[22px] py-5">
+        <p role="alert" className="text-[14px] text-hot">
           {formatApiError(error, "Base definition could not be loaded.")}
         </p>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        <p className="mt-2 text-[14px] leading-6 text-mute">
           The file could not be opened safely in the structured editor. Repair
           it in a text editor, then reload this page.
         </p>
-        <p className="mt-4 flex items-center gap-2 break-all font-mono text-xs text-foreground">
+        <p className="mt-4 flex items-center gap-2 break-all text-[13px] text-ink-2">
           {path}
           <CopyButton getText={() => path} label="Copy base file path" />
         </p>
@@ -400,8 +407,8 @@ export function BaseDefinitionWorkspace({
 
   if (baseQuery.isPending && !hydrated.current) {
     return (
-      <div className="mx-auto w-full max-w-5xl p-4">
-        <p role="status" className="font-mono text-xs text-muted-foreground">
+      <div className="mx-auto w-full max-w-5xl px-10 pt-10">
+        <p role="status" className="text-[13px] text-mute">
           Loading base definition…
         </p>
       </div>
@@ -409,6 +416,7 @@ export function BaseDefinitionWorkspace({
   }
   if (!draft) return <RecoveryState slug={slug} error={baseQuery.error} />;
   const visibleDiagnostics = [...diagnostics, ...mergedLocalDiagnostics];
+  const hasValidation = visibleDiagnostics.length > 0;
   const draftViews = draft.views;
   let activeView = draftViews.find((view) => view.id === selectedView.id);
   if (!activeView && selectedView.name) {
@@ -455,7 +463,7 @@ export function BaseDefinitionWorkspace({
   };
 
   return (
-    <div className="mx-auto w-full p-4">
+    <div className="mx-auto w-full px-10 pt-10 pb-10">
       <DefinitionHeader
         name={draft.name || slug}
         slug={slug}
@@ -478,7 +486,7 @@ export function BaseDefinitionWorkspace({
       {(saveError || conflictMessage) && (
         <div
           role="alert"
-          className="mt-4 border border-destructive p-3 text-sm text-destructive"
+          className="mt-6 rounded-xl bg-sink px-4 py-3 text-[13.5px] text-hot"
         >
           <p>{conflictMessage ?? saveError}</p>
           {conflictMessage && (
@@ -503,23 +511,54 @@ export function BaseDefinitionWorkspace({
         </div>
       )}
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[12rem_minmax(0,1fr)_18rem]">
-        <nav
-          aria-label="Definition sections"
-          className="border-t border-border"
-        >
-          {sectionOrder.map((section) => (
-            <button
-              key={section.id}
-              type="button"
-              aria-current={selectedSection === section.id ? "page" : undefined}
-              onClick={() => setSelectedSection(section.id)}
-              className="block w-full border-b border-border px-3 py-3 text-left font-mono text-xs uppercase tracking-widest text-muted-foreground hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 aria-[current=page]:border-l-2 aria-[current=page]:border-l-primary aria-[current=page]:text-foreground"
-            >
-              {section.label}
-            </button>
-          ))}
-        </nav>
+      {/* Validation appears only while there are diagnostics, under the
+          section nav: the editor keeps its width, so the field being fixed
+          does not move. */}
+      <div
+        data-definition-layout
+        data-validation-column={hasValidation || undefined}
+        className="mt-11 grid gap-8 lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-14"
+      >
+        <div className="flex min-w-0 flex-col gap-6 self-start lg:sticky lg:top-6">
+          <nav
+            aria-label="Definition sections"
+            className="flex flex-col gap-0.5 self-start text-[14px]"
+          >
+            {sectionOrder.map((section) => {
+              const current = selectedSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  aria-current={current ? "page" : undefined}
+                  onClick={() => setSelectedSection(section.id)}
+                  className={cn(
+                    "flex h-10 w-full items-center gap-2.5 rounded-xl px-3.5 text-left transition-colors",
+                    current
+                      ? "bg-raise font-medium text-ink"
+                      : "text-mute hover:bg-sink hover:text-ink",
+                    FOCUS_RING_NATIVE,
+                  )}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "h-[5px] w-[5px] flex-shrink-0 rounded-[1px]",
+                      current ? "bg-accent" : "bg-transparent",
+                    )}
+                  />
+                  {section.label}
+                </button>
+              );
+            })}
+          </nav>
+          {hasValidation ? (
+            <ValidationSummary
+              diagnostics={visibleDiagnostics}
+              focusDiagnostic={focusDiagnostic}
+            />
+          ) : null}
+        </div>
         <div className="min-w-0">
           {selectedSection === "general" && (
             <GeneralEditor slug={slug} {...editorProps} />
@@ -529,18 +568,14 @@ export function BaseDefinitionWorkspace({
               ref={(element) => registerFocusTarget("filter", element)}
               tabIndex={-1}
               aria-labelledby="filter-editor-heading"
-              className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+              className={cn("rounded-xl", FOCUS_RING_NATIVE)}
             >
-              <h2
+              <DefinitionSectionHeading
                 id="filter-editor-heading"
-                className="text-sm font-bold uppercase tracking-widest text-foreground"
-              >
-                Filter
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Membership rules choose the pages included in every view.
-              </p>
-              <div className="mt-5">
+                title="Filter"
+                description="Membership rules choose the pages included in every view."
+              />
+              <div className="mt-[22px] ml-[17px]">
                 <BaseFilterEditor
                   value={draft.filter}
                   properties={draft.properties}
@@ -598,10 +633,6 @@ export function BaseDefinitionWorkspace({
             </>
           )}
         </div>
-        <ValidationSummary
-          diagnostics={visibleDiagnostics}
-          focusDiagnostic={focusDiagnostic}
-        />
       </div>
 
       <Dialog
@@ -632,7 +663,7 @@ export function BaseDefinitionWorkspace({
           </>
         }
       >
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[14px] text-mute">
           Your unsaved base edits are only in this browser.
         </p>
       </Dialog>
@@ -662,11 +693,11 @@ export function BaseDefinitionWorkspace({
           </>
         }
       >
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[14px] text-mute">
           Review your draft first if you need to reapply any changes.
         </p>
         {reloadError && (
-          <p role="alert" className="mt-3 text-sm text-destructive">
+          <p role="alert" className="mt-3 text-[14px] text-hot">
             {reloadError}
           </p>
         )}

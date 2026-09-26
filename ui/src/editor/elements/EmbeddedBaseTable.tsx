@@ -103,20 +103,20 @@ export const EmbeddedBaseTable = forwardRef<
     ) : (
       <div className="flex flex-wrap items-center justify-between gap-2">
         {message}
-        <span className="flex items-center gap-2">{actions}</span>
+        <span className="flex items-center gap-1.5">{actions}</span>
       </div>
     );
 
   if (detailLoading && !definition) {
     return withActions(
-      <p role="status" className="cl-mono p-4 text-[12px] text-ink-mute">
+      <p role="status" className="p-4 text-[13px] text-mute">
         Loading Base embed…
       </p>,
     );
   }
   if (detailMissing || !definition) {
     return withActions(
-      <p role="alert" className="cl-mono p-4 text-[12px] text-ink-mute">
+      <p role="alert" className="p-4 text-[13px] text-mute">
         No Base named “{element.base}” is available. Edit the embed to choose a
         saved Base and view.
       </p>,

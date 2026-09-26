@@ -394,6 +394,66 @@ describe("BaseDefinitionWorkspace", () => {
     expect(name).toHaveFocus();
   });
 
+  it("renders the validation column only while diagnostics exist", async () => {
+    const { container } = renderWorkspace();
+    const layout = () =>
+      container.querySelector("[data-definition-layout]") as HTMLElement;
+    const validation = () =>
+      screen.queryByRole("complementary", { name: /^Validation/ });
+
+    expect(validation()).toBeNull();
+    expect(layout()).not.toHaveAttribute("data-validation-column");
+
+    const user = userEvent.setup();
+    const name = screen.getByLabelText("Name");
+    const cleanGrid = layout().className;
+    await user.clear(name);
+
+    expect(validation()).toBeInTheDocument();
+    expect(layout()).toHaveAttribute("data-validation-column");
+    expect(name).toHaveFocus();
+    // The summary sits under the section nav, so the editor keeps its width
+    // and a field being fixed does not jump (5.2 review I1).
+    expect(layout().className).toBe(cleanGrid);
+    const nav = screen.getByRole("navigation", { name: "Definition sections" });
+    expect(nav.parentElement?.contains(validation())).toBe(true);
+
+    await user.type(name, "Reading");
+
+    expect(validation()).toBeNull();
+    expect(layout()).not.toHaveAttribute("data-validation-column");
+    expect(name).toHaveFocus();
+  });
+
+  it("shortens a long revision hash, keeping the whole one in its title", () => {
+    const hash =
+      "532dc475cfd7810c133e8d816b27c694a6f9a7a55de05fd534c2a006959a45b4";
+    baseState.data = { ...detail, revision: hash };
+    renderWorkspace();
+    expect(screen.getByText("532dc475…")).toHaveAttribute("title", hash);
+  });
+
+  it("shows the validation column for server diagnostics on load", () => {
+    baseState.data = {
+      ...detail,
+      diagnostics: [
+        {
+          slug: "reading-log",
+          severity: "warning",
+          path: "views[0].sort[0]",
+          message: "sort field is unavailable",
+        },
+      ],
+    };
+    const { container } = renderWorkspace();
+    expect(
+      screen.getByRole("complementary", { name: /^Validation/ }),
+    ).toBeInTheDocument();
+    expect(container.querySelector("[data-definition-layout]")).toHaveAttribute(
+      "data-validation-column",
+    );
+  });
+
   it("saves the exact membership filter edited in the workspace", async () => {
     const filter = { field: "id", op: "eq", value: "page-1" } as const;
     updateMock.mockResolvedValue(

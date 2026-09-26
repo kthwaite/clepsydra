@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import type { BaseFilter } from "#/api/bases";
+import { SegmentedControl } from "#/components/ui/segmented-control";
+import { cn } from "#/lib/cn";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
@@ -27,6 +29,21 @@ interface BaseFilterEditorProps {
   diagnostics?: BaseDiagnostic[];
   diagnosticRoot?: string;
 }
+
+/** Nested groups alternate tone so each level reads as its own surface
+ * without borders: the root group sits on sink, its children on raise. */
+function surfaceAt(depth: number) {
+  return depth % 2 === 0 ? "bg-sink" : "bg-raise";
+}
+
+function depthOf(path: FilterPath) {
+  return path.filter((segment) => typeof segment === "string").length;
+}
+
+const COMBINATOR_OPTIONS = [
+  { id: "all", label: "All" },
+  { id: "any", label: "Any" },
+] as const;
 
 interface FilterNodeEditorProps {
   value: BaseFilter;
@@ -97,12 +114,18 @@ function FilterNodeEditor({
 
   if ("not" in value) {
     const childPath: FilterPath = [...path, "not"];
+    const depth = depthOf(path);
     return (
-      <fieldset className="m-0 min-w-0 border-y-0 border-r-0 border-l-2 border-primary/70 bg-card/40 p-0 pl-3">
-        <legend className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-primary">
-          <span aria-hidden="true">Not</span>
-          <span className="sr-only">Exclude matching condition</span>
-        </legend>
+      <fieldset
+        className={cn("m-0 min-w-0 rounded-xl p-3 sm:p-4", surfaceAt(depth))}
+      >
+        <legend className="sr-only">Exclude matching condition</legend>
+        <p aria-hidden="true" className="mb-3 flex items-center gap-2">
+          <span className="rounded-full bg-accent-tint px-2.5 py-0.5 text-[12.5px] font-medium text-accent">
+            Not
+          </span>
+          <span className="text-[13px] text-mute">Exclude pages matching</span>
+        </p>
         <FilterNodeEditor
           value={value.not}
           path={childPath}
@@ -113,7 +136,7 @@ function FilterNodeEditor({
           diagnostics={diagnostics}
           diagnosticRoot={diagnosticRoot}
         />
-        <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+        <div className="mt-3 flex flex-wrap gap-2">
           <FilterSeedMenu
             triggerLabel="Excluded condition actions"
             replace
@@ -147,6 +170,17 @@ function FilterNodeEditor({
       ? `${meaning} conditions`
       : `${meaning} of ${children.length} ${children.length === 1 ? "condition" : "conditions"}`;
 
+  const depth = depthOf(path);
+
+  function setCombinator(next: string) {
+    if (next === kind) return;
+    dispatch({
+      type: "replace",
+      path,
+      value: next === "all" ? { all: children } : { any: children },
+    });
+  }
+
   function append(child: BaseFilter) {
     setChildRows((current) => [...current, createRow(child)]);
     dispatch({
@@ -178,19 +212,38 @@ function FilterNodeEditor({
   }
 
   return (
-    <fieldset className="m-0 min-w-0 border-y-0 border-r-0 border-l-2 border-border bg-card/40 p-0 pl-3">
-      <legend className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-        <span aria-hidden="true">{meaning}</span>
-        <span className="sr-only">{label}</span>
-      </legend>
-      <div className="grid gap-4">
+    <fieldset
+      className={cn("m-0 min-w-0 rounded-xl p-3 sm:p-4", surfaceAt(depth))}
+    >
+      <legend className="sr-only">{label}</legend>
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px] text-mute">
+        <span aria-hidden="true">Match</span>
+        <SegmentedControl
+          label="Combine conditions"
+          value={kind}
+          options={COMBINATOR_OPTIONS}
+          onChange={setCombinator}
+          optionsClassName={depth % 2 === 0 ? "bg-ground" : undefined}
+        />
+        <span aria-hidden="true">
+          {children.length === 1
+            ? "of 1 condition"
+            : `of ${children.length} conditions`}
+        </span>
+      </div>
+      <div className="grid gap-2">
         {childRows.map(({ id, value: child }, index) => {
           const childPath: FilterPath = [...path, kind, index];
           const childPosition = index + 1;
           return (
             <div
               key={id}
-              className="border-t border-border pt-3 first:border-t-0 first:pt-0"
+              className={cn(
+                "min-w-0 rounded-xl",
+                "field" in child || readTagCondition(child)
+                  ? cn("p-3", surfaceAt(depth + 1))
+                  : undefined,
+              )}
             >
               <FilterNodeEditor
                 value={child}
@@ -243,7 +296,7 @@ function FilterNodeEditor({
           );
         })}
       </div>
-      <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
+      <div className="mt-3 flex flex-wrap gap-2">
         <FilterSeedMenu triggerLabel={`Add to ${meaning}`} onSeed={append} />
       </div>
     </fieldset>
@@ -277,15 +330,15 @@ export function BaseFilterEditor({
 
   if (!draftValue) {
     return (
-      <fieldset className="m-0 min-w-0 border-0 p-0">
+      <fieldset className="m-0 min-w-0 p-0">
         <legend className="sr-only">{label}</legend>
-        <div className="border-y border-border py-5">
-          <p className="text-sm font-medium text-foreground">All pages</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Add a rule to limit which pages belong to this base.
-          </p>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-4 rounded-xl bg-sink px-4 py-3.5">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <p className="text-[14px] font-medium text-ink">All pages</p>
+            <p className="text-[12.5px] text-mute">
+              Add a rule to limit which pages belong to this base.
+            </p>
+          </div>
           <FilterSeedMenu
             triggerLabel="Add rule"
             variant="primary"
@@ -297,7 +350,7 @@ export function BaseFilterEditor({
   }
 
   return (
-    <fieldset className="m-0 min-w-0 border-0 p-0">
+    <fieldset className="m-0 min-w-0 p-0">
       <legend className="sr-only">{label}</legend>
       <FilterNodeEditor
         value={draftValue}
@@ -309,7 +362,7 @@ export function BaseFilterEditor({
         diagnostics={diagnostics}
         diagnosticRoot={diagnosticRoot}
       />
-      <fieldset className="m-0 mt-4 flex min-w-0 flex-wrap gap-2 border-x-0 border-b-0 border-t border-border p-0 pt-3">
+      <fieldset className="m-0 mt-3 flex min-w-0 flex-wrap gap-2 p-0">
         <legend className="sr-only">Root membership controls</legend>
         <FilterSeedMenu
           triggerLabel="Membership actions"

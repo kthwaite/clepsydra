@@ -1,4 +1,6 @@
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
+import { cn } from "#/lib/cn";
 
 export type DefinitionSaveStatus = "saved" | "saving" | "unsaved" | "error";
 
@@ -33,32 +35,52 @@ export function DefinitionHeader({
   onDiscard,
 }: DefinitionHeaderProps) {
   return (
-    <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-4">
-      <div className="min-w-0">
-        <p className="font-mono text-xs uppercase tracking-widest text-primary">
-          Base definition
-        </p>
-        <h1 className="mt-2 truncate text-2xl font-bold tracking-tight text-foreground">
+    <header className="flex flex-wrap items-end gap-x-7 gap-y-4">
+      <div className="flex min-w-0 flex-col gap-2">
+        <span className="flex items-center gap-2.5">
+          <Tick />
+          <span className="font-serif text-[19px] italic text-mute">
+            Base definition
+          </span>
+        </span>
+        <h1 className="truncate font-serif text-[56px] leading-none tracking-[-0.015em] text-ink">
           {name}
         </h1>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
-          <span>{slug}</span>
-          <span title="Current revision">{revision}</span>
-        </div>
       </div>
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <span className="pb-1.5 text-[14px] text-mute">
+        <span>{slug}</span>{" "}
+        <span aria-hidden="true" className="text-faint">
+          ·
+        </span>{" "}
+        revision{" "}
+        <span title={revision}>
+          {revision.length > 12 ? `${revision.slice(0, 8)}…` : revision}
+        </span>
+      </span>
+      <span className="flex-1" />
+      <div className="flex flex-wrap items-center justify-end gap-2.5">
         <span
           role="status"
           aria-live="polite"
           title={saveError}
-          className={
+          className={cn(
+            "mr-1 flex items-center gap-2 text-[13px]",
             status === "error"
-              ? "mr-1 text-xs text-destructive"
+              ? "text-hot"
               : status === "unsaved"
-                ? "mr-1 text-xs text-foreground"
-                : "mr-1 text-xs text-muted-foreground"
-          }
+                ? "text-ink"
+                : "text-mute",
+          )}
         >
+          {status === "unsaved" || status === "error" ? (
+            <span
+              aria-hidden="true"
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                status === "error" ? "bg-hot" : "bg-accent",
+              )}
+            />
+          ) : null}
           {statusLabels[status]}
         </span>
         <Button
@@ -73,5 +95,33 @@ export function DefinitionHeader({
         </Button>
       </div>
     </header>
+  );
+}
+
+/** A definition section's title: tick + italic serif heading, with the
+ *  caption indented to the heading text (the mockup's 17px body indent). */
+export function DefinitionSectionHeading({
+  id,
+  title,
+  description,
+}: {
+  id: string;
+  title: string;
+  description?: string;
+}) {
+  return (
+    <>
+      <h2 id={id} className="flex items-center gap-2.5">
+        <Tick />
+        <span className="font-serif text-[22px] italic leading-none text-ink">
+          {title}
+        </span>
+      </h2>
+      {description ? (
+        <p className="mt-1.5 ml-[17px] text-[14px] leading-normal text-mute">
+          {description}
+        </p>
+      ) : null}
+    </>
   );
 }

@@ -23,6 +23,8 @@ import type {
   BaseEmbedElement,
   GeneratedRegionElement as RegionNode,
 } from "#/editor/schema/types";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 const encoder = new TextEncoder();
 
@@ -146,7 +148,10 @@ export function GeneratedRegionElement({
   return (
     <div
       {...attributes}
-      className={`my-4 border ${selected ? "border-primary ring-1 ring-primary" : "border-border"}`}
+      className={cn(
+        "my-4 min-w-0 rounded-[14px] bg-raise transition-shadow",
+        (selected || active) && "ring-2 ring-accent",
+      )}
       data-testid="generated-region"
     >
       <fieldset
@@ -173,30 +178,40 @@ export function GeneratedRegionElement({
             }
           }}
         />
-        <header className="flex flex-wrap items-center gap-2 border-b border-border p-2">
-          <span className="mr-auto font-mono text-[11px] uppercase text-muted-foreground">
+        <header className="flex flex-wrap items-center gap-x-1.5 gap-y-2 px-3.5 pt-3 pb-1">
+          <span className="mr-auto text-[12.5px] text-mute">
             Generated snapshot
           </span>
-          <button
+          <Button
             ref={editRef}
-            type="button"
-            disabled={readOnly}
-            className="border border-border px-2 py-1 font-mono text-xs disabled:opacity-50"
-            onClick={openSelection}
+            variant="secondary"
+            size="sm"
+            isDisabled={readOnly}
+            {...(element.status === "valid" ? { "aria-expanded": active } : {})}
+            className={cn(
+              "h-7 rounded-full px-[11px] text-[12.5px] font-normal",
+              active &&
+                "bg-accent-tint text-accent data-[hovered]:bg-accent-tint",
+            )}
+            onPress={openSelection}
           >
             {element.status === "valid" ? "Edit selection" : "Repair source"}
-          </button>
+          </Button>
           {element.status === "valid" ? (
             <>
               <Button
                 variant="secondary"
                 size="sm"
+                className="h-7 rounded-full px-[11px] text-[12.5px] font-normal"
                 onPress={() => setTemplateOpen(true)}
               >
                 Edit template
               </Button>
               <a
-                className="font-mono text-xs underline"
+                className={cn(
+                  "rounded-full px-[11px] text-[12.5px] text-accent underline-offset-2 hover:underline",
+                  FOCUS_RING_NATIVE,
+                )}
                 href={`/bases/${encodeURIComponent(element.descriptor.base)}${element.descriptor.view ? `?view=${encodeURIComponent(element.descriptor.view)}` : ""}`}
               >
                 Open source
@@ -204,6 +219,7 @@ export function GeneratedRegionElement({
               <Button
                 variant="secondary"
                 size="sm"
+                className="h-7 rounded-full px-[11px] text-[12.5px] font-normal"
                 isDisabled={readOnly || !lifecycle || lifecycle.readonly}
                 onPress={() => setPreviewSelection(element.descriptor)}
               >
@@ -212,8 +228,9 @@ export function GeneratedRegionElement({
             </>
           ) : null}
           <Button
-            variant="danger"
+            variant="ghost"
             size="sm"
+            className="h-7 px-[11px] text-[12.5px] font-normal data-[hovered]:text-hot"
             isDisabled={readOnly}
             onPress={() =>
               editing.remove(ReactEditor.findPath(editor, element), element)
@@ -223,11 +240,11 @@ export function GeneratedRegionElement({
           </Button>
         </header>
         {element.status === "valid" ? (
-          <div className="p-4">
+          <div className="px-3.5 pt-2 pb-3.5">
             {modified ? (
               <p
                 role="status"
-                className="mb-3 border border-destructive p-2 text-sm text-destructive"
+                className="mb-3 rounded-xl bg-hot/10 px-3 py-2 text-[13px] text-hot"
               >
                 Generated output was modified outside regeneration. Regenerating
                 requires explicit overwrite approval.
@@ -241,11 +258,11 @@ export function GeneratedRegionElement({
             </div>
           </div>
         ) : (
-          <div className="p-4">
-            <p role="alert" className="text-destructive">
+          <div className="px-3.5 pt-2 pb-3.5">
+            <p role="alert" className="text-[13.5px] text-hot">
               Generated region needs source repair: {element.parseError}
             </p>
-            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs">
+            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-xl bg-sink p-3 text-[12.5px] text-ink-2">
               {element.rawBlock}
             </pre>
           </div>
@@ -328,10 +345,12 @@ export function GeneratedRegionElement({
               </>
             }
           >
-            <label className="block text-xs font-mono">
+            <label className="block text-[12.5px] text-mute">
               Generated region Markdown
               <textarea
                 autoFocus
+                // The source is code: data-code-editor keeps it monospace.
+                data-code-editor=""
                 rows={20}
                 spellCheck={false}
                 value={repair}
@@ -339,11 +358,14 @@ export function GeneratedRegionElement({
                   setRepair(event.target.value);
                   setRepairError(null);
                 }}
-                className="mt-2 block w-full border border-input bg-background p-3 font-mono text-sm"
+                className={cn(
+                  "mt-1.5 block w-full resize-y rounded-xl bg-sink p-3 text-[13px] leading-6 text-ink",
+                  FOCUS_RING_NATIVE,
+                )}
               />
             </label>
             {repairError ? (
-              <p role="alert" className="text-destructive">
+              <p role="alert" className="mt-2 text-[12.5px] text-hot">
                 {repairError}
               </p>
             ) : null}

@@ -1,3 +1,4 @@
+import { ArrowDown, ArrowUp, ChevronDown, X } from "lucide-react";
 import {
   type ReactNode,
   useEffect,
@@ -6,7 +7,11 @@ import {
   useRef,
   useState,
 } from "react";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
+import { IconButton } from "#/components/ui/icon-button";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
@@ -61,10 +66,25 @@ interface PreviewPropertiesEditorProps {
   registerFocus: RegisterFocusTarget;
 }
 
-const controlClass =
-  "mt-1 block w-full border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2";
-const labelClass =
-  "text-xs font-bold uppercase tracking-widest text-muted-foreground";
+const controlClass = cn(
+  "block h-10 w-full min-w-0 rounded-full bg-sink px-4 text-[14px] text-ink placeholder:text-mute aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-hot",
+  FOCUS_RING_NATIVE,
+);
+const selectClass = cn(controlClass, "appearance-none truncate pr-10");
+const labelClass = "flex min-w-0 flex-col gap-1.5 text-[12.5px] text-mute";
+
+/** A native select drawn as the sink pill, with the shared chevron. */
+function SelectShell({ children }: { children: ReactNode }) {
+  return (
+    <span className="relative block min-w-0">
+      {children}
+      <ChevronDown
+        aria-hidden
+        className="pointer-events-none absolute top-1/2 right-4 size-4 -translate-y-1/2 text-mute"
+      />
+    </span>
+  );
+}
 
 export function PreviewPropertiesEditor({
   preview,
@@ -158,19 +178,19 @@ export function PreviewPropertiesEditor({
       !selectedIdentities.has(fieldToAddIdentity));
 
   return (
-    <section aria-labelledby="preview-properties-heading">
-      <h2
-        id="preview-properties-heading"
-        className="text-sm font-bold uppercase tracking-widest text-foreground"
-      >
-        Preview properties
+    <section aria-labelledby="preview-properties-heading" className="min-w-0">
+      <h2 id="preview-properties-heading" className="flex items-center gap-2.5">
+        <Tick />
+        <span className="font-serif text-[22px] italic leading-none text-ink">
+          Preview properties
+        </span>
       </h2>
-      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+      <p className="mt-1.5 ml-[17px] text-[14px] leading-normal text-mute">
         Choose the fields shown in the default page preview, from top to bottom.
         The Markdown body is read-only.
       </p>
 
-      <ol className="mt-5 border-t border-border">
+      <ol className="mt-6 ml-[17px] flex flex-col gap-1.5">
         {preview.map((row, index) => {
           const fieldPath = `preview[${index}].field`;
           const labelPath = `preview[${index}].label`;
@@ -197,70 +217,76 @@ export function PreviewPropertiesEditor({
             >
               <label className={labelClass}>
                 Property {index + 1}
-                <select
-                  ref={(element) => {
-                    registerFocus(fieldPath, element);
-                    if (element) fieldSelectors.current.set(row.id, element);
-                    else fieldSelectors.current.delete(row.id);
-                  }}
-                  className={controlClass}
-                  value={row.field}
-                  aria-label={`Field for preview property ${row.field}`}
-                  aria-invalid={invalid || undefined}
-                  onChange={(event) => {
-                    const field = event.target.value;
-                    if (field === row.field) return;
-                    const identity = presentationFieldIdentity(field);
-                    if (
-                      identity !== undefined &&
-                      preview.some(
-                        (current) =>
-                          current.id !== row.id &&
-                          presentationFieldIdentity(current.field) === identity,
-                      )
-                    ) {
-                      return;
-                    }
-                    setFocusRequest({ kind: "field", id: row.id });
-                    onChange(
-                      preview.map((current) =>
-                        current.id === row.id ? { ...current, field } : current,
-                      ),
-                    );
-                  }}
-                >
-                  {choices.some(
-                    (choice) => choice.field === row.field,
-                  ) ? null : (
-                    <option value={row.field}>{row.field}</option>
-                  )}
-                  {choices.map((choice) => {
-                    const identity = presentationFieldIdentity(choice.field);
-                    const selectedElsewhere =
-                      identity !== undefined &&
-                      preview.some(
-                        (current) =>
-                          current.id !== row.id &&
-                          presentationFieldIdentity(current.field) === identity,
+                <SelectShell>
+                  <select
+                    ref={(element) => {
+                      registerFocus(fieldPath, element);
+                      if (element) fieldSelectors.current.set(row.id, element);
+                      else fieldSelectors.current.delete(row.id);
+                    }}
+                    className={selectClass}
+                    value={row.field}
+                    aria-label={`Field for preview property ${row.field}`}
+                    aria-invalid={invalid || undefined}
+                    onChange={(event) => {
+                      const field = event.target.value;
+                      if (field === row.field) return;
+                      const identity = presentationFieldIdentity(field);
+                      if (
+                        identity !== undefined &&
+                        preview.some(
+                          (current) =>
+                            current.id !== row.id &&
+                            presentationFieldIdentity(current.field) ===
+                              identity,
+                        )
+                      ) {
+                        return;
+                      }
+                      setFocusRequest({ kind: "field", id: row.id });
+                      onChange(
+                        preview.map((current) =>
+                          current.id === row.id
+                            ? { ...current, field }
+                            : current,
+                        ),
                       );
-                    const description = [
-                      choice.description,
-                      selectedElsewhere ? "Already added" : undefined,
-                    ]
-                      .filter(Boolean)
-                      .join(" — ");
-                    return (
-                      <option
-                        key={choice.field}
-                        value={choice.field}
-                        disabled={selectedElsewhere}
-                      >
-                        {choice.label}
-                        {description ? ` — ${description}` : ""}
-                      </option>
-                    );
-                  })}
-                </select>
+                    }}
+                  >
+                    {choices.some(
+                      (choice) => choice.field === row.field,
+                    ) ? null : (
+                      <option value={row.field}>{row.field}</option>
+                    )}
+                    {choices.map((choice) => {
+                      const identity = presentationFieldIdentity(choice.field);
+                      const selectedElsewhere =
+                        identity !== undefined &&
+                        preview.some(
+                          (current) =>
+                            current.id !== row.id &&
+                            presentationFieldIdentity(current.field) ===
+                              identity,
+                        );
+                      const description = [
+                        choice.description,
+                        selectedElsewhere ? "Already added" : undefined,
+                      ]
+                        .filter(Boolean)
+                        .join(" — ");
+                      return (
+                        <option
+                          key={choice.field}
+                          value={choice.field}
+                          disabled={selectedElsewhere}
+                        >
+                          {choice.label}
+                          {description ? ` — ${description}` : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </SelectShell>
               </label>
               <label className={labelClass}>
                 Label for {row.field}
@@ -288,28 +314,25 @@ export function PreviewPropertiesEditor({
                   }}
                 />
               </label>
-              <div className="flex flex-wrap justify-end gap-1">
-                <Button
+              <div className="flex items-center justify-end gap-0.5">
+                <IconButton
                   data-preview-move-direction="up"
-                  size="sm"
-                  variant="ghost"
+                  aria-label={`Move ${row.field} up`}
                   isDisabled={index === 0}
                   onPress={() => move(index, index - 1)}
                 >
-                  Move {row.field} up
-                </Button>
-                <Button
+                  <ArrowUp />
+                </IconButton>
+                <IconButton
                   data-preview-move-direction="down"
-                  size="sm"
-                  variant="ghost"
+                  aria-label={`Move ${row.field} down`}
                   isDisabled={index === preview.length - 1}
                   onPress={() => move(index, index + 1)}
                 >
-                  Move {row.field} down
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
+                  <ArrowDown />
+                </IconButton>
+                <IconButton
+                  aria-label={`Remove preview property ${row.field}`}
                   onPress={() => {
                     const remaining = preview.filter(
                       (current) => current.id !== row.id,
@@ -324,15 +347,15 @@ export function PreviewPropertiesEditor({
                     onChange(remaining);
                   }}
                 >
-                  Remove preview property {row.field}
-                </Button>
+                  <X />
+                </IconButton>
               </div>
               {rowDiagnostics.length > 0 ? (
                 <p
                   className={
                     invalid
-                      ? "text-xs text-destructive sm:col-span-3"
-                      : "text-xs text-warn sm:col-span-3"
+                      ? "text-[12.5px] text-hot sm:col-span-3 sm:col-start-2"
+                      : "text-[12.5px] text-ink-2 sm:col-span-3 sm:col-start-2"
                   }
                 >
                   {rowDiagnostics.map(({ message }) => message).join(" ")}
@@ -351,38 +374,40 @@ export function PreviewPropertiesEditor({
       >
         {announcement}
       </p>
-      <div className="mt-4 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="mt-5 ml-[17px] grid items-end gap-3 rounded-[14px] bg-sink px-[18px] pt-4 pb-[18px] sm:grid-cols-[minmax(0,1fr)_auto]">
         <label className={labelClass}>
           Preview property to add
-          <select
-            ref={selector}
-            className={controlClass}
-            value={fieldToAdd}
-            onChange={(event) => setFieldToAdd(event.target.value)}
-          >
-            <option value="">Choose a property</option>
-            {choices.map((choice) => {
-              const identity = presentationFieldIdentity(choice.field);
-              const selected =
-                identity !== undefined && selectedIdentities.has(identity);
-              const description = [
-                choice.description,
-                selected ? "Already added" : undefined,
-              ]
-                .filter(Boolean)
-                .join(" — ");
-              return (
-                <option
-                  key={choice.field}
-                  value={choice.field}
-                  disabled={selected}
-                >
-                  {choice.label}
-                  {description ? ` — ${description}` : ""}
-                </option>
-              );
-            })}
-          </select>
+          <SelectShell>
+            <select
+              ref={selector}
+              className={cn(selectClass, "bg-raise")}
+              value={fieldToAdd}
+              onChange={(event) => setFieldToAdd(event.target.value)}
+            >
+              <option value="">Choose a property</option>
+              {choices.map((choice) => {
+                const identity = presentationFieldIdentity(choice.field);
+                const selected =
+                  identity !== undefined && selectedIdentities.has(identity);
+                const description = [
+                  choice.description,
+                  selected ? "Already added" : undefined,
+                ]
+                  .filter(Boolean)
+                  .join(" — ");
+                return (
+                  <option
+                    key={choice.field}
+                    value={choice.field}
+                    disabled={selected}
+                  >
+                    {choice.label}
+                    {description ? ` — ${description}` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </SelectShell>
         </label>
         <Button
           variant="primary"
@@ -450,7 +475,7 @@ function PreviewRow({
         rowRef.current = element;
         onRowRef(element);
       }}
-      className="grid gap-3 border-b border-border py-3 sm:grid-cols-[auto_minmax(8rem,0.7fr)_minmax(10rem,1fr)_auto] sm:items-end"
+      className="grid shrink-0 gap-3 rounded-xl bg-raise px-3 py-3 sm:grid-cols-[auto_minmax(8rem,0.7fr)_minmax(10rem,1fr)_auto] sm:items-end"
     >
       <ReorderHandle
         label={label}

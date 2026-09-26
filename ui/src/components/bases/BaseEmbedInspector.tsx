@@ -1,4 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { X } from "lucide-react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import type {
   BaseDetailResponse,
   BaseFilter,
@@ -6,8 +16,9 @@ import type {
   SortKey,
 } from "#/api/bases";
 import { useBase, useBases, useBaseTemplates } from "#/api/bases";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
-import { Dialog } from "#/components/ui/dialog";
+import { IconButton } from "#/components/ui/icon-button";
 import { Select, SelectItem } from "#/components/ui/select";
 import { useBaseRendering } from "#/editor/baseRendering";
 import {
@@ -19,12 +30,16 @@ import type {
   BaseEmbedElement,
   ConfiguredBaseEmbedElement,
 } from "#/editor/schema/types";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { useFolioDock } from "#/store/folioDock";
 import type { BaseDiagnostic } from "./BaseDefinitionWorkspace";
 import { BaseFilterEditor } from "./BaseFilterEditor";
 import type { DraftProperty } from "./definition-model";
 import { diagnosticRows } from "./diagnostic-rows";
 import {
   type BaseEmbedDisplay,
+  DOCKED_INSPECTOR_ATTR,
   EMBED_WIDTH_MAX,
   EMBED_WIDTH_MIN,
 } from "./embed-presentation";
@@ -60,12 +75,115 @@ export interface BaseEmbedInspectorProps {
   onRestoreFocus(): void;
 }
 
-const controlClass =
-  "mt-1 block w-full border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
-const labelClass =
-  "text-xs font-bold uppercase tracking-widest text-muted-foreground";
-const sectionClass = "border-t border-border pt-4";
-const descriptionClass = "mt-1 text-xs leading-5 text-muted-foreground";
+const controlClass = cn(
+  "mt-1.5 block h-10 w-full rounded-full bg-sink px-4 text-[14px] text-ink tabular-nums placeholder:text-mute disabled:cursor-not-allowed disabled:opacity-45 aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-hot",
+  FOCUS_RING_NATIVE,
+);
+const labelClass = "text-[12.5px] text-mute";
+const sectionClass = "flex min-w-0 flex-col gap-2";
+const descriptionClass = "mt-1.5 text-[12.5px] leading-[1.45] text-mute";
+const diagnosticClass = "text-[12.5px] text-hot";
+const radioClass = "h-4 w-4 shrink-0 accent-accent";
+
+/** An italic serif eyebrow with a faint tick, as the mockup's section heads. */
+function SectionHeading({ id, children }: { id: string; children: string }) {
+  return (
+    <h3 id={id} className="flex items-center gap-2.5">
+      <Tick variant="faint" />
+      <span className="font-serif text-[19px] italic leading-tight text-ink">
+        {children}
+      </span>
+    </h3>
+  );
+}
+
+interface DockedPanelProps {
+  isOpen: boolean;
+  title: string;
+  description: string;
+  ariaDescribedBy?: string;
+  onClose(): void;
+  footer: ReactNode;
+  children: ReactNode;
+}
+
+/** The inspector docks at the right edge beside the page rather than over
+ *  it: non-modal, so the editor stays readable, focusable and editable while
+ *  it is open. Below 1024px it becomes a full-height right sheet. Escape
+ *  inside it closes without saving; clicks outside leave it open. */
+function DockedPanel({
+  isOpen,
+  title,
+  description,
+  ariaDescribedBy,
+  onClose,
+  footer,
+  children,
+}: DockedPanelProps) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const setRightDock = useFolioDock((s) => s.setRightDock);
+  // The Folio gives its right column to the panel instead of being covered.
+  useEffect(() => {
+    if (!isOpen) return;
+    setRightDock(true);
+    return () => setRightDock(false);
+  }, [isOpen, setRightDock]);
+  if (!isOpen || typeof document === "undefined") return null;
+
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.defaultPrevented || event.key !== "Escape") return;
+    // The panel is portalled, but React still bubbles its events through the
+    // embed's controls, whose own Escape leaves the embed.
+    event.preventDefault();
+    event.stopPropagation();
+    onClose();
+  }
+
+  return createPortal(
+    <section
+      role="dialog"
+      aria-labelledby={titleId}
+      aria-describedby={[descriptionId, ariaDescribedBy]
+        .filter(Boolean)
+        .join(" ")}
+      data-docked="right"
+      {...{ [DOCKED_INSPECTOR_ATTR]: "" }}
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+      className="fixed top-0 right-0 bottom-0 z-40 flex w-full max-w-[400px] flex-col overflow-hidden rounded-l-2xl bg-raise text-ink shadow-xl lg:top-[136px] lg:right-6 lg:bottom-4 xl:right-10 lg:rounded-2xl"
+    >
+      <div className="flex shrink-0 items-start gap-4 px-[26px] pt-6 pb-[18px]">
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <h2
+            id={titleId}
+            className="font-serif text-[28px] leading-[1.1] text-ink"
+          >
+            {title}
+          </h2>
+          <p id={descriptionId} className="text-[13.5px] text-mute">
+            {description}
+          </p>
+        </div>
+        <IconButton
+          variant="secondary"
+          aria-label="Close without saving"
+          onPress={onClose}
+          className="h-9 w-9 shrink-0 text-mute"
+        >
+          <X />
+        </IconButton>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-[26px] pt-1 pb-5 text-[14px] text-ink-2">
+        {children}
+      </div>
+      <div className="flex shrink-0 justify-end gap-2 px-[26px] pt-3.5 pb-[18px]">
+        {footer}
+      </div>
+    </section>,
+    document.body,
+  );
+}
 
 function draftFromNode(
   node: BaseEmbedElement,
@@ -205,6 +323,12 @@ export function BaseEmbedInspector({
     previousNode.current = node;
   }, [bases, initialMode, isOpen, node]);
   const sourceRepair = node.status === "invalid";
+  const sourceRef = useRef<HTMLTextAreaElement>(null);
+  // The docked panel has no focus scope of its own: a repair session starts
+  // in its source, as the structured form starts on Base (autoFocus there).
+  useEffect(() => {
+    if (isOpen && sourceRepair) sourceRef.current?.focus();
+  }, [isOpen, sourceRepair]);
   const parsedSource = useMemo(() => parseBaseEmbedConfig(source), [source]);
   const selectedSlug = sourceRepair
     ? (parsedSource.config?.base ?? "")
@@ -336,11 +460,9 @@ export function BaseEmbedInspector({
 
   return (
     <>
-      <Dialog
+      <DockedPanel
         isOpen={isOpen}
-        onOpenChange={(open) => {
-          if (!open) closeWithoutSaving();
-        }}
+        onClose={closeWithoutSaving}
         title="Configure Base embed"
         description={
           sourceRepair
@@ -352,7 +474,6 @@ export function BaseEmbedInspector({
             ? "base-embed-root-diagnostics"
             : undefined
         }
-        size="xl"
         footer={
           <>
             <Button variant="secondary" onPress={closeWithoutSaving}>
@@ -370,14 +491,16 @@ export function BaseEmbedInspector({
               Base embed TOML
             </label>
             <textarea
+              ref={sourceRef}
               id="base-embed-source"
-              autoFocus
+              // The source is code: data-code-editor keeps it monospace.
+              data-code-editor=""
               rows={12}
               value={source}
               onChange={(event) => setSource(event.target.value)}
               aria-invalid={diagnostics.length > 0}
               aria-describedby="base-embed-source-description base-embed-source-diagnostics"
-              className={`${controlClass} min-h-48 resize-y font-mono`}
+              className={`${controlClass} h-auto min-h-48 resize-y rounded-xl py-2.5 text-[13px] leading-6`}
             />
             <p id="base-embed-source-description" className={descriptionClass}>
               Enter a valid TOML Base embed body. Fence delimiters are managed
@@ -386,7 +509,7 @@ export function BaseEmbedInspector({
             <div
               id="base-embed-source-diagnostics"
               role={diagnostics.length > 0 ? "alert" : undefined}
-              className="mt-2 text-xs text-destructive"
+              className={`mt-2 ${diagnosticClass}`}
             >
               {diagnosticRows(diagnostics).map(({ diagnostic, key }) => (
                 <p key={key}>{diagnostic.message}</p>
@@ -394,12 +517,12 @@ export function BaseEmbedInspector({
             </div>
           </div>
         ) : (
-          <div className="grid gap-5">
+          <div className="flex flex-col gap-6">
             {rootDiagnostics.length > 0 ? (
               <div
                 id="base-embed-root-diagnostics"
                 role="alert"
-                className="border border-destructive px-3 py-2 text-xs text-destructive"
+                className="rounded-xl bg-hot/10 px-3 py-2 text-[12.5px] text-hot"
               >
                 {rootDiagnostics.map((diagnostic) => (
                   <p key={diagnostic.message}>{diagnostic.message}</p>
@@ -431,9 +554,10 @@ export function BaseEmbedInspector({
                   </SelectItem>
                 ))}
               </Select>
-              <div className="mt-2 flex gap-2">
+              <div className="flex gap-1.5">
                 <Button
                   variant="secondary"
+                  size="sm"
                   onPress={() => setTemplateEditor({})}
                   isDisabled={!!lifecycle?.readonly}
                 >
@@ -441,6 +565,7 @@ export function BaseEmbedInspector({
                 </Button>
                 <Button
                   variant="secondary"
+                  size="sm"
                   onPress={() => setTemplateEditor({ slug: draft.template })}
                   isDisabled={!draft.template}
                 >
@@ -448,7 +573,7 @@ export function BaseEmbedInspector({
                 </Button>
               </div>
               {templates.error ? (
-                <p role="alert" className="mt-2 text-xs text-destructive">
+                <p role="alert" className={diagnosticClass}>
                   {renderErrorMessage(templates.error)}
                 </p>
               ) : null}
@@ -458,27 +583,29 @@ export function BaseEmbedInspector({
                 </p>
               ) : null}
             </section>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3.5">
               {onGenerate ? (
-                <fieldset className="sm:col-span-2">
+                <fieldset className="col-span-2 m-0 min-w-0 p-0">
                   <legend className={labelClass}>Presentation</legend>
-                  <div className="mt-2 flex gap-4 text-sm">
-                    <label>
+                  <div className="mt-2 flex flex-col gap-2 text-[14px] text-ink">
+                    <label className="flex items-center gap-2.5">
                       <input
                         type="radio"
                         name="base-render-mode"
+                        className={radioClass}
                         checked={mode === "live"}
                         onChange={() => setMode("live")}
-                      />{" "}
+                      />
                       Live embed
                     </label>
-                    <label>
+                    <label className="flex items-center gap-2.5">
                       <input
                         type="radio"
                         name="base-render-mode"
+                        className={radioClass}
                         checked={mode === "generated"}
                         onChange={() => setMode("generated")}
-                      />{" "}
+                      />
                       Generated Markdown snapshot
                     </label>
                   </div>
@@ -538,7 +665,7 @@ export function BaseEmbedInspector({
                 </p>
                 <div
                   id="base-embed-base-diagnostics"
-                  className="text-xs text-destructive"
+                  className={diagnosticClass}
                   role={baseDiagnostics.length > 0 ? "alert" : undefined}
                 >
                   {baseDiagnostics.map((diagnostic) => (
@@ -596,7 +723,7 @@ export function BaseEmbedInspector({
                 </p>
                 <div
                   id="base-embed-view-diagnostics"
-                  className="text-xs text-destructive"
+                  className={diagnosticClass}
                 >
                   {viewDiagnostics.map((diagnostic) => (
                     <p key={diagnostic.message}>{diagnostic.message}</p>
@@ -615,13 +742,13 @@ export function BaseEmbedInspector({
                   : undefined
               }
             >
-              <h3 id="base-embed-filter-heading" className={labelClass}>
+              <SectionHeading id="base-embed-filter-heading">
                 Embed filter
-              </h3>
-              <p className={descriptionClass}>
+              </SectionHeading>
+              <p className="pl-[17px] text-[13px] leading-normal text-mute">
                 This filter is combined with Base membership and the saved view.
               </p>
-              <div className="mt-3">
+              <div className="mt-1 ml-[17px] rounded-xl bg-ground p-3">
                 <BaseFilterEditor
                   label="Embed filter"
                   value={draft.filter}
@@ -637,7 +764,7 @@ export function BaseEmbedInspector({
                 <div
                   id="base-embed-filter-diagnostics"
                   role="alert"
-                  className="mt-2 text-xs text-destructive"
+                  className={`pl-[17px] ${diagnosticClass}`}
                 >
                   {filterSectionDiagnostics.map((diagnostic) => (
                     <p key={`${diagnostic.path}-${diagnostic.message}`}>
@@ -658,15 +785,16 @@ export function BaseEmbedInspector({
                   : undefined
               }
             >
-              <h3 id="base-embed-sort-heading" className={labelClass}>
+              <SectionHeading id="base-embed-sort-heading">
                 Sort order
-              </h3>
-              <fieldset className="mt-3">
-                <legend className={labelClass}>Sort behavior</legend>
-                <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm">
-                  <label className="inline-flex items-center gap-2">
+              </SectionHeading>
+              <fieldset className="m-0 ml-[17px] min-w-0 p-0">
+                <legend className="sr-only">Sort behavior</legend>
+                <div className="flex flex-col gap-2 text-[14px] text-ink">
+                  <label className="flex items-center gap-2.5">
                     <input
                       type="radio"
+                      className={radioClass}
                       name="base-embed-sort-behavior"
                       checked={draft.sort === undefined}
                       onChange={() =>
@@ -678,9 +806,10 @@ export function BaseEmbedInspector({
                     />
                     Inherit saved view sorting
                   </label>
-                  <label className="inline-flex items-center gap-2">
+                  <label className="flex items-center gap-2.5">
                     <input
                       type="radio"
+                      className={radioClass}
                       name="base-embed-sort-behavior"
                       checked={draft.sort !== undefined}
                       onChange={() =>
@@ -694,29 +823,31 @@ export function BaseEmbedInspector({
                   </label>
                 </div>
               </fieldset>
-              <p className={descriptionClass}>
+              <p className="pl-[17px] text-[12.5px] leading-normal text-mute">
                 Inherit uses the saved view sort. An override with no keys
                 explicitly removes saved-view sorting; earlier keys take
                 precedence.
               </p>
               {draft.sort === undefined ? null : (
-                <OrderedSortEditor
-                  value={draft.sort}
-                  properties={properties}
-                  diagnostics={diagnostics}
-                  diagnosticRoot="sort"
-                  idPrefix="base-embed"
-                  onChange={(sort) =>
-                    setDraft((current) => ({ ...current, sort }))
-                  }
-                  registerFocus={() => {}}
-                />
+                <div className="pl-[17px]">
+                  <OrderedSortEditor
+                    value={draft.sort}
+                    properties={properties}
+                    diagnostics={diagnostics}
+                    diagnosticRoot="sort"
+                    idPrefix="base-embed"
+                    onChange={(sort) =>
+                      setDraft((current) => ({ ...current, sort }))
+                    }
+                    registerFocus={() => {}}
+                  />
+                </div>
               )}
               {sortSectionDiagnostics.length > 0 ? (
                 <div
                   id="base-embed-sort-diagnostics"
                   role="alert"
-                  className="mt-2 text-xs text-destructive"
+                  className={`pl-[17px] ${diagnosticClass}`}
                 >
                   {sortSectionDiagnostics.map((diagnostic) => (
                     <p key={`${diagnostic.path}-${diagnostic.message}`}>
@@ -757,6 +888,8 @@ export function BaseEmbedInspector({
               {draft.template ? (
                 <Button
                   variant="ghost"
+                  size="sm"
+                  className="self-start text-accent"
                   onPress={() =>
                     setDraft((current) => ({ ...current, persistLimit: false }))
                   }
@@ -766,7 +899,7 @@ export function BaseEmbedInspector({
               ) : null}
               <div
                 id="base-embed-limit-diagnostics"
-                className="text-xs text-destructive"
+                className={diagnosticClass}
               >
                 {limitDiagnostics.map((diagnostic) => (
                   <p key={diagnostic.message}>{diagnostic.message}</p>
@@ -775,7 +908,7 @@ export function BaseEmbedInspector({
             </section>
 
             <section className={sectionClass} hidden={!!draft.template}>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-[18px]">
                 <div>
                   <Select
                     id="base-embed-display"
@@ -834,7 +967,7 @@ export function BaseEmbedInspector({
                   </p>
                   <div
                     id="base-embed-width-diagnostics"
-                    className="text-xs text-destructive"
+                    className={diagnosticClass}
                   >
                     {widthDiagnostics.map((diagnostic) => (
                       <p key={diagnostic.message}>{diagnostic.message}</p>
@@ -845,13 +978,13 @@ export function BaseEmbedInspector({
             </section>
 
             {refreshing ? (
-              <p role="status" className="text-xs text-muted-foreground">
+              <p role="status" className="text-[12.5px] text-mute">
                 Refreshing Base configuration…
               </p>
             ) : null}
           </div>
         )}
-      </Dialog>
+      </DockedPanel>
       {templateEditor ? (
         <TemplateSourceEditor
           key={templateEditor.slug ?? "__new__"}

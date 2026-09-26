@@ -1,5 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
@@ -20,10 +24,27 @@ interface DisplayLabelsEditorProps {
   registerFocus: RegisterFocusTarget;
 }
 
-const controlClass =
-  "mt-1 block w-full border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2";
-const labelClass =
-  "text-xs font-bold uppercase tracking-widest text-muted-foreground";
+const controlClass = cn(
+  "block h-10 w-full min-w-0 rounded-full bg-sink px-4 text-[14px] text-ink aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-hot",
+  FOCUS_RING_NATIVE,
+);
+const labelClass = "block min-w-0 text-[12.5px] text-mute";
+
+const selectClass = cn(controlClass, "appearance-none truncate pr-10");
+
+/** Dresses a native select as the Stone & Lamp select pill. Native options
+ * stay because each carries a disabled "Already labelled" state. */
+function SelectShell({ children }: { children: ReactNode }) {
+  return (
+    <span className="relative mt-1.5 block">
+      {children}
+      <ChevronDown
+        aria-hidden
+        className="pointer-events-none absolute top-1/2 right-4 size-4 -translate-y-1/2 text-mute"
+      />
+    </span>
+  );
+}
 
 function defaultLabel(choice: PresentationFieldChoice): string {
   const readable = choice.label.replaceAll("_", " ");
@@ -90,195 +111,214 @@ export function DisplayLabelsEditor({
 
   return (
     <section
-      className="mt-6 border-t border-border pt-4"
+      className="flex min-w-0 flex-col gap-2.5"
       aria-labelledby={`${diagnosticRoot}-heading`}
     >
       <h4
         id={`${diagnosticRoot}-heading`}
-        className="font-mono text-xs font-semibold uppercase tracking-widest text-foreground"
+        className="flex items-center gap-2.5 font-serif text-[19px] italic leading-none text-ink"
       >
+        <Tick variant="faint" />
         Display labels
       </h4>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        Override field names in this view. Labels may target fields outside the
-        visible columns; the Markdown body is read-only.
-      </p>
+      <div className="min-w-0 pl-[17px]">
+        <p className="text-[13px] leading-normal text-mute">
+          Override field names in this view. Labels may target fields outside
+          the visible columns; the Markdown body is read-only.
+        </p>
 
-      <ol className="mt-3 grid gap-2">
-        {Object.entries(labels).map(([field, label]) => {
-          const path = `${diagnosticRoot}.${field}`;
-          const fieldDiagnostics = diagnostics.filter(
-            (diagnostic) => diagnostic.path === path,
-          );
-          const invalid = fieldDiagnostics.some(
-            (diagnostic) => diagnostic.severity === "error",
-          );
-          const identitiesUsedByOtherRows = new Set(
-            Object.keys(labels)
-              .filter((existingField) => existingField !== field)
-              .map((existingField) => presentationFieldIdentity(existingField))
-              .filter((identity): identity is string => identity !== undefined),
-          );
-          return (
-            <li
-              key={field}
-              className="grid items-end gap-2 border-b border-border pb-3 sm:grid-cols-[minmax(9rem,0.8fr)_minmax(8rem,0.7fr)_minmax(10rem,1fr)_auto]"
-            >
-              <label className={labelClass}>
-                Field
-                <select
-                  ref={(element) => {
-                    if (element) fieldSelectors.current.set(field, element);
-                    else fieldSelectors.current.delete(field);
-                  }}
-                  className={controlClass}
-                  value={field}
-                  aria-label={`Field for display label ${field}`}
-                  aria-invalid={invalid || undefined}
-                  onChange={(event) => {
-                    const nextField = event.target.value;
-                    if (nextField === field) return;
-                    const identity = presentationFieldIdentity(nextField);
-                    if (
-                      identity !== undefined &&
-                      identitiesUsedByOtherRows.has(identity)
-                    ) {
-                      return;
-                    }
-                    const { [field]: movedLabel, ...remaining } = labels;
-                    setFocusRequest({ kind: "field", field: nextField });
-                    onChange({ ...remaining, [nextField]: movedLabel });
-                  }}
-                >
-                  {choices.some((choice) => choice.field === field) ? null : (
-                    <option value={field}>{field}</option>
-                  )}
-                  {choices.map((choice) => {
-                    const identity = presentationFieldIdentity(choice.field);
-                    const labelled =
-                      identity !== undefined &&
-                      identitiesUsedByOtherRows.has(identity);
-                    const description = [
-                      choice.description,
-                      labelled ? "Already labelled" : undefined,
-                    ]
-                      .filter(Boolean)
-                      .join(" — ");
-                    return (
-                      <option
-                        key={choice.field}
-                        value={choice.field}
-                        disabled={labelled}
-                      >
-                        {choice.label}
-                        {description ? ` — ${description}` : ""}
-                      </option>
-                    );
-                  })}
-                </select>
-              </label>
-              <div>
-                <span className={labelClass}>Stored key</span>
-                <span
-                  role="note"
-                  aria-label={`Stored label key ${field}`}
-                  className="mt-1 block border border-border bg-muted/30 px-3 py-2 font-mono text-sm text-foreground"
-                >
-                  {field}
-                </span>
-              </div>
-              <label className={labelClass}>
-                Display label for {field}
-                <input
-                  ref={(element) => {
-                    registerFocus(path, element);
-                    if (element) labelInputs.current.set(field, element);
-                    else labelInputs.current.delete(field);
-                  }}
-                  className={controlClass}
-                  value={label}
-                  aria-invalid={invalid || undefined}
-                  onChange={(event) =>
-                    onChange({ ...labels, [field]: event.target.value })
-                  }
-                />
-              </label>
-              <Button
-                size="sm"
-                variant="ghost"
-                onPress={() => {
-                  const { [field]: _removed, ...remaining } = labels;
-                  setFocusRequest({ kind: "selector" });
-                  onChange(remaining);
-                }}
+        <ol className="mt-2.5 flex flex-col gap-3 empty:hidden">
+          {Object.entries(labels).map(([field, label]) => {
+            const path = `${diagnosticRoot}.${field}`;
+            const fieldDiagnostics = diagnostics.filter(
+              (diagnostic) => diagnostic.path === path,
+            );
+            const invalid = fieldDiagnostics.some(
+              (diagnostic) => diagnostic.severity === "error",
+            );
+            const identitiesUsedByOtherRows = new Set(
+              Object.keys(labels)
+                .filter((existingField) => existingField !== field)
+                .map((existingField) =>
+                  presentationFieldIdentity(existingField),
+                )
+                .filter(
+                  (identity): identity is string => identity !== undefined,
+                ),
+            );
+            return (
+              <li
+                key={field}
+                className="grid shrink-0 items-start gap-x-2 gap-y-1.5 sm:grid-cols-[minmax(7rem,0.8fr)_minmax(0,1fr)_auto]"
               >
-                Reset label {field}
-              </Button>
-              {fieldDiagnostics.length > 0 ? (
-                <p
-                  className={
-                    invalid
-                      ? "text-xs text-destructive sm:col-span-4"
-                      : "text-xs text-warn sm:col-span-4"
-                  }
+                <div className="min-w-0">
+                  <label className={labelClass}>
+                    Field
+                    <SelectShell>
+                      <select
+                        className={selectClass}
+                        ref={(element) => {
+                          if (element)
+                            fieldSelectors.current.set(field, element);
+                          else fieldSelectors.current.delete(field);
+                        }}
+                        value={field}
+                        aria-label={`Field for display label ${field}`}
+                        aria-invalid={invalid || undefined}
+                        onChange={(event) => {
+                          const nextField = event.target.value;
+                          if (nextField === field) return;
+                          const identity = presentationFieldIdentity(nextField);
+                          if (
+                            identity !== undefined &&
+                            identitiesUsedByOtherRows.has(identity)
+                          ) {
+                            return;
+                          }
+                          const { [field]: movedLabel, ...remaining } = labels;
+                          setFocusRequest({ kind: "field", field: nextField });
+                          onChange({ ...remaining, [nextField]: movedLabel });
+                        }}
+                      >
+                        {choices.some(
+                          (choice) => choice.field === field,
+                        ) ? null : (
+                          <option value={field}>{field}</option>
+                        )}
+                        {choices.map((choice) => {
+                          const identity = presentationFieldIdentity(
+                            choice.field,
+                          );
+                          const labelled =
+                            identity !== undefined &&
+                            identitiesUsedByOtherRows.has(identity);
+                          const description = [
+                            choice.description,
+                            labelled ? "Already labelled" : undefined,
+                          ]
+                            .filter(Boolean)
+                            .join(" — ");
+                          return (
+                            <option
+                              key={choice.field}
+                              value={choice.field}
+                              disabled={labelled}
+                            >
+                              {choice.label}
+                              {description ? ` — ${description}` : ""}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </SelectShell>
+                  </label>
+                  <span
+                    role="note"
+                    aria-label={`Stored label key ${field}`}
+                    title={field}
+                    className="mt-1.5 block truncate px-4 text-[12.5px] text-mute"
+                  >
+                    Stored as {field}
+                  </span>
+                </div>
+                <label className={labelClass}>
+                  Display label<span className="sr-only"> for {field}</span>
+                  <input
+                    ref={(element) => {
+                      registerFocus(path, element);
+                      if (element) labelInputs.current.set(field, element);
+                      else labelInputs.current.delete(field);
+                    }}
+                    className={cn(controlClass, "mt-1.5")}
+                    value={label}
+                    aria-invalid={invalid || undefined}
+                    onChange={(event) =>
+                      onChange({ ...labels, [field]: event.target.value })
+                    }
+                  />
+                </label>
+                <Button
+                  className="justify-self-start sm:mt-[29px]"
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Reset label ${field}`}
+                  onPress={() => {
+                    const { [field]: _removed, ...remaining } = labels;
+                    setFocusRequest({ kind: "selector" });
+                    onChange(remaining);
+                  }}
                 >
-                  {fieldDiagnostics.map(({ message }) => message).join(" ")}
-                </p>
-              ) : null}
-            </li>
-          );
-        })}
-      </ol>
+                  Reset
+                </Button>
+                {fieldDiagnostics.length > 0 ? (
+                  <p
+                    className={
+                      invalid
+                        ? "text-[12.5px] text-hot sm:col-span-3"
+                        : "text-[12.5px] text-warn sm:col-span-3"
+                    }
+                  >
+                    {fieldDiagnostics.map(({ message }) => message).join(" ")}
+                  </p>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
 
-      <div className="mt-3 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <label className={labelClass}>
-          Field to label
-          <select
-            ref={selector}
-            className={controlClass}
-            value={fieldToAdd}
-            onChange={(event) => setFieldToAdd(event.target.value)}
+        <div className="mt-2.5 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <label className={labelClass}>
+            Field to label
+            <SelectShell>
+              <select
+                ref={selector}
+                className={selectClass}
+                value={fieldToAdd}
+                onChange={(event) => setFieldToAdd(event.target.value)}
+              >
+                <option value="">Choose a field</option>
+                {choices.map((choice) => {
+                  const identity = presentationFieldIdentity(choice.field);
+                  const labelled =
+                    identity !== undefined && labelledIdentities.has(identity);
+                  const description = [
+                    choice.description,
+                    labelled ? "Already labelled" : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" — ");
+                  return (
+                    <option
+                      key={choice.field}
+                      value={choice.field}
+                      disabled={labelled}
+                    >
+                      {choice.label}
+                      {description ? ` — ${description}` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            </SelectShell>
+          </label>
+          <Button
+            className="mb-1"
+            size="sm"
+            variant="secondary"
+            isDisabled={!canAddLabel}
+            onPress={() => {
+              if (!canAddLabel || choiceToAdd === undefined) return;
+              setFocusRequest({ kind: "label", field: fieldToAdd });
+              onChange({
+                ...labels,
+                [fieldToAdd]: defaultLabel(choiceToAdd),
+              });
+              setFieldToAdd("");
+            }}
           >
-            <option value="">Choose a field</option>
-            {choices.map((choice) => {
-              const identity = presentationFieldIdentity(choice.field);
-              const labelled =
-                identity !== undefined && labelledIdentities.has(identity);
-              const description = [
-                choice.description,
-                labelled ? "Already labelled" : undefined,
-              ]
-                .filter(Boolean)
-                .join(" — ");
-              return (
-                <option
-                  key={choice.field}
-                  value={choice.field}
-                  disabled={labelled}
-                >
-                  {choice.label}
-                  {description ? ` — ${description}` : ""}
-                </option>
-              );
-            })}
-          </select>
-        </label>
-        <Button
-          size="sm"
-          variant="secondary"
-          isDisabled={!canAddLabel}
-          onPress={() => {
-            if (!canAddLabel || choiceToAdd === undefined) return;
-            setFocusRequest({ kind: "label", field: fieldToAdd });
-            onChange({
-              ...labels,
-              [fieldToAdd]: defaultLabel(choiceToAdd),
-            });
-            setFieldToAdd("");
-          }}
-        >
-          Add label
-        </Button>
+            Add label
+          </Button>
+        </div>
       </div>
     </section>
   );
