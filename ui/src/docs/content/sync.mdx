@@ -176,16 +176,16 @@ open either or to compare them.
 ### Comparing and resolving
 
 **Compare** opens a side-by-side line diff: the original on the left as
-*Local (this device)*, the copy on the right as *Other (conflict copy)*. Sync
+*Local (this device)*, the copy on the right as *Remote (conflict copy)*. Sync
 bookkeeping is left out, so only real edits show — both sides carry the
 original's id, neither shows `updated_at`, and the copy's `conflict_of` and
 `(conflict ab12cd3)` title suffix are dropped. Frontmatter is compared like
 the body. Unchanged runs fold to three lines of context around each change,
 with a button to show the rest.
 
-Each change has a **Local / Other / Both** choice (arrow keys move between
-them); *Both* keeps the local lines, then the other lines. Every change starts
-on *Local*, and **All local** / **All other** set them all at once. The
+Each change has a **Local / Remote / Both** choice (arrow keys move between
+them); *Both* keeps the local lines, then the remote lines. Every change starts
+on *Local*, and **All local** / **All remote** set them all at once. The
 **Result** pane shows the page exactly as it will be saved. There is no
 free-text editing here — pick the sides, resolve, then edit the page as usual.
 

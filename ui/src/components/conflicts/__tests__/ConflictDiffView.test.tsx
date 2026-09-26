@@ -82,7 +82,7 @@ beforeEach(() => {
 });
 
 describe("ConflictDiffView", () => {
-  it("shows each hunk's local and other lines side by side", () => {
+  it("shows each hunk's local and remote lines side by side", () => {
     render(<ConflictDiffView copyPath={COPY} />);
 
     expect(screen.getByText("1 change")).toBeInTheDocument();
@@ -91,20 +91,21 @@ describe("ConflictDiffView", () => {
       within(hunk).getByRole("figure", { name: "Local (this device)" }),
     ).toHaveTextContent("local");
     expect(
-      within(hunk).getByRole("figure", { name: "Other (conflict copy)" }),
+      within(hunk).getByRole("figure", { name: "Remote (conflict copy)" }),
     ).toHaveTextContent("other");
     expect(
       within(hunk).getByRole("radiogroup", { name: "Keep for change 1" }),
     ).toBeInTheDocument();
     expect(mergedResult()).toBe("a\nkeep\nlocal\nz\n");
+    expect(screen.getByText("4 lines")).toBeInTheDocument();
   });
 
-  it("updates the result preview when a hunk takes Other or Both", async () => {
+  it("updates the result preview when a hunk takes Remote or Both", async () => {
     const user = userEvent.setup();
     render(<ConflictDiffView copyPath={COPY} />);
     const group = screen.getByRole("radiogroup", { name: "Keep for change 1" });
 
-    await user.click(within(group).getByRole("radio", { name: "Other" }));
+    await user.click(within(group).getByRole("radio", { name: "Remote" }));
     expect(mergedResult()).toBe("a\nkeep\nother\nz\n");
 
     await user.click(within(group).getByRole("radio", { name: "Both" }));
@@ -118,17 +119,17 @@ describe("ConflictDiffView", () => {
 
     await user.click(within(group).getByRole("radio", { name: "Local" }));
     await user.keyboard("{ArrowRight}");
-    expect(within(group).getByRole("radio", { name: "Other" })).toBeChecked();
+    expect(within(group).getByRole("radio", { name: "Remote" })).toBeChecked();
     expect(mergedResult()).toBe("a\nkeep\nother\nz\n");
   });
 
-  it("takes every hunk from one side with All local / All other", async () => {
+  it("takes every hunk from one side with All local / All remote", async () => {
     const user = userEvent.setup();
     mocks.compare.data = compareOf("1\nx\n2\ny\n3\n", "1\nX\n2\nY\n3\n");
     render(<ConflictDiffView copyPath={COPY} />);
     expect(screen.getByText("2 changes")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "All other" }));
+    await user.click(screen.getByRole("button", { name: "All remote" }));
     expect(mergedResult()).toBe("1\nX\n2\nY\n3\n");
 
     await user.click(screen.getByRole("button", { name: "All local" }));
@@ -158,7 +159,7 @@ describe("ConflictDiffView", () => {
 
     const hunk = screen.getByRole("group", { name: "Change 1 of 1" });
     expect(
-      within(hunk).getByRole("figure", { name: "Other (conflict copy)" }),
+      within(hunk).getByRole("figure", { name: "Remote (conflict copy)" }),
     ).toHaveTextContent(/no newline at end/i);
     expect(
       within(hunk).getByRole("figure", { name: "Local (this device)" }),
@@ -175,7 +176,7 @@ describe("ConflictDiffView", () => {
     await user.click(
       within(
         screen.getByRole("radiogroup", { name: "Keep for change 1" }),
-      ).getByRole("radio", { name: "Other" }),
+      ).getByRole("radio", { name: "Remote" }),
     );
 
     await user.click(screen.getByRole("button", { name: "Resolve" }));

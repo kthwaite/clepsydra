@@ -7,6 +7,7 @@ import {
   useConflictCompare,
   useResolveConflict,
 } from "#/api/sync";
+import { Tick } from "#/components/codex/Tick";
 import { Button } from "#/components/ui/button";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import {
@@ -15,7 +16,7 @@ import {
   diffSegments,
   type Segment,
 } from "#/lib/conflictMerge";
-import { ChangeHunk, LOCAL_LABEL, OTHER_LABEL, SameRun } from "./DiffRows";
+import { ChangeHunk, LOCAL_LABEL, REMOTE_LABEL, SameRun } from "./DiffRows";
 
 interface PageRef {
   path: string;
@@ -37,7 +38,7 @@ export function ConflictDiffView({ copyPath }: { copyPath: string }) {
       <Frame>
         <div
           role="status"
-          className="cl-mono flex flex-1 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute"
+          className="flex flex-1 items-center justify-center p-8 text-[13px] text-mute"
         >
           Loading comparison…
         </div>
@@ -57,7 +58,7 @@ export function ConflictDiffView({ copyPath }: { copyPath: string }) {
         : undefined;
     return (
       <Frame>
-        <div className="p-3 md:p-5">
+        <div className="px-4 py-6 md:px-10">
           <ConflictErrorAlert
             error={compare.error}
             copy={{ path: copyPath, title: copyPath }}
@@ -88,10 +89,17 @@ export function ConflictDiffView({ copyPath }: { copyPath: string }) {
 
 function Frame({ children }: { children: ReactNode }) {
   return (
-    <main className="mx-auto flex h-full min-h-screen w-full max-w-[1440px] flex-col bg-paper text-ink">
+    <main className="mx-auto flex h-full min-h-screen w-full max-w-[1440px] flex-col bg-ground text-ink">
       {children}
     </main>
   );
+}
+
+/** Lines in the merged text; a trailing newline does not open a new line. */
+function lineCount(text: string): number {
+  if (text === "") return 0;
+  const parts = text.split("\n").length;
+  return text.endsWith("\n") ? parts - 1 : parts;
 }
 
 /** First line number of each segment, per side. */
@@ -158,134 +166,149 @@ function MergeEditor({
       { onSuccess: () => void navigate({ to: "/conflicts" }) },
     );
 
+  const resultLines = lineCount(merged);
+
   return (
     <Frame>
-      <header className="border-b border-rule bg-paper-2 px-3 py-4 md:px-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="min-w-0">
-            <p className="cl-mono text-[9px] uppercase tracking-[0.22em] text-ink-mute">
-              Vault sync / conflict compare
+      <header className="flex flex-wrap items-end gap-x-7 gap-y-4 px-4 pt-6 md:px-10">
+        <div className="flex min-w-0 max-w-full flex-col gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <Tick className="bg-hot" />
+            <p className="font-serif text-[19px] italic leading-none text-mute">
+              Conflict copy
             </p>
-            <h1 className="mt-1 truncate text-2xl font-black tracking-tight">
-              {original.title}
-            </h1>
-            <p
-              className="cl-mono mt-1 truncate text-[11px] text-ink-mute"
-              title={`${copy.path} → ${original.path}`}
-            >
-              {copy.path} → {original.path}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="cl-mono mr-2 text-[10px] tabular-nums text-ink-mute">
-              {hunkIds.length} {hunkIds.length === 1 ? "change" : "changes"}
-            </p>
-            <Button
-              size="sm"
-              isDisabled={hunkIds.length === 0}
-              onPress={() => chooseAll("local")}
-            >
-              All local
-            </Button>
-            <Button
-              size="sm"
-              isDisabled={hunkIds.length === 0}
-              onPress={() => chooseAll("other")}
-            >
-              All other
-            </Button>
             <Button
               size="sm"
               variant="ghost"
+              className="ml-1 text-accent"
               onPress={() => void navigate({ to: "/conflicts" })}
             >
               All conflicts
             </Button>
           </div>
+          <h1
+            className="m-0 truncate font-serif text-[40px] font-normal leading-none md:text-[56px]"
+            title={original.title}
+          >
+            {original.title}
+          </h1>
+          <p
+            className="truncate text-[13px] text-mute"
+            title={`${copy.path} → ${original.path}`}
+          >
+            {copy.path} <span className="text-faint">→</span> {original.path}
+          </p>
         </div>
-        <p className="mt-3 max-w-2xl text-sm text-ink-2">
-          Pick which side to keep for each change. Sync bookkeeping (the page
-          id, its updated time and the conflict marker) is left out of the
-          comparison.
-        </p>
+        <span className="hidden flex-1 md:block" />
+        <div className="flex flex-wrap items-center gap-2 pb-0.5">
+          <p className="mr-2 text-[14px] tabular-nums text-mute">
+            {hunkIds.length} {hunkIds.length === 1 ? "change" : "changes"}
+          </p>
+          <Button
+            isDisabled={hunkIds.length === 0}
+            onPress={() => chooseAll("local")}
+          >
+            All local
+          </Button>
+          <Button
+            isDisabled={hunkIds.length === 0}
+            onPress={() => chooseAll("other")}
+          >
+            All remote
+          </Button>
+        </div>
       </header>
 
-      <div className="cl-mono min-h-0 flex-1 overflow-y-auto text-[12px] leading-relaxed">
-        <div
-          aria-hidden="true"
-          className="hidden border-b border-rule text-[9px] uppercase tracking-[0.2em] text-ink-mute md:grid md:grid-cols-2"
+      <div className="grid min-h-0 flex-1 gap-7 overflow-y-auto px-4 pt-5 pb-5 md:px-10 xl:grid-cols-[minmax(0,1fr)_380px] xl:overflow-hidden">
+        <section
+          aria-label="Comparison"
+          className="min-h-0 min-w-0 rounded-2xl bg-raise pt-1 pb-3 text-[12.5px] leading-5 text-ink-2 xl:overflow-y-auto"
         >
-          <p className="px-3 py-1.5">{LOCAL_LABEL}</p>
-          <p className="border-l border-rule px-3 py-1.5">{OTHER_LABEL}</p>
-        </div>
-        {hunkIds.length === 0 ? (
-          <p className="px-3 py-3 text-sm text-ink-2 md:px-5">
-            No differences. Resolving keeps the original and bins the copy.
-          </p>
-        ) : null}
-        {segments.map((segment, index) =>
-          segment.kind === "same" ? (
-            <SameRun
-              // biome-ignore lint/suspicious/noArrayIndexKey: segments are fixed for this compare
-              key={`same-${index}`}
-              lines={segment.lines}
-              localStart={starts[index].local}
-              otherStart={starts[index].other}
-              hasBefore={index > 0}
-              hasAfter={index < segments.length - 1}
-            />
-          ) : (
-            <ChangeHunk
-              key={`change-${segment.id}`}
-              hunk={segment}
-              index={segment.id}
-              total={hunkIds.length}
-              localStart={starts[index].local}
-              otherStart={starts[index].other}
-              choice={choices.get(segment.id) ?? "local"}
-              onChoice={choose}
-            />
-          ),
-        )}
+          <div
+            aria-hidden="true"
+            className="hidden text-mute md:grid md:grid-cols-2"
+          >
+            <p className="px-5 pt-2.5 pb-2">{LOCAL_LABEL}</p>
+            <p className="px-5 pt-2.5 pb-2">{REMOTE_LABEL}</p>
+          </div>
+          {hunkIds.length === 0 ? (
+            <p className="px-5 py-3 text-sm text-ink-2">
+              No differences. Resolving keeps the original and bins the copy.
+            </p>
+          ) : null}
+          {segments.map((segment, index) =>
+            segment.kind === "same" ? (
+              <SameRun
+                // biome-ignore lint/suspicious/noArrayIndexKey: segments are fixed for this compare
+                key={`same-${index}`}
+                lines={segment.lines}
+                localStart={starts[index].local}
+                otherStart={starts[index].other}
+                hasBefore={index > 0}
+                hasAfter={index < segments.length - 1}
+              />
+            ) : (
+              <ChangeHunk
+                key={`change-${segment.id}`}
+                hunk={segment}
+                index={segment.id}
+                total={hunkIds.length}
+                localStart={starts[index].local}
+                otherStart={starts[index].other}
+                choice={choices.get(segment.id) ?? "local"}
+                onChoice={choose}
+              />
+            ),
+          )}
+        </section>
 
         <section
           aria-labelledby="conflict-result-heading"
-          className="mt-6 border-t border-rule"
+          className="flex min-h-0 min-w-0 flex-col gap-4"
         >
-          <h2
-            id="conflict-result-heading"
-            className="bg-paper-2 px-3 py-1.5 text-[10px] uppercase tracking-[0.2em] text-ink-mute md:px-5"
-          >
-            Result
-          </h2>
-          <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words px-3 py-2 md:px-5">
+          <div className="flex items-center gap-2.5">
+            <Tick />
+            <h2
+              id="conflict-result-heading"
+              className="m-0 font-serif text-[21px] font-normal italic leading-none text-mute"
+            >
+              Result
+            </h2>
+            <span className="text-[12.5px] tabular-nums text-mute">
+              {resultLines} {resultLines === 1 ? "line" : "lines"}
+            </span>
+          </div>
+          <pre className="m-0 ml-[17px] max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-sink px-[18px] py-4 text-[12px] leading-5 text-ink-2 xl:max-h-none xl:min-h-0 xl:flex-1">
             {merged}
           </pre>
-        </section>
-      </div>
-
-      <footer className="border-t border-rule bg-paper-2 px-3 py-3 md:px-5">
-        {resolve.error ? (
-          <ConflictErrorAlert
-            error={resolve.error}
-            copy={copy}
-            original={original}
-            onReload={() => {
-              resolve.reset();
-              onReload();
-            }}
-          />
-        ) : null}
-        <div className="mt-2 flex justify-end">
+          <p className="m-0 ml-[17px] text-[13px] leading-[1.55] text-mute">
+            Pick which side to keep for each change. Sync bookkeeping (the page
+            id, its updated time and the conflict marker) is left out of the
+            comparison.
+          </p>
+          {resolve.error ? (
+            <div className="ml-[17px]">
+              <ConflictErrorAlert
+                error={resolve.error}
+                copy={copy}
+                original={original}
+                onReload={() => {
+                  resolve.reset();
+                  onReload();
+                }}
+              />
+            </div>
+          ) : null}
           <Button
             variant="primary"
+            className="ml-[17px] shrink-0"
             isDisabled={resolve.isPending}
             onPress={submit}
           >
             {resolve.isPending ? "Resolving…" : "Resolve"}
           </Button>
-        </div>
-      </footer>
+        </section>
+      </div>
     </Frame>
   );
 }
@@ -325,7 +348,7 @@ function ConflictErrorAlert({
           pages, copy what you want to keep into the original, then delete the
           copy.
         </p>
-        <p className="cl-mono mt-1 text-[11px] text-ink-mute">{message}</p>
+        <p className="mt-1 text-[12.5px] text-mute">{message}</p>
         <div className="mt-2 flex gap-2">
           <Button
             size="sm"
