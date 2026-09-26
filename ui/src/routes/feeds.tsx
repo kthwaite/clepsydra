@@ -289,7 +289,7 @@ function FeedsPage() {
   return (
     <div
       data-feeds-page=""
-      className="grid w-full auto-rows-min gap-5 px-4 pt-6 pb-4 md:h-full md:grid-rows-[auto_minmax(0,1fr)] md:contain-paint md:overflow-hidden md:px-10 md:pt-10 md:pb-6"
+      className="grid w-full auto-rows-min gap-5 px-4 pb-4 md:h-full md:grid-rows-[auto_minmax(0,1fr)] md:contain-paint md:overflow-hidden md:px-10 md:pb-6"
     >
       <section
         aria-label="Feed controls"
