@@ -670,4 +670,47 @@ describe("BaseEmbedElement docked inspector", () => {
     expect(firstEdit).toHaveAttribute("aria-expanded", "false");
     expect(secondEdit).toHaveAttribute("aria-expanded", "true");
   });
+
+  // Changing the inspected embed itself (width, sort, view) replaced the node
+  // and silently dropped the panel's draft (5.2 review I2); as under the old
+  // modal, that one embed holds still while its panel is open.
+  it("holds the inspected embed still while its panel is open", async () => {
+    const user = userEvent.setup();
+    renderTwoEmbeds();
+    const [firstEdit] = screen.getAllByRole("button", { name: "Edit embed" });
+    const [firstEmbed, secondEmbed] = screen.getAllByTestId("base-embed");
+    await user.click(firstEdit as HTMLElement);
+    await screen.findByRole("dialog", { name: "Configure Base embed" });
+
+    const body = within(firstEmbed as HTMLElement).getByTestId(
+      "base-embed-body",
+    );
+    expect(body).toHaveAttribute("inert");
+    expect(
+      within(firstEmbed as HTMLElement).queryByRole("separator", {
+        name: "Resize this Base embed",
+      }),
+    ).toBeNull();
+    expect(
+      within(secondEmbed as HTMLElement).getByTestId("base-embed-body"),
+    ).not.toHaveAttribute("inert");
+  });
+
+  // With no focus trap, a keyboard user who leaves the panel needs a way
+  // back (5.2 review I4).
+  it("offers a way back into the open panel from its embed", async () => {
+    const user = userEvent.setup();
+    renderTwoEmbeds();
+    const [firstEdit] = screen.getAllByRole("button", { name: "Edit embed" });
+    await user.click(firstEdit as HTMLElement);
+    const panel = await screen.findByRole("dialog", {
+      name: "Configure Base embed",
+    });
+    (firstEdit as HTMLElement).ownerDocument.body.focus();
+
+    await user.click(
+      screen.getByRole("button", { name: "Go to embed settings" }),
+    );
+    expect(panel.contains(document.activeElement)).toBe(true);
+  });
 });

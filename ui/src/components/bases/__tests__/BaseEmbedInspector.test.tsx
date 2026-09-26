@@ -13,6 +13,7 @@ import type {
   ConfiguredBaseEmbedElement,
   InvalidBaseEmbedElement,
 } from "#/editor/schema/types";
+import { useFolioDock } from "#/store/folioDock";
 
 function selectTriggerName(label: string) {
   return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
@@ -712,6 +713,21 @@ describe("BaseEmbedInspector docked panel", () => {
     expect(panel).toHaveAttribute("data-docked", "right");
     expect(panel.className).toMatch(/\bfixed\b/);
     expect(panel.className).toMatch(/\bright-0\b/);
+  });
+
+  it("takes the Folio's right column while open and gives it back on close", () => {
+    const { unmount } = render(
+      <BaseEmbedInspector
+        isOpen
+        node={configured()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onRestoreFocus={vi.fn()}
+      />,
+    );
+    expect(useFolioDock.getState().rightDock).toBe(true);
+    unmount();
+    expect(useFolioDock.getState().rightDock).toBe(false);
   });
 
   it("closes on Escape without saving and hands focus back", async () => {

@@ -319,6 +319,7 @@ import { TabContent } from "#/components/TabContent";
 import { useActivateTabWithFolioHistory } from "#/hooks/useFolioHistoryNavigation";
 import { todayJournalPath } from "#/lib/journal";
 import { queryClient } from "#/lib/queryClient";
+import { useFolioDock } from "#/store/folioDock";
 import {
   captureFolioHistoryLocation,
   clearFolioHistoryState,
@@ -641,6 +642,25 @@ describe("Folio invalid-tab recovery", () => {
     const title = screen.getByRole("textbox", { name: "Page title" });
     expect(title).toHaveClass("font-serif", "leading-[1.02]");
     expect(title.className).not.toMatch(/font-bold/);
+  });
+
+  // A docked panel (the base embed inspector) takes the right column's place
+  // instead of covering the reading column (5.2 review I3).
+  it("gives a right dock the right column's place while it is open", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    act(() => useFolioDock.getState().setRightDock(true));
+    try {
+      render(<Folio tabId="t1" path="notes/alpha.md" />);
+      expect(
+        screen.queryByRole("complementary", { name: "Page links" }),
+      ).toBeNull();
+      const grid = screen.getByRole("complementary", {
+        name: "Page details",
+      }).parentElement;
+      expect(grid?.style.gridTemplateColumns).toMatch(/ 400px$/);
+    } finally {
+      act(() => useFolioDock.getState().setRightDock(false));
+    }
   });
 
   it("frames the rails at 232 and 296 with no rules and round hide buttons", async () => {

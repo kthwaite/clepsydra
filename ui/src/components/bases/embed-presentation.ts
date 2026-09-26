@@ -53,3 +53,6 @@ export function embedWidthStyle(width: number | undefined): CSSProperties {
 export function embedIsCompact(presentation: BaseEmbedPresentation): boolean {
   return presentation.display !== "full";
 }
+
+/** Marks the docked embed inspector, so its embed can send focus back in. */
+export const DOCKED_INSPECTOR_ATTR = "data-base-embed-inspector";

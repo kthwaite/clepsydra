@@ -32,12 +32,14 @@ import type {
 } from "#/editor/schema/types";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { useFolioDock } from "#/store/folioDock";
 import type { BaseDiagnostic } from "./BaseDefinitionWorkspace";
 import { BaseFilterEditor } from "./BaseFilterEditor";
 import type { DraftProperty } from "./definition-model";
 import { diagnosticRows } from "./diagnostic-rows";
 import {
   type BaseEmbedDisplay,
+  DOCKED_INSPECTOR_ATTR,
   EMBED_WIDTH_MAX,
   EMBED_WIDTH_MIN,
 } from "./embed-presentation";
@@ -120,6 +122,13 @@ function DockedPanel({
 }: DockedPanelProps) {
   const titleId = useId();
   const descriptionId = useId();
+  const setRightDock = useFolioDock((s) => s.setRightDock);
+  // The Folio gives its right column to the panel instead of being covered.
+  useEffect(() => {
+    if (!isOpen) return;
+    setRightDock(true);
+    return () => setRightDock(false);
+  }, [isOpen, setRightDock]);
   if (!isOpen || typeof document === "undefined") return null;
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -139,8 +148,10 @@ function DockedPanel({
         .filter(Boolean)
         .join(" ")}
       data-docked="right"
+      {...{ [DOCKED_INSPECTOR_ATTR]: "" }}
+      tabIndex={-1}
       onKeyDown={handleKeyDown}
-      className="fixed top-0 right-0 bottom-0 z-40 flex w-full max-w-[400px] flex-col overflow-hidden rounded-l-2xl bg-raise text-ink shadow-xl lg:top-[136px] lg:right-10 lg:bottom-4 lg:rounded-2xl"
+      className="fixed top-0 right-0 bottom-0 z-40 flex w-full max-w-[400px] flex-col overflow-hidden rounded-l-2xl bg-raise text-ink shadow-xl lg:top-[136px] lg:right-6 lg:bottom-4 xl:right-10 lg:rounded-2xl"
     >
       <div className="flex shrink-0 items-start gap-4 px-[26px] pt-6 pb-[18px]">
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">

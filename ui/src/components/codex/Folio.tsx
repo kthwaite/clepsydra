@@ -115,6 +115,7 @@ import {
   type RecipeParseResult,
   serializeRecipeMarkdown,
 } from "#/recipe/recipeCodec";
+import { useFolioDock } from "#/store/folioDock";
 import { FOLIO_LEFT_RAIL, FOLIO_RIGHT_RAIL } from "#/store/folioRails";
 import {
   clearFolioRestoration,
@@ -1679,6 +1680,9 @@ export function Folio({ tabId, path }: FolioProps) {
   );
 }
 
+/** Width of a panel docked in the right column (the base embed inspector). */
+const DOCK_WIDTH = 400;
+
 function DesktopFolioLayout({
   header,
   document,
@@ -1721,8 +1725,9 @@ function DesktopFolioLayout({
     max: 480,
   });
   const column = useReadingColumn();
+  const rightDock = useFolioDock((s) => s.rightDock);
   const lw = left.collapsed ? 32 : left.width;
-  const rw = right.collapsed ? 32 : right.width;
+  const rw = rightDock ? DOCK_WIDTH : right.collapsed ? 32 : right.width;
 
   return (
     <div
@@ -1788,7 +1793,10 @@ function DesktopFolioLayout({
         <ReadingTicks toc={toc} activeIndex={activeIndex} onJump={onJump} />
       </div>
 
-      {right.collapsed ? (
+      {rightDock ? (
+        // The docked panel is fixed over this slot; it only reserves room.
+        <div aria-hidden data-folio-dock-slot />
+      ) : right.collapsed ? (
         <RailStub side="right" onExpand={right.toggle} />
       ) : (
         <aside
