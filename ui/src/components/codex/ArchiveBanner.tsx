@@ -116,12 +116,15 @@ export function ArchiveBanner({ title, path, archive }: ArchiveBannerProps) {
       </div>
 
       {collapsed ? null : (
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-10 pt-0.5 pb-4">
+        <div className="grid grid-cols-1 gap-3 pt-0.5 pb-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end md:gap-10">
           <div className="flex min-w-0 flex-col gap-1">
             <p className="text-[12.5px] text-mute">
               Archive · {archive.domain}
             </p>
-            <h1 className="truncate text-[20px] font-semibold leading-tight tracking-[-0.01em] text-ink">
+            <h1
+              title={title}
+              className="truncate text-[20px] font-semibold leading-tight tracking-[-0.01em] text-ink"
+            >
               {title}
             </h1>
             {isSafeLiveUrl(archive.url) ? (

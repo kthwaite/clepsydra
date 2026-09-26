@@ -69,6 +69,19 @@ describe("ArchiveBanner collapse", () => {
     ).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("stacks title and provenance on phones so neither squeezes to nothing", async () => {
+    renderBanner();
+
+    const heading = await screen.findByRole("heading", {
+      name: "Example Article",
+    });
+    // Long titles truncate; the full title stays available on hover.
+    expect(heading).toHaveAttribute("title", "Example Article");
+    const body = heading.closest("div.grid");
+    expect(body).toHaveClass("grid-cols-1");
+    expect(body).toHaveClass("md:grid-cols-[minmax(0,1fr)_auto]");
+  });
+
   it("collapse hides provenance but keeps title strip and back link", async () => {
     const user = userEvent.setup();
     renderBanner();
