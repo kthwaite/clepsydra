@@ -1287,6 +1287,14 @@ describe("TaskEditPanel — undimmed dock and escape close", () => {
     expect(dimmers).toEqual([]);
   });
 
+  // The dock body is a scrolling flex column; a shrinkable textarea there
+  // collapsed the title to a sliver (smoke, 1440×960).
+  it("keeps the dock body's rows at their own height", () => {
+    wrap();
+    const column = screen.getByRole("textbox", { name: "Title" }).parentElement;
+    expect(column?.className).toContain("[&>*]:shrink-0");
+  });
+
   it("remains a labelled modal dialog and closes on Escape", async () => {
     const onClose = vi.fn();
     wrap({ onClose });

@@ -520,7 +520,7 @@ export function TaskEditPanel({
           {/* Dock body — a fade at the foot hints at more fields below */}
           <div className="relative min-h-0 flex-1">
             <fieldset
-              className="m-0 flex h-full min-w-0 flex-col gap-4.5 overflow-y-auto px-6 pt-3 pb-6"
+              className="m-0 flex h-full min-w-0 flex-col gap-4.5 overflow-y-auto px-6 pt-3 pb-6 [&>*]:shrink-0"
               disabled={archiving}
               data-testid="edit-panel-fields"
             >
