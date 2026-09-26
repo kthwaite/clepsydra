@@ -1,5 +1,6 @@
 import type { useNavigate } from "@tanstack/react-router";
 import { describe, expect, it, vi } from "vitest";
+import type { CodexView } from "#/components/codex/useCodexView";
 import {
   CONTENTS_GROUPS,
   CORE_NAV,
@@ -7,7 +8,8 @@ import {
   enabledNavItems,
   goToView,
   isCoreView,
-  MOBILE_NAV,
+  MOBILE_BAR,
+  MOBILE_GO_TO,
   VIEW_REGISTRY,
   type ViewNavDeps,
 } from "#/components/codex/viewRegistry";
@@ -32,55 +34,13 @@ const deps = (): ViewNavDeps & {
   };
 
 describe("VIEW_REGISTRY", () => {
-  it("preserves today's mobile roots order and labels", () => {
-    expect(MOBILE_NAV).toEqual([
-      "atrium",
-      "gazetteer",
-      "academic",
-      "bases",
-      "feeds",
-      "constellation",
-      "rubbish",
-    ]);
-    expect(MOBILE_NAV.map((v) => VIEW_REGISTRY[v].mobile?.label)).toEqual([
-      "ATR",
-      "GAZ",
-      "ACAD",
-      "BASE",
-      "FEED",
-      "GRAPH",
-      "BIN",
-    ]);
-  });
-  it("removes Academic independently from desktop and mobile navigation", () => {
-    const flags = { academic: false, feeds: true };
-
-    expect(contentsGroups(flags).flatMap((g) => g.views)).not.toContain(
-      "academic",
-    );
-    expect(enabledNavItems(MOBILE_NAV, flags)).toEqual([
-      "atrium",
-      "gazetteer",
-      "bases",
-      "feeds",
-      "constellation",
-      "rubbish",
-    ]);
-  });
-  it("removes Feeds independently from desktop and mobile navigation", () => {
-    const flags = { academic: true, feeds: false };
-
-    expect(contentsGroups(flags).flatMap((g) => g.views)).not.toContain(
-      "feeds",
-    );
-    expect(enabledNavItems(MOBILE_NAV, flags)).toEqual([
-      "atrium",
-      "gazetteer",
-      "academic",
-      "bases",
-      "constellation",
-      "rubbish",
-    ]);
+  it("removes Academic and Feeds from Contents when their flags are off", () => {
+    expect(
+      contentsGroups({ academic: false, feeds: true }).flatMap((g) => g.views),
+    ).not.toContain("academic");
+    expect(
+      contentsGroups({ academic: true, feeds: false }).flatMap((g) => g.views),
+    ).not.toContain("feeds");
   });
   it("shows the Sheaf exactly for folio, launcher, gazetteer", () => {
     const withSheaf = (
@@ -90,10 +50,9 @@ describe("VIEW_REGISTRY", () => {
       .sort();
     expect(withSheaf).toEqual(["folio", "gazetteer", "launcher"]);
   });
-  it("highlights FOLIO for launcher, nothing for repairs/agenda", () => {
+  it("highlights FOLIO for launcher, nothing for repairs", () => {
     expect(VIEW_REGISTRY.launcher.navRoot).toBe("folio");
     expect(VIEW_REGISTRY.repairs.navRoot).toBeNull();
-    expect(VIEW_REGISTRY.agenda.navRoot).toBeNull();
   });
 });
 
@@ -195,5 +154,47 @@ describe("goToView", () => {
     goToView("launcher", d);
     expect(d.navigate).not.toHaveBeenCalled();
     expect(d.openTab).not.toHaveBeenCalled();
+  });
+});
+
+describe("mobile bar", () => {
+  it("lists Today, Agenda, Tasks, Search and Folio in order", () => {
+    expect(MOBILE_BAR).toEqual([
+      "atrium",
+      "agenda",
+      "tasking",
+      "search",
+      "folio",
+    ]);
+    expect(
+      MOBILE_BAR.filter((s) => s !== "search").map(
+        (v) => VIEW_REGISTRY[v as CodexView].mobile?.label,
+      ),
+    ).toEqual(["Today", "Agenda", "Tasks", "Folio"]);
+  });
+
+  it("gives only bar views a mobile label", () => {
+    const labelled = (Object.keys(VIEW_REGISTRY) as CodexView[]).filter(
+      (v) => VIEW_REGISTRY[v].mobile !== null,
+    );
+    expect(labelled.sort()).toEqual(["agenda", "atrium", "folio", "tasking"]);
+  });
+
+  it("highlights Agenda as its own root", () => {
+    expect(VIEW_REGISTRY.agenda.navRoot).toBe("agenda");
+  });
+
+  it("lists the other screens as Go-to targets, filtered by feature", () => {
+    expect(MOBILE_GO_TO).toEqual([
+      "gazetteer",
+      "bases",
+      "feeds",
+      "academic",
+      "constellation",
+      "rubbish",
+    ]);
+    expect(
+      enabledNavItems(MOBILE_GO_TO, { academic: false, feeds: false }),
+    ).toEqual(["gazetteer", "bases", "constellation", "rubbish"]);
   });
 });

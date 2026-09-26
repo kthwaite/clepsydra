@@ -351,21 +351,15 @@ describe("CodexFrame real breakpoint transitions", () => {
     expect(banner.firstElementChild).toHaveClass("min-w-0", "overflow-hidden");
     expect(actions).toHaveClass("shrink-0");
 
-    const actionNames = [
-      "Search",
-      "New note",
-      "Status",
-      "Switch to dark mode",
-    ] as const;
-    expect(within(actions).getAllByRole("button")).toHaveLength(
-      actionNames.length,
-    );
-    for (const name of actionNames) {
-      const button = within(actions).getByRole("button", { name });
-      expect(button).toHaveAttribute("aria-label", name);
-      expect(button).toHaveClass("min-w-8");
-      expect(button.textContent?.trim().length).toBeLessThanOrEqual(3);
+    expect(
+      within(actions)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual(["New note", "Settings"]);
+    for (const button of within(actions).getAllByRole("button")) {
+      expect(button).toHaveClass("h-11", "w-11");
     }
+    expect(within(actions).getByRole("status")).toBeInTheDocument();
   });
 
   it("preserves real Constellation controls through real media-query changes", async () => {

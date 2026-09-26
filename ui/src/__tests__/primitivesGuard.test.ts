@@ -72,6 +72,15 @@ const BASES_FILES = [
   "../../routes/bases.$slug.tsx",
 ];
 
+/** Mobile companion shell (phase 4b-1). */
+const MOBILE_FILES = [
+  "../codex/MobileCodexFrame.tsx",
+  "../codex/StatusDot.tsx",
+  "../codex/OpenPagesSheet.tsx",
+  "../codex/MobileGoTo.tsx",
+  "../codex/ContentsBadge.tsx",
+];
+
 const FORBIDDEN: Array<[string, RegExp]> = [
   ["uppercase", /\buppercase\b/],
   // Negative tracking tightens large serif display type (mockup); Vessel's
@@ -108,6 +117,7 @@ const files = [
   ...PROSE_FILES,
   ...FOLIO_FILES,
   ...BASES_FILES,
+  ...MOBILE_FILES,
 ].filter((f) => {
   try {
     readFileSync(path.join(uiDir, f));

@@ -1042,7 +1042,7 @@ describe("mobile Folio Back", () => {
     ).toBe(149);
   });
 
-  it("keeps frame graph activation and router navigation in one raw-draft confirmation", async () => {
+  it("keeps a frame root navigation in one raw-draft confirmation", async () => {
     const user = userEvent.setup();
     useWorkspaceStore.setState({
       tabs: [
@@ -1064,7 +1064,7 @@ describe("mobile Folio Back", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
       target: { value: "Frame graph draft stays local  \n" },
     });
-    await user.click(screen.getByRole("button", { name: "Constellation" }));
+    await user.click(screen.getByRole("button", { name: "Today" }));
 
     expect(useWorkspaceStore.getState().activeTabId).toBe("page");
     expect(navigateSpy).not.toHaveBeenCalled();
@@ -1079,20 +1079,16 @@ describe("mobile Folio Back", () => {
       "Frame graph draft stays local  \n",
     );
 
-    await user.click(screen.getByRole("button", { name: "Constellation" }));
+    await user.click(screen.getByRole("button", { name: "Today" }));
     await user.click(screen.getByRole("button", { name: "Leave" }));
 
     await waitFor(() => {
-      const state = useWorkspaceStore.getState();
-      expect(state.tabs.filter((tab) => tab.type === "graph")).toHaveLength(1);
-      expect(state.activeTabId).not.toBe("page");
+      expect(router.state.location.pathname).toBe("/");
       expect(router.state.status).toBe("idle");
     });
     expect(navigateSpy).toHaveBeenCalledOnce();
-    // Mobile Constellation now opens via useOpenTab, which also stamps
-    // folioOriginTabId via a state callback (see useOpenTab.test.tsx).
     expect(navigateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "/workspace" }),
+      expect.objectContaining({ to: "/" }),
     );
   });
 
@@ -1679,8 +1675,9 @@ describe("mobile Folio Back", () => {
       {
         name: "mobile root",
         setup: () => undefined,
+        to: "/",
         exit: async (user: ReturnType<typeof userEvent.setup>) => {
-          await user.click(screen.getByRole("button", { name: "Gazetteer" }));
+          await user.click(screen.getByRole("button", { name: "Today" }));
         },
       },
       {
@@ -1688,6 +1685,7 @@ describe("mobile Folio Back", () => {
         setup: () => {
           mobileLayout.current = false;
         },
+        to: "/gazetteer",
         exit: async (user: ReturnType<typeof userEvent.setup>) => {
           await user.click(screen.getByRole("button", { name: /^Gazetteer$/ }));
         },
@@ -1695,13 +1693,14 @@ describe("mobile Folio Back", () => {
       {
         name: "keyboard shortcut",
         setup: () => undefined,
+        to: "/gazetteer",
         exit: async () => {
           fireEvent.keyDown(window, { key: "i", ctrlKey: true });
         },
       },
     ])(
       "checkpoints a positioned Folio for $name exit and restores it on Back",
-      async ({ setup, exit }) => {
+      async ({ setup, to, exit }) => {
         const user = userEvent.setup();
         setup();
         useWorkspaceStore.setState({
@@ -1725,9 +1724,7 @@ describe("mobile Folio Back", () => {
         setFolioPosition(919, 9);
 
         await exit(user);
-        await waitFor(() =>
-          expect(router.state.location.pathname).toBe("/gazetteer"),
-        );
+        await waitFor(() => expect(router.state.location.pathname).toBe(to));
         act(() => router.history.back());
 
         await expectFolioPosition("notes/alpha.md", 919, 9);

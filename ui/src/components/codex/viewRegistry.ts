@@ -56,10 +56,10 @@ interface ViewDescriptor {
   /** Route owns the entire content window; suppress both responsive shells. */
   fullPage?: boolean;
   /** Which rail/mobile entry highlights while this view is current; null =
-   * no highlight (repairs, agenda). */
+   * no highlight (repairs, conflicts). */
   navRoot: CodexView | null;
-  /** Mobile bottom-bar presentation, for views listed in MOBILE_NAV. */
-  mobile: { name: string; label: string } | null;
+  /** Mobile bottom-bar label, for views in MOBILE_BAR. */
+  mobile: { label: string } | null;
   /** Navigate to this view; null for states that are not direct targets. */
   go: ((deps: ViewNavDeps) => void) | null;
 }
@@ -73,7 +73,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     showsSheaf: false,
     feature: null,
     navRoot: "atrium",
-    mobile: { name: "Atrium", label: "ATR" },
+    mobile: { label: "Today" },
     go: ({ navigate }) => void navigate({ to: "/" }),
   },
   folio: {
@@ -84,7 +84,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     showsSheaf: true,
     feature: null,
     navRoot: "folio",
-    mobile: null,
+    mobile: { label: "Folio" },
     go: ({ activateTab, leaveWorkspace, navigate }) => {
       const store = useWorkspaceStore.getState();
       const firstPage = store.tabs.find((tab) => tab.type === "page");
@@ -117,7 +117,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     showsSheaf: false,
     feature: null,
     navRoot: "constellation",
-    mobile: { name: "Constellation", label: "GRAPH" },
+    mobile: null,
     go: ({ openTab }) => openTab("graph"),
   },
   gazetteer: {
@@ -128,7 +128,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     showsSheaf: true,
     feature: null,
     navRoot: "gazetteer",
-    mobile: { name: "Gazetteer", label: "GAZ" },
+    mobile: null,
     go: ({ navigate }) => void navigate({ to: "/gazetteer" }),
   },
   stats: {
@@ -150,7 +150,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     showsSheaf: false,
     feature: null,
     navRoot: "tasking",
-    mobile: null,
+    mobile: { label: "Tasks" },
     go: ({ navigate }) => void navigate({ to: "/tasking" }),
   },
   academic: {
@@ -161,7 +161,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     showsSheaf: false,
     feature: "academic",
     navRoot: "academic",
-    mobile: { name: "Academic", label: "ACAD" },
+    mobile: null,
     go: ({ navigate }) => void navigate({ to: "/academic" }),
   },
   bases: {
@@ -172,7 +172,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     showsSheaf: false,
     feature: null,
     navRoot: "bases",
-    mobile: { name: "Bases", label: "BASE" },
+    mobile: null,
     go: ({ navigate }) => void navigate({ to: "/bases" }),
   },
   feeds: {
@@ -183,7 +183,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     showsSheaf: false,
     feature: "feeds",
     navRoot: "feeds",
-    mobile: { name: "Feeds", label: "FEED" },
+    mobile: null,
     go: ({ navigate }) => void navigate({ to: "/feeds" }),
   },
   docs: {
@@ -218,7 +218,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     showsSheaf: false,
     feature: null,
     navRoot: "rubbish",
-    mobile: { name: "Rubbish Bin", label: "BIN" },
+    mobile: null,
     go: ({ navigate }) => void navigate({ to: "/rubbish" }),
   },
   repairs: {
@@ -239,8 +239,8 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     shortcut: null,
     showsSheaf: false,
     feature: null,
-    navRoot: null,
-    mobile: null,
+    navRoot: "agenda",
+    mobile: { label: "Agenda" },
     go: ({ navigate }) => void navigate({ to: "/agenda" }),
   },
   conflicts: {
@@ -279,12 +279,22 @@ export function contentsGroups(
   })).filter((g) => g.views.length > 0);
 }
 
-export const MOBILE_NAV: readonly CodexView[] = [
+/** Mobile bottom bar (spec §9 Q3): four screens plus the Search slot. */
+export type MobileSlot = CodexView | "search";
+export const MOBILE_BAR: readonly MobileSlot[] = [
   "atrium",
+  "agenda",
+  "tasking",
+  "search",
+  "folio",
+];
+
+/** Screens reached from mobile Search's "Go to" chips. */
+export const MOBILE_GO_TO: readonly CodexView[] = [
   "gazetteer",
-  "academic",
   "bases",
   "feeds",
+  "academic",
   "constellation",
   "rubbish",
 ];

@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import { Search } from "lucide-react";
 import {
   Fragment,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -18,6 +19,7 @@ import {
   type StaticCommandAction,
 } from "#/components/codex/commandRegistry";
 import { shortFolio } from "#/components/codex/folio-utils";
+import { MobileGoTo } from "#/components/codex/MobileGoTo";
 import { Tick } from "#/components/codex/Tick";
 import { goToView } from "#/components/codex/viewRegistry";
 import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
@@ -28,10 +30,12 @@ import {
   useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
+import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayAiJournal } from "#/hooks/useOpenTodayAiJournal";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { formatChord, SHORTCUTS } from "#/lib/shortcuts";
 import { deriveQuireName } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
@@ -79,6 +83,7 @@ function CommandPaletteContent() {
   const openTodayJournal = useOpenTodayJournal();
   const openTodayAiJournal = useOpenTodayAiJournal();
   const { toggle: toggleTheme } = useTheme();
+  const mobile = useMobileLayout();
 
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -341,7 +346,12 @@ function CommandPaletteContent() {
     if (e.key === "Escape") {
       e.preventDefault();
       close();
-    } else if (e.key === "ArrowDown") {
+      return;
+    }
+    // Arrows and Enter drive the result list from the query field only; a
+    // focused row, chip or Cancel keeps its own Enter.
+    if (e.target !== inputRef.current) return;
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       setSel((s) => Math.min(s + 1, Math.max(filtered.length - 1, 0)));
     } else if (e.key === "ArrowUp") {
@@ -363,23 +373,55 @@ function CommandPaletteContent() {
       panelClassName="flex flex-col rounded-[18px]"
       widthClassName="w-[92%]"
     >
-      <label className="flex h-[72px] items-center gap-3.5 px-[26px]">
-        <input
-          ref={inputRef}
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setSel(0);
-          }}
-          placeholder="Search pages · kind:recipe (tag:beer | tag:wine)"
-          aria-label="Command query"
-          className="flex-1 bg-transparent text-[21px] text-ink outline-none placeholder:text-faint"
-        />
-        <span className="text-[12.5px] text-mute">esc</span>
-      </label>
+      {mobile ? (
+        <div className="flex items-center gap-2.5 px-4 pt-5">
+          <label className="flex h-12 min-w-0 flex-1 items-center gap-2.5 rounded-full bg-ground px-4 shadow-[0_0_0_2px_var(--accent)]">
+            <Search aria-hidden size={18} className="shrink-0 text-mute" />
+            <input
+              ref={inputRef}
+              value={q}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setSel(0);
+              }}
+              placeholder="Search pages, tasks and screens"
+              aria-label="Command query"
+              className="min-w-0 flex-1 bg-transparent text-[17px] text-ink outline-none placeholder:text-mute"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={close}
+            className={cn(
+              "min-h-11 rounded-md px-1 text-[15px] text-accent",
+              FOCUS_RING_NATIVE,
+            )}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <label className="flex h-[72px] items-center gap-3.5 px-[26px]">
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setSel(0);
+            }}
+            placeholder="Search pages · kind:recipe (tag:beer | tag:wine)"
+            aria-label="Command query"
+            className="flex-1 bg-transparent text-[21px] text-ink outline-none placeholder:text-faint"
+          />
+          <span className="text-[12.5px] text-mute">esc</span>
+        </label>
+      )}
       <div
         ref={listRef}
-        className="cl-noscroll max-h-[420px] overflow-auto px-3.5 pb-4"
+        className={cn(
+          "cl-noscroll overflow-auto px-3.5 pb-4",
+          mobile ? "min-h-0 flex-1 pt-3" : "max-h-[420px]",
+        )}
       >
         {showSearchLoading && (
           <div
@@ -465,16 +507,19 @@ function CommandPaletteContent() {
             </Fragment>
           );
         })}
+        {mobile && <MobileGoTo onGo={close} />}
       </div>
-      <div className="flex items-center gap-6 bg-ground px-[26px] pt-3.5 pb-[18px] text-[12.5px] text-mute">
-        <span>↑↓ move</span>
-        <span>↵ open</span>
-        <span>esc close</span>
-        <span className="flex-1" />
-        <span>
-          {filtered.length} {filtered.length === 1 ? "result" : "results"}
-        </span>
-      </div>
+      {!mobile && (
+        <div className="flex items-center gap-6 bg-ground px-[26px] pt-3.5 pb-[18px] text-[12.5px] text-mute">
+          <span>↑↓ move</span>
+          <span>↵ open</span>
+          <span>esc close</span>
+          <span className="flex-1" />
+          <span>
+            {filtered.length} {filtered.length === 1 ? "result" : "results"}
+          </span>
+        </div>
+      )}
     </CodexModalShell>
   );
 }

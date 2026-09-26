@@ -160,6 +160,13 @@ vi.mock("#/components/ThemeProvider", () => ({
 vi.mock("#/hooks/useVaultEvents", () => ({
   useVaultEvents: () => "connected",
 }));
+vi.mock("#/components/codex/OpenPagesSheet", () => ({
+  OpenPagesSheet: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div role="dialog" aria-label="Open pages" /> : null,
+}));
+vi.mock("#/components/codex/StatusDot", () => ({
+  StatusDot: () => <span role="status">Synced</span>,
+}));
 vi.mock("#/hooks/useMobileLayout", () => ({
   useMobileLayout: () => mobileLayoutState.matches,
 }));
@@ -171,6 +178,7 @@ vi.mock("#/store/ui", () => ({
       openSearch: () => void;
       openSettings: () => void;
       isSettingsOpen: boolean;
+      isSearchOpen: boolean;
       isContentsOpen: boolean;
       setContentsOpen: () => void;
       toggleContents: () => void;
@@ -182,6 +190,7 @@ vi.mock("#/store/ui", () => ({
       openSearch: openSearchMock,
       openSettings: openSettingsMock,
       isSettingsOpen: false,
+      isSearchOpen: false,
       isContentsOpen: false,
       setContentsOpen: vi.fn(),
       toggleContents: vi.fn(),
@@ -393,7 +402,7 @@ describe("CodexFrame responsive shell", () => {
     workspaceState.activeTabId = null;
   });
 
-  it("hides disabled destinations from mobile roots", () => {
+  it("shows the same five slots whatever the feature flags", () => {
     featureFlagsState.academic = false;
     featureFlagsState.feeds = false;
     mobileLayoutState.matches = true;
@@ -401,12 +410,6 @@ describe("CodexFrame responsive shell", () => {
 
     const roots = screen.getByRole("navigation", { name: "Mobile roots" });
     expect(within(roots).getAllByRole("button")).toHaveLength(5);
-    expect(
-      within(roots).queryByRole("button", { name: "Academic" }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(roots).queryByRole("button", { name: "Feeds" }),
-    ).not.toBeInTheDocument();
   });
 
   it("gives the archive route the full content window without codex chrome", () => {
@@ -435,35 +438,38 @@ describe("CodexFrame responsive shell", () => {
     expect(document.querySelectorAll("main")).toHaveLength(1);
   });
 
-  it("shows the seven roots and global actions in the mobile chrome", () => {
+  it("shows Today, Agenda, Tasks, Search and Folio with the global actions", () => {
     mobileLayoutState.matches = true;
     renderFrame();
 
     const roots = screen.getByRole("navigation", { name: "Mobile roots" });
-    expect(within(roots).getAllByRole("button")).toHaveLength(7);
     expect(
-      within(roots).getByRole("button", { name: "Atrium" }),
+      within(roots)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Today", "Agenda", "Tasks", "Search", "Folio"]);
+    expect(
+      within(roots).getByRole("button", { name: "Today" }),
     ).toHaveAttribute("aria-current", "page");
+    const actions = screen.getByRole("group", { name: "Global actions" });
     expect(
-      within(roots).getByRole("button", { name: "Gazetteer" }),
-    ).toBeVisible();
-    expect(within(roots).getByRole("button", { name: "Bases" })).toBeVisible();
-    expect(within(roots).getByRole("button", { name: "Feeds" })).toBeVisible();
-    expect(
-      within(roots).getByRole("button", { name: "Academic" }),
-    ).toBeVisible();
-    expect(
-      within(roots).getByRole("button", { name: "Constellation" }),
-    ).toBeVisible();
-    expect(
-      within(roots).getByRole("button", { name: "Rubbish Bin" }),
-    ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Search" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "New note" })).toBeVisible();
-    expect(
-      within(roots).queryByRole("button", { name: "Tasking" }),
-    ).not.toBeInTheDocument();
+      within(actions)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual(["New note", "Settings"]);
+    expect(within(actions).getByRole("status")).toHaveTextContent("Synced");
     expect(screen.getByText("Frame content")).toBeInTheDocument();
+  });
+
+  it("shows the wordmark on Today only", () => {
+    mobileLayoutState.matches = true;
+    const { unmount } = renderFrame();
+    expect(screen.getByRole("banner")).toHaveTextContent("Clepsydra");
+    unmount();
+
+    locationState.pathname = "/agenda";
+    renderFrame();
+    expect(screen.getByRole("banner")).not.toHaveTextContent("Clepsydra");
   });
 
   it.each([
@@ -490,97 +496,77 @@ describe("CodexFrame responsive shell", () => {
     },
   );
 
-  it("wires the mobile global actions and Constellation root", async () => {
+  it("wires the mobile global actions and bar slots", async () => {
     const user = userEvent.setup();
-    mobileLayoutState.matches = true;
-    renderFrame();
-
-    await user.click(screen.getByRole("button", { name: "Search" }));
-    await user.click(screen.getByRole("button", { name: "New note" }));
-    await user.click(screen.getByRole("button", { name: "Constellation" }));
-
-    expect(openSearchMock).toHaveBeenCalledOnce();
-    expect(openInscribeMock).toHaveBeenCalledOnce();
-    // Navigation to /workspace is now useOpenTab's responsibility (mocked
-    // above as workspaceState.openTab); see useOpenTab.test.tsx.
-    expect(workspaceState.openTab).toHaveBeenCalledWith("graph");
-  });
-
-  it("marks Bases active on mobile and navigates to its index", async () => {
-    const user = userEvent.setup();
-    mobileLayoutState.matches = true;
-    locationState.pathname = "/bases/reading-log/edit";
-    renderFrame();
-
-    const bases = within(
-      screen.getByRole("navigation", { name: "Mobile roots" }),
-    ).getByRole("button", { name: "Bases" });
-    expect(bases).toHaveAttribute("aria-current", "page");
-
-    await user.click(bases);
-
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/bases" });
-  });
-
-  it("marks Feeds active on mobile and navigates to its index", async () => {
-    const user = userEvent.setup();
-    mobileLayoutState.matches = true;
-    locationState.pathname = "/feeds";
-    renderFrame();
-
-    const feeds = within(
-      screen.getByRole("navigation", { name: "Mobile roots" }),
-    ).getByRole("button", { name: "Feeds" });
-    expect(feeds).toHaveAttribute("aria-current", "page");
-    expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
-
-    await user.click(feeds);
-
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/feeds" });
-  });
-
-  it("fits seven 44px mobile targets at 320px with short labels and full accessible names", () => {
     mobileLayoutState.matches = true;
     renderFrame();
 
     const roots = screen.getByRole("navigation", { name: "Mobile roots" });
-    const expectedRoots = [
-      ["Atrium", "ATR"],
-      ["Gazetteer", "GAZ"],
-      ["Academic", "ACAD"],
-      ["Bases", "BASE"],
-      ["Feeds", "FEED"],
-      ["Constellation", "GRAPH"],
-      ["Rubbish Bin", "BIN"],
-    ] as const;
+    await user.click(within(roots).getByRole("button", { name: "Search" }));
+    await user.click(screen.getByRole("button", { name: "New note" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(within(roots).getByRole("button", { name: "Agenda" }));
+    await user.click(within(roots).getByRole("button", { name: "Tasks" }));
 
-    expect(within(roots).getAllByRole("button")).toHaveLength(
-      expectedRoots.length,
-    );
-    for (const [accessibleName, visualLabel] of expectedRoots) {
-      const root = within(roots).getByRole("button", {
-        name: accessibleName,
-      });
-      expect(root).toHaveAttribute("aria-label", accessibleName);
-      expect(root).toHaveClass("min-h-12", "flex-1");
-      expect(root).toHaveTextContent(visualLabel);
-      expect(root.textContent?.trim()).toHaveLength(visualLabel.length);
+    expect(openSearchMock).toHaveBeenCalledOnce();
+    expect(openInscribeMock).toHaveBeenCalledOnce();
+    expect(openSettingsMock).toHaveBeenCalledWith("appearance");
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/agenda" });
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/tasking" });
+  });
+
+  it.each([
+    ["/agenda", "Agenda"],
+    ["/tasking", "Tasks"],
+    ["/workspace", "Folio"],
+  ])("marks the %s slot current", (pathname, name) => {
+    mobileLayoutState.matches = true;
+    locationState.pathname = pathname;
+    renderFrame();
+
+    const roots = screen.getByRole("navigation", { name: "Mobile roots" });
+    const current = within(roots)
+      .getAllByRole("button")
+      .filter((b) => b.getAttribute("aria-current") === "page");
+    expect(current).toHaveLength(1);
+    expect(current[0]).toHaveTextContent(name);
+  });
+
+  it("marks no slot current on a Go-to screen", () => {
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/gazetteer";
+    renderFrame();
+
+    const roots = screen.getByRole("navigation", { name: "Mobile roots" });
+    for (const button of within(roots).getAllByRole("button")) {
+      expect(button).not.toHaveAttribute("aria-current");
     }
   });
 
-  it("marks Academic active on mobile and navigates to its library", async () => {
-    const user = userEvent.setup();
+  it("fits five 44px targets at 320px with visible labels", () => {
     mobileLayoutState.matches = true;
-    locationState.pathname = "/academic";
     renderFrame();
 
-    const academic = within(
-      screen.getByRole("navigation", { name: "Mobile roots" }),
-    ).getByRole("button", { name: "Academic" });
-    expect(academic).toHaveAttribute("aria-current", "page");
+    const roots = screen.getByRole("navigation", { name: "Mobile roots" });
+    for (const root of within(roots).getAllByRole("button")) {
+      expect(root).toHaveClass("min-h-12");
+    }
+  });
 
-    await user.click(academic);
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/academic" });
+  it("badges Folio with the open-page count and opens the open-pages sheet", async () => {
+    const user = userEvent.setup();
+    mobileLayoutState.matches = true;
+    workspaceState.tabs = [
+      { id: "a", type: "page", path: "notes/a.md" },
+      { id: "b", type: "page", path: "notes/b.md" },
+      { id: "g", type: "graph" },
+    ];
+    renderFrame();
+
+    const folio = screen.getByRole("button", { name: "Folio, 2 open pages" });
+    expect(folio).toHaveTextContent("2");
+    await user.click(folio);
+    expect(screen.getByRole("dialog", { name: "Open pages" })).toBeVisible();
   });
 
   it("preserves the routed child instance and local state across desktop/mobile breakpoint changes", async () => {
