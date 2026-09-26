@@ -10,20 +10,7 @@ const OUT_OF_SCOPE = new Set<string>([]);
 
 /** Not yet restyled; each task removes its files. `it.fails` makes a file
  *  that is already clean fail, forcing its removal here. */
-const PENDING = new Set<string>([
-  "../codex/ArchiveBanner.tsx",
-  "../codex/FeedFacetSelect.tsx",
-  "../codex/FeedGroupComboBox.tsx",
-  "../codex/FeedManagement.tsx",
-  "../codex/FeedReaderPane.tsx",
-  "../../routes/feeds.tsx",
-  "../../routes/archive.$.tsx",
-  "../academic/AcademicLibrary.tsx",
-  "../academic/ImportDialog.tsx",
-  "../academic/WorkDetail.tsx",
-  "../books/BookBarcodeScanner.tsx",
-  "../books/BookImportModal.tsx",
-]);
+const PENDING = new Set<string>([]);
 
 /** Tasking board screen (phase 4.3). */
 const TASKING_FILES = [
