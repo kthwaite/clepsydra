@@ -23,7 +23,7 @@ vi.mock("#/components/FeatureFlagsProvider", () => ({
 vi.mock("#/components/academic/AcademicLibrary", () => ({
   AcademicLibrary: () => {
     routeMocks.useAcademicApi();
-    return <div>Academic Library</div>;
+    return <div>Academic library</div>;
   },
 }));
 
@@ -137,7 +137,7 @@ describe("Academic route capability gate", () => {
   it("retains the Academic library when enabled", () => {
     render(<AcademicRoute />);
 
-    expect(screen.getByText("Academic Library")).toBeVisible();
+    expect(screen.getByText("Academic library")).toBeVisible();
     expect(routeMocks.useAcademicApi).toHaveBeenCalledOnce();
   });
 });

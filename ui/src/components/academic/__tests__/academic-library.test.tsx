@@ -202,18 +202,21 @@ describe("AcademicLibrary", () => {
     render(<ControlledAcademicLibrary />);
 
     expect(
-      screen.getByRole("heading", { name: "Academic Library" }),
+      screen.getByRole("heading", { level: 1, name: "Academic library" }),
     ).toBeVisible();
+    expect(screen.getByText("Research")).toBeVisible();
     expect(screen.getByText("2 works")).toBeVisible();
+    expect(screen.getByText("Paper · 2017 · reading")).toBeVisible();
     const search = screen.getByTestId("filter-bar-input");
     await user.type(search, "turing");
     expect(screen.getByText(secondWork.title ?? "")).toBeVisible();
     expect(screen.queryByText(work.title)).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 2 works")).toBeVisible();
 
     await user.clear(search);
-    await user.click(
-      screen.getByRole("button", { name: `Open ${work.title}` }),
-    );
+    const row = screen.getByRole("button", { name: `Open ${work.title}` });
+    await user.click(row);
+    expect(row).toHaveAttribute("aria-current", "true");
     expect(
       screen.getByRole("heading", { level: 2, name: work.title }),
     ).toBeVisible();
@@ -312,10 +315,10 @@ describe("AcademicLibrary — shared FilterBar composition", () => {
     );
 
     expect(screen.getByTestId("filter-bar-chip-status")).toHaveTextContent(
-      "STATUS: reading",
+      "Status: reading",
     );
     await user.click(
-      screen.getByRole("button", { name: "Clear STATUS filter" }),
+      screen.getByRole("button", { name: "Clear Status filter" }),
     );
 
     expect(mocks.worksFilters).toHaveBeenLastCalledWith(
@@ -354,10 +357,10 @@ describe("AcademicLibrary — shared FilterBar composition", () => {
     );
 
     expect(screen.getByTestId("filter-bar-chip-status")).toHaveTextContent(
-      "STATUS: reading",
+      "Status: reading",
     );
     await user.click(
-      screen.getByRole("button", { name: "Clear STATUS filter" }),
+      screen.getByRole("button", { name: "Clear Status filter" }),
     );
 
     expect(mocks.worksFilters).toHaveBeenLastCalledWith(
@@ -373,7 +376,7 @@ describe("AcademicLibrary — shared FilterBar composition", () => {
     );
 
     expect(screen.getByTestId("filter-bar-chip-year")).toHaveTextContent(
-      "YEAR: abc",
+      "Year: abc",
     );
     expect(mocks.worksFilters).toHaveBeenLastCalledWith(
       expect.objectContaining({ year: undefined }),
@@ -382,6 +385,18 @@ describe("AcademicLibrary — shared FilterBar composition", () => {
 });
 
 describe("WorkDetail", () => {
+  it("shows the sentence-case eyebrow, field list and notes", () => {
+    render(<WorkDetail workId={work.id} />);
+    expect(screen.getByText("Paper · 2017")).toBeVisible();
+    expect(screen.getByText("Status").tagName).toBe("DT");
+    expect(screen.getByText("Reading").tagName).toBe("DD");
+    expect(screen.getByText("Cite key").tagName).toBe("DT");
+    expect(
+      screen.getByRole("heading", { level: 3, name: "Notes" }),
+    ).toBeVisible();
+    expect(screen.getByText("Foundational transformer paper.")).toBeVisible();
+  });
+
   it("updates work metadata and hands the page body to the standard editor", async () => {
     const user = userEvent.setup();
     render(<WorkDetail workId={work.id} />);
@@ -443,6 +458,10 @@ describe("WorkDetail", () => {
     const user = userEvent.setup();
     render(<WorkDetail workId={work.id} />);
     expect(screen.getByText("The key claim.")).toBeVisible();
+    expect(screen.getByText("Highlight · page 3")).toBeVisible();
+    expect(
+      screen.getByRole("heading", { level: 3, name: /Annotations/ }),
+    ).toBeVisible();
     await user.click(
       screen.getByRole("button", { name: "Open annotation The key claim." }),
     );
@@ -528,7 +547,7 @@ describe("ImportDialog", () => {
         };
         expect(request.bodySerializer(request.body)).toBe(input);
       }
-      expect(await screen.findByText("created")).toBeVisible();
+      expect(await screen.findByText("Created")).toBeVisible();
     },
   );
 
@@ -571,7 +590,7 @@ describe("ImportDialog", () => {
         auto_checkpoint: false,
       },
     });
-    expect(await screen.findByText("skipped")).toBeVisible();
+    expect(await screen.findByText("Skipped")).toBeVisible();
   });
 
   it("shows Zotero field-level conflict details", async () => {
@@ -605,6 +624,26 @@ describe("ImportDialog", () => {
     expect(await screen.findByText("title")).toBeVisible();
     expect(screen.getByText("Local title")).toBeVisible();
     expect(screen.getByText("Zotero title")).toBeVisible();
+  });
+
+  it("rejects an incomplete DOI with an alert in hot", async () => {
+    const user = userEvent.setup();
+    render(<ImportDialog isOpen onClose={vi.fn()} />);
+    const dialog = screen.getByRole("dialog", {
+      name: "Import academic works",
+    });
+    await chooseOption(user, "Import source", "DOI", dialog);
+    fireEvent.change(screen.getByRole("textbox", { name: "DOI" }), {
+      target: { value: "not-a-doi" },
+    });
+    await user.click(screen.getByRole("button", { name: "Import DOI" }));
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Enter a complete DOI, such as 10.1000/example.",
+    );
+    expect(alert).toHaveClass("text-hot");
+    expect(mocks.importDoi).not.toHaveBeenCalled();
   });
 
   it("reports a successful import with no results", async () => {

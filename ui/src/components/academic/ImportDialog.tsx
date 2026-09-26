@@ -13,6 +13,8 @@ import { Dialog } from "#/components/ui/dialog";
 import { Select, SelectItem } from "#/components/ui/select";
 import { TextField } from "#/components/ui/text-field";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 type ImportMode = "bibtex" | "doi" | "isbn" | "zotero";
 
@@ -22,6 +24,11 @@ const MODE_LABEL: Record<ImportMode, string> = {
   isbn: "ISBN",
   zotero: "Zotero",
 };
+
+/** "created" → "Created": result statuses read in sentence case. */
+function sentence(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -182,20 +189,22 @@ export function ImportDialog({
         </Select>
 
         {mode === "bibtex" ? (
-          <div>
-            <label
-              htmlFor={`${id}-bibtex`}
-              className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-            >
+          <div className="flex flex-col">
+            <label htmlFor={`${id}-bibtex`} className="text-[12.5px] text-mute">
               BibTeX
             </label>
             <textarea
               id={`${id}-bibtex`}
+              data-code-editor=""
               value={value}
               onChange={(event) => setValue(event.target.value)}
               rows={10}
               disabled={isPending}
-              className="mt-2 w-full resize-y border border-input bg-background px-3 py-2 font-mono text-xs outline-none focus:border-ring"
+              spellCheck={false}
+              className={cn(
+                "mt-1.5 w-full resize-y rounded-xl bg-sink px-4 py-3 text-[12.5px] leading-[1.55] text-ink placeholder:text-mute disabled:opacity-45",
+                FOCUS_RING_NATIVE,
+              )}
               placeholder="@article{citekey, ...}"
             />
           </div>
@@ -268,7 +277,7 @@ export function ImportDialog({
         ) : null}
 
         {error ? (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-[13.5px] text-hot">
             {error}
           </p>
         ) : null}
@@ -276,49 +285,51 @@ export function ImportDialog({
         {hasSubmitted ? (
           <section
             aria-label="Import results"
-            className="border-t border-border pt-3"
+            className="flex flex-col gap-2.5 pt-2"
           >
-            <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-              Results
-            </h3>
+            <h3 className="font-serif text-[20px] italic text-ink">Results</h3>
             {results.length === 0 ? (
-              <p className="cl-marg mt-2">No items to import.</p>
+              <p className="text-[13.5px] text-mute">No items to import.</p>
             ) : (
-              <ul className="mt-2 space-y-2">
+              <ul className="flex flex-col gap-2">
                 {results.map((result, index) => (
                   <li
                     key={`${result.cite_key}-${result.page_path ?? index}`}
-                    className="border border-border px-3 py-2 text-sm"
+                    className="rounded-xl bg-sink px-4 py-3 text-[13.5px]"
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <span className="min-w-0 break-all font-mono text-xs">
+                      <span className="min-w-0 break-all text-ink">
                         {result.cite_key ||
                           result.page_path ||
                           `Item ${index + 1}`}
                       </span>
-                      <span className="cl-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                        {result.status}
+                      <span className="flex-shrink-0 text-[12.5px] text-mute">
+                        {sentence(result.status)}
                       </span>
                     </div>
                     {result.error ? (
-                      <p className="mt-1 text-xs text-destructive">
+                      <p className="mt-1 text-[12.5px] text-hot">
                         {result.error}
                       </p>
                     ) : null}
                     {result.conflict_detail?.fields.length ? (
-                      <dl className="mt-2 space-y-2 border-t border-border pt-2">
+                      <dl className="mt-2.5 flex flex-col gap-2">
                         {result.conflict_detail.fields.map((field) => (
                           <div key={field.field}>
-                            <dt className="cl-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                            <dt className="text-[12.5px] text-mute">
                               {field.field}
                             </dt>
-                            <dd className="mt-1 grid gap-1 text-xs sm:grid-cols-2">
+                            <dd className="mt-1 grid gap-1 text-[12.5px] text-ink-2 sm:grid-cols-2">
                               <span>
-                                <span className="font-medium">Local:</span>{" "}
+                                <span className="font-medium text-ink">
+                                  Local:
+                                </span>{" "}
                                 {field.local_value ?? "—"}
                               </span>
                               <span>
-                                <span className="font-medium">Zotero:</span>{" "}
+                                <span className="font-medium text-ink">
+                                  Zotero:
+                                </span>{" "}
                                 {field.source_value ?? "—"}
                               </span>
                             </dd>
@@ -329,7 +340,10 @@ export function ImportDialog({
                     {result.page_path ? (
                       <button
                         type="button"
-                        className="mt-1 break-all text-left text-xs text-accent hover:underline"
+                        className={cn(
+                          "mt-1 cursor-pointer break-all rounded-sm text-left text-[12.5px] text-accent hover:underline",
+                          FOCUS_RING_NATIVE,
+                        )}
                         onClick={() =>
                           openPage(
                             "page",
