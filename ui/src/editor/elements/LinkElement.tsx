@@ -17,9 +17,20 @@ import {
   useCallback,
   useState,
 } from "react";
-import type { RenderElementProps } from "slate-react";
+import {
+  ReactEditor,
+  type RenderElementProps,
+  useReadOnly,
+  useSlateStatic,
+} from "slate-react";
 import { toast } from "sonner";
 import { resolveSchemeUrl } from "#/api/deeplink";
+import { InlineSourceEditor } from "#/editor/InlineSourceInput";
+import {
+  isSessionAt,
+  useInlineSourceEditing,
+} from "#/editor/inlineSourceEditing";
+import { linkSourceAdapter } from "#/editor/linkSourceAdapter";
 import { isSchemeLink, openSchemeLink } from "#/editor/schemeLinks";
 import type { LinkElement as LinkElementType } from "#/editor/types";
 import { useOpenTab } from "#/hooks/useOpenTab";
@@ -40,7 +51,37 @@ const LINK_ACTION = cn(
   FOCUS_RING_NATIVE,
 );
 
-export function LinkElement({ attributes, children, element }: Props) {
+export function LinkElement(props: Props) {
+  const editor = useSlateStatic();
+  const readOnly = useReadOnly();
+  const controller = useInlineSourceEditing();
+  const session = controller.active;
+  const { attributes, children, element } = props;
+
+  // Only a link session needs the path; findPath throws for a detached node.
+  if (
+    !readOnly &&
+    session?.type === "link" &&
+    isSessionAt(session, ReactEditor.findPath(editor, element))
+  ) {
+    // The link is not void: its Slate children stay mounted, hidden, so the
+    // DOM mapping holds while the source input has focus.
+    return (
+      <span {...attributes}>
+        <InlineSourceEditor
+          adapter={linkSourceAdapter}
+          element={element}
+          session={session}
+        />
+        <span hidden>{children}</span>
+      </span>
+    );
+  }
+
+  return <LinkAnchor {...props} />;
+}
+
+function LinkAnchor({ attributes, children, element }: Props) {
   const url = element.url;
   const openTab = useOpenTab();
   const [open, setOpen] = useState(false);

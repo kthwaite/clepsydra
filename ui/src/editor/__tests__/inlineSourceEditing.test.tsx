@@ -9,7 +9,10 @@ import {
 } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it, vi } from "vitest";
-import { INLINE_SOURCE_ADAPTERS } from "../inlineSourceAdapters";
+import {
+  INLINE_SOURCE_ADAPTERS,
+  INLINE_SOURCE_TYPES,
+} from "../inlineSourceAdapters";
 import {
   findAdjacentSourceInline,
   type InlineSourceAdapter,
@@ -135,7 +138,7 @@ describe("findAdjacentSourceInline", () => {
     },
   );
 
-  it("returns null when the adjacent sibling is not a wikilink", () => {
+  it("finds a link only when its type is registered", () => {
     const editor = withSchema(withHistory(createEditor()));
     editor.children = [
       {
@@ -156,6 +159,9 @@ describe("findAdjacentSourceInline", () => {
     expect(
       findAdjacentSourceInline(editor, "ArrowRight", ["wikilink"]),
     ).toBeNull();
+    expect(
+      findAdjacentSourceInline(editor, "ArrowRight", INLINE_SOURCE_TYPES),
+    ).toEqual({ path: [0, 1], caret: "start", returnSide: "before" });
   });
 });
 

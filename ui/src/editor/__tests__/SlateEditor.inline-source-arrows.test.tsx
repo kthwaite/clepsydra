@@ -267,3 +267,161 @@ describe("SlateEditor footnote-ref source editing", () => {
     });
   });
 });
+
+const boldLink = {
+  type: "link",
+  url: "https://e.com",
+  children: [{ text: "b", bold: true }, { text: " x" }],
+} as Descendant;
+
+describe("SlateEditor link source editing", () => {
+  async function enterLink(
+    value: Descendant[],
+    path: number[],
+    offset: number,
+    key: "ArrowLeft" | "ArrowRight",
+  ) {
+    const harness = await renderAt(value, path, offset);
+    fireEvent.keyDown(harness.editable, { key });
+    const input = (await screen.findByRole("textbox", {
+      name: "Edit link",
+    })) as HTMLInputElement;
+    return { ...harness, input };
+  }
+
+  it("ArrowRight at the end of the text before a link opens its Markdown", async () => {
+    const { editor, input } = await enterLink(
+      [paragraph([{ text: "See " }, boldLink, { text: " now." }])],
+      [0, 0],
+      "See ".length,
+      "ArrowRight",
+    );
+
+    expect(input).toHaveValue("[**b** x](https://e.com)");
+    expect(input).toHaveFocus();
+    expect(input.selectionStart).toBe(0);
+    // The Slate selection stays in the text before the link.
+    expect(editor.selection?.anchor).toEqual({ path: [0, 0], offset: 4 });
+  });
+
+  it("keeps the link's Slate children mounted but hidden during the session", async () => {
+    const { input } = await enterLink(
+      [paragraph([{ text: "See " }, boldLink, { text: " now." }])],
+      [0, 0],
+      "See ".length,
+      "ArrowRight",
+    );
+
+    const element = input.closest("[data-slate-inline]");
+    expect(element).not.toBeNull();
+    const hidden = element?.querySelector(
+      "[data-slate-node='text']",
+    )?.parentElement;
+    expect(hidden?.textContent).toBe("b x");
+    expect(
+      hidden?.closest("[hidden], [style*='display: none']"),
+    ).not.toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("ArrowLeft at the start of the text after a link opens it with the caret at the end", async () => {
+    const { input } = await enterLink(
+      [paragraph([{ text: "See " }, boldLink, { text: " now." }])],
+      [0, 2],
+      0,
+      "ArrowLeft",
+    );
+
+    expect(input.selectionStart).toBe("[**b** x](https://e.com)".length);
+  });
+
+  it("opens a link that is the first inline from the leading empty text", async () => {
+    const { input } = await enterLink(
+      [paragraph([{ text: "" }, boldLink, { text: " after" }])],
+      [0, 0],
+      0,
+      "ArrowRight",
+    );
+
+    expect(input).toHaveValue("[**b** x](https://e.com)");
+  });
+
+  it("opens a link that is the last inline from the trailing empty text", async () => {
+    const { input } = await enterLink(
+      [paragraph([{ text: "See " }, boldLink, { text: "" }])],
+      [0, 2],
+      0,
+      "ArrowLeft",
+    );
+
+    expect(input).toHaveValue("[**b** x](https://e.com)");
+  });
+
+  it("commits an edited url and exits after the new link", async () => {
+    const { editor, input } = await enterLink(
+      [paragraph([{ text: "See " }, boldLink, { text: " now." }])],
+      [0, 0],
+      "See ".length,
+      "ArrowRight",
+    );
+
+    fireEvent.change(input, {
+      target: { value: "[**b** x](https://other.org)" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(slateToMarkdown(editor.children)).toBe(
+        "See [**b** x](https://other.org) now.\n",
+      ),
+    );
+    expect(editor.selection?.anchor).toEqual({ path: [0, 2], offset: 0 });
+  });
+
+  it("unlinks when the brackets are deleted", async () => {
+    const { editor, input } = await enterLink(
+      [paragraph([{ text: "See " }, boldLink, { text: " now." }])],
+      [0, 2],
+      0,
+      "ArrowLeft",
+    );
+
+    fireEvent.change(input, { target: { value: "**b** x" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(slateToMarkdown(editor.children)).toBe("See **b** x now.\n"),
+    );
+  });
+
+  it("an empty draft cancels and keeps the link", async () => {
+    const { editor, input } = await enterLink(
+      [paragraph([{ text: "See " }, boldLink, { text: " now." }])],
+      [0, 0],
+      "See ".length,
+      "ArrowRight",
+    );
+
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "Edit link" })).toBeNull(),
+    );
+    expect(slateToMarkdown(editor.children)).toBe(
+      "See [**b** x](https://e.com) now.\n",
+    );
+  });
+
+  it("a plain click inside the label places the caret without a session", async () => {
+    await renderAt(
+      [paragraph([{ text: "See " }, boldLink, { text: " now." }])],
+      [0, 0],
+      0,
+    );
+
+    await userEvent.setup().click(screen.getByText("x", { exact: false }));
+
+    expect(screen.queryByRole("textbox", { name: "Edit link" })).toBeNull();
+  });
+});
