@@ -2365,29 +2365,19 @@ mod tests {
             ..FeedsSettings::default()
         };
         let fixture = feed_test_app_with_client("", settings, client).await;
-        let first = tokio::spawn({
-            let app = fixture.app.clone();
-            let url = format!("http://feed.test:{}/first", address.port());
-            async move {
-                request_json(
-                    &app,
-                    Method::POST,
-                    "/api/vault/feeds",
-                    Some(json!({
-                        "url": url,
-                        "expected_revision": page_revision("")
-                    })),
-                )
-                .await
-            }
-        });
-        tokio::time::timeout(Duration::from_secs(1), started.recv())
+        // Hold the only permit directly. A competing subscribe would drop it
+        // at its own deadline, which lands inside the queued request's budget
+        // whenever the two start more than MIN_DISCOVERY_NETWORK_BUDGET apart.
+        let held_permit = fixture
+            .state
+            .feed_runtime()
+            .feed_discovery_semaphore
+            .acquire()
             .await
-            .unwrap()
             .unwrap();
-        let mut second = tokio::spawn({
+        let mut queued = tokio::spawn({
             let app = fixture.app.clone();
-            let url = format!("http://feed.test:{}/second", address.port());
+            let url = format!("http://feed.test:{}/queued", address.port());
             async move {
                 request_json(
                     &app,
@@ -2402,20 +2392,20 @@ mod tests {
             }
         });
 
-        let second_before_release =
-            tokio::time::timeout(Duration::from_millis(600), &mut second).await;
-        let permit_wait_was_bounded = second_before_release.is_ok();
-        let second_reached_server = tokio::time::timeout(Duration::from_millis(50), started.recv())
+        let queued_before_release =
+            tokio::time::timeout(Duration::from_millis(600), &mut queued).await;
+        let permit_wait_was_bounded = queued_before_release.is_ok();
+        drop(held_permit);
+        let queued_reached_server = tokio::time::timeout(Duration::from_millis(50), started.recv())
             .await
             .ok()
             .flatten()
             .is_some();
         release.send(true).unwrap();
-        let (second_status, second_body) = match second_before_release {
+        let (queued_status, queued_body) = match queued_before_release {
             Ok(result) => result.unwrap(),
-            Err(_) => second.await.unwrap(),
+            Err(_) => queued.await.unwrap(),
         };
-        let _ = tokio::time::timeout(Duration::from_secs(1), first).await;
         server.abort();
 
         assert!(
@@ -2423,12 +2413,12 @@ mod tests {
             "subscribe deadline did not include semaphore queue time"
         );
         assert!(
-            !second_reached_server,
+            !queued_reached_server,
             "expired queued discovery must not start an HTTP request"
         );
-        assert_eq!(second_status, StatusCode::BAD_REQUEST);
+        assert_eq!(queued_status, StatusCode::BAD_REQUEST);
         assert!(
-            second_body["error"]
+            queued_body["error"]
                 .as_str()
                 .unwrap()
                 .to_ascii_lowercase()
