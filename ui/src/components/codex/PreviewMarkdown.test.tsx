@@ -23,6 +23,21 @@ describe("PreviewMarkdown", () => {
     );
   });
 
+  it("shows a wikilink alias as an inert wikilink span", () => {
+    const { container } = render(
+      <PreviewMarkdown content="See [[Target Page|the target]] and [[Target Page#Notes]]." />,
+    );
+
+    for (const name of ["the target", "Target Page#Notes"]) {
+      const text = screen.getByText(name);
+      expect(text.tagName).toBe("SPAN");
+      expect(text).toHaveAttribute("data-link-resource", "wikilink");
+    }
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.querySelector("[node]")).toBeNull();
+    expect(container.querySelector("[href]")).toBeNull();
+  });
+
   it("marks prefixed external links with their resource", () => {
     render(<PreviewMarkdown content="[paper](arxiv:2301.00001)" />);
 

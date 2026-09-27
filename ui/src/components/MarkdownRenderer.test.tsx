@@ -4,9 +4,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BlockResponse } from "#/api/blocks";
 import { MarkdownRenderer } from "#/components/MarkdownRenderer";
 
-const { openTabMock, useBlockMock } = vi.hoisted(() => ({
-  openTabMock: vi.fn(),
-  useBlockMock: vi.fn(),
+const { openTabMock, useBlockMock, lookupMock, resolveMock } = vi.hoisted(
+  () => ({
+    openTabMock: vi.fn(),
+    useBlockMock: vi.fn(),
+    lookupMock: vi.fn<(target: string) => string | null>(),
+    resolveMock: vi.fn(),
+  }),
+);
+
+vi.mock("#/editor/wikilinkResolution", () => ({
+  useWikilinkResolution: () => ({
+    lookup: lookupMock,
+    refetchAndLookup: vi.fn(),
+  }),
+}));
+
+vi.mock("#/editor/useResolveWikilinkTarget", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useResolveWikilinkTarget: () => ({ resolve: resolveMock }),
 }));
 
 vi.mock("#/api/blocks", async () => {
@@ -55,10 +71,16 @@ function blockFetches(): string[] {
 beforeEach(() => {
   openTabMock.mockReset();
   useBlockMock.mockReset();
+  lookupMock.mockReset();
+  lookupMock.mockReturnValue(null);
+  resolveMock.mockReset();
 });
 
 describe("MarkdownRenderer", () => {
   it("renders snapshot prose and links while keeping nested embeds and HTML inert", async () => {
+    lookupMock.mockImplementation((target) =>
+      target === "source" ? "notes/source.md" : null,
+    );
     const user = userEvent.setup();
     const { container } = render(
       <MarkdownRenderer
@@ -78,7 +100,48 @@ describe("MarkdownRenderer", () => {
     expect(screen.queryByRole("button", { name: "Execute" })).toBeNull();
     expect(useBlockMock).not.toHaveBeenCalled();
     await user.click(screen.getByRole("link", { name: "Source" }));
-    expect(openTabMock).toHaveBeenCalledWith("page", "source");
+    expect(openTabMock).toHaveBeenCalledWith(
+      "page",
+      "notes/source.md",
+      "source",
+    );
+  });
+
+  it("keeps a wikilink's raw target instead of slugifying it", async () => {
+    lookupMock.mockImplementation((target) =>
+      target === "Target Page" ? "notes/target.md" : null,
+    );
+    const user = userEvent.setup();
+    render(<MarkdownRenderer content="See [[Target Page]]." />);
+
+    const link = screen.getByRole("link", { name: "Target Page" });
+    expect(link).toHaveAttribute("href", "/pages/notes%2Ftarget.md");
+    expect(link).not.toHaveAttribute("node");
+    await user.click(link);
+    expect(openTabMock).toHaveBeenCalledWith(
+      "page",
+      "notes/target.md",
+      "Target Page",
+    );
+  });
+
+  it("resolves an unresolved wikilink on click", async () => {
+    resolveMock.mockResolvedValue({
+      path: "inbox/new.md",
+      title: "New Page",
+    });
+    const user = userEvent.setup();
+    render(<MarkdownRenderer content="[[New Page|fresh]]" />);
+
+    await user.click(screen.getByRole("link", { name: "fresh" }));
+    expect(resolveMock).toHaveBeenCalledWith("New Page");
+    await waitFor(() =>
+      expect(openTabMock).toHaveBeenCalledWith(
+        "page",
+        "inbox/new.md",
+        "New Page",
+      ),
+    );
   });
   it("resolves relative attachment and page links from the destination, not the browser route", async () => {
     const user = userEvent.setup();
