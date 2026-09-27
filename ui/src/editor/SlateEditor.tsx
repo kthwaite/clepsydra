@@ -730,6 +730,15 @@ export function SlateEditor({
       return;
     }
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      // Inline math keeps its own source editor and session controller.
+      const adjacentMath = findAdjacentSourceInline(editor, event.key, [
+        "inline-math",
+      ]);
+      if (adjacentMath) {
+        event.preventDefault();
+        mathEditing.begin(adjacentMath.path);
+        return;
+      }
       const adjacent = findAdjacentSourceInline(
         editor,
         event.key,
