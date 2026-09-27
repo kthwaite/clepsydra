@@ -178,10 +178,17 @@ describe("MarkdownRenderer", () => {
     expect(link).toHaveAttribute("data-link-resource", "arxiv");
   });
 
-  it("does not mark internal page links", () => {
-    render(<MarkdownRenderer content="[Local](/pages/notes/local.md)" />);
-    expect(screen.getByRole("link", { name: "Local" })).not.toHaveAttribute(
+  it("marks internal page links and wikilinks with the wikilink mark", () => {
+    render(
+      <MarkdownRenderer content="[Local](/pages/notes/local.md) and [[Other Page]]" />,
+    );
+    expect(screen.getByRole("link", { name: "Local" })).toHaveAttribute(
       "data-link-resource",
+      "wikilink",
+    );
+    expect(screen.getByRole("link", { name: "Other Page" })).toHaveAttribute(
+      "data-link-resource",
+      "wikilink",
     );
   });
 

@@ -9,7 +9,7 @@ Palette: cobalt `#1747E6` (field), bone `#F6F1E6` (drop), ink `#0E1A3A` (hands).
 - `clepsydra-icon.svg` is the master. The field runs to the edges, and the glyph sits inside the PWA maskable 80% safe circle.
 - `clepsydra-icon-macos.svg` is an 824 px tile on the 1024 grid (100 px margin). The glyph is scaled to 0.805.
 - `ui/public/favicon.svg` is a rounded tile. It is also the source for the PWA "any" icons and the extension icon.
-- `ui/src/editor/elements/WikilinkIcon.tsx` is the outline version, used inline for wikilinks.
+- `ui/src/assets/link-marks/wikilink.svg` is the outline version, the trailing CSS mark on wikilinks.
 
 ## Regenerating rasters
 

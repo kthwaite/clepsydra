@@ -9,9 +9,9 @@ import {
 } from "slate";
 import { HistoryEditor } from "slate-history";
 import { matchTrailingInlineProperty } from "#/editor/properties";
-import { makeFootnoteDef } from "#/editor/schema/elements/footnoteDef";
 import { makeFootnoteRef } from "#/editor/schema/elements/footnoteRef";
 import { makeWikilink } from "#/editor/schema/elements/wikilink";
+import { ensureFootnoteDef } from "#/editor/transforms/footnotes";
 import type { CustomElement } from "#/editor/types";
 
 type MarkType = "bold" | "italic" | "strikethrough" | "code";
@@ -390,14 +390,6 @@ function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
     const identifier = label.slice(1);
     if (identifier.trim().length === 0) return false;
 
-    const hasDefinition = editor.children.some((node) => {
-      if (!SlateElement.isElement(node)) return false;
-      const element = node as CustomElement;
-      return (
-        element.type === "footnote-def" && element.identifier === identifier
-      );
-    });
-
     const rangeStart: Point = {
       path,
       offset: openBracketIdx,
@@ -413,12 +405,7 @@ function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
         Transforms.delete(editor);
         Transforms.insertNodes(editor, makeFootnoteRef({ identifier }));
         const referencePath = editor.selection?.anchor.path.slice(0, -1);
-
-        if (!hasDefinition) {
-          Transforms.insertNodes(editor, makeFootnoteDef({ identifier }), {
-            at: [editor.children.length],
-          });
-        }
+        ensureFootnoteDef(editor, identifier);
         if (referencePath) selectTextAfterInline(editor, referencePath);
       });
     });

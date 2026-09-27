@@ -1,12 +1,17 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { WikilinkInlineEditor } from "#/editor/WikilinkInlineEditor";
-import type { WikilinkCaretEdge } from "#/editor/wikilinkEditing";
+import { InlineSourceInput } from "#/editor/InlineSourceInput";
+import type {
+  SourceCaretEdge,
+  SourceParseResult,
+} from "#/editor/inlineSourceEditing";
+import { wikilinkSourceAdapter } from "#/editor/wikilinkSourceAdapter";
 
 interface RenderEditorOptions {
   initialDraft?: string;
-  initialCaret?: WikilinkCaretEdge;
+  initialCaret?: SourceCaretEdge;
+  parse?: (draft: string) => SourceParseResult;
   returnSide?: "before" | "after";
 }
 
@@ -14,12 +19,15 @@ function renderEditor({
   initialDraft = "Target|Label",
   initialCaret = "end",
   returnSide = "after",
+  parse = wikilinkSourceAdapter.parse,
 }: RenderEditorOptions = {}) {
   const onCommit = vi.fn();
   const onCancel = vi.fn();
   const onOpen = vi.fn();
   render(
-    <WikilinkInlineEditor
+    <InlineSourceInput
+      label="Edit wikilink"
+      parse={parse}
       initialDraft={initialDraft}
       initialCaret={initialCaret}
       returnSide={returnSide}
@@ -34,7 +42,7 @@ function renderEditor({
   return { input, onCommit, onCancel, onOpen };
 }
 
-describe("WikilinkInlineEditor", () => {
+describe("InlineSourceInput", () => {
   it("renders the draft and places the caret at the requested start edge", () => {
     const { input } = renderEditor({ initialCaret: "start" });
 
@@ -110,10 +118,7 @@ describe("WikilinkInlineEditor", () => {
     await user.keyboard("{ArrowLeft}");
 
     expect(input).toHaveFocus();
-    expect(onCommit).toHaveBeenCalledWith(
-      { target: "Target", alias: "Label" },
-      "before",
-    );
+    expect(onCommit).toHaveBeenCalledWith("Target|Label", "before");
   });
 
   it("does not exit when ArrowLeft is pressed away from offset zero", async () => {
@@ -133,10 +138,7 @@ describe("WikilinkInlineEditor", () => {
 
     await user.keyboard("{ArrowRight}");
 
-    expect(onCommit).toHaveBeenCalledWith(
-      { target: "Target", alias: "Label" },
-      "after",
-    );
+    expect(onCommit).toHaveBeenCalledWith("Target|Label", "after");
   });
 
   it("commits after on Enter", async () => {
@@ -145,10 +147,7 @@ describe("WikilinkInlineEditor", () => {
 
     await user.keyboard("{Enter}");
 
-    expect(onCommit).toHaveBeenCalledWith(
-      { target: "Target", alias: "Label" },
-      "after",
-    );
+    expect(onCommit).toHaveBeenCalledWith("Target|Label", "after");
   });
 
   it("cancels to the return side on Escape without committing", async () => {
@@ -167,10 +166,7 @@ describe("WikilinkInlineEditor", () => {
 
     await user.tab();
 
-    expect(onCommit).toHaveBeenCalledWith(
-      { target: "Target", alias: "Label" },
-      "preserve",
-    );
+    expect(onCommit).toHaveBeenCalledWith("Target|Label", "preserve");
   });
 
   it.each([
@@ -209,11 +205,8 @@ describe("WikilinkInlineEditor", () => {
 
     await user.keyboard("{Meta>}{Enter}{/Meta}");
 
-    expect(onCommit).toHaveBeenCalledWith(
-      { target: "Target", alias: "Label" },
-      "after",
-    );
-    expect(onOpen).toHaveBeenCalledWith("Target");
+    expect(onCommit).toHaveBeenCalledWith("Target|Label", "after");
+    expect(onOpen).toHaveBeenCalledWith("Target|Label");
     expect(onCommit.mock.invocationCallOrder[0]).toBeLessThan(
       onOpen.mock.invocationCallOrder[0],
     );
@@ -225,11 +218,8 @@ describe("WikilinkInlineEditor", () => {
 
     await user.keyboard("{Control>}{Enter}{/Control}");
 
-    expect(onCommit).toHaveBeenCalledWith(
-      { target: "Target", alias: "Label" },
-      "after",
-    );
-    expect(onOpen).toHaveBeenCalledWith("Target");
+    expect(onCommit).toHaveBeenCalledWith("Target|Label", "after");
+    expect(onOpen).toHaveBeenCalledWith("Target|Label");
   });
 
   it("keeps an invalid Cmd+Enter draft focused without callbacks", async () => {
@@ -252,10 +242,7 @@ describe("WikilinkInlineEditor", () => {
 
     await user.keyboard("{Enter}");
 
-    expect(onCommit).toHaveBeenCalledWith(
-      { target: "Target", alias: "Label|More" },
-      "after",
-    );
+    expect(onCommit).toHaveBeenCalledWith("Target|Label|More", "after");
   });
 
   it("does not commit again when a key-triggered exit is followed by blur", async () => {
@@ -266,5 +253,90 @@ describe("WikilinkInlineEditor", () => {
     await user.tab();
 
     expect(onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  describe("invalid drafts", () => {
+    const strictParse = (draft: string): SourceParseResult =>
+      draft === ""
+        ? { kind: "cancel" }
+        : /^[a-z]+$/.test(draft)
+          ? { kind: "commit", apply: () => {} }
+          : { kind: "invalid" };
+
+    it("marks the input aria-invalid while the draft is invalid", async () => {
+      const user = userEvent.setup();
+      const { input } = renderEditor({
+        initialDraft: "abc",
+        parse: strictParse,
+      });
+
+      expect(input).not.toHaveAttribute("aria-invalid", "true");
+      await user.keyboard("1");
+      expect(input).toHaveAttribute("aria-invalid", "true");
+      await user.keyboard("{Backspace}");
+      expect(input).not.toHaveAttribute("aria-invalid", "true");
+    });
+
+    it("ignores Enter and Cmd+Enter on an invalid draft", async () => {
+      const user = userEvent.setup();
+      const { input, onCommit, onCancel, onOpen } = renderEditor({
+        initialDraft: "abc1",
+        parse: strictParse,
+      });
+
+      await user.keyboard("{Enter}");
+      await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+      expect(input).toHaveFocus();
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(onCancel).not.toHaveBeenCalled();
+      expect(onOpen).not.toHaveBeenCalled();
+    });
+
+    it("still cancels an invalid draft on Escape", async () => {
+      const user = userEvent.setup();
+      const { onCommit, onCancel } = renderEditor({
+        initialDraft: "abc1",
+        parse: strictParse,
+      });
+
+      await user.keyboard("{Escape}");
+
+      expect(onCancel).toHaveBeenCalledWith("after");
+      expect(onCommit).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["{ArrowRight}", "end", "after"],
+      ["{ArrowLeft}", "start", "before"],
+    ] as const)(
+      "cancels an invalid draft on the %s edge exit",
+      async (key, initialCaret, exit) => {
+        const user = userEvent.setup();
+        const { onCommit, onCancel } = renderEditor({
+          initialDraft: "abc1",
+          initialCaret,
+          parse: strictParse,
+        });
+
+        await user.keyboard(key);
+
+        expect(onCancel).toHaveBeenCalledWith(exit);
+        expect(onCommit).not.toHaveBeenCalled();
+      },
+    );
+
+    it("cancels an invalid draft with preserve on blur", async () => {
+      const user = userEvent.setup();
+      const { onCommit, onCancel } = renderEditor({
+        initialDraft: "abc1",
+        parse: strictParse,
+      });
+
+      await user.tab();
+
+      expect(onCancel).toHaveBeenCalledWith("preserve");
+      expect(onCommit).not.toHaveBeenCalled();
+    });
   });
 });

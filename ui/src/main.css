@@ -190,6 +190,20 @@ body {
     background: var(--accent-tint);
 }
 
+/* Inline prose links (Markdown links and wikilinks): a text underline that
+   thickens on hover, instead of the border and tint band. */
+.cl-link.cl-link-underline {
+    border-bottom: 0;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+}
+
+.cl-link.cl-link-underline:hover {
+    background: transparent;
+    text-decoration-thickness: 2px;
+}
+
 /* Block links (Folio rail entries): the card carries its own type, so no
    accent underline or hover band. */
 .cl-link.cl-link-plain,
@@ -215,6 +229,10 @@ body {
 
 [data-link-resource]:is(:hover, :focus-visible)::after {
     opacity: 1;
+}
+
+[data-link-resource="wikilink"] {
+    --link-resource-mask: url("./assets/link-marks/wikilink.svg");
 }
 
 [data-link-resource="wikipedia"] {

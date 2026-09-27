@@ -1,5 +1,4 @@
 import { type KeyboardEvent, type MouseEvent, useRef, useState } from "react";
-import { Path } from "slate";
 import {
   ReactEditor,
   type RenderElementProps,
@@ -7,13 +6,19 @@ import {
   useSlateStatic,
 } from "slate-react";
 import { CLink } from "#/components/codex/CLink";
-import { WikilinkIcon } from "#/editor/elements/WikilinkIcon";
+import { InlineSourceEditor } from "#/editor/InlineSourceInput";
+import {
+  isSessionAt,
+  useInlineSourceEditing,
+} from "#/editor/inlineSourceEditing";
 import { MissingWikilinkPopover } from "#/editor/MissingWikilinkPopover";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
-import { WikilinkInlineEditor } from "#/editor/WikilinkInlineEditor";
-import { useWikilinkEditing } from "#/editor/wikilinkEditing";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
+import {
+  parseWikilinkDraft,
+  wikilinkSourceAdapter,
+} from "#/editor/wikilinkSourceAdapter";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
@@ -24,7 +29,7 @@ type Props = RenderElementProps & { element: WikilinkElementType };
 export function WikilinkElement({ attributes, children, element }: Props) {
   const editor = useSlateStatic();
   const readOnly = useReadOnly();
-  const controller = useWikilinkEditing();
+  const controller = useInlineSourceEditing();
   const { lookup } = useWikilinkResolution();
   const { resolveOrCreate } = useResolveOrCreateWikilinkTarget();
   const openTab = useOpenTab();
@@ -72,35 +77,18 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     }
   };
 
-  if (
-    !readOnly &&
-    activeSession !== null &&
-    Path.equals(activeSession.path, path)
-  ) {
-    const draft =
-      element.alias === undefined
-        ? element.target
-        : `${element.target}|${element.alias}`;
+  if (!readOnly && activeSession && isSessionAt(activeSession, path)) {
     return (
       <span {...attributes}>
-        <span contentEditable={false} className="align-baseline text-ink">
-          <span aria-hidden className="text-mute">
-            [[
-          </span>
-          <WikilinkInlineEditor
-            initialDraft={draft}
-            initialCaret={activeSession.initialCaret}
-            returnSide={activeSession.returnSide}
-            onCommit={(parsed, exit) => controller.commit(parsed, exit)}
-            onCancel={(exit) => controller.cancel(exit)}
-            onOpen={(target) => {
-              void openTarget(target);
-            }}
-          />
-          <span aria-hidden className="text-mute">
-            ]]
-          </span>
-        </span>
+        <InlineSourceEditor
+          adapter={wikilinkSourceAdapter}
+          element={element}
+          session={activeSession}
+          onOpen={(draft) => {
+            const parsed = parseWikilinkDraft(draft);
+            if (parsed) void openTarget(parsed.target);
+          }}
+        />
         {children}
       </span>
     );
@@ -110,7 +98,6 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   // Resolved links read as links (accent); a missing page reads mute and
   // italic, like the attendee "no page carries this name yet" state.
   const linkClassName = dangling ? "italic text-mute" : "text-accent";
-  const iconClassName = dangling ? "text-mute" : "text-accent";
 
   const handleActivation = (event: MouseEvent | KeyboardEvent) => {
     event.preventDefault();
@@ -136,16 +123,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     if (event.key === "Enter") handleActivation(event);
   };
 
-  const linkContent = (
-    <>
-      <WikilinkIcon
-        size="0.85em"
-        strokeWidth={1.8}
-        className={`mr-1 inline-block align-[-0.1em] ${iconClassName}`}
-      />
-      <span>{displayText}</span>
-    </>
-  );
+  const linkContent = <span>{displayText}</span>;
 
   return (
     <span {...attributes}>
@@ -154,7 +132,8 @@ export function WikilinkElement({ attributes, children, element }: Props) {
           <CLink
             path={resolved}
             onClick={handleActivation}
-            className={linkClassName}
+            className={cn("cl-link-underline", linkClassName)}
+            resource="wikilink"
           >
             {linkContent}
           </CLink>
@@ -173,6 +152,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
                 onKeyDown: handleKeyDown,
               }}
               tabIndex={0}
+              data-link-resource="wikilink"
               className={cn(
                 "relative cursor-pointer rounded-[3px] hover:text-ink",
                 FOCUS_RING_NATIVE,

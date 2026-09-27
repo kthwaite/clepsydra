@@ -427,13 +427,15 @@ wiki:"Vichy Catalán"
 Bare values convert when you type Space or Enter:
 
 ```text
+wiki:Frida_Kahlo
 arxiv:2401.00001
 youtube:dQw4w9WgXcQ
 youtube:https://youtu.be/dQw4w9WgXcQ
 ```
 
 Clepsydra uses deterministic labels such as `arXiv: 2401.00001` and
-`YouTube: dQw4w9WgXcQ`. Wikipedia targets English Wikipedia. arXiv accepts
+`YouTube: dQw4w9WgXcQ`. Wikipedia targets English Wikipedia; underscores in a
+bare value become spaces in the label, so `wiki:Frida_Kahlo` reads `Frida Kahlo`. arXiv accepts
 identifiers, not full arXiv URLs: use modern `NNNN.NNNN` or `NNNN.NNNNN`
 form and legacy `archive/NNNNNNN` form.
 Either form may have an optional positive `vN` version suffix. YouTube accepts
@@ -459,6 +461,9 @@ DOI, PubMed, Semantic Scholar, GitHub, GitLab, Internet Archive, YouTube, and
 Vimeo. Direct PDF, audio, video, and image links receive file-type marks. A
 specific service takes precedence over a generic file extension, so an arXiv
 PDF receives the arXiv mark rather than the generic PDF mark.
+
+Wikilinks and other links to vault pages carry the Clepsydra drop-dial mark in
+the same trailing position, so every marked link reads the same way.
 
 ## Math
 
