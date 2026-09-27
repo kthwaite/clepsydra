@@ -22,6 +22,18 @@ describe("expandPrefixedLink", () => {
       "https://en.wikipedia.org/wiki/Hypertext",
       "Hypertext",
     ],
+    [
+      "wiki",
+      "Frida_Kahlo",
+      "https://en.wikipedia.org/wiki/Frida_Kahlo",
+      "Frida Kahlo",
+    ],
+    [
+      "wiki",
+      "_Frida__Kahlo_",
+      "https://en.wikipedia.org/wiki/Frida_Kahlo",
+      "Frida Kahlo",
+    ],
   ])("expands Wikipedia value %#", (prefix, value, url, label) => {
     expect(expandPrefixedLink(prefix, value)).toEqual({
       provider: "wiki",
@@ -37,6 +49,7 @@ describe("expandPrefixedLink", () => {
   it.each([
     "",
     "   ",
+    "___",
     "title\u0000suffix",
     "title\u0009suffix",
     "title\u0085suffix",
