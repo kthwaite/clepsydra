@@ -13,24 +13,47 @@ import { SlateEditor } from "#/editor/SlateEditor";
 import { makeWikilink } from "#/editor/schema/elements/wikilink";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 
-function ProductionEditor() {
-  const initialValue = useMemo<Descendant[]>(
-    () => [
-      {
-        type: "paragraph",
-        children: [
-          { text: "Before " },
-          makeWikilink({
-            target: "Clepsydra Design Notes",
-            alias: "the design doc",
-          }),
-          { text: " after" },
-        ],
-      },
+const LABELED_WIKILINK: Descendant[] = [
+  {
+    type: "paragraph",
+    children: [
+      { text: "Before " },
+      makeWikilink({
+        target: "Clepsydra Design Notes",
+        alias: "the design doc",
+      }),
+      { text: " after" },
     ],
-    [],
-  );
+  },
+];
 
+const INLINE_SOURCES: Descendant[] = [
+  {
+    type: "paragraph",
+    children: [
+      { text: "A " },
+      {
+        type: "link",
+        url: "https://en.wikipedia.org/wiki/Frida_Kahlo",
+        children: [{ text: "Frida " }, { text: "Kahlo", bold: true }],
+      },
+      { text: " link, a note" },
+      { type: "footnote-ref", identifier: "1", children: [{ text: "" }] },
+      { text: ", math " },
+      { type: "inline-math", tex: "e^{i\\pi}", children: [{ text: "" }] },
+      { text: " and a ref " },
+      { type: "block-ref", blockId: "abc123DEF0", children: [{ text: "" }] },
+      { text: " end." },
+    ],
+  },
+  {
+    type: "footnote-def",
+    identifier: "1",
+    children: [{ type: "paragraph", children: [{ text: "The note." }] }],
+  },
+] as Descendant[];
+
+function ProductionEditor({ initialValue }: { initialValue: Descendant[] }) {
   return (
     <WikilinkResolutionProvider path="notes/story.md">
       <SlateEditor
@@ -42,7 +65,7 @@ function ProductionEditor() {
   );
 }
 
-function StoryProviders() {
+function StoryProviders({ value }: { value: Descendant[] }) {
   const queryClient = useMemo(
     () =>
       new QueryClient({
@@ -54,7 +77,9 @@ function StoryProviders() {
     [],
   );
   const router = useMemo(() => {
-    const rootRoute = createRootRoute({ component: ProductionEditor });
+    const rootRoute = createRootRoute({
+      component: () => <ProductionEditor initialValue={value} />,
+    });
     const indexRoute = createRoute({
       getParentRoute: () => rootRoute,
       path: "/",
@@ -69,7 +94,7 @@ function StoryProviders() {
       routeTree: rootRoute.addChildren([indexRoute, workspaceRoute]),
       history: createMemoryHistory({ initialEntries: ["/"] }),
     });
-  }, []);
+  }, [value]);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -87,12 +112,24 @@ export default meta;
 type Story = StoryObj;
 
 export const EditableLabeledWikilink: Story = {
-  render: () => <StoryProviders />,
+  render: () => <StoryProviders value={LABELED_WIKILINK} />,
   parameters: {
     docs: {
       description: {
         story:
           "Only ‘the design doc’ is passive. Click to edit; use Left/Right to enter from adjacent prose.",
+      },
+    },
+  },
+};
+
+export const InlineSourceEditing: Story = {
+  render: () => <StoryProviders value={INLINE_SOURCES} />,
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Use Left/Right from adjacent prose to open the Markdown source of the link, footnote ref, math and block ref.",
       },
     },
   },

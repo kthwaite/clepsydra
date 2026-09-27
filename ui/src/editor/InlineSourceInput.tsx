@@ -1,7 +1,7 @@
 import {
   type KeyboardEvent,
   type ReactNode,
-  useLayoutEffect,
+  useEffect,
   useRef,
   useState,
 } from "react";
@@ -51,7 +51,11 @@ export function InlineSourceInput({
   const finishedRef = useRef(false);
   const invalid = parse(draft).kind === "invalid";
 
-  useLayoutEffect(() => {
+  // A passive effect, not a layout one: it runs after React has attached every
+  // ref in the commit, including a remounted element root (a link swaps its
+  // <a> for a <span>). Focusing earlier blurs the editor while Slate cannot yet
+  // map the input's element, which throws in Slate's onBlur.
+  useEffect(() => {
     const input = inputRef.current;
     if (!input) return;
 

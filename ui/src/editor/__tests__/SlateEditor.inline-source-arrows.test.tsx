@@ -304,6 +304,38 @@ describe("SlateEditor link source editing", () => {
     expect(editor.selection?.anchor).toEqual({ path: [0, 0], offset: 4 });
   });
 
+  it("focuses the input only once Slate can map it to the link", async () => {
+    // The session swaps the link's <a> root for a new <span>. Slate's onBlur
+    // resolves the focus target to a Slate node; if the input takes focus
+    // before the new root's ref is attached, that throws, the editor never
+    // clears its focused flag, and it pulls focus back, cancelling the session.
+    const harness = await renderAt(
+      [paragraph([{ text: "See " }, boldLink, { text: " now." }])],
+      [0, 0],
+      "See ".length,
+    );
+    const { ReactEditor } =
+      await vi.importActual<typeof import("slate-react")>("slate-react");
+    const resolved: boolean[] = [];
+    const onFocusIn = (event: FocusEvent) => {
+      if (!(event.target instanceof HTMLInputElement)) return;
+      try {
+        ReactEditor.toSlateNode(harness.editor, event.target);
+        resolved.push(true);
+      } catch {
+        resolved.push(false);
+      }
+    };
+    document.addEventListener("focusin", onFocusIn, true);
+    try {
+      fireEvent.keyDown(harness.editable, { key: "ArrowRight" });
+      await screen.findByRole("textbox", { name: "Edit link" });
+      await waitFor(() => expect(resolved).toEqual([true]));
+    } finally {
+      document.removeEventListener("focusin", onFocusIn, true);
+    }
+  });
+
   it("keeps the link's Slate children mounted but hidden during the session", async () => {
     const { input } = await enterLink(
       [paragraph([{ text: "See " }, boldLink, { text: " now." }])],
