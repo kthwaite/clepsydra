@@ -23,6 +23,11 @@ export interface CellEditorProps {
   /** Commit local editor state when focus leaves; defaults to cancel-on-blur. */
   commitOnBlur?: boolean;
   /**
+   * Values worth offering beyond the declared options, e.g. those already
+   * used in this column. Only list-valued editors (multi-select) read it.
+   */
+  suggestions?: string[];
+  /**
    * Commit the edited value. `null` clears the key. `hint` carries the
    * declared type when the wire value needs disambiguation (dates).
    */

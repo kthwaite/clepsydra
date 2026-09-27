@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Select, SelectItem } from "#/components/ui/select";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { TagInput } from "#/components/ui/tag-input";
 import { type CellEditorProps, tabCommit } from "./types";
 
 function currentValues(value: CellEditorProps["value"]): string[] {
@@ -10,14 +10,33 @@ function currentValues(value: CellEditorProps["value"]): string[] {
   return [];
 }
 
+/** TagInput's own duplicate rule: trimmed, case-insensitive. */
+const sameValue = (left: string, right: string) =>
+  left.trim().toLowerCase() === right.trim().toLowerCase();
+
+function withValue(values: string[], candidate: string): string[] {
+  const trimmed = candidate.trim();
+  if (trimmed === "" || values.some((value) => sameValue(value, trimmed))) {
+    return values;
+  }
+  return [...values, trimmed];
+}
+
 /**
- * Multi-select editor: toggles memberships while preserving the rest of the
- * array — a commit always carries the complete value set, never a single
- * chosen option. Enter commits, Escape/blur cancels.
+ * Multi-select editor: a tag input over an open vocabulary. Suggestions are
+ * the declared options plus any caller-supplied values (the column's). A
+ * commit always carries the complete value set, never a single value, and
+ * includes text typed but not yet added.
+ *
+ * Enter adds the typed value (or the highlighted suggestion); Enter on an
+ * empty field commits. Escape closes open suggestions, then cancels. Tab and
+ * Shift+Tab commit and move, except in drafts (`commitOnBlur`). Blur leaving
+ * the editor commits in drafts and cancels inline.
  */
 export function MultiSelectCell({
   value,
   definition,
+  suggestions,
   onCommit,
   onCommitNext,
   onCommitPrevious,
@@ -26,27 +45,37 @@ export function MultiSelectCell({
   ariaDescribedBy,
   commitOnBlur,
 }: CellEditorProps) {
-  const initial = currentValues(value);
-  const [selected, setSelected] = useState<string[]>(initial);
+  const [selected, setSelected] = useState<string[]>(() =>
+    currentValues(value),
+  );
+  const rootRef = useRef<HTMLFieldSetElement>(null);
+  const name = ariaLabel ?? "Edit multi-select";
+
+  const choices = useMemo(
+    () =>
+      [...(definition.options ?? []), ...(suggestions ?? [])].reduce<string[]>(
+        withValue,
+        [],
+      ),
+    [definition.options, suggestions],
+  );
+
+  const input = () => rootRef.current?.querySelector("input") ?? null;
+
+  useLayoutEffect(() => {
+    rootRef.current?.querySelector("input")?.focus();
+  }, []);
+
   const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
-    submit(selected.length === 0 ? null : selected);
+    // `selected` may lag a same-event add; the field's text is still there.
+    const next = withValue(selected, input()?.value ?? "");
+    submit(next.length === 0 ? null : next);
   };
 
-  // Open vocabulary (or novel values on disk): keep them selectable.
-  const options = [
-    ...(definition.options ?? []),
-    ...initial.filter((v) => !(definition.options ?? []).includes(v)),
-  ];
-  const choices = options.map((option, index) => ({
-    id: `option-${index}`,
-    value: option,
-  }));
-  const selectedIds = choices
-    .filter((choice) => selected.includes(choice.value))
-    .map((choice) => choice.id);
-
   return (
-    <div
+    <fieldset
+      ref={rootRef}
+      className="m-0 min-w-0 border-0 p-0"
       onKeyDownCapture={(event) => {
         const tabSubmit = tabCommit(event, {
           commitOnBlur,
@@ -57,45 +86,49 @@ export function MultiSelectCell({
           event.preventDefault();
           event.stopPropagation();
           commit(tabSubmit);
-          return;
         }
-        if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) {
+      }}
+      // Bubble phase: TagInput has already handled the key. It stops
+      // Escape while suggestions are open, so that Escape never gets here.
+      onKeyDown={(event) => {
+        if (
+          event.key === "Enter" &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          event.target === input() &&
+          (input()?.value.trim() ?? "") === ""
+        ) {
           event.preventDefault();
           commit();
-        }
-        if (event.key === "Escape") {
+        } else if (event.key === "Escape") {
           event.preventDefault();
           onCancel();
         }
       }}
+      onBlur={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        if (commitOnBlur) {
+          commit();
+        } else {
+          onCancel();
+        }
+      }}
     >
-      <Select
-        autoFocus
-        selectionMode="multiple"
-        aria-label={ariaLabel ?? "Edit multi-select"}
-        aria-describedby={ariaDescribedBy}
-        value={selectedIds}
-        onChange={(keys) => {
-          setSelected(
-            choices
-              .filter((choice) => keys.includes(choice.id))
-              .map((choice) => choice.value),
-          );
-        }}
-        onBlur={() => {
-          if (commitOnBlur) {
-            commit();
-          } else {
-            onCancel();
-          }
-        }}
-      >
-        {choices.map((choice) => (
-          <SelectItem key={choice.id} id={choice.id}>
-            {choice.value}
-          </SelectItem>
-        ))}
-      </Select>
-    </div>
+      <TagInput
+        label="Values"
+        hideLabel
+        ariaLabel={name}
+        valuesLabel={`${name} values`}
+        ariaDescribedBy={ariaDescribedBy}
+        values={selected}
+        suggestions={choices}
+        maxSuggestions={8}
+        floatingSuggestions
+        placeholder="Add value"
+        onChange={setSelected}
+        className="min-w-[10rem] gap-1"
+      />
+    </fieldset>
   );
 }

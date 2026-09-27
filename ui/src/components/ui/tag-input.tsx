@@ -1,3 +1,10 @@
+import {
+  autoUpdate,
+  flip,
+  offset,
+  shift,
+  useFloating,
+} from "@floating-ui/react";
 import { X } from "lucide-react";
 import {
   type Key,
@@ -34,6 +41,16 @@ export interface TagInputProps {
   maxSuggestions?: number;
   /** Called after the input loses focus (and any draft is committed). */
   onBlur?: () => void;
+  /** Keep the label for assistive tech only (e.g. inside a table cell). */
+  hideLabel?: boolean;
+  /** Accessible name of the chip group; defaults to `ariaLabel ?? label`. */
+  valuesLabel?: string;
+  /**
+   * Position the suggestion list with fixed positioning so a scrolling or
+   * clipping ancestor (a table cell) cannot cut it off. It stays a DOM
+   * descendant of the field, so focus logic still sees it as inside.
+   */
+  floatingSuggestions?: boolean;
 }
 
 const tagsEqual = (left: string, right: string) =>
@@ -58,6 +75,9 @@ export function TagInput({
   maxSuggestions = 5,
   className,
   onBlur,
+  hideLabel = false,
+  valuesLabel,
+  floatingSuggestions = false,
 }: TagInputProps) {
   const [inputValue, setInputValue] = useState("");
   const [highlight, setHighlight] = useState(0);
@@ -90,6 +110,13 @@ export function TagInput({
   const open = !dismissed && matches.length > 0;
   const selected = Math.min(highlight, Math.max(matches.length - 1, 0));
   const inputRef = useRef<HTMLInputElement>(null);
+  const floating = useFloating({
+    open: floatingSuggestions && open,
+    placement: "bottom-start",
+    strategy: "fixed",
+    middleware: [offset(4), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
   const suggestionInputProps = hasSuggestions
     ? {
         role: "combobox" as const,
@@ -203,6 +230,7 @@ export function TagInput({
 
   return (
     <fieldset
+      ref={floatingSuggestions ? floating.refs.setReference : undefined}
       aria-label={label}
       className={cn(
         "relative m-0 flex min-w-0 flex-wrap items-center gap-1.5 border-0 p-0",
@@ -217,7 +245,10 @@ export function TagInput({
         }
       }}
     >
-      <label htmlFor={inputId} className="text-[12.5px] text-mute">
+      <label
+        htmlFor={inputId}
+        className={cn("text-[12.5px] text-mute", hideLabel && "sr-only")}
+      >
         {label}:
       </label>
       {readOnlyValues.length > 0 && (
@@ -244,7 +275,7 @@ export function TagInput({
       {values.length > 0 && (
         <TagGroup
           onRemove={handleRemove}
-          aria-label={ariaLabel ?? label}
+          aria-label={valuesLabel ?? ariaLabel ?? label}
           aria-describedby={ariaDescribedBy}
           className="contents"
         >
@@ -342,11 +373,24 @@ export function TagInput({
       ) : null}
       {open && (
         <div
+          ref={floatingSuggestions ? floating.refs.setFloating : undefined}
           id={listId}
           role="listbox"
           aria-label="Tag suggestions"
+          style={
+            floatingSuggestions
+              ? {
+                  ...floating.floatingStyles,
+                  // Hidden, not removed, until measured: no flash at the origin.
+                  opacity: floating.isPositioned ? undefined : 0,
+                }
+              : undefined
+          }
           className={cn(
-            "absolute left-0 right-0 top-full z-20 m-0 mt-1 max-h-[200px] list-none overflow-auto rounded-xl bg-raise p-1.5 shadow-lg",
+            "z-20 m-0 max-h-[200px] list-none overflow-auto rounded-xl bg-raise p-1.5 shadow-lg",
+            floatingSuggestions
+              ? "z-50 min-w-48 max-w-80"
+              : "absolute left-0 right-0 top-full mt-1",
           )}
         >
           {matches.map((suggestion, index) => (

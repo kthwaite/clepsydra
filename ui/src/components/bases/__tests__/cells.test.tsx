@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -19,6 +19,7 @@ interface CellHarnessProps {
   onCommit: EditableProps["onCommit"];
   onCommitNext: NonNullable<EditableProps["onCommitNext"]>;
   onCommitPrevious: NonNullable<EditableProps["onCommitPrevious"]>;
+  suggestions?: string[];
 }
 
 function CellHarness({
@@ -28,12 +29,14 @@ function CellHarness({
   onCommit,
   onCommitNext,
   onCommitPrevious,
+  suggestions,
 }: CellHarnessProps) {
   const [isEditing, setIsEditing] = useState(false);
   return (
     <EditableCell
       value={value}
       definition={definition}
+      suggestions={suggestions}
       isEditing={isEditing}
       onEdit={() => setIsEditing(true)}
       onCancel={() => setIsEditing(false)}
@@ -58,6 +61,7 @@ function renderCell(
   value: EditableProps["value"],
   definition: PropertyDefinition,
   accessibility: AccessibilityProps = {},
+  suggestions?: string[],
 ) {
   const onCommit = vi.fn();
   const onCommitNext = vi.fn();
@@ -70,6 +74,7 @@ function renderCell(
       onCommit={onCommit}
       onCommitNext={onCommitNext}
       onCommitPrevious={onCommitPrevious}
+      suggestions={suggestions}
     />,
   );
   return { onCommit, onCommitNext, onCommitPrevious };
@@ -169,85 +174,6 @@ describe("cell editors", () => {
     expect(onCommit).not.toHaveBeenCalled();
     // Back to display mode with the original value.
     expect(screen.getByRole("button", { name: "Gene Wolfe" })).toBeTruthy();
-  });
-
-  it("multi-select preserves the existing array when toggling a value", async () => {
-    const user = userEvent.setup();
-    const { onCommit } = renderCell(["memory", "identity"], {
-      type: "multi_select",
-      options: ["memory", "identity", "style", "grief"],
-    });
-    await user.click(screen.getByRole("button", { name: "memory, identity" }));
-    const trigger = screen.getByRole("button", {
-      name: /Edit multi-select/,
-    });
-    await user.click(trigger);
-    const style = await screen.findByRole("option", { name: "style" });
-    // Toggle a third option on; the original two must survive the commit.
-    await user.click(style);
-    await user.keyboard("{Enter}");
-    expect(onCommit).toHaveBeenCalledTimes(1);
-    const [committed] = onCommit.mock.calls[0];
-    expect(committed).toEqual(
-      expect.arrayContaining(["memory", "identity", "style"]),
-    );
-    expect(committed).toHaveLength(3);
-  });
-
-  it("multi-select commits the complete latest selection on blur when enabled", async () => {
-    const user = userEvent.setup();
-    const onCommit = vi.fn();
-    render(
-      <>
-        <EditableCell
-          value={["memory", "identity"]}
-          definition={{
-            type: "multi_select",
-            options: ["memory", "identity", "style"],
-          }}
-          commitOnBlur
-          onCommit={onCommit}
-        />
-        <button type="button" data-testid="outside-focus">
-          Outside
-        </button>
-      </>,
-    );
-    await user.click(screen.getByRole("button", { name: "memory, identity" }));
-    const trigger = screen.getByRole("button", {
-      name: /Edit multi-select/,
-    });
-    await user.click(trigger);
-    await user.click(await screen.findByRole("option", { name: "style" }));
-
-    screen.getByTestId("outside-focus").focus();
-
-    expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit).toHaveBeenCalledWith(
-      ["memory", "identity", "style"],
-      undefined,
-    );
-  });
-
-  it("multi-select cancels a changed selection with Escape", async () => {
-    const user = userEvent.setup();
-    const { onCommit } = renderCell(["memory", "identity"], {
-      type: "multi_select",
-      options: ["memory", "identity", "style"],
-    });
-    await user.click(screen.getByRole("button", { name: "memory, identity" }));
-    const trigger = screen.getByRole("button", {
-      name: /Edit multi-select/,
-    });
-    await user.click(trigger);
-    await user.click(await screen.findByRole("option", { name: "style" }));
-
-    await user.keyboard("{Escape}");
-
-    expect(onCommit).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole("button", { name: "memory, identity" }),
-    ).toBeInTheDocument();
   });
 
   it("datetime edit preserves the time component and zone suffix", async () => {
@@ -384,29 +310,6 @@ describe("cell editors", () => {
     );
   });
 
-  it("multi-select cell commits its complete selection with Tab", async () => {
-    const user = userEvent.setup();
-    const { onCommit, onCommitNext } = renderCell(["memory", "identity"], {
-      type: "multi_select",
-      options: ["memory", "identity", "style"],
-    });
-    await user.click(screen.getByRole("button", { name: "memory, identity" }));
-    const trigger = screen.getByRole("button", {
-      name: /Edit multi-select/,
-    });
-    await user.click(trigger);
-    const style = await screen.findByRole("option", { name: "style" });
-    await user.click(style);
-
-    fireEvent.keyDown(style, { key: "Tab" });
-
-    expect(onCommit).not.toHaveBeenCalled();
-    expect(onCommitNext).toHaveBeenCalledWith(
-      ["memory", "identity", "style"],
-      undefined,
-    );
-  });
-
   it("relation cell serializes every target when committing with Tab", async () => {
     vi.stubGlobal(
       "fetch",
@@ -486,7 +389,7 @@ describe("cell editors", () => {
       ["memory"],
       { type: "multi_select", options: ["memory", "style"] },
       "memory",
-      /Edit multi-select/,
+      /^Edit multi-select$/,
       [["memory"], undefined],
     ],
   ];
@@ -614,6 +517,258 @@ describe("cell editors", () => {
       vi.unstubAllGlobals();
     },
   );
+});
+
+describe("multi-select tag editor", () => {
+  const hops: PropertyDefinition = { type: "multi_select" };
+  const moods: PropertyDefinition = {
+    type: "multi_select",
+    options: ["memory", "identity", "style", "grief"],
+  };
+
+  async function openEditor(
+    user: ReturnType<typeof userEvent.setup>,
+    display: string,
+  ) {
+    await user.click(screen.getByRole("button", { name: display }));
+    const input = screen.getByRole("combobox", { name: "Edit multi-select" });
+    expect(input).toHaveFocus();
+    return input;
+  }
+
+  it("adds a value to an open-vocabulary empty cell and commits it", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(null, hops);
+    await openEditor(user, "—");
+
+    await user.keyboard("Citra{Enter}");
+    expect(
+      screen.getByRole("grid", { name: "Edit multi-select values" }),
+    ).toHaveTextContent("Citra");
+    expect(onCommit).not.toHaveBeenCalled();
+
+    await user.keyboard("{Enter}");
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith(["Citra"], undefined);
+  });
+
+  it("preserves existing values and appends a new one", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(["memory", "identity"], moods);
+    await openEditor(user, "memory, identity");
+
+    await user.keyboard("Sorrow{Enter}{Enter}");
+
+    expect(onCommit).toHaveBeenCalledWith(
+      ["memory", "identity", "Sorrow"],
+      undefined,
+    );
+  });
+
+  it("chooses a declared option from the suggestions", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(["memory"], moods);
+    await openEditor(user, "memory");
+
+    await user.keyboard("sty");
+    expect(screen.getByRole("option", { name: "style" })).toBeInTheDocument();
+    await user.keyboard("{ArrowDown}{Enter}{Enter}");
+
+    expect(onCommit).toHaveBeenCalledWith(["memory", "style"], undefined);
+  });
+
+  it("chooses a column value from the suggestions without cancelling", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(null, hops, {}, ["Mosaic", "Citra"]);
+    await openEditor(user, "—");
+
+    await user.keyboard("mos");
+    await user.click(screen.getByRole("option", { name: "Mosaic" }));
+    expect(
+      screen.getByRole("combobox", { name: "Edit multi-select" }),
+    ).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    expect(onCommit).toHaveBeenCalledWith(["Mosaic"], undefined);
+  });
+
+  it("lists each suggestion once", async () => {
+    const user = userEvent.setup();
+    renderCell(null, { type: "multi_select", options: ["Mosaic"] }, {}, [
+      "Mosaic",
+      "Mosaic",
+    ]);
+    await openEditor(user, "—");
+
+    await user.keyboard("mos");
+
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+  });
+
+  it("does not add a duplicate value", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(["Citra"], hops);
+    await openEditor(user, "Citra");
+
+    await user.keyboard("Citra{Enter}citra{Enter}{Enter}");
+
+    expect(onCommit).toHaveBeenCalledWith(["Citra"], undefined);
+  });
+
+  it("removes the last chip with Backspace on an empty field", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(["memory", "identity"], moods);
+    await openEditor(user, "memory, identity");
+
+    await user.keyboard("{Backspace}{Enter}");
+
+    expect(onCommit).toHaveBeenCalledWith(["memory"], undefined);
+  });
+
+  it("commits null when the last value is removed", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(["memory"], moods);
+    await openEditor(user, "memory");
+
+    await user.keyboard("{Backspace}{Enter}");
+
+    expect(onCommit).toHaveBeenCalledWith(null, undefined);
+  });
+
+  it("commits the unchanged set with Enter on an empty field", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(["memory", "identity"], moods);
+    await openEditor(user, "memory, identity");
+
+    await user.keyboard("{Enter}");
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith(["memory", "identity"], undefined);
+  });
+
+  it("closes open suggestions with Escape before cancelling", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(["memory"], moods);
+    await openEditor(user, "memory");
+
+    await user.keyboard("sty");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Edit multi-select" }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "memory" })).toBeInTheDocument();
+  });
+
+  it("commits the complete set with Tab and moves forward", async () => {
+    const user = userEvent.setup();
+    const { onCommit, onCommitNext } = renderCell(["memory"], moods);
+    await openEditor(user, "memory");
+
+    await user.keyboard("style{Enter}{Tab}");
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCommitNext).toHaveBeenCalledTimes(1);
+    expect(onCommitNext).toHaveBeenCalledWith(["memory", "style"], undefined);
+  });
+
+  it("commits the complete set with Shift+Tab and moves back", async () => {
+    const user = userEvent.setup();
+    const { onCommit, onCommitPrevious } = renderCell(["memory"], moods);
+    await openEditor(user, "memory");
+
+    await user.keyboard("style{Enter}{Shift>}{Tab}{/Shift}");
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCommitPrevious).toHaveBeenCalledTimes(1);
+    expect(onCommitPrevious).toHaveBeenCalledWith(
+      ["memory", "style"],
+      undefined,
+    );
+  });
+
+  it("includes typed-but-unadded text in a Tab commit", async () => {
+    const user = userEvent.setup();
+    const { onCommitNext } = renderCell(["memory"], moods);
+    await openEditor(user, "memory");
+
+    await user.keyboard("grief{Tab}");
+
+    expect(onCommitNext).toHaveBeenCalledWith(["memory", "grief"], undefined);
+  });
+
+  it("cancels inline edits on blur", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(["memory"], moods);
+    await openEditor(user, "memory");
+
+    await user.keyboard("style{Enter}");
+    act(() => {
+      (document.activeElement as HTMLElement).blur();
+    });
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "memory" })).toBeInTheDocument();
+  });
+
+  it("commits the complete set on blur in a draft", async () => {
+    const user = userEvent.setup();
+    const onCommit = vi.fn();
+    render(
+      <>
+        <EditableCell
+          value={["memory", "identity"]}
+          definition={moods}
+          commitOnBlur
+          onCommit={onCommit}
+        />
+        <button type="button" data-testid="outside-focus">
+          Outside
+        </button>
+      </>,
+    );
+    await openEditor(user, "memory, identity");
+
+    await user.keyboard("style{Enter}grief");
+    act(() => {
+      screen.getByTestId("outside-focus").focus();
+    });
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith(
+      ["memory", "identity", "style", "grief"],
+      undefined,
+    );
+  });
+
+  it("keeps a draft editor open while focus moves to a chip's remove button", async () => {
+    const user = userEvent.setup();
+    const onCommit = vi.fn();
+    render(
+      <EditableCell
+        value={["memory", "identity"]}
+        definition={moods}
+        commitOnBlur
+        onCommit={onCommit}
+      />,
+    );
+    await openEditor(user, "memory, identity");
+
+    const removeButtons = screen.getAllByRole("button", { name: /Remove/ });
+    act(() => {
+      removeButtons[0].focus();
+    });
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("combobox", { name: "Edit multi-select" }),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("metadata control accessibility", () => {

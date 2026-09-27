@@ -1838,3 +1838,36 @@ describe("BaseTableView", () => {
     expect(props.onOpenPage).not.toHaveBeenCalled();
   });
 });
+
+describe("BaseTableView multi-select suggestions", () => {
+  it("suggests values used in the same column on other rows", async () => {
+    const user = userEvent.setup();
+    const hopsDefinition: BaseDetailResponse = {
+      ...definition,
+      properties: [
+        ...(definition.properties ?? []),
+        { key: "hops", definition: { type: "multi_select" } },
+      ],
+      views: [{ name: "Brews", layout: "table", columns: ["title", "hops"] }],
+    };
+    const rows = [
+      { ...row, id: "01", columns: { hops: ["Citra"] } },
+      { ...row, id: "02", path: "two.md", columns: { hops: ["Mosaic"] } },
+      { ...row, id: "03", path: "three.md", columns: { hops: "Simcoe" } },
+    ];
+    renderView({
+      definition: hopsDefinition,
+      activeView: "Brews",
+      output: { shape: "flat", rows, total: 3, aggregates: [] },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Citra" }));
+    const input = screen.getByRole("combobox", { name: "Edit multi-select" });
+    await user.type(input, "o");
+
+    const options = screen
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(options).toEqual(["Mosaic", "Simcoe"]);
+  });
+});

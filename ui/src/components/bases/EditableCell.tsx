@@ -11,6 +11,8 @@ interface EditableCellCommonProps {
   ariaLabel?: string;
   ariaDescribedBy?: string;
   commitOnBlur?: boolean;
+  /** Extra editor suggestions, e.g. values used elsewhere in the column. */
+  suggestions?: string[];
   /** Focus the display affordance when an external async action closes edit mode. */
   focusOnDisplay?: boolean;
   /** Keep a controlled draft mounted while focus moves to sibling recovery actions. */
@@ -55,6 +57,7 @@ export function EditableCell({
   focusOnDisplay = false,
   preserveEditingOnBlur = false,
   commitOnBlur = false,
+  suggestions,
   onCommit,
   onCommitNext,
   onCommitPrevious,
@@ -81,6 +84,7 @@ export function EditableCell({
         ariaLabel={ariaLabel}
         ariaDescribedBy={ariaDescribedBy}
         commitOnBlur={commitOnBlur}
+        suggestions={suggestions}
         onCommit={(next, hint) => {
           if (!controlled) setLocalEditing(false);
           onCommit(next, hint);

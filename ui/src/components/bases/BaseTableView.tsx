@@ -877,6 +877,22 @@ export const BaseTableView = forwardRef<
       return output.groups.flatMap((group) => group.rows);
     return [];
   }, [output]);
+  /** Multi-select editors suggest the values each column already holds. */
+  const columnSuggestions = useMemo(() => {
+    const result = new Map<string, string[]>();
+    for (const [key, property] of properties) {
+      if (property.type !== "multi_select") continue;
+      const values = new Set<string>();
+      for (const loaded of rowsInOrder) {
+        const cell = (loaded.columns as Record<string, CellValue>)[key];
+        for (const item of Array.isArray(cell) ? cell : [cell]) {
+          if (typeof item === "string" && item !== "") values.add(item);
+        }
+      }
+      result.set(key, [...values]);
+    }
+    return result;
+  }, [properties, rowsInOrder]);
   // Opening the page is what the title button already does, so a menu holding
   // only that is a button with nothing behind it: the read-only definition
   // preview wires no row actions at all.
@@ -1076,6 +1092,7 @@ export const BaseTableView = forwardRef<
             <EditableCell
               value={(row.columns as Record<string, CellValue>)[column] ?? null}
               definition={property}
+              suggestions={columnSuggestions.get(column)}
               isEditing={
                 activeCell?.rowId === String(row.id) &&
                 activeCell.column === column &&
