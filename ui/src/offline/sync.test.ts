@@ -148,8 +148,10 @@ describe("runFullSync", () => {
     expect(maxInFlight).toBeLessThanOrEqual(WALKER_CONCURRENCY);
     while (release.length > 0 || inFlight > 0) {
       release.shift()?.();
-      await Promise.resolve();
-      await Promise.resolve();
+      // Yield a macrotask: the hop from one response to the worker's next
+      // fetch takes a Node-version-dependent number of microtasks, and
+      // exiting while that fetch is still pending leaves it held forever.
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
     await run;
     expect(maxInFlight).toBe(WALKER_CONCURRENCY);
