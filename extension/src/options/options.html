@@ -3,14 +3,23 @@
 <head>
   <meta charset="utf-8">
   <title>Clepsydra Web Archive — Settings</title>
-  <link rel="stylesheet" href="/styles/vessel.css">
+  <link rel="stylesheet" href="/styles/clepsydra.css">
   <style>
     /* Options-specific layout. Palette, type, controls and focus ring come
-       from /styles/vessel.css, which both extension pages share. */
+       from /styles/clepsydra.css, which both extension pages share. */
     body {
       display: flex;
       min-height: 100vh;
       flex-direction: column;
+    }
+    .rail {
+      width: 100%;
+      max-width: 620px;
+      margin: 0 auto;
+      padding: 28px 16px 0;
+    }
+    .wordmark {
+      font-size: 24px;
     }
     .sheet {
       display: flex;
@@ -18,23 +27,25 @@
       max-width: 620px;
       flex: 1;
       flex-direction: column;
-      gap: 28px;
+      gap: 32px;
       margin: 0 auto;
-      padding: 28px var(--space-3);
+      padding: 28px 16px;
     }
     .group {
       display: flex;
       flex-direction: column;
-      gap: var(--space-3);
+      gap: 16px;
     }
+    /* The app's SectionHeading: tick + italic serif. */
     .group-title {
-      padding-bottom: var(--space-1);
-      border-bottom: 1px solid var(--rule);
-      color: var(--ink-mute);
-      font-size: var(--fs-s);
-      font-weight: 500;
-      letter-spacing: var(--track);
-      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--ink);
+      font-family: var(--font-serif);
+      font-size: 20px;
+      font-style: italic;
+      line-height: 1;
     }
     .field {
       display: flex;
@@ -43,18 +54,17 @@
     .checkbox-row {
       display: flex;
       align-items: center;
-      gap: var(--space-2);
+      gap: 8px;
     }
-    /* Sentence copy, not a control label: no tracking, no uppercase. */
     .checkbox-label {
-      color: var(--ink-2);
-      font-size: var(--fs);
+      color: var(--ink);
+      font-size: 14px;
       cursor: pointer;
     }
     .actions {
       display: flex;
       align-items: center;
-      gap: var(--space-3);
+      gap: 12px;
     }
     #save-btn {
       min-width: 140px;
@@ -62,36 +72,28 @@
     .saved {
       display: none;
       color: var(--ok);
-      font-size: var(--fs-s);
-      letter-spacing: var(--track);
-      text-transform: uppercase;
+      font-size: 13px;
     }
-    .status-box {
-      color: var(--ink-mute);
+    .status-box[data-tone="ok"] { --tone: var(--ok); }
+    .status-box[data-tone="error"] { --tone: var(--hot); }
+    .rail-bottom {
+      padding: 0 16px 28px;
     }
-    .status-box[data-tone="ok"] { color: var(--ok); }
-    .status-box[data-tone="error"] { color: var(--hot); }
     .footer-note {
-      display: flex;
-      flex: 1;
-      align-items: center;
-      padding: 3px var(--space-3);
-      color: var(--bar-fg);
-      letter-spacing: var(--track);
-      text-transform: uppercase;
-      opacity: 0.7;
+      color: var(--mute);
+      font-size: 12.5px;
     }
   </style>
 </head>
 <body>
   <header class="rail rail-top">
-    <h1 class="wordmark"><span class="wordmark-lead">C</span>lepsydra</h1>
-    <div class="rail-label">Web Archive · Settings</div>
+    <h1 class="wordmark">Clepsydra</h1>
+    <div class="rail-label">Web archive · Settings</div>
   </header>
 
   <main class="sheet">
     <section class="group">
-      <h2 class="group-title">Server</h2>
+      <h2 class="group-title"><span class="tick" aria-hidden="true"></span>Server</h2>
 
       <div class="field">
         <label class="field-label" for="server-url">Server URL</label>
@@ -102,7 +104,7 @@
     </section>
 
     <section class="group">
-      <h2 class="group-title">Capture</h2>
+      <h2 class="group-title"><span class="tick" aria-hidden="true"></span>Capture</h2>
 
       <div class="field">
         <label class="field-label" for="default-tags">Default tags (comma-separated)</label>
@@ -121,7 +123,7 @@
     </section>
 
     <section class="group">
-      <h2 class="group-title">Notifications</h2>
+      <h2 class="group-title"><span class="tick" aria-hidden="true"></span>Notifications</h2>
 
       <div class="checkbox-row">
         <input type="checkbox" id="notify-success" />

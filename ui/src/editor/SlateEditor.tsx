@@ -54,6 +54,7 @@ import {
 import { JournalDateProvider } from "./journalContext";
 import { MathEditingProvider, useMathEditingController } from "./mathEditing";
 import { withAutoformat } from "./plugins/autoformat/withAutoformat";
+import { withBlockVoidDeletion } from "./plugins/withBlockVoidDeletion";
 import {
   exitTerminalInlineCode,
   withInlinePunctuationBoundary,
@@ -250,7 +251,11 @@ export function SlateEditor({
             withInlinePunctuationBoundary(
               withHistory(
                 withAutoformat(
-                  withOutliner(withTables(withSchema(createEditor()))),
+                  withOutliner(
+                    withBlockVoidDeletion(
+                      withTables(withSchema(createEditor())),
+                    ),
+                  ),
                 ),
               ),
             ),

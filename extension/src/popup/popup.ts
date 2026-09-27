@@ -22,7 +22,7 @@ import { createTagPicker } from "#/popup/tag-picker";
 
 const POLL_INTERVAL_MS = 250;
 const STATUS_TRANSPORT_ERROR =
-	"Capture status is temporarily unavailable. You can try Capture This Page again.";
+	"Capture status is temporarily unavailable. You can try Capture this page again.";
 
 interface CaptureStatusResponse {
 	status: CaptureStatus | null;
@@ -333,7 +333,7 @@ function init(): void {
 		clearError();
 		renderPhase(
 			"error",
-			"No capture is currently running. You can try Capture This Page again.",
+			"No capture is currently running. You can try Capture this page again.",
 		);
 	};
 	const schedulePoll = (tabId: number) => {
