@@ -1,8 +1,8 @@
 import { useCallback } from "react";
-import { fetchClient } from "#/api/client";
 import { useCreatePage } from "#/api/pages";
 import { normalizeWikilinkIdentity } from "#/editor/wikilinkIdentity";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
+import { searchWikilinkTarget } from "#/editor/wikilinkSearch";
 import { generateShortId, intakePath } from "#/lib/intake";
 
 export interface ResolvedWikilinkTarget {
@@ -33,19 +33,8 @@ export function useResolveOrCreateWikilinkTarget(): ResolveOrCreateWikilinkTarge
         const refreshedPath = await refetchAndLookup(title);
         if (refreshedPath) return { path: refreshedPath, title };
 
-        const { data, error } = await fetchClient.GET(
-          "/api/vault/index/search",
-          {
-            params: { query: { q: title } },
-          },
-        );
-        if (error) throw error;
-        const exact = (data ?? []).find(
-          (entry) =>
-            entry.title != null &&
-            normalizeWikilinkIdentity(entry.title) === key,
-        );
-        if (exact) return { path: exact.path, title };
+        const found = await searchWikilinkTarget(title, "title");
+        if (found) return { path: found, title };
 
         const path = intakePath({
           kind: "NOTE",

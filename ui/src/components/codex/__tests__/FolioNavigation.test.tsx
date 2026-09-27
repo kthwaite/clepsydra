@@ -63,6 +63,11 @@ import { useGazetteerStore } from "#/store/gazetteer";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
+// Folio reads embed renders from the query cache; these tests mount it without a QueryClient.
+vi.mock("#/components/codex/useEmbedTocExpander", () => ({
+  useEmbedTocExpander: () => undefined,
+}));
+
 const {
   editorCapture,
   editorMountCount,

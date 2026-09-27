@@ -4,11 +4,11 @@ import Markdown, {
   type UrlTransform,
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
 import { BlockTransclusion } from "#/components/blocks/BlockTransclusion";
 import { MathExpression } from "#/components/MathExpression";
 import { MermaidCodeBlock } from "#/components/MermaidCodeBlock";
+import { RenderedWikilink } from "#/components/RenderedWikilink";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { expandPrefixedUrl } from "#/editor/prefixedExternalLinks";
 import { useOpenTab } from "#/hooks/useOpenTab";
@@ -20,6 +20,7 @@ import {
 } from "#/lib/markdown/blockReferences";
 import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
 import { mermaidFenceSource } from "#/lib/markdown/mermaidFence";
+import { remarkWikilinks, wikilinkTarget } from "#/lib/markdown/wikilinks";
 import {
   isCasResource,
   resolveResourceUrl,
@@ -66,13 +67,7 @@ const remarkPlugins: PluggableList = [
   remarkFolioMath,
   remarkGfm,
   remarkBlockReferences,
-  [
-    wikiLinkPlugin,
-    {
-      hrefTemplate: (permalink: string) => `/pages/${permalink}`,
-      aliasDivider: "|",
-    },
-  ],
+  ...remarkWikilinks,
 ];
 
 const transformMarkdownUrl: UrlTransform = (url, key, node) => {
@@ -147,7 +142,13 @@ export function MarkdownRenderer({
           }
           return <div {...props}>{children}</div>;
         },
-        a: ({ href, children, ...props }) => {
+        a: ({ href, children, node, ...props }) => {
+          const target = wikilinkTarget(node);
+          if (target !== null) {
+            return (
+              <RenderedWikilink target={target}>{children}</RenderedWikilink>
+            );
+          }
           const blockId = href ? blockIdFromHref(href) : null;
           if (blockId && !restricted) {
             return (
@@ -171,6 +172,7 @@ export function MarkdownRenderer({
             const pagePath = decodeURIComponent(href.replace(/^\/pages\//, ""));
             return (
               <a
+                {...props}
                 href={href}
                 onClick={(e) => {
                   e.preventDefault();
@@ -178,7 +180,6 @@ export function MarkdownRenderer({
                 }}
                 className="underline decoration-1 underline-offset-2 hover:decoration-2"
                 data-link-resource="wikilink"
-                {...props}
               >
                 {children}
               </a>
@@ -186,12 +187,12 @@ export function MarkdownRenderer({
           }
           return (
             <a
+              {...props}
               href={href}
               target="_blank"
               rel="noopener noreferrer"
               className="underline decoration-1 underline-offset-2 hover:decoration-2"
               data-link-resource={resource ?? undefined}
-              {...props}
             >
               {children}
             </a>

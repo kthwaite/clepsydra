@@ -4,12 +4,12 @@ import Markdown, {
   type UrlTransform,
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
 import { MathExpression } from "#/components/MathExpression";
 import { expandPrefixedUrl } from "#/editor/prefixedExternalLinks";
 import { classifyLinkResource } from "#/lib/linkResource";
 import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
+import { remarkWikilinks, wikilinkTarget } from "#/lib/markdown/wikilinks";
 
 function isMathDelimiter(value: unknown): value is MathDelimiter {
   return value === "$" || value === "$$" || value === "\\(" || value === "\\[";
@@ -21,13 +21,7 @@ function isMathDelimiter(value: unknown): value is MathDelimiter {
 const remarkPlugins: PluggableList = [
   remarkFolioMath,
   remarkGfm,
-  [
-    wikiLinkPlugin,
-    {
-      hrefTemplate: (permalink: string) => `/pages/${permalink}`,
-      aliasDivider: "|",
-    },
-  ],
+  ...remarkWikilinks,
 ];
 
 // Compact element styling scaled for the ~340px preview card: tight headings,
@@ -94,12 +88,13 @@ const components: Components = {
     </ol>
   ),
   li: ({ children }) => <li className="my-0.5">{children}</li>,
-  a: ({ href, children }) => {
-    const resource = href?.startsWith("/pages/")
-      ? "wikilink"
-      : href
-        ? classifyLinkResource(href)
-        : null;
+  a: ({ href, children, node }) => {
+    const resource =
+      wikilinkTarget(node) !== null || href?.startsWith("/pages/")
+        ? "wikilink"
+        : href
+          ? classifyLinkResource(href)
+          : null;
     return (
       <span
         className="text-accent underline decoration-1 underline-offset-2"
