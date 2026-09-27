@@ -9,7 +9,7 @@ import { Popover } from "#/components/ui/popover";
 import { PICKER_PILL } from "./BasePickers";
 
 export interface FieldsPopoverProps {
-  /** The saved view's columns, in saved order. */
+  /** The view's columns, with any column-order override applied. */
   columns: string[];
   /** Hidden overrides; entries no longer in `columns` are not counted. */
   hidden: string[];

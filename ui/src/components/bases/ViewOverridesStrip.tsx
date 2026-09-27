@@ -17,6 +17,7 @@ export interface ViewOverridesStripProps {
   onRemoveQuickFilter(identity: string): void;
   onSetGroup(group: undefined): void;
   onShowHiddenColumns(): void;
+  onResetColumnOrder(): void;
   onClear(): void;
   onSave(): void;
   onReload(): void;
@@ -90,6 +91,9 @@ export function ViewOverridesStrip(props: ViewOverridesStripProps) {
         ) : null}
         {hidden.length > 0 ? (
           <Chip text={hiddenText} onRemove={props.onShowHiddenColumns} />
+        ) : null}
+        {overrides.columnOrder ? (
+          <Chip text="Column order" onRemove={props.onResetColumnOrder} />
         ) : null}
         <span className="ml-auto flex items-center gap-1">
           <Button variant="ghost" size="sm" onPress={props.onClear}>

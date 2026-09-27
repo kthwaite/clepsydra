@@ -28,6 +28,8 @@ export interface BaseHeaderMenuProps {
   /** True when the effective grouping already uses this column. */
   groupedByThis: boolean;
   hideable: boolean;
+  canMoveLeft: boolean;
+  canMoveRight: boolean;
   presets: QuickFilter[];
   /** Options the presets left out, from `headerOptionOverflow`. */
   optionOverflow: number;
@@ -35,7 +37,15 @@ export interface BaseHeaderMenuProps {
   onAddQuickFilter(filter: QuickFilter): void;
   onSetGroup(group: GroupOverride | undefined): void;
   onHideColumn(column: string): void;
+  /** Move this column one place among the visible columns. */
+  onMove(delta: -1 | 1): void;
   children: ReactNode;
+}
+
+/** Why a column refuses to move one way, for the disabled item's description. */
+function moveBlocker(column: string, delta: -1 | 1): string {
+  if (column === "title") return "The title column stays first";
+  return delta < 0 ? "Cannot move further left" : "Cannot move further right";
 }
 
 /** Why a column refuses to hide, for the disabled item's description. */
@@ -52,12 +62,15 @@ function HeaderMenu({
   groupable,
   groupedByThis,
   hideable,
+  canMoveLeft,
+  canMoveRight,
   presets,
   optionOverflow,
   onSortChange,
   onAddQuickFilter,
   onSetGroup,
   onHideColumn,
+  onMove,
 }: Omit<BaseHeaderMenuProps, "children">) {
   // Keyed by the filter's own identity: a preset keeps its key when the
   // column's options change, and a repeated preset collapses into one item.
@@ -82,6 +95,8 @@ function HeaderMenu({
             groupedByThis ? { kind: "flat" } : { kind: "by", field: column },
           );
         else if (id === "hide") onHideColumn(column);
+        else if (id === "move-left") onMove(-1);
+        else if (id === "move-right") onMove(1);
         else addPreset(id);
       }}
     >
@@ -132,6 +147,21 @@ function HeaderMenu({
         description={hideable ? undefined : hideBlocker(column)}
       >
         Hide column
+      </MenuItem>
+      <MenuSeparator />
+      <MenuItem
+        id="move-left"
+        isDisabled={!canMoveLeft}
+        description={canMoveLeft ? undefined : moveBlocker(column, -1)}
+      >
+        Move left
+      </MenuItem>
+      <MenuItem
+        id="move-right"
+        isDisabled={!canMoveRight}
+        description={canMoveRight ? undefined : moveBlocker(column, 1)}
+      >
+        Move right
       </MenuItem>
     </Menu>
   );

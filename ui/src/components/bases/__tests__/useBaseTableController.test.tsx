@@ -52,6 +52,7 @@ const definition: BaseDetailResponse = {
   views: [
     { name: "Continues", layout: "table", columns: ["title", "status"] },
     { name: "Shelf", layout: "table", columns: ["title"] },
+    { name: "Wide", layout: "table", columns: ["title", "status", "rating"] },
   ],
   diagnostics: [],
   member_creation: [
@@ -1173,17 +1174,80 @@ describe("view overrides", () => {
               sort: [{ field: "status", dir: "desc" }],
             },
             { name: "Shelf", layout: "table", columns: ["title"] },
+            {
+              name: "Wide",
+              layout: "table",
+              columns: ["title", "status", "rating"],
+            },
           ],
         },
         view_origins: [
           { kind: "existing", name: "Continues" },
           { kind: "existing", name: "Shelf" },
+          { kind: "existing", name: "Wide" },
         ],
       },
     });
     expect(model.overrides.quickFilters).toEqual([]);
     expect(onSortChange).toHaveBeenCalledWith(undefined);
     expect(model.overridesSave).toEqual({ phase: "idle" });
+  });
+
+  it("treats a reorder back to the saved order as no override", () => {
+    let model!: ReturnType<typeof useBaseTableController>;
+    function Probe({ value }: { value: BaseTableControllerOptions }) {
+      model = useBaseTableController(value);
+      return null;
+    }
+    render(
+      <Probe value={options({ mode: "standalone", filter: undefined })} />,
+    );
+    act(() => model.onReorderColumns(["status", "title"]));
+    // Title stays first, so this order is the saved one: no override.
+    expect(model.overrides.columnOrder).toBeUndefined();
+    act(() => model.onReorderColumns(["title", "ghost", "status"]));
+    expect(model.overrides.columnOrder).toBeUndefined();
+  });
+
+  it("writes a reordered view through the revision-guarded PUT", async () => {
+    mocks.updateBase.mockResolvedValue({ revision: "r2", diagnostics: [] });
+    let model!: ReturnType<typeof useBaseTableController>;
+    function Probe({ value }: { value: BaseTableControllerOptions }) {
+      model = useBaseTableController(value);
+      return null;
+    }
+    render(
+      <Probe
+        value={options({
+          mode: "standalone",
+          filter: undefined,
+          activeView: "Wide",
+        })}
+      />,
+    );
+    act(() => model.onReorderColumns(["title", "rating", "status"]));
+    expect(model.overrides.columnOrder).toEqual(["title", "rating", "status"]);
+    act(() => model.onResetColumnOrder());
+    expect(model.overrides.columnOrder).toBeUndefined();
+    act(() => model.onReorderColumns(["title", "rating", "status"]));
+    await act(async () => model.onSaveOverrides());
+    expect(mocks.updateBase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          expected_revision: definition.revision,
+          definition: expect.objectContaining({
+            views: expect.arrayContaining([
+              {
+                name: "Wide",
+                layout: "table",
+                columns: ["title", "rating", "status"],
+              },
+            ]),
+          }),
+        }),
+      }),
+    );
+    expect(model.overrides.columnOrder).toBeUndefined();
   });
 
   it("reports a conflict and keeps the overrides", async () => {

@@ -77,11 +77,14 @@ import { ViewOverridesStrip } from "./ViewOverridesStrip";
 import {
   EMPTY_OVERRIDES,
   type GroupOverride,
+  movedColumnOrder,
+  orderColumns,
   type QuickFilter,
   type ViewOverridesState,
 } from "./view-overrides";
 
 const EMPTY_AGGREGATES: readonly Aggregate[] = [];
+const DEFAULT_COLUMNS = ["title"];
 const IDLE_SAVE: OverridesSaveState = { phase: "idle" };
 const noop = () => {};
 
@@ -154,6 +157,9 @@ export interface BaseTableViewProps {
   onHideColumn?(column: string): void;
   onShowColumn?(column: string): void;
   onShowHiddenColumns?(): void;
+  /** The whole column order, hidden columns included, after a move. */
+  onReorderColumns?(order: string[]): void;
+  onResetColumnOrder?(): void;
   onClearOverrides?(): void;
   onSaveOverrides?(): void;
   onReloadDefinition?(): void;
@@ -401,6 +407,8 @@ export const BaseTableView = forwardRef<
     onHideColumn,
     onShowColumn,
     onShowHiddenColumns,
+    onReorderColumns,
+    onResetColumnOrder,
     onClearOverrides,
     onSaveOverrides,
     onReloadDefinition,
@@ -426,8 +434,14 @@ export const BaseTableView = forwardRef<
     view?.aggregates ?? EMPTY_AGGREGATES,
     "table-aggregate",
   );
-  const columns =
-    view?.columns && view.columns.length > 0 ? view.columns : ["title"];
+  const savedColumns =
+    view?.columns && view.columns.length > 0 ? view.columns : DEFAULT_COLUMNS;
+  // Reorder applies before hiding: hidden columns keep their slots.
+  const columnOrder = overrides.columnOrder;
+  const columns = useMemo(
+    () => orderColumns(savedColumns, columnOrder),
+    [savedColumns, columnOrder],
+  );
   const hiddenColumns = overrides.hiddenColumns;
   const visibleColumns = useMemo(
     () => columns.filter((column) => !hiddenColumns.includes(column)),
@@ -959,6 +973,25 @@ export const BaseTableView = forwardRef<
                     groupable={capability.groupable}
                     groupedByThis={effectiveGroup === column}
                     hideable={column !== "title" && visibleColumns.length > 1}
+                    canMoveLeft={
+                      onReorderColumns !== undefined &&
+                      movedColumnOrder(columns, hiddenColumns, column, -1) !==
+                        undefined
+                    }
+                    canMoveRight={
+                      onReorderColumns !== undefined &&
+                      movedColumnOrder(columns, hiddenColumns, column, 1) !==
+                        undefined
+                    }
+                    onMove={(delta) => {
+                      const next = movedColumnOrder(
+                        columns,
+                        hiddenColumns,
+                        column,
+                        delta,
+                      );
+                      if (next) onReorderColumns?.(next);
+                    }}
                     presets={capability.presets}
                     optionOverflow={capability.optionOverflow}
                     onSortChange={onSortChange}
@@ -986,6 +1019,8 @@ export const BaseTableView = forwardRef<
           onCopyValue,
           readOnly,
           rowActions,
+          // Reorder keeps the grid mounted, so the cached rows must re-render.
+          visibleColumns,
         ]}
         items={rows}
       >
@@ -1484,6 +1519,7 @@ export const BaseTableView = forwardRef<
         onRemoveQuickFilter={onRemoveQuickFilter ?? noop}
         onSetGroup={onSetGroup ?? noop}
         onShowHiddenColumns={onShowHiddenColumns ?? noop}
+        onResetColumnOrder={onResetColumnOrder ?? noop}
         onClear={onClearOverrides ?? noop}
         onSave={onSaveOverrides ?? noop}
         onReload={onReloadDefinition ?? noop}

@@ -7,10 +7,14 @@ import {
   EMPTY_OVERRIDES,
   groupOverrideParam,
   hasOverrides,
+  movedColumnOrder,
+  orderColumns,
   type QuickFilter,
   quickFilterIdentity,
+  withColumnOrder,
   withGroup,
   withHiddenColumn,
+  withoutColumnOrder,
   withoutHiddenColumn,
   withoutHiddenColumns,
   withoutQuickFilter,
@@ -213,5 +217,140 @@ describe("definitionPayload", () => {
     });
     expect("slug" in payload).toBe(false);
     expect("revision" in payload).toBe(false);
+  });
+});
+
+describe("orderColumns", () => {
+  const base = ["title", "author", "status", "due"];
+
+  it("returns the columns unchanged without an order", () => {
+    expect(orderColumns(base, undefined)).toBe(base);
+  });
+
+  it("follows the order, drops unknown ids and appends missing columns", () => {
+    expect(orderColumns(base, ["title", "due", "ghost", "author"])).toEqual([
+      "title",
+      "due",
+      "author",
+      "status",
+    ]);
+  });
+
+  it("forces title first when the view has it", () => {
+    expect(orderColumns(base, ["due", "title", "author", "status"])).toEqual([
+      "title",
+      "due",
+      "author",
+      "status",
+    ]);
+    expect(orderColumns(["author", "rating"], ["rating", "author"])).toEqual([
+      "rating",
+      "author",
+    ]);
+  });
+});
+
+describe("column order override", () => {
+  const base = ["title", "author", "status"];
+
+  it("stores a normalised order and counts as an override", () => {
+    const state = withColumnOrder(
+      EMPTY_OVERRIDES,
+      ["status", "ghost", "title"],
+      base,
+    );
+    expect(state.columnOrder).toEqual(["title", "status", "author"]);
+    expect(hasOverrides(state, undefined)).toBe(true);
+  });
+
+  it("drops an order equal to the base order", () => {
+    const moved = withColumnOrder(
+      EMPTY_OVERRIDES,
+      ["title", "status", "author"],
+      base,
+    );
+    const back = withColumnOrder(moved, ["title", "author", "status"], base);
+    expect(back.columnOrder).toBeUndefined();
+    expect("columnOrder" in back).toBe(false);
+    expect(hasOverrides(back, undefined)).toBe(false);
+  });
+
+  it("clears the order on reset", () => {
+    const moved = withColumnOrder(
+      EMPTY_OVERRIDES,
+      ["title", "status", "author"],
+      base,
+    );
+    expect(withoutColumnOrder(moved).columnOrder).toBeUndefined();
+    expect(hasOverrides(withoutColumnOrder(moved), undefined)).toBe(false);
+    expect(withoutColumnOrder(EMPTY_OVERRIDES)).toBe(EMPTY_OVERRIDES);
+  });
+
+  it("writes the view's columns in the new order before hiding", () => {
+    const view: BaseViewDefinition = {
+      name: "Continues",
+      layout: "table",
+      columns: ["title", "author", "status", "due"],
+    };
+    const rendered = view.columns ?? [];
+    const ordered = withColumnOrder(
+      EMPTY_OVERRIDES,
+      ["title", "due", "author", "status"],
+      rendered,
+    );
+    expect(
+      applyOverridesToView(view, ordered, undefined, rendered).columns,
+    ).toEqual(["title", "due", "author", "status"]);
+    expect(
+      applyOverridesToView(
+        view,
+        withHiddenColumn(ordered, "author"),
+        undefined,
+        rendered,
+      ).columns,
+    ).toEqual(["title", "due", "status"]);
+  });
+});
+
+describe("movedColumnOrder", () => {
+  const columns = ["title", "author", "status", "due"];
+
+  it("swaps a column with its visible neighbour", () => {
+    expect(movedColumnOrder(columns, [], "status", -1)).toEqual([
+      "title",
+      "status",
+      "author",
+      "due",
+    ]);
+    expect(movedColumnOrder(columns, [], "author", 1)).toEqual([
+      "title",
+      "status",
+      "author",
+      "due",
+    ]);
+  });
+
+  it("refuses title, the edges and the title neighbour", () => {
+    expect(movedColumnOrder(columns, [], "title", 1)).toBeUndefined();
+    expect(movedColumnOrder(columns, [], "author", -1)).toBeUndefined();
+    expect(movedColumnOrder(columns, [], "due", 1)).toBeUndefined();
+    expect(movedColumnOrder(columns, ["due"], "status", 1)).toBeUndefined();
+    expect(movedColumnOrder(columns, ["author"], "author", 1)).toBeUndefined();
+    expect(
+      movedColumnOrder(["author", "rating"], [], "author", -1),
+    ).toBeUndefined();
+    expect(movedColumnOrder(["author", "rating"], [], "rating", -1)).toEqual([
+      "rating",
+      "author",
+    ]);
+  });
+
+  it("steps over hidden columns, which keep their slots", () => {
+    expect(movedColumnOrder(columns, ["status"], "author", 1)).toEqual([
+      "title",
+      "status",
+      "due",
+      "author",
+    ]);
   });
 });

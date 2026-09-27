@@ -102,6 +102,9 @@ export interface BaseTableControllerModel {
   onHideColumn(column: string): void;
   onShowColumn(column: string): void;
   onShowHiddenColumns(): void;
+  /** Order the active view's columns; the saved order clears the override. */
+  onReorderColumns(order: string[]): void;
+  onResetColumnOrder(): void;
   onClearOverrides(): void;
   onSaveOverrides(): void;
   onReloadDefinition(): void;
@@ -421,6 +424,11 @@ export function useBaseTableController(
   const [overridesSave, setOverridesSave] = useState<OverridesSaveState>({
     phase: "idle",
   });
+  const overridesReorder = overrides.reorderColumns;
+  const reorderColumns = useCallback(
+    (order: string[]) => overridesReorder(order, baseColumns),
+    [baseColumns, overridesReorder],
+  );
   const overridesClear = overrides.clear;
   const clearOverrides = useCallback(() => {
     overridesClear();
@@ -925,6 +933,8 @@ export function useBaseTableController(
     onHideColumn: overrides.hideColumn,
     onShowColumn: overrides.showColumn,
     onShowHiddenColumns: overrides.showHiddenColumns,
+    onReorderColumns: reorderColumns,
+    onResetColumnOrder: overrides.resetColumnOrder,
     onClearOverrides: clearOverrides,
     onSaveOverrides: () => void saveOverrides(),
     onReloadDefinition: () => void reloadDefinition(),
