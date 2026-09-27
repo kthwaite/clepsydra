@@ -9,9 +9,9 @@ import {
   withReact,
 } from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as InlineSourceEditingExports from "#/editor/inlineSourceEditing";
 import { withSchema } from "#/editor/schema/withSchema";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
-import type * as WikilinkEditingExports from "#/editor/wikilinkEditing";
 import { usePreviewStore } from "#/store/preview";
 
 type CapturedCLinkProps = {
@@ -44,7 +44,8 @@ const {
     cancelMock: cancel,
     editingController: {
       active: null as {
-        path: number[];
+        type: string;
+        ref: { current: number[] | null };
         initialCaret: "start" | "end";
         returnSide: "before" | "after";
       } | null,
@@ -72,11 +73,11 @@ vi.mock("#/editor/useResolveOrCreateWikilinkTarget", () => ({
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
-vi.mock("#/editor/wikilinkEditing", async (importOriginal) => {
-  const actual = await importOriginal<typeof WikilinkEditingExports>();
+vi.mock("#/editor/inlineSourceEditing", async (importOriginal) => {
+  const actual = await importOriginal<typeof InlineSourceEditingExports>();
   return {
     ...actual,
-    useWikilinkEditing: () => editingController,
+    useInlineSourceEditing: () => editingController,
   };
 });
 vi.mock("#/components/codex/CLink", () => ({
@@ -125,7 +126,12 @@ function renderWikilink(
     },
   ];
   editingController.active = active
-    ? { path: [0, 1], initialCaret: "end", returnSide: "after" }
+    ? {
+        type: "wikilink",
+        ref: { current: [0, 1] },
+        initialCaret: "end",
+        returnSide: "after",
+      }
     : null;
   const renderElement = (props: RenderElementProps) =>
     props.element.type === "wikilink" ? (
@@ -462,10 +468,7 @@ describe("WikilinkElement editing and navigation", () => {
 
     await user.keyboard("{Enter}");
 
-    expect(commitMock).toHaveBeenCalledWith(
-      { target: "Target", alias: "Label" },
-      "after",
-    );
+    expect(commitMock).toHaveBeenCalledWith("Target|Label", "after");
     expect(cancelMock).not.toHaveBeenCalled();
   });
 

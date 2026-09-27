@@ -42,6 +42,15 @@ import { makeDecorateCode } from "./decorate-code";
 import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
 import { createSelectionReference } from "./floatingSelectionReference";
+import {
+  INLINE_SOURCE_ADAPTERS,
+  INLINE_SOURCE_TYPES,
+} from "./inlineSourceAdapters";
+import {
+  findAdjacentSourceInline,
+  InlineSourceEditingProvider,
+  useInlineSourceEditingController,
+} from "./inlineSourceEditing";
 import { JournalDateProvider } from "./journalContext";
 import { MathEditingProvider, useMathEditingController } from "./mathEditing";
 import { withAutoformat } from "./plugins/autoformat/withAutoformat";
@@ -82,11 +91,6 @@ import {
 import { selectAdjacentVoidBlock } from "./transforms/voidNavigation";
 import { useVim, VimStatusBar } from "./vim";
 import { WikilinkCombobox } from "./WikilinkCombobox";
-import {
-  findAdjacentWikilink,
-  useWikilinkEditingController,
-  WikilinkEditingProvider,
-} from "./wikilinkEditing";
 
 export function slashCommandToConversion(id: string): BlockConversion | null {
   switch (id) {
@@ -275,7 +279,10 @@ export function SlateEditor({
     },
     [editor],
   );
-  const wikilinkEditing = useWikilinkEditingController(editor);
+  const inlineSourceEditing = useInlineSourceEditingController(
+    editor,
+    INLINE_SOURCE_ADAPTERS,
+  );
   const mathEditing = useMathEditingController(editor);
   const baseEmbedEditing = useBaseEmbedEditingController(editor);
   const taskProperties = useTaskPropertyPopoverController(editor);
@@ -723,10 +730,14 @@ export function SlateEditor({
       return;
     }
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      const adjacent = findAdjacentWikilink(editor, event.key);
+      const adjacent = findAdjacentSourceInline(
+        editor,
+        event.key,
+        INLINE_SOURCE_TYPES,
+      );
       if (adjacent) {
         event.preventDefault();
-        wikilinkEditing.begin(
+        inlineSourceEditing.begin(
           adjacent.path,
           adjacent.caret,
           adjacent.returnSide,
@@ -875,7 +886,7 @@ export function SlateEditor({
         >
           <BaseEmbedEditingProvider value={baseEmbedEditing}>
             <MathEditingProvider value={mathEditing}>
-              <WikilinkEditingProvider value={wikilinkEditing}>
+              <InlineSourceEditingProvider value={inlineSourceEditing}>
                 <TaskPropertyPopoverProvider value={taskProperties.opener}>
                   <Editable
                     data-folio-heading-root
@@ -897,7 +908,7 @@ export function SlateEditor({
                 {!readOnly && isVimEnabled && (
                   <VimStatusBar mode={vim.mode} pending={vim.pending} />
                 )}
-              </WikilinkEditingProvider>
+              </InlineSourceEditingProvider>
             </MathEditingProvider>
           </BaseEmbedEditingProvider>
         </Slate>
