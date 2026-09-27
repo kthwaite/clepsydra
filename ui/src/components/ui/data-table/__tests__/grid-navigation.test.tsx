@@ -634,3 +634,174 @@ describe("useGridNavigation — re-render and remount", () => {
     expect(button("Status 1")).toHaveFocus();
   });
 });
+
+/**
+ * Headers with resizers: A has a menu and a resizer, B only a resizer, C
+ * neither. Resizers sit in `[data-grid-skip]`, React Aria's resizable-table
+ * model: navigation passes them by; Enter on the header enters resize mode.
+ */
+function ResizeFixture({
+  onResizerKey,
+  onHeaderMove,
+}: {
+  onResizerKey?: (key: string, defaultPrevented: boolean) => void;
+  onHeaderMove?: (th: HTMLTableCellElement, delta: -1 | 1) => void;
+}) {
+  const ref = useRef<HTMLTableElement>(null);
+  useGridNavigation(ref, { onHeaderMove });
+  const resizer = (label: string) => (
+    <span data-grid-skip>
+      {/* biome-ignore lint/a11y/useSemanticElements: splitter fixture */}
+      <div
+        role="separator"
+        aria-label={label}
+        aria-valuenow={100}
+        tabIndex={0}
+        onKeyDown={(e) => onResizerKey?.(e.key, e.defaultPrevented)}
+      />
+    </span>
+  );
+  return (
+    <>
+      <button type="button">before</button>
+      {/* biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: the ARIA grid pattern on a native table */}
+      <table ref={ref} role="grid" aria-label="Resizable">
+        <thead>
+          <tr>
+            <th data-testid="h-a">
+              A<button type="button">A menu</button>
+              {resizer("Resize A")}
+            </th>
+            <th data-testid="h-b">B{resizer("Resize B")}</th>
+            <th data-testid="h-c">C</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <button type="button">a0</button>
+            </td>
+            <td data-testid="b0">b0</td>
+            <td>c0</td>
+          </tr>
+        </tbody>
+      </table>
+      <button type="button">after</button>
+    </>
+  );
+}
+
+const separator = (name: string) => screen.getByRole("separator", { name });
+
+describe("useGridNavigation — resizers ([data-grid-skip])", () => {
+  it("focusableChildren leaves out skipped controls", () => {
+    const th = document.createElement("th");
+    th.innerHTML = `<button>menu</button><span data-grid-skip><div role="separator" tabindex="0"></div></span>`;
+    expect(focusableChildren(th).map((el) => el.textContent)).toEqual(["menu"]);
+  });
+
+  it("takes resizers out of the tab sequence", () => {
+    render(<ResizeFixture />);
+    expect(separator("Resize A")).toHaveAttribute("tabindex", "-1");
+    expect(separator("Resize B")).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("walks headers past resizers; a resizer-only header focuses itself", async () => {
+    const user = userEvent.setup();
+    render(<ResizeFixture />);
+    focus(cell("h-b"));
+    expect(cell("h-b")).toHaveFocus();
+    focus(button("A menu"));
+    await user.keyboard("{ArrowRight}");
+    expect(cell("h-b")).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+    expect(cell("h-c")).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(cell("h-b")).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(button("A menu")).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(button("a0")).toHaveFocus();
+  });
+
+  it("Enter on a header enters resize mode; not from the header's own button", async () => {
+    const user = userEvent.setup();
+    render(<ResizeFixture />);
+    focus(cell("h-b"));
+    await user.keyboard("{Enter}");
+    expect(separator("Resize B")).toHaveFocus();
+    focus(button("A menu"));
+    await user.keyboard("{Enter}");
+    expect(button("A menu")).toHaveFocus();
+  });
+
+  it("leaves every other key in resize mode to the resizer", async () => {
+    const user = userEvent.setup();
+    const onResizerKey = vi.fn();
+    render(<ResizeFixture onResizerKey={onResizerKey} />);
+    focus(separator("Resize B"));
+    await user.keyboard("{ArrowRight}{ArrowLeft}{Home}{End}{ArrowDown}");
+    expect(separator("Resize B")).toHaveFocus();
+    expect(onResizerKey.mock.calls).toEqual([
+      ["ArrowRight", false],
+      ["ArrowLeft", false],
+      ["Home", false],
+      ["End", false],
+      ["ArrowDown", false],
+    ]);
+  });
+
+  it("Escape and Enter return from resize mode to the header", async () => {
+    const user = userEvent.setup();
+    const onResizerKey = vi.fn();
+    render(<ResizeFixture onResizerKey={onResizerKey} />);
+    focus(separator("Resize B"));
+    await user.keyboard("{Escape}");
+    expect(cell("h-b")).toHaveFocus();
+    focus(separator("Resize A"));
+    await user.keyboard("{Enter}");
+    expect(cell("h-a")).toHaveFocus();
+    // Consumed by the grid: the resizer (and an embed's Escape) never see them.
+    expect(onResizerKey).not.toHaveBeenCalled();
+  });
+
+  it("Tab from resize mode returns to the header, then leaves the grid", async () => {
+    const user = userEvent.setup();
+    render(<ResizeFixture />);
+    focus(separator("Resize B"));
+    const event = pressTab(separator("Resize B"), false);
+    // Back on the header (its key), then out through the last tabbable.
+    expect(event.defaultPrevented).toBe(false);
+    expect(button("a0")).toHaveFocus();
+    expect(cell("h-b")).toHaveAttribute("tabindex", "0");
+    focus(button("after"));
+    await user.tab({ shift: true });
+    expect(cell("h-b")).toHaveFocus();
+  });
+
+  it("pointer focus on a resizer records its header, not the resizer", async () => {
+    const user = userEvent.setup();
+    render(<ResizeFixture />);
+    focus(separator("Resize B"));
+    await user.click(button("before"));
+    await user.tab();
+    expect(cell("h-b")).toHaveFocus();
+  });
+
+  it("Alt+Arrow in resize mode moves the column, not the width", async () => {
+    const user = userEvent.setup();
+    const onHeaderMove = vi.fn();
+    const onResizerKey = vi.fn();
+    render(
+      <ResizeFixture onHeaderMove={onHeaderMove} onResizerKey={onResizerKey} />,
+    );
+    focus(separator("Resize B"));
+    await user.keyboard("{Alt>}{ArrowRight}{/Alt}");
+    expect(onHeaderMove).toHaveBeenCalledWith(cell("h-b"), 1);
+    expect(onResizerKey).not.toHaveBeenCalledWith(
+      "ArrowRight",
+      expect.anything(),
+    );
+    expect(separator("Resize B")).toHaveFocus();
+  });
+});

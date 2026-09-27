@@ -8,6 +8,12 @@ import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
  *
  * A "key" is a body `<tr>` or a `<td>`/`<th>`. The grid is one tab stop:
  * the table holds tabIndex 0 until a key is focused, then that key holds it.
+ *
+ * Controls inside `[data-grid-skip]` (column resizers) are left out of
+ * navigation and the tab sequence, as in React Aria's resizable table:
+ * Enter on a header cell focuses its skipped control ("resize mode"), whose
+ * keys are its own except Escape/Enter/Tab (back to the cell) and Alt+Arrow
+ * (header move).
  */
 export interface GridNavigationOptions {
   /** Enter on a focused body row, or on a bare cell (not on its controls). */
@@ -46,10 +52,27 @@ function isHidden(el: Element, root: Element): boolean {
   return false;
 }
 
-/** Focusable descendants of a cell, in document order (the cell excluded). */
+const SKIP = "[data-grid-skip]";
+
+function isSkipped(el: Element, root: Element): boolean {
+  const skip = el.closest(SKIP);
+  return skip !== null && root.contains(skip);
+}
+
+/** Focusable descendants of a cell, in document order (the cell excluded);
+ *  controls inside `[data-grid-skip]` are not part of navigation. */
 export function focusableChildren(cell: Element): HTMLElement[] {
   return Array.from(cell.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-    (el) => !isHidden(el, cell),
+    (el) => !isHidden(el, cell) && !isSkipped(el, cell),
+  );
+}
+
+/** The cell's skipped control (its resizer), if any. */
+function skippedControl(cell: Element): HTMLElement | null {
+  return (
+    Array.from(cell.querySelectorAll<HTMLElement>(FOCUSABLE)).find(
+      (el) => !isHidden(el, cell) && isSkipped(el, cell),
+    ) ?? null
   );
 }
 
@@ -203,7 +226,7 @@ function focusKey(key: Key, childFocus: ChildFocus = "first") {
 }
 
 function isTabbable(el: HTMLElement, root: Element): boolean {
-  return el.tabIndex >= 0 && !isHidden(el, root);
+  return el.tabIndex >= 0 && !isHidden(el, root) && !isSkipped(el, root);
 }
 
 /** The last tabbable element inside `table`, in document order. */
@@ -238,6 +261,12 @@ function attach(
       if (key.tabIndex !== tabIndex || !key.hasAttribute("tabindex")) {
         key.tabIndex = tabIndex;
       }
+    }
+    // Skipped controls are reached from their cell, never by Tab.
+    for (const el of table.querySelectorAll<HTMLElement>(
+      `${SKIP} :is(${FOCUSABLE}), ${SKIP}:is(${FOCUSABLE})`,
+    )) {
+      if (el.tabIndex !== -1) el.tabIndex = -1;
     }
   };
 
@@ -296,7 +325,8 @@ function attach(
         return;
       }
     }
-    lastFocused = target;
+    // Resize mode belongs to its cell: re-entry lands on the cell.
+    lastFocused = isSkipped(target, key) ? key : target;
     setFocusedKey(key);
   };
 
@@ -370,6 +400,10 @@ function attach(
     const target = event.target;
     if (event.defaultPrevented) return;
     if (!(target instanceof HTMLElement) || !table.contains(target)) return;
+    if (isSkipped(target, table)) {
+      skippedKeyDown(event, target);
+      return;
+    }
     if (isEditorTarget(target)) return;
 
     if (event.key === "Tab") {
@@ -389,6 +423,8 @@ function attach(
         (event.key === "ArrowLeft" || event.key === "ArrowRight")
       ) {
         event.preventDefault();
+        // A resizer in resize mode must not also take the arrow.
+        event.stopPropagation();
         onHeaderMove(
           key as HTMLTableCellElement,
           event.key === "ArrowLeft" ? -1 : 1,
@@ -401,6 +437,13 @@ function attach(
     if (event.key === "Enter") {
       const onActivateRow = options.current?.onActivateRow;
       const row = rowOf(key);
+      const resizer =
+        target === key && isHeaderRow(table, row) ? skippedControl(key) : null;
+      if (resizer) {
+        event.preventDefault();
+        resizer.focus();
+        return;
+      }
       if (target === key && onActivateRow && !isHeaderRow(table, row)) {
         event.preventDefault();
         onActivateRow(row);
@@ -417,6 +460,37 @@ function attach(
     }
     event.preventDefault();
     event.stopPropagation();
+  };
+
+  /** Resize mode: Escape/Enter/Tab return to the cell (Tab then leaves the
+   *  grid as usual); Alt+Arrow moves the header; everything else is the
+   *  control's own. */
+  const skippedKeyDown = (event: KeyboardEvent, target: HTMLElement) => {
+    const key = keyOf(table, target);
+    if (!key || isRow(key)) return;
+    if (event.key === "Escape" || event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      key.focus();
+      return;
+    }
+    if (event.key === "Tab") {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      key.focus();
+      leave(event.shiftKey);
+      return;
+    }
+    const onHeaderMove = options.current?.onHeaderMove;
+    if (
+      event.altKey &&
+      onHeaderMove &&
+      isHeaderRow(table, rowOf(key)) &&
+      (event.key === "ArrowLeft" || event.key === "ArrowRight")
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      onHeaderMove(key, event.key === "ArrowLeft" ? -1 : 1);
+    }
   };
 
   const onDocumentKeyDown = (event: KeyboardEvent) => {
