@@ -39,6 +39,12 @@ jobs:
         with:
           bun-version: "1.3.11"
 
+      # vitest's bin runs on `node`, not Bun; match the local major so
+      # jsdom/Storage and microtask timing behave the same as on dev machines.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 

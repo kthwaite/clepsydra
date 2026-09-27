@@ -1118,9 +1118,14 @@ describe("FeedManagement", () => {
 
   it("persists one committed transition once under StrictMode", async () => {
     managementMocks.feedsQuery.data = disclosureFeedList;
-    // The test Storage is an in-memory object (Node 26), so spy on the
-    // instance rather than Storage.prototype.
-    const setItem = vi.spyOn(window.localStorage, "setItem");
+    // Node 26 gets test-setup's in-memory Storage (own `setItem`); older
+    // Nodes get jsdom's, whose `setItem` lives on Storage.prototype.
+    const setItem = vi.spyOn(
+      Object.hasOwn(window.localStorage, "setItem")
+        ? window.localStorage
+        : Storage.prototype,
+      "setItem",
+    );
     const user = userEvent.setup();
     render(
       <StrictMode>
