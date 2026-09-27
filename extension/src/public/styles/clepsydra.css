@@ -1,0 +1,362 @@
+/* =============================================================================
+   CLEPSYDRA WEB ARCHIVE — Stone & Lamp
+   The extension's share of the language defined in ui/src/main.css: charcoal
+   ground, bone under light, cobalt as the only accent, Geist for UI and
+   Instrument Serif as accent. src/styles.test.ts pins the tokens to the app.
+
+   Two deliberate divergences from the app:
+     - The app resolves charcoal/bone through ThemeProvider (a `.paper` class
+       on <html>). An extension page has no user prefs to read, so bone is
+       driven by the browser's own colour scheme instead.
+     - `--ok` has no counterpart in main.css. A finished capture needs a hue
+       of its own, distinct from the accent that marks work in progress, so it
+       borrows the verdigris quire hue: nothing new enters the palette.
+
+   Lives in public/ so it is copied verbatim to the extension root: both pages
+   link it as /styles/clepsydra.css and it is never touched by the bundler.
+   ============================================================================= */
+
+@font-face {
+	font-family: "Geist Variable";
+	font-style: normal;
+	font-weight: 100 900;
+	/* `block`, not `swap`: the file is packaged alongside the page, so the block
+	   period is measured in milliseconds — and a popup that lives for two
+	   seconds must not spend the first of them repainting in a fallback face. */
+	font-display: block;
+	src: url("/fonts/geist-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+@font-face {
+	font-family: "Instrument Serif";
+	font-style: normal;
+	font-weight: 400;
+	font-display: block;
+	src: url("/fonts/instrument-serif-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+	font-family: "Instrument Serif";
+	font-style: italic;
+	font-weight: 400;
+	font-display: block;
+	src: url("/fonts/instrument-serif-latin-400-italic.woff2") format("woff2");
+}
+
+/* Charcoal — the base, exactly as :root in ui/src/main.css ------------------ */
+:root {
+	color-scheme: dark;
+	--ground: #151412;
+	--raise: #262420;
+	--sink: #1f1d1a;
+	--ink: #eee8db;
+	--ink-2: #cbc5b8;
+	--mute: #9a948a;
+	--faint: #57524a;
+	--accent: #809cff;
+	--warn: #e08a6a;
+	--hot: #e08a6a;
+	--quire-verdigris: #7fc0a8;
+	--rule: #34312c;
+	--accent-tint: rgba(128, 156, 255, 0.15);
+	--elev-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+	--elev-2: 0 8px 24px rgba(0, 0, 0, 0.35);
+	--ok: var(--quire-verdigris);
+
+	--font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui,
+		"Helvetica Neue", Arial, sans-serif;
+	--font-serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+	/* Code only, and rare here: the system stack spares a packaged font. */
+	--font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+	--radius: 12px;
+}
+
+/* Bone — the `.paper` values from main.css, keyed to the browser scheme. ---- */
+@media (prefers-color-scheme: light) {
+	:root {
+		color-scheme: light;
+		--ground: #f4efe4;
+		--raise: #fbf8f2;
+		--sink: #eae3d3;
+		--ink: #0e1a3a;
+		--ink-2: #343b50;
+		--mute: #5f6372;
+		--faint: #a9a89f;
+		--accent: #1747e6;
+		--warn: #b3401f;
+		--hot: #b3401f;
+		--quire-verdigris: #3f7f6a;
+		--rule: #ddd5c3;
+		--accent-tint: rgba(23, 71, 230, 0.09);
+		--elev-1: 0 1px 2px rgba(14, 26, 58, 0.08);
+		--elev-2: 0 8px 24px rgba(14, 26, 58, 0.12);
+	}
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: var(--ground);
+	color: var(--ink);
+	font-family: var(--font-sans);
+	font-size: 14px;
+	line-height: 1.5;
+	letter-spacing: 0;
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+	margin: 0;
+	font-size: inherit;
+	font-weight: inherit;
+}
+
+::selection {
+	background: var(--accent-tint);
+	color: inherit;
+}
+
+/* Header and footer bars. Spacing separates them from the body; no rules. -- */
+.rail {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+/* Wordmark — serif, sentence case, as in the app header. */
+.wordmark {
+	flex: none;
+	font-family: var(--font-serif);
+	font-size: 22px;
+	font-weight: 400;
+	line-height: 1;
+	color: var(--ink);
+}
+
+.rail-label {
+	flex: 1;
+	min-width: 0;
+	color: var(--mute);
+	font-size: 12.5px;
+	text-align: end;
+}
+
+/* Tick — the 7px square in front of every eyebrow. */
+.tick {
+	display: inline-block;
+	flex: none;
+	width: 7px;
+	height: 7px;
+	border-radius: 1px;
+	background: var(--accent);
+}
+
+/* Chips — the app's Badge: pill, sunk, no border. */
+.tag {
+	display: inline-flex;
+	max-width: 100%;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 8px;
+	border-radius: 9999px;
+	background: var(--sink);
+	color: var(--ink-2);
+	font-size: 12.5px;
+	line-height: 1.4;
+	overflow-wrap: anywhere;
+}
+
+/* Fields — the app's TextField. ---------------------------------------------- */
+.field-label {
+	display: block;
+	margin-bottom: 6px;
+	color: var(--mute);
+	font-size: 12.5px;
+}
+
+input[type="text"],
+input[type="number"] {
+	width: 100%;
+	height: 40px;
+	padding: 0 16px;
+	border: none;
+	border-radius: 9999px;
+	background: var(--sink);
+	color: var(--ink);
+	font: inherit;
+	font-size: 14px;
+}
+
+input[type="text"]::placeholder,
+input[type="number"]::placeholder {
+	color: var(--mute);
+}
+
+/* Checkbox — the app's 16px box: sunk with a faint inset ring, cobalt when
+   checked. `appearance: none` so the box can take the tokens. */
+input[type="checkbox"] {
+	position: relative;
+	flex: none;
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	border-radius: 5px;
+	background: var(--sink);
+	box-shadow: inset 0 0 0 1.5px var(--faint);
+	appearance: none;
+	cursor: pointer;
+	transition: background-color 0.1s;
+}
+
+input[type="checkbox"]:checked {
+	background: var(--accent);
+	box-shadow: none;
+}
+
+/* The check mark, drawn from borders so it follows --raise in both themes. */
+input[type="checkbox"]:checked::after {
+	position: absolute;
+	top: 3px;
+	left: 5.5px;
+	width: 5px;
+	height: 8px;
+	border: solid var(--raise);
+	border-width: 0 2px 2px 0;
+	transform: rotate(45deg);
+	content: "";
+}
+
+input:disabled {
+	cursor: not-allowed;
+	opacity: 0.45;
+}
+
+.field-help,
+.hint {
+	margin: 6px 0 0;
+	color: var(--mute);
+	font-size: 12.5px;
+	line-height: 1.45;
+}
+
+code {
+	padding: 0 4px;
+	border-radius: 4px;
+	background: var(--sink);
+	color: var(--ink-2);
+	font-family: var(--font-mono);
+	font-size: 0.92em;
+}
+
+/* Buttons — bare `button` is the app's quiet (secondary) button. ------------- */
+button {
+	display: inline-flex;
+	height: 36px;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 0 16px;
+	border: none;
+	border-radius: 14px;
+	background: var(--sink);
+	color: var(--ink);
+	font-family: var(--font-sans);
+	font-size: 14px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: background-color 0.1s, color 0.1s;
+}
+
+button:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--sink) 70%, transparent);
+}
+
+button:disabled {
+	cursor: not-allowed;
+	opacity: 0.45;
+}
+
+/* Primary — the app's cobalt pill. */
+.btn-primary {
+	height: 44px;
+	padding: 0 20px;
+	border-radius: 9999px;
+	background: var(--accent);
+	color: var(--raise);
+}
+
+.btn-primary:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--accent) 90%, transparent);
+}
+
+.btn-primary:active:not(:disabled) {
+	background: color-mix(in srgb, var(--accent) 85%, transparent);
+}
+
+/* One focus treatment everywhere: 2px cobalt ring, offset on the ground. */
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+/* Links — the app's .cl-link. */
+a {
+	color: var(--accent);
+	text-decoration: none;
+	border-bottom: 1px solid var(--accent);
+}
+
+a:hover {
+	background: var(--accent-tint);
+}
+
+/* Tone-carrying panel. The tone is a dot, not a rule (spec decisions 13–14);
+   the copy stays in ink so every tone reads at the same contrast. */
+.panel {
+	padding: 10px 12px;
+	border-radius: var(--radius);
+	background: var(--sink);
+	color: var(--ink-2);
+	font-size: 13px;
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
+.panel::before {
+	display: inline-block;
+	width: 7px;
+	height: 7px;
+	margin-right: 8px;
+	border-radius: 50%;
+	background: var(--tone, var(--mute));
+	vertical-align: 0.1em;
+	content: "";
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}
+
+/* `hidden` must win over the layout `display` a component sets on itself.
+   Without this, `.tag-list { display: flex }` and `.capture-link
+   { display: inline-block }` outrank the UA's `[hidden] { display: none }`
+   — author origin beats UA origin at equal specificity — and every element
+   the popup hides by toggling `.hidden` stays on screen. */
+[hidden] {
+	display: none !important;
+}

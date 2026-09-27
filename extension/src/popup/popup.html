@@ -2,115 +2,123 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <link rel="stylesheet" href="/styles/vessel.css">
+  <link rel="stylesheet" href="/styles/clepsydra.css">
   <style>
     /* Popup-specific layout. The palette, type, controls and focus ring come
-       from /styles/vessel.css, which both extension pages share. */
+       from /styles/clepsydra.css, which both extension pages share. */
     body {
       width: 320px;
+    }
+    .rail-top {
+      padding: 14px 14px 0;
+    }
+    .rail-bottom {
+      padding: 0 14px 12px;
     }
     .body {
       display: flex;
       flex-direction: column;
-      gap: var(--space-3);
-      padding: var(--space-3);
+      gap: 12px;
+      padding: 14px;
     }
     .captured-indicator {
-      padding: var(--space-2);
-      border: 1px solid var(--rule-soft);
-      border-left: 2px solid var(--warn);
-      background: var(--paper-2);
-      color: var(--ink-2);
-      font-size: var(--fs-s);
-      line-height: var(--line-height-copy);
-      overflow-wrap: anywhere;
+      --tone: var(--warn);
     }
     .capture-tags {
       display: flex;
       flex-direction: column;
-      gap: var(--space-1);
+      gap: 6px;
     }
     .capture-tags .field-label {
       margin-bottom: 0;
     }
+    /* The eyebrow over the default tags carries the section tick. */
+    #capture-tags-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
     .tag-list {
       display: flex;
-      min-height: 20px;
+      min-height: 22px;
       flex-wrap: wrap;
       align-items: center;
-      gap: var(--space-1);
-      color: var(--ink-mute);
-      font-size: var(--fs-s);
+      gap: 4px;
+      color: var(--mute);
+      font-size: 12.5px;
     }
     /* An empty live region must not hold open a row of dead space. */
     .tag-list:empty {
       min-height: 0;
     }
     .tag-remove {
-      min-height: 0;
+      height: auto;
       padding: 0;
-      border: none;
+      border-radius: 0;
       background: none;
-      color: var(--ink-mute);
-      font-size: var(--fs);
-      letter-spacing: 0;
+      color: var(--mute);
+      font-size: 12.5px;
+      font-weight: 400;
       line-height: 1;
     }
     .tag-remove:hover:not(:disabled) {
-      border: none;
       background: none;
       color: var(--hot);
     }
-    /* Suggested tags are chips that happen to be buttons: they keep the chip's
-       lowercase vault spelling rather than the tracked uppercase of a control. */
+    /* Suggested tags are chips that happen to be buttons: the chip's shape and
+       size win over the quiet button's. */
     .tag-suggested {
-      cursor: pointer;
+      height: auto;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      color: var(--ink-2);
+      font-size: 12.5px;
       font-weight: 400;
-      letter-spacing: 0.04em;
-      text-transform: none;
+      line-height: 1.4;
     }
     .tag-suggested::before {
       content: "+";
       color: var(--accent);
     }
     .tag-suggested:hover:not(:disabled) {
-      border-color: var(--accent);
-      background: var(--highlight);
+      background: var(--accent-tint);
       color: var(--ink);
     }
+    /* The one overlay in the popup, so the one place elevation appears. */
     .tag-suggestions {
       max-height: 132px;
-      margin: 0;
-      padding: 0;
-      border: 1px solid var(--rule);
-      border-top: none;
-      background: var(--paper);
+      margin: 2px 0 0;
+      padding: 4px;
+      border-radius: var(--radius);
+      background: var(--raise);
+      box-shadow: var(--elev-2);
       list-style: none;
       overflow-y: auto;
     }
     .tag-suggestions [role="option"] {
-      padding: var(--space-1) var(--space-2);
+      padding: 6px 10px;
+      border-radius: 8px;
       color: var(--ink-2);
-      letter-spacing: 0.04em;
       cursor: pointer;
     }
     .tag-suggestions [role="option"][aria-selected="true"],
     .tag-suggestions [role="option"]:hover {
-      background: var(--highlight);
+      background: var(--accent-tint);
       color: var(--ink);
-      font-weight: 700;
     }
     #capture-btn {
       width: 100%;
     }
     .capture-progress {
       height: 4px;
-      border: 1px solid var(--rule);
-      background: var(--paper-2);
+      overflow: hidden;
+      border-radius: 9999px;
+      background: var(--sink);
     }
     .capture-progress-fill {
       width: 0%;
       height: 100%;
+      border-radius: 9999px;
       background: var(--accent);
       transition: width 150ms ease-out;
     }
@@ -122,60 +130,58 @@
       from { margin-left: 0; }
       to { margin-left: 70%; }
     }
-    /* Signal hues follow the app's telemetry: --cool reads, --accent works,
-       --ok settles, --warn hesitates, --hot fails. */
+    /* Tones: mute reads, accent works, ok settles, warn hesitates, hot fails.
+       popup.ts shows the panel by setting display itself. */
     .capture-status {
       display: none;
     }
-    .capture-status[data-tone="reading"] { color: var(--cool); }
-    .capture-status[data-tone="processing"] { color: var(--accent); }
-    .capture-status[data-tone="success"] { color: var(--ok); }
-    .capture-status[data-tone="conflict"] { color: var(--warn); }
-    .capture-status[data-tone="error"] { color: var(--hot); }
+    .capture-status[data-tone="reading"] { --tone: var(--mute); }
+    .capture-status[data-tone="processing"] { --tone: var(--accent); }
+    .capture-status[data-tone="success"] { --tone: var(--ok); }
+    .capture-status[data-tone="conflict"] { --tone: var(--warn); }
+    .capture-status[data-tone="error"] { --tone: var(--hot); }
     .capture-link {
       display: inline-block;
       align-self: flex-start;
-      font-size: var(--fs-s);
-      letter-spacing: var(--track);
-      text-transform: uppercase;
+      font-size: 13px;
     }
     .error {
       display: none;
-      color: var(--hot);
+      --tone: var(--hot);
     }
-    /* Footer rail — the popup's share of the app's status bar. */
     .status {
       display: flex;
       min-width: 0;
       flex: 1;
       align-items: center;
-      gap: var(--space-2);
-      padding: 3px var(--space-3);
+      gap: 8px;
+      color: var(--mute);
+      font-size: 12.5px;
     }
+    /* Status dot — the app's 7px round StatusDot, faint until reachability
+       is known. */
     .dot {
       flex: none;
-      width: 6px;
-      height: 6px;
-      background: var(--ink-faint);
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--faint);
     }
-    .dot.connected { background: var(--cool); }
+    .dot.connected { background: var(--accent); }
     .dot.disconnected { background: var(--hot); }
     #status-text {
       min-width: 0;
       overflow-wrap: anywhere;
-      opacity: 0.8;
     }
+    /* 24px keeps the link a usable pointer target in a text-sized footer. */
     .settings-link {
       display: inline-flex;
       min-height: 24px;
       flex: none;
       align-items: center;
-      padding: 0 var(--space-3);
-      border: none;
-      border-left: 1px solid var(--bar-rule);
-      color: var(--ink-mute);
-      letter-spacing: var(--track);
-      text-transform: uppercase;
+      border-bottom: none;
+      color: var(--mute);
+      font-size: 12.5px;
     }
     .settings-link:hover {
       background: none;
@@ -185,13 +191,13 @@
 </head>
 <body>
   <header class="rail rail-top">
-    <div class="wordmark"><span class="wordmark-lead">C</span>lepsydra</div>
-    <div class="rail-label">Web Archive</div>
+    <div class="wordmark">Clepsydra</div>
+    <div class="rail-label">Web archive</div>
   </header>
   <main class="body">
-    <div class="captured-indicator" id="captured-indicator" hidden></div>
+    <div class="captured-indicator panel" id="captured-indicator" hidden></div>
     <section class="capture-tags" aria-labelledby="capture-tags-label">
-      <div id="capture-tags-label" class="field-label">Defaults</div>
+      <div id="capture-tags-label" class="field-label"><span class="tick" aria-hidden="true"></span>Defaults</div>
       <div id="default-tags" class="tag-list" aria-live="polite">Loading…</div>
       <label class="field-label" for="additional-tags">Additional tags</label>
       <div id="selected-tags" class="tag-list" aria-live="polite"></div>
@@ -202,7 +208,7 @@
       <div id="suggested-tags" class="tag-list" role="group" aria-label="Suggested from this page" hidden></div>
       <p id="additional-tags-help" class="field-help">Applies only to this capture. Type to search vault tags. Suggested tags come from this page.</p>
     </section>
-    <button id="capture-btn" class="btn-primary">Capture This Page</button>
+    <button id="capture-btn" class="btn-primary">Capture this page</button>
     <div class="capture-progress" id="capture-progress" hidden
          role="progressbar" aria-label="Capture progress"
          aria-valuemin="0" aria-valuemax="100">

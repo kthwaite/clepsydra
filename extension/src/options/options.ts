@@ -71,7 +71,7 @@ async function checkStatus(serverUrl: string) {
 	try {
 		const status = await client.getStatus();
 		statusBox.textContent = `Connected — ${status.blob_count} blobs, ${(status.total_size_bytes / 1024 / 1024).toFixed(1)} MB`;
-		// The tone drives the panel's signal rule from the Vessel palette; the
+		// The tone picks the panel's dot colour from the shared stylesheet; the
 		// page must not carry colour literals of its own.
 		statusBox.dataset.tone = "ok";
 	} catch {
