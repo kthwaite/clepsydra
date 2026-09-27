@@ -172,6 +172,8 @@ describe("SlateEditor block-ref source editing", () => {
     const input = (await screen.findByRole("textbox", {
       name: "Edit block reference",
     })) as HTMLInputElement;
+    // The input focuses in a passive effect; a user cannot type before that.
+    await waitFor(() => expect(input).toHaveFocus());
     return { ...harness, input };
   }
 
@@ -251,6 +253,8 @@ describe("SlateEditor footnote-ref source editing", () => {
     const input = (await screen.findByRole("textbox", {
       name: "Edit footnote reference",
     })) as HTMLInputElement;
+    // The input focuses in a passive effect; a user cannot type before that.
+    await waitFor(() => expect(input).toHaveFocus());
     expect(input).toHaveValue("old");
     expect(input.selectionStart).toBe(0);
     const chrome = input.closest("[contenteditable='false']")?.parentElement;
@@ -286,6 +290,8 @@ describe("SlateEditor link source editing", () => {
     const input = (await screen.findByRole("textbox", {
       name: "Edit link",
     })) as HTMLInputElement;
+    // The input focuses in a passive effect; a user cannot type before that.
+    await waitFor(() => expect(input).toHaveFocus());
     return { ...harness, input };
   }
 
