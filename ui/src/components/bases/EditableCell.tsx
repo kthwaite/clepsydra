@@ -103,6 +103,9 @@ export function EditableCell({
 
     return (
       <fieldset
+        // The grid leaves every key inside an open editor alone: arrows move
+        // the caret or the Select, not focus.
+        data-grid-editor=""
         className="m-0 min-w-0 border-0 p-0"
         onBlurCapture={(event) => {
           if (preserveEditingOnBlur) event.stopPropagation();

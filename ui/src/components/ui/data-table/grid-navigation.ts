@@ -244,7 +244,10 @@ function attach(
 ): () => void {
   let focusedKey: Key | null = null;
   let lastFocused: HTMLElement | null = null;
-  let tabbing: { shift: boolean } | null = null;
+  let tab: { shift: boolean; event: KeyboardEvent } | null = null;
+  /** A Tab the browser will act on; a cancelled one (an editor committing
+   *  and moving on) moves focus in code, which is not Tab entry. */
+  const tabbing = () => (tab && !tab.event.defaultPrevented ? tab : null);
   let leaving = false;
 
   const allKeys = (): Key[] => [
@@ -296,10 +299,11 @@ function attach(
     const entering = !(from instanceof Node && table.contains(from));
 
     if (target === table) {
-      if (entering) enter(tabbing?.shift ?? false);
+      if (entering) enter(tabbing()?.shift ?? false);
       return;
     }
-    if (entering && tabbing) {
+    const tabbed = tabbing();
+    if (entering && tabbed) {
       const restore =
         lastFocused?.isConnected && table.contains(lastFocused)
           ? lastFocused
@@ -309,7 +313,7 @@ function attach(
         return;
       }
       if (!restore) {
-        enter(tabbing.shift);
+        enter(tabbed.shift);
         return;
       }
     }
@@ -495,9 +499,9 @@ function attach(
 
   const onDocumentKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Tab") return;
-    tabbing = { shift: event.shiftKey };
+    tab = { shift: event.shiftKey, event };
     setTimeout(() => {
-      tabbing = null;
+      tab = null;
     });
   };
 

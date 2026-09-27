@@ -12,14 +12,6 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  Cell,
-  Column,
-  Row,
-  Table,
-  TableBody,
-  TableHeader,
-} from "react-aria-components";
 import type {
   Aggregate,
   BaseDetailResponse,
@@ -34,6 +26,11 @@ import type {
 import { FooterControls } from "#/components/codex/FooterControls";
 import { Tick } from "#/components/codex/Tick";
 import { Button, buttonStyles } from "#/components/ui/button";
+import {
+  type DataColumn,
+  DataTable,
+  type SortDirection,
+} from "#/components/ui/data-table";
 import { Switch } from "#/components/ui/switch";
 import { useTableCompact } from "#/hooks/useTableCompact";
 import { cn } from "#/lib/cn";
@@ -55,6 +52,7 @@ import {
   type RowMenuCell,
 } from "./BaseRowMenu";
 import { type CellValue, formatCellValue } from "./cells/types";
+import { columnWidthsKey } from "./column-widths";
 import { canGroup, canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
 import type { EmbedScrollCap } from "./embed-query";
@@ -71,6 +69,7 @@ import {
   headerOptionOverflow,
   quickFilterType,
 } from "./quick-filters";
+import { useColumnWidths } from "./useColumnWidths";
 import { useGroupCollapse } from "./useGroupCollapse";
 import type { OverridesSaveState } from "./useViewOverrides";
 import { ViewOverridesStrip } from "./ViewOverridesStrip";
@@ -87,11 +86,19 @@ const EMPTY_AGGREGATES: readonly Aggregate[] = [];
 const DEFAULT_COLUMNS = ["title"];
 const IDLE_SAVE: OverridesSaveState = { phase: "idle" };
 const noop = () => {};
+/** Default column widths in pixels; the title fills what is left. */
+const COLUMN_WIDTH = 160;
+const BODY_WIDTH = 280;
+const TITLE_MIN_WIDTH = 200;
+
+function defaultColumnWidth(column: string): number {
+  return column === "body" ? BODY_WIDTH : COLUMN_WIDTH;
+}
 
 export interface BaseTableViewHandle {
   /**
    * Focuses the active saved-view button, falling back to the first rendered
-   * React Aria table when the view switcher has no enabled control.
+   * grid when the view switcher has no enabled control.
    */
   focusEntry(): boolean;
   /** Focuses one row's title button; false when that row is not rendered. */
@@ -359,7 +366,7 @@ function ScrollViewport({
 }
 
 /**
- * The Vessel data grid: one react-aria `Table` per (group of) rows, column
+ * The Base data grid: one `DataTable` per (group of) rows, column
  * sorting mapped to ordered query sort keys, group header rows carrying
  * aggregate chips. Purely presentational — data and commits flow through
  * props (`BaseTable` wires the queries).
@@ -446,6 +453,9 @@ export const BaseTableView = forwardRef<
   const visibleColumns = useMemo(
     () => columns.filter((column) => !hiddenColumns.includes(column)),
     [columns, hiddenColumns],
+  );
+  const columnWidths = useColumnWidths(
+    columnWidthsKey(definition.slug, activeView),
   );
   const displayLabelsByIdentity = useMemo(() => {
     const result = new Map<string, string>();
@@ -539,6 +549,11 @@ export const BaseTableView = forwardRef<
   };
   const [activeCell, setActiveCell] = useState<ActiveCell | null>(null);
   const activeViewIdentityRef = useRef(equivalentActiveView);
+  // The view being committed. Title refs attach before this component's
+  // layout effects run, so on a view switch `activeViewIdentityRef` still
+  // names the old view when the new grid's title buttons arrive.
+  const committingViewRef = useRef(equivalentActiveView);
+  committingViewRef.current = equivalentActiveView;
   const nextForwardFocusToken = useRef(0);
   const pendingForwardFocus = useRef<ForwardFocusRequest | undefined>(
     undefined,
@@ -666,7 +681,7 @@ export const BaseTableView = forwardRef<
     const request = createdFocusRequest.current;
     if (
       !request ||
-      request.view !== activeViewIdentityRef.current ||
+      request.view !== committingViewRef.current ||
       createdFocusBlocked.current ||
       focusedCreatedId.current === request.id ||
       createdFocusTimer.current !== undefined
@@ -674,9 +689,8 @@ export const BaseTableView = forwardRef<
       return;
     }
 
-    // Entering a React Aria Table initializes its selection manager, whose
-    // pending effect focuses the row. Prime that state, then restore the
-    // requested descendant focus after the row effect has settled.
+    // Focus now, then again once the row's own effects have settled, in case
+    // something in between (a row focused on entry) took it.
     node.focus();
     const { id: createdId, view: requestView } = request;
     createdFocusTimer.current = window.setTimeout(() => {
@@ -958,263 +972,245 @@ export const BaseTableView = forwardRef<
     setActiveCell(null);
   };
 
-  const grid = (rows: QueryRow[], label: string, cacheIdentity: string) => (
-    <Table
-      key={cacheIdentity}
-      aria-label={label}
-      data-density={dense ? "compact" : "comfortable"}
-      sortDescriptor={readOnly ? undefined : sortDescriptor}
-      onSortChange={
-        readOnly
-          ? undefined
-          : (descriptor) =>
-              onSortChange([
-                {
-                  field: String(descriptor.column),
-                  dir: descriptor.direction === "descending" ? "desc" : "asc",
-                },
-              ])
-      }
-      className={cn(
-        "w-full border-collapse",
-        dense
-          ? "text-[12.5px] [--title:13.5px]"
-          : "text-[13px] [--title:14.5px]",
-      )}
-    >
-      <TableHeader>
-        {visibleColumns.map((column) => {
-          const capability = pickerColumn(column);
-          const allowsSorting = capability.allowsSorting;
-          return (
-            <Column
-              key={column}
-              id={column}
-              isRowHeader={column === visibleColumns[0]}
-              allowsSorting={allowsSorting}
-              className={cn(
-                "px-3 text-left text-[12.5px] font-normal text-mute",
-                dense ? "h-[34px]" : "h-10",
-                allowsSorting && "cursor-pointer data-[hovered]:text-ink",
-                // The scroller moves the rows under the header, not past it.
-                compact && "sticky top-0 z-[1] bg-ground",
-              )}
-            >
-              {({ sortDirection }) => {
-                const label = displayLabelForColumn(column);
-                const heading = (
-                  <span className="inline-flex items-center gap-1">
-                    {label}
-                    {sortDirection && (
-                      <span aria-hidden="true">
-                        {sortDirection === "ascending" ? "↑" : "↓"}
-                      </span>
-                    )}
-                  </span>
-                );
-                if (readOnly) return heading;
-                return (
-                  <BaseHeaderMenu
-                    column={column}
-                    label={label}
-                    allowsSorting={allowsSorting}
-                    groupable={capability.groupable}
-                    groupedByThis={effectiveGroup === column}
-                    hideable={column !== "title" && visibleColumns.length > 1}
-                    canMoveLeft={
-                      onReorderColumns !== undefined &&
-                      movedColumnOrder(columns, hiddenColumns, column, -1) !==
-                        undefined
-                    }
-                    canMoveRight={
-                      onReorderColumns !== undefined &&
-                      movedColumnOrder(columns, hiddenColumns, column, 1) !==
-                        undefined
-                    }
-                    onMove={(delta) => {
-                      const next = movedColumnOrder(
-                        columns,
-                        hiddenColumns,
-                        column,
-                        delta,
-                      );
-                      if (next) onReorderColumns?.(next);
-                    }}
-                    presets={capability.presets}
-                    optionOverflow={capability.optionOverflow}
-                    onSortChange={onSortChange}
-                    onAddQuickFilter={onAddQuickFilter ?? noop}
-                    onSetGroup={onSetGroup ?? noop}
-                    onHideColumn={onHideColumn ?? noop}
-                  >
-                    {heading}
-                  </BaseHeaderMenu>
-                );
-              }}
-            </Column>
-          );
-        })}
-      </TableHeader>
-      <TableBody
-        key={`${cacheIdentity}:${memberDraftOpen ? "draft" : "active"}`}
-        dependencies={[
-          activeCell,
-          contextTarget,
-          evaluationIdentity,
-          focusCreatedId,
-          memberDraftOpen,
-          onAddQuickFilter,
-          onCopyValue,
-          readOnly,
-          rowActions,
-          // Reorder keeps the grid mounted, so the cached rows must re-render.
-          visibleColumns,
-        ]}
-        items={rows}
-      >
-        {(row) => (
-          <Row
-            id={row.id}
-            className={cn(
-              "group data-[hovered]:*:bg-sink",
-              dense ? "h-8" : "h-[42px]",
-            )}
-          >
-            {visibleColumns.map((column) => {
-              const property = properties.get(column);
-              return (
-                <Cell
-                  key={column}
-                  className="px-3 align-middle first:rounded-l-[10px] last:rounded-r-[10px]"
-                >
-                  {/* One menu serves the row; each cell forwards its context
-                    events to the `⋯` button that owns it. */}
-                  <div className="flex min-w-0 items-center">
-                    <CellContextTrigger
-                      row={row}
-                      column={column}
-                      onContextTarget={setContextTarget}
-                    >
-                      {column === "title" ? (
-                        readOnly || memberDraftOpen ? (
-                          <span className="block truncate px-1 py-0.5 text-[length:var(--title)] font-medium text-ink">
-                            {row.title ?? row.path}
-                          </span>
-                        ) : (
-                          <button
-                            ref={
-                              row.id === focusCreatedId
-                                ? setCreatedTitleRef
-                                : forwardFocusRequest?.view ===
-                                      equivalentActiveView &&
-                                    String(row.id) === forwardFocusRequest.rowId
-                                  ? forwardFocusRequest.ref
-                                  : undefined
-                            }
-                            type="button"
-                            data-row-title={String(row.id)}
-                            className={cn(
-                              "cursor-pointer truncate rounded-md text-left text-[length:var(--title)] font-medium text-ink hover:text-accent",
-                              FOCUS_RING_NATIVE,
-                            )}
-                            onClick={() => onOpenPage(row.path)}
-                          >
-                            {row.title ?? row.path}
-                          </button>
-                        )
-                      ) : column === "body" ? (
-                        <BodyExcerptCell
-                          value={
-                            (row.columns as Record<string, CellValue>).body ??
-                            null
-                          }
-                          pageLabel={row.title ?? row.path}
-                          path={row.path}
-                          onOpenPage={onOpenPage}
-                        />
-                      ) : !readOnly &&
-                        !memberDraftOpen &&
-                        SYSTEM_COLUMNS[column] === undefined &&
-                        property !== undefined ? (
-                        <EditableCell
-                          value={
-                            (row.columns as Record<string, CellValue>)[
-                              column
-                            ] ?? null
-                          }
-                          definition={property}
-                          isEditing={
-                            activeCell?.rowId === String(row.id) &&
-                            activeCell.column === column &&
-                            asciiCaseFold(activeCell.view) ===
-                              equivalentActiveView
-                          }
-                          onEdit={() => {
-                            pendingForwardFocus.current = undefined;
-                            nextForwardFocusToken.current += 1;
-                            setForwardFocusRequest(undefined);
-                            setActiveCell({
-                              rowId: String(row.id),
-                              column,
-                              view: activeView,
-                            });
-                          }}
-                          onCancel={() => {
-                            if (pendingForwardFocus.current) return;
-                            pendingForwardFocus.current = undefined;
-                            setForwardFocusRequest(undefined);
-                            setActiveCell(null);
-                          }}
-                          onCommit={(value, hint) => {
-                            pendingForwardFocus.current = undefined;
-                            nextForwardFocusToken.current += 1;
-                            setForwardFocusRequest(undefined);
-                            setActiveCell(null);
-                            onCommitCell(row, column, value, hint);
-                          }}
-                          onCommitNext={(value, hint) =>
-                            commitAndMove(rows, row, column, value, hint, 1)
-                          }
-                          onCommitPrevious={(value, hint) =>
-                            commitAndMove(rows, row, column, value, hint, -1)
-                          }
-                        />
-                      ) : (
-                        // System fields and undeclared keys are read-only.
-                        <span className="block truncate px-1 py-0.5 text-mute tabular-nums">
-                          {formatCellValue(
-                            (row.columns as Record<string, CellValue>)[
-                              column
-                            ] ?? null,
-                          )}
-                        </span>
-                      )}
-                    </CellContextTrigger>
-                    {column === visibleColumns[0] && hasRowActions ? (
-                      <RowActionsButton
-                        row={row}
-                        readOnly={readOnly}
-                        actions={rowActions}
-                        cell={contextCell(row)}
-                        restoreFocus={
-                          contextTarget?.rowId === String(row.id)
-                            ? contextTarget.origin
-                            : null
-                        }
-                        onContextTarget={setContextTarget}
-                        onAddQuickFilter={onAddQuickFilter}
-                        onCopyValue={onCopyValue}
-                      />
-                    ) : null}
-                  </div>
-                </Cell>
-              );
-            })}
-          </Row>
-        )}
-      </TableBody>
-    </Table>
+  /** Title first, pinned and filling; `columns` keeps hidden ones too, so a
+   * move reported by the grid is already the whole order. */
+  const columnVisibility = useMemo(
+    () => Object.fromEntries(hiddenColumns.map((column) => [column, false])),
+    [hiddenColumns],
   );
+  const firstVisibleColumn = visibleColumns[0];
+
+  const headerFor = (column: string, sorted: SortDirection | undefined) => {
+    const capability = pickerColumn(column);
+    const label = capability.label;
+    const heading = (
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {sorted && (
+          <span aria-hidden="true">{sorted === "ascending" ? "↑" : "↓"}</span>
+        )}
+      </span>
+    );
+    if (readOnly) return heading;
+    return (
+      <BaseHeaderMenu
+        column={column}
+        label={label}
+        allowsSorting={capability.allowsSorting}
+        groupable={capability.groupable}
+        groupedByThis={effectiveGroup === column}
+        hideable={column !== "title" && visibleColumns.length > 1}
+        canMoveLeft={
+          onReorderColumns !== undefined &&
+          movedColumnOrder(columns, hiddenColumns, column, -1) !== undefined
+        }
+        canMoveRight={
+          onReorderColumns !== undefined &&
+          movedColumnOrder(columns, hiddenColumns, column, 1) !== undefined
+        }
+        onMove={(delta) => {
+          const next = movedColumnOrder(columns, hiddenColumns, column, delta);
+          if (next) onReorderColumns?.(next);
+        }}
+        resizable={column !== "title"}
+        presets={capability.presets}
+        optionOverflow={capability.optionOverflow}
+        onSortChange={onSortChange}
+        onAddQuickFilter={onAddQuickFilter ?? noop}
+        onSetGroup={onSetGroup ?? noop}
+        onHideColumn={onHideColumn ?? noop}
+      >
+        {heading}
+      </BaseHeaderMenu>
+    );
+  };
+
+  const cellFor = (rows: QueryRow[], row: QueryRow, column: string) => {
+    const property = properties.get(column);
+    return (
+      // One menu serves the row; each cell forwards its context events to
+      // the `⋯` button that owns it.
+      <div className="flex min-w-0 items-center">
+        <CellContextTrigger
+          row={row}
+          column={column}
+          onContextTarget={setContextTarget}
+        >
+          {column === "title" ? (
+            readOnly || memberDraftOpen ? (
+              <span className="block truncate px-1 py-0.5 text-[length:var(--title)] font-medium text-ink">
+                {row.title ?? row.path}
+              </span>
+            ) : (
+              <button
+                ref={
+                  row.id === focusCreatedId
+                    ? setCreatedTitleRef
+                    : forwardFocusRequest?.view === equivalentActiveView &&
+                        String(row.id) === forwardFocusRequest.rowId
+                      ? forwardFocusRequest.ref
+                      : undefined
+                }
+                type="button"
+                data-row-title={String(row.id)}
+                className={cn(
+                  "cursor-pointer truncate rounded-md text-left text-[length:var(--title)] font-medium text-ink hover:text-accent",
+                  FOCUS_RING_NATIVE,
+                )}
+                onClick={() => onOpenPage(row.path)}
+              >
+                {row.title ?? row.path}
+              </button>
+            )
+          ) : column === "body" ? (
+            <BodyExcerptCell
+              value={(row.columns as Record<string, CellValue>).body ?? null}
+              pageLabel={row.title ?? row.path}
+              path={row.path}
+              onOpenPage={onOpenPage}
+            />
+          ) : !readOnly &&
+            !memberDraftOpen &&
+            SYSTEM_COLUMNS[column] === undefined &&
+            property !== undefined ? (
+            <EditableCell
+              value={(row.columns as Record<string, CellValue>)[column] ?? null}
+              definition={property}
+              isEditing={
+                activeCell?.rowId === String(row.id) &&
+                activeCell.column === column &&
+                asciiCaseFold(activeCell.view) === equivalentActiveView
+              }
+              onEdit={() => {
+                pendingForwardFocus.current = undefined;
+                nextForwardFocusToken.current += 1;
+                setForwardFocusRequest(undefined);
+                setActiveCell({
+                  rowId: String(row.id),
+                  column,
+                  view: activeView,
+                });
+              }}
+              onCancel={() => {
+                if (pendingForwardFocus.current) return;
+                pendingForwardFocus.current = undefined;
+                setForwardFocusRequest(undefined);
+                setActiveCell(null);
+              }}
+              onCommit={(value, hint) => {
+                pendingForwardFocus.current = undefined;
+                nextForwardFocusToken.current += 1;
+                setForwardFocusRequest(undefined);
+                setActiveCell(null);
+                onCommitCell(row, column, value, hint);
+              }}
+              onCommitNext={(value, hint) =>
+                commitAndMove(rows, row, column, value, hint, 1)
+              }
+              onCommitPrevious={(value, hint) =>
+                commitAndMove(rows, row, column, value, hint, -1)
+              }
+            />
+          ) : (
+            // System fields and undeclared keys are read-only.
+            <span className="block truncate px-1 py-0.5 text-mute tabular-nums">
+              {formatCellValue(
+                (row.columns as Record<string, CellValue>)[column] ?? null,
+              )}
+            </span>
+          )}
+        </CellContextTrigger>
+        {column === firstVisibleColumn && hasRowActions ? (
+          <RowActionsButton
+            row={row}
+            readOnly={readOnly}
+            actions={rowActions}
+            cell={contextCell(row)}
+            restoreFocus={
+              contextTarget?.rowId === String(row.id)
+                ? contextTarget.origin
+                : null
+            }
+            onContextTarget={setContextTarget}
+            onAddQuickFilter={onAddQuickFilter}
+            onCopyValue={onCopyValue}
+          />
+        ) : null}
+      </div>
+    );
+  };
+
+  const dataColumns = (rows: QueryRow[]): DataColumn<QueryRow>[] =>
+    columns.map((column) => {
+      const title = column === "title";
+      return {
+        id: column,
+        label: displayLabelForColumn(column),
+        header: ({ sorted }) => headerFor(column, sorted),
+        cell: (row) => cellFor(rows, row, column),
+        width: title ? undefined : defaultColumnWidth(column),
+        minWidth: title ? TITLE_MIN_WIDTH : undefined,
+        fill: title,
+        pinned: title,
+        resizable: !title,
+        sortable: columnAllowsSorting(column),
+        rowHeader: column === firstVisibleColumn,
+        cellClassName:
+          "align-middle first:rounded-l-[10px] last:rounded-r-[10px]",
+      };
+    });
+
+  const onHeaderSort = (column: string) =>
+    onSortChange([
+      {
+        field: column,
+        dir:
+          sortDescriptor?.column === column &&
+          sortDescriptor.direction === "ascending"
+            ? "desc"
+            : "asc",
+      },
+    ]);
+
+  const grid = (rows: QueryRow[], label: string, cacheIdentity: string) => {
+    const table = (
+      <DataTable
+        // Sort, hide, group and revision remount the grid; an order or width
+        // change does not, so focus stays on a moved header. Opening the draft
+        // swaps every title button for a span, and starts the rows afresh.
+        key={`${cacheIdentity}:${memberDraftOpen ? "draft" : "active"}`}
+        ariaLabel={label}
+        rows={rows}
+        columns={dataColumns(rows)}
+        getRowId={(row) => String(row.id)}
+        density={dense ? "compact" : "comfortable"}
+        sort={readOnly ? undefined : sortDescriptor}
+        onHeaderSort={readOnly ? undefined : onHeaderSort}
+        columnOrder={columns}
+        onColumnOrderChange={
+          readOnly || !onReorderColumns
+            ? undefined
+            : (next) => onReorderColumns(next)
+        }
+        columnVisibility={columnVisibility}
+        columnWidths={columnWidths.widths}
+        onColumnWidthChange={readOnly ? undefined : columnWidths.setWidth}
+        rowClassName={() => cn("hover:*:bg-sink", dense ? "h-8" : "h-[42px]")}
+        // The scroller moves the rows under the header, not past it.
+        stickyHeader={compact}
+        className={
+          dense
+            ? "text-[12.5px] [--title:13.5px]"
+            : "text-[13px] [--title:14.5px]"
+        }
+      />
+    );
+    if (compact) return table;
+    // Fixed widths can outgrow the page; the table scrolls sideways on its
+    // own. Only sideways: a vertical scroller would become the page that
+    // PageUp/PageDown measure.
+    return <div className="overflow-x-auto overflow-y-hidden">{table}</div>;
+  };
 
   const groups: GroupResult[] | null =
     output?.shape === "grouped" ? output.groups : null;

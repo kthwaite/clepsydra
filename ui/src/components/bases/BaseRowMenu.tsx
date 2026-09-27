@@ -262,7 +262,7 @@ export function RowActionsButton({
         // Invisible until the row is engaged, and untouchable while invisible:
         // an `opacity-0` button is still a hit target, so a stray click at the
         // first cell's right edge would open a menu from nowhere.
-        className="ml-auto shrink-0 px-1 py-0 opacity-0 pointer-events-none aria-expanded:pointer-events-auto aria-expanded:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 group-data-[hovered]:pointer-events-auto group-data-[hovered]:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+        className="ml-auto shrink-0 px-1 py-0 opacity-0 pointer-events-none aria-expanded:pointer-events-auto aria-expanded:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
         onPress={() => {
           const trigger = triggerRef.current;
           if (!trigger) return;
@@ -304,7 +304,7 @@ export interface CellContextTriggerProps {
 /**
  * A cell's context-menu affordance. Right-click or the context-menu key
  * anywhere in the cell re-fires on the row's `⋯` button, which owns the menu.
- * The wrapper is deliberately not focusable: React Aria's grid focuses a
+ * The wrapper is deliberately not focusable: the grid focuses a
  * cell's *first focusable child*, which must stay the cell's own control.
  */
 export function CellContextTrigger({
@@ -328,7 +328,7 @@ export function CellContextTrigger({
     return true;
   };
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: these handlers only forward the platform's context-menu gesture to the row's `⋯` button, which is the real, focusable control; an interactive role here would both mislead about the cell's semantics and take React Aria's in-cell focus off the cell's own control.
+    // biome-ignore lint/a11y/noStaticElementInteractions: these handlers only forward the platform's context-menu gesture to the row's `⋯` button, which is the real, focusable control; an interactive role here would both mislead about the cell's semantics and take the grid's in-cell focus off the cell's own control.
     <div
       className="flex min-w-0 flex-1 items-center [&>*:first-child]:min-w-0 [&>*:first-child]:flex-1"
       data-row-id={row.id}

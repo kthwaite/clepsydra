@@ -338,6 +338,12 @@ function Harness({
 }
 
 const grid = () => screen.getByRole("grid", { name: "Books" });
+/** The reorder live region; not role="status", which the host screen owns. */
+const announcer = () => {
+  const region = grid().parentElement?.querySelector('[aria-live="polite"]');
+  if (!(region instanceof HTMLElement)) throw new Error("No live region");
+  return region;
+};
 const headerTexts = () =>
   screen
     .getAllByRole("columnheader")
@@ -379,6 +385,12 @@ describe("DataTable markup", () => {
   it("shows the default sort arrow outside the header name", () => {
     render(<Harness sort={{ column: "author", direction: "descending" }} />);
     expect(header("Author")).toHaveTextContent("Author ↓");
+  });
+
+  it("announces through a live region that leaves role=status to its host", () => {
+    render(<Harness />);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(announcer()).toHaveAttribute("aria-atomic", "true");
   });
 
   it("renders the empty state when there are no rows", () => {
@@ -742,9 +754,7 @@ describe("header drag reorder", () => {
     expect(headerTexts()).toEqual(["title", "tags", "author", "year"]);
     expect(header(/^Tags/)).not.toHaveClass("opacity-50");
     expect(header("Author").style.boxShadow).toBe("");
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Moved Tags to position 2 of 4.",
-    );
+    expect(announcer()).toHaveTextContent("Moved Tags to position 2 of 4.");
   });
 
   it("rejects drags from another table", () => {
@@ -793,9 +803,7 @@ describe("keyboard reorder", () => {
     expect(headerTexts()).toEqual(["title", "year", "author", "tags"]);
     expect(grid()).toBe(before);
     expect(author).toHaveFocus();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Moved Author to position 3 of 4.",
-    );
+    expect(announcer()).toHaveTextContent("Moved Author to position 3 of 4.");
     await userEvent.keyboard("{Alt>}{ArrowRight}{/Alt}");
     expect(headerTexts()).toEqual(["title", "year", "tags", "author"]);
     expect(author).toHaveFocus();
@@ -888,8 +896,6 @@ describe("keyboard reorder", () => {
     header("Author").focus();
     await userEvent.keyboard("{Alt>}{ArrowRight}{/Alt}");
     expect(headerTexts()).toEqual(["title", "tags", "author"]);
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Moved Author to position 3 of 3.",
-    );
+    expect(announcer()).toHaveTextContent("Moved Author to position 3 of 3.");
   });
 });

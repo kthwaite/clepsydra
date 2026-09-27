@@ -604,12 +604,9 @@ export function DataTable<TRow extends RowData>({
       <p id={`${tableId}-resize-hint`} hidden>
         Press Enter to resize
       </p>
-      <p
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        className="sr-only"
-      >
+      {/* A live region without role="status": the screens hosting a table
+          keep that role for their own messages. */}
+      <p aria-live="polite" aria-atomic="true" className="sr-only">
         {announcement}
       </p>
     </>

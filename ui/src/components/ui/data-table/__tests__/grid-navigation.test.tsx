@@ -249,6 +249,21 @@ describe("useGridNavigation — single tab stop", () => {
     expect(button("Status 1")).toHaveFocus();
   });
 
+  it("treats focus after a cancelled Tab as code, not Tab entry", () => {
+    // An editor that takes Tab (commit and open the next cell) cancels it,
+    // unmounts, and focuses its successor with no related target.
+    render(<Fixture />);
+    const note = screen.getByRole("textbox", { name: "Note 0" });
+    focus(note);
+    note.addEventListener("keydown", (event) => event.preventDefault());
+    pressTab(note, false);
+    act(() => {
+      note.blur();
+      button("Status 1").focus();
+    });
+    expect(button("Status 1")).toHaveFocus();
+  });
+
   it("focusing the grid from inside it does not bounce to a row", () => {
     render(<Fixture />);
     focus(button("Status 1"));
