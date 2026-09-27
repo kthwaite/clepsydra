@@ -64,4 +64,40 @@ describe("buildToc", () => {
       buildToc([{ type: "heading", level: 1, children: [{ text: "  " }] }]),
     ).toEqual([{ number: "1", depth: 1, text: "(untitled)" }]);
   });
+
+  it("splices an embed's rendered headings in at the embed's position", () => {
+    const embed = { type: "base-embed", children: [{ text: "" }] };
+    const rendered = [
+      { type: "heading", level: 1, children: [{ text: "Lagers" }] },
+      { type: "paragraph", children: [{ text: "prose" }] },
+      { type: "heading", level: 2, children: [{ text: "Pils" }] },
+    ];
+    expect(
+      buildToc(
+        [
+          { type: "heading", level: 1, children: [{ text: "Base" }] },
+          embed,
+          { type: "heading", level: 1, children: [{ text: "After" }] },
+        ],
+        (node) => (node === embed ? rendered : null),
+      ),
+    ).toEqual([
+      { number: "1", depth: 1, text: "Base" },
+      { number: "2", depth: 1, text: "Lagers" },
+      { number: "2.1", depth: 2, text: "Pils" },
+      { number: "3", depth: 1, text: "After" },
+    ]);
+  });
+
+  it("does not expand nodes inside an embed's rendered output", () => {
+    const inner = { type: "base-embed", children: [{ text: "" }] };
+    const outer = { type: "base-embed", children: [{ text: "" }] };
+    const expand = (node: unknown) =>
+      node === outer
+        ? [inner]
+        : node === inner
+          ? [{ type: "heading", level: 1, children: [{ text: "Nested" }] }]
+          : null;
+    expect(buildToc([outer], expand)).toEqual([]);
+  });
 });

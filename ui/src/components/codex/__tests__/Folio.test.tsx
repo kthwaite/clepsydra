@@ -16,7 +16,15 @@ import {
   Text,
 } from "slate";
 import { ReactEditor } from "slate-react";
-import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type * as AttachmentsApi from "#/api/attachments";
 import type {
   BacklinkEntry,
@@ -334,6 +342,11 @@ import {
 } from "#/store/folioRestoration";
 import { useWorkspaceStore } from "#/store/workspace";
 import { Folio } from "../Folio";
+
+// Folio reads embed renders from the query cache; these tests mount it without a QueryClient.
+vi.mock("#/components/codex/useEmbedTocExpander", () => ({
+  useEmbedTocExpander: () => undefined,
+}));
 
 beforeEach(() => {
   useCollapsibleRailMock.mockImplementation(() => ({
