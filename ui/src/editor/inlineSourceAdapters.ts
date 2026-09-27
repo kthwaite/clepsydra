@@ -1,9 +1,11 @@
+import { blockRefSourceAdapter } from "#/editor/blockRefSourceAdapter";
 import type { InlineSourceAdapter } from "#/editor/inlineSourceEditing";
 import { wikilinkSourceAdapter } from "#/editor/wikilinkSourceAdapter";
 
 /** Every inline element type whose Markdown source ←/→ can open. */
 export const INLINE_SOURCE_ADAPTERS: readonly InlineSourceAdapter[] = [
   wikilinkSourceAdapter,
+  blockRefSourceAdapter,
 ];
 
 export const INLINE_SOURCE_TYPES: readonly string[] =

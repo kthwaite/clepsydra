@@ -31,6 +31,7 @@ vi.mock("slate-react", async (importOriginal) => {
 
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
 
+import { slateToMarkdown } from "#/editor/convert";
 import { SlateEditor } from "#/editor/SlateEditor";
 
 beforeAll(() => {
@@ -151,5 +152,74 @@ describe("SlateEditor ←/→ into inline math", () => {
     expect(
       screen.queryByRole("textbox", { name: "Edit inline math" }),
     ).toBeNull();
+  });
+});
+
+const blockRef = {
+  type: "block-ref",
+  blockId: "abc123DEF0",
+  children: [{ text: "" }],
+} as Descendant;
+
+describe("SlateEditor block-ref source editing", () => {
+  async function enterBlockRef() {
+    const harness = await renderAt(
+      [paragraph([{ text: "See " }, blockRef, { text: " after" }])],
+      [0, 2],
+      0,
+    );
+    fireEvent.keyDown(harness.editable, { key: "ArrowLeft" });
+    const input = (await screen.findByRole("textbox", {
+      name: "Edit block reference",
+    })) as HTMLInputElement;
+    return { ...harness, input };
+  }
+
+  it("ArrowLeft opens the id between (( and )) with the caret at the end", async () => {
+    const { input } = await enterBlockRef();
+
+    expect(input).toHaveValue("abc123DEF0");
+    expect(input).toHaveFocus();
+    expect(input.selectionStart).toBe("abc123DEF0".length);
+    const chrome = input.closest("[contenteditable='false']")?.parentElement;
+    expect(chrome?.textContent).toContain("((");
+    expect(chrome?.textContent).toContain("))");
+  });
+
+  it("commits a valid new id", async () => {
+    const { editor, input } = await enterBlockRef();
+
+    fireEvent.change(input, { target: { value: "zyx987WVU6" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(slateToMarkdown(editor.children)).toContain("((zyx987WVU6))"),
+    );
+  });
+
+  it("marks an invalid id and ignores Enter", async () => {
+    const { editor, input } = await enterBlockRef();
+
+    fireEvent.change(input, { target: { value: "nope" } });
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input).toBeInTheDocument();
+    expect(slateToMarkdown(editor.children)).toContain("((abc123DEF0))");
+  });
+
+  it("Escape restores the node unchanged", async () => {
+    const { editor, input } = await enterBlockRef();
+
+    fireEvent.change(input, { target: { value: "zyx987WVU6" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", { name: "Edit block reference" }),
+      ).toBeNull(),
+    );
+    expect(slateToMarkdown(editor.children)).toContain("((abc123DEF0))");
+    expect(editor.selection?.anchor).toEqual({ path: [0, 2], offset: 0 });
   });
 });

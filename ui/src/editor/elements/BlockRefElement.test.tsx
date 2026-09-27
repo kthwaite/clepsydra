@@ -1,11 +1,24 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { RenderElementProps } from "slate-react";
+import { useState } from "react";
+import { createEditor, type Descendant } from "slate";
+import {
+  Editable,
+  type RenderElementProps,
+  Slate,
+  withReact,
+} from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as BlocksApi from "#/api/blocks";
 import type { BlockResponse } from "#/api/blocks";
 import { markdownToSlate, slateToMarkdown } from "#/editor/convert";
 import { BlockRefElement } from "#/editor/elements/BlockRefElement";
+import { INLINE_SOURCE_ADAPTERS } from "#/editor/inlineSourceAdapters";
+import {
+  InlineSourceEditingProvider,
+  useInlineSourceEditingController,
+} from "#/editor/inlineSourceEditing";
+import { withSchema } from "#/editor/schema/withSchema";
 import type { BlockRefElement as BlockRefElementType } from "#/editor/types";
 
 const { openTabMock, useBlockMock } = vi.hoisted(() => ({
@@ -21,13 +34,6 @@ vi.mock("#/api/blocks", async (importOriginal) => {
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
-
-const attributes = {
-  "data-slate-node": "element",
-  "data-slate-inline": true,
-  "data-slate-void": true,
-  ref: () => {},
-} as unknown as RenderElementProps["attributes"];
 
 const block: BlockResponse = {
   block_id: "abc123DEF0",
@@ -60,17 +66,40 @@ function mockBlockError() {
   });
 }
 
-function renderBlockRef(blockId: string) {
+function BlockRefHarness({ blockId }: { blockId: string }) {
+  const [editor] = useState(() => withReact(withSchema(createEditor())));
+  const controller = useInlineSourceEditingController(
+    editor,
+    INLINE_SOURCE_ADAPTERS,
+  );
   const element: BlockRefElementType = {
     type: "block-ref",
     blockId,
     children: [{ text: "" }],
   };
-  return render(
-    <BlockRefElement attributes={attributes} element={element}>
-      <span data-testid="slate-child" />
-    </BlockRefElement>,
+  const value: Descendant[] = [
+    { type: "paragraph", children: [{ text: "" }, element, { text: "" }] },
+  ];
+  const renderElement = (props: RenderElementProps) =>
+    props.element.type === "block-ref" ? (
+      <BlockRefElement
+        {...props}
+        element={props.element as BlockRefElementType}
+      />
+    ) : (
+      <p {...props.attributes}>{props.children}</p>
+    );
+  return (
+    <InlineSourceEditingProvider value={controller}>
+      <Slate editor={editor} initialValue={value}>
+        <Editable renderElement={renderElement} />
+      </Slate>
+    </InlineSourceEditingProvider>
   );
+}
+
+function renderBlockRef(blockId: string) {
+  return render(<BlockRefHarness blockId={blockId} />);
 }
 
 beforeEach(() => {
@@ -84,16 +113,12 @@ describe("BlockRefElement", () => {
     const { container } = renderBlockRef("abc123DEF0");
 
     expect(screen.getByText("Referenced sentence")).toBeVisible();
-    expect(container.firstElementChild).toHaveAttribute(
-      "contenteditable",
-      "false",
-    );
+    const voidSpan = container.querySelector('[data-slate-void="true"]');
+    expect(voidSpan).toHaveAttribute("contenteditable", "false");
     expect(
       screen.getByRole("button", { name: /Open referenced block/ }),
     ).toHaveAttribute("contenteditable", "false");
-    expect(container.firstElementChild?.lastElementChild).toBe(
-      screen.getByTestId("slate-child"),
-    );
+    expect(voidSpan?.lastElementChild).toHaveAttribute("data-slate-spacer");
   });
 
   it("keeps the retry action outside Slate editing", () => {

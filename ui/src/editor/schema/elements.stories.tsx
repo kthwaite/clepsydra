@@ -19,6 +19,11 @@ import {
 import { makeDecorateCode } from "#/editor/decorate-code";
 import { renderElement } from "#/editor/elements/renderElement";
 import { renderLeaf } from "#/editor/elements/renderLeaf";
+import { INLINE_SOURCE_ADAPTERS } from "#/editor/inlineSourceAdapters";
+import {
+  InlineSourceEditingProvider,
+  useInlineSourceEditingController,
+} from "#/editor/inlineSourceEditing";
 import { refractor } from "#/editor/refractor-languages";
 import { makeBaseEmbed } from "./elements/baseEmbed";
 import { makeBlockquote } from "./elements/blockquote";
@@ -73,16 +78,22 @@ function SchemaPreview({
     [],
   );
   const baseEmbedEditing = useBaseEmbedEditingController(editor);
+  const inlineSourceEditing = useInlineSourceEditingController(
+    editor,
+    INLINE_SOURCE_ADAPTERS,
+  );
   return (
     <Slate editor={editor} initialValue={value}>
       <BaseEmbedEditingProvider value={baseEmbedEditing}>
-        <Editable
-          readOnly={!editable}
-          renderElement={renderElement}
-          renderLeaf={renderLeaf}
-          decorate={decorateCode}
-          className="max-w-2xl text-ink outline-none"
-        />
+        <InlineSourceEditingProvider value={inlineSourceEditing}>
+          <Editable
+            readOnly={!editable}
+            renderElement={renderElement}
+            renderLeaf={renderLeaf}
+            decorate={decorateCode}
+            className="max-w-2xl text-ink outline-none"
+          />
+        </InlineSourceEditingProvider>
       </BaseEmbedEditingProvider>
     </Slate>
   );
