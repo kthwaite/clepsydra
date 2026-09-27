@@ -353,7 +353,7 @@ describe("FolioProperties", () => {
         key: "genres",
         type: "multi_select",
         definition: { options: ["fiction"] },
-        tag: "BUTTON",
+        tag: "INPUT",
       },
       { key: "author", type: "relation", tag: "INPUT" },
     ];
