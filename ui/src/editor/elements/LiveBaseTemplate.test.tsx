@@ -91,4 +91,34 @@ describe("live template rendering", () => {
     expect(persisted).not.toContain("Fresh report");
     expect(post).toHaveBeenCalledTimes(1);
   });
+
+  it("presents as part of the document, with one quiet row of controls", async () => {
+    post.mockResolvedValue({
+      data: { markdown: "# Fresh report\n", selected_count: 1 },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LiveHarness />
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("heading", { name: "Fresh report" });
+
+    const embed = screen.getByTestId("base-embed");
+    expect(embed).toHaveAttribute("data-presentation", "document");
+    const controls = screen.getByRole("toolbar", { name: "Rendered Base" });
+    for (const name of [
+      "Edit embed",
+      "Remove Base embed",
+      "Edit template",
+      "Refresh output",
+    ]) {
+      expect(controls).toContainElement(screen.getByRole("button", { name }));
+    }
+    expect(controls).toContainElement(
+      screen.getByRole("link", { name: "Open source" }),
+    );
+  });
 });

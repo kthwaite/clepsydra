@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { type RenderSelection, useLiveBaseRender } from "#/api/bases";
 import { BaseRenderedMarkdown } from "#/components/bases/BaseRenderedMarkdown";
 import {
@@ -10,27 +10,45 @@ import { useBaseRendering } from "#/editor/baseRendering";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
+const quietControl = "h-7 rounded-full px-[11px] text-[12.5px] font-normal";
+
+/**
+ * A template-rendered Base reads as part of the note: its controls sit in one
+ * quiet row that comes up to full strength on hover or keyboard focus.
+ */
 export function LiveBaseTemplate({
   selection,
+  actions,
 }: {
   selection: RenderSelection;
+  /** The embed's own controls (Edit embed, Remove), placed in the same row. */
+  actions?: ReactNode;
 }) {
   const lifecycle = useBaseRendering();
   const rendered = useLiveBaseRender(selection, lifecycle?.pagePath ?? "");
   const [editingTemplate, setEditingTemplate] = useState(false);
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div
+        role="toolbar"
+        aria-label="Rendered Base"
+        className="mb-2 flex flex-wrap items-center gap-1 text-mute opacity-60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        <span className="mr-1 min-w-0 truncate text-[12.5px]">
+          {selection.base}
+          {selection.view ? ` · ${selection.view}` : ""}
+        </span>
         <Button
-          variant="secondary"
+          variant="ghost"
           size="sm"
+          className={quietControl}
           onPress={() => setEditingTemplate(true)}
         >
           Edit template
         </Button>
         <a
           className={cn(
-            "rounded-[3px] text-[13px] text-accent underline decoration-1 underline-offset-[3px] hover:decoration-2",
+            "rounded-full px-[11px] text-[12.5px] leading-7 text-mute underline decoration-1 underline-offset-[3px] hover:text-accent hover:decoration-2",
             FOCUS_RING_NATIVE,
           )}
           href={`/bases/${encodeURIComponent(selection.base)}${selection.view ? `?view=${encodeURIComponent(selection.view)}` : ""}`}
@@ -38,8 +56,9 @@ export function LiveBaseTemplate({
           Open source
         </a>
         <Button
-          variant="secondary"
+          variant="ghost"
           size="sm"
+          className={quietControl}
           onPress={() => {
             void rendered.refetch();
           }}
@@ -47,6 +66,7 @@ export function LiveBaseTemplate({
         >
           Refresh output
         </Button>
+        {actions}
       </div>
       {!lifecycle ? (
         <p role="alert" className="text-[14px] text-ink-2">

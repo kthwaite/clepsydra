@@ -138,6 +138,10 @@ export function BaseEmbedElement({
     element.status === "configured" &&
     !element.template &&
     embedIsCompact(element);
+  // A template renders prose, so the embed drops its card and reads as part
+  // of the note; its controls join the renderer's quiet row.
+  const rendersDocument =
+    element.status === "configured" && Boolean(element.template);
   const authoredWidth =
     element.status === "configured" ? element.width : undefined;
   const setWidth = useCallback(
@@ -231,7 +235,7 @@ export function BaseEmbedElement({
     <>
       <Button
         ref={editRef}
-        variant="secondary"
+        variant={rendersDocument ? "ghost" : "secondary"}
         size="sm"
         aria-expanded={active}
         className={cn(
@@ -260,9 +264,11 @@ export function BaseEmbedElement({
       {...attributes}
       style={embedWidthStyle(previewWidth ?? authoredWidth)}
       className={cn(
-        "relative my-4 min-w-0 rounded-[14px] bg-raise transition-shadow",
+        "group relative my-4 min-w-0 rounded-[14px] transition-shadow",
+        rendersDocument ? "ring-offset-8 ring-offset-ground" : "bg-raise",
         (selected || active) && "ring-2 ring-accent",
       )}
+      data-presentation={rendersDocument ? "document" : undefined}
       data-testid="base-embed"
     >
       <fieldset
@@ -309,7 +315,7 @@ export function BaseEmbedElement({
         {/* While its panel is open this embed holds still: changing it would
             replace the node the panel's draft belongs to. */}
         <div data-testid="base-embed-body" inert={active}>
-          {compact ? null : (
+          {compact || (rendersDocument && !active) ? null : (
             <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3.5 pt-3 pb-1">
               <div className="min-w-0 flex-1">
                 <p className="text-[12.5px] text-mute">Base embed</p>
@@ -325,9 +331,17 @@ export function BaseEmbedElement({
             </header>
           )}
 
-          <div className={cn("min-w-0", compact ? "p-2" : "px-3.5 pt-2 pb-3")}>
+          <div
+            className={cn(
+              "min-w-0",
+              compact ? "p-2" : rendersDocument ? "p-0" : "px-3.5 pt-2 pb-3",
+            )}
+          >
             {element.status === "configured" && element.template ? (
-              <LiveBaseTemplate selection={baseRenderSelection(element)} />
+              <LiveBaseTemplate
+                selection={baseRenderSelection(element)}
+                actions={active ? undefined : actions}
+              />
             ) : element.status === "configured" && element.view ? (
               <EmbeddedBaseTable
                 ref={tableRef}
