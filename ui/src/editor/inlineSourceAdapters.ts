@@ -1,4 +1,5 @@
 import { blockRefSourceAdapter } from "#/editor/blockRefSourceAdapter";
+import { footnoteRefSourceAdapter } from "#/editor/footnoteRefSourceAdapter";
 import type { InlineSourceAdapter } from "#/editor/inlineSourceEditing";
 import { wikilinkSourceAdapter } from "#/editor/wikilinkSourceAdapter";
 
@@ -6,6 +7,7 @@ import { wikilinkSourceAdapter } from "#/editor/wikilinkSourceAdapter";
 export const INLINE_SOURCE_ADAPTERS: readonly InlineSourceAdapter[] = [
   wikilinkSourceAdapter,
   blockRefSourceAdapter,
+  footnoteRefSourceAdapter,
 ];
 
 export const INLINE_SOURCE_TYPES: readonly string[] =

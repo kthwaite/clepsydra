@@ -223,3 +223,47 @@ describe("SlateEditor block-ref source editing", () => {
     expect(editor.selection?.anchor).toEqual({ path: [0, 2], offset: 0 });
   });
 });
+
+describe("SlateEditor footnote-ref source editing", () => {
+  it("ArrowRight opens the identifier between [^ and ] and commits a repoint", async () => {
+    const { editable, editor } = await renderAt(
+      [
+        paragraph([
+          { text: "Claim" },
+          {
+            type: "footnote-ref",
+            identifier: "old",
+            children: [{ text: "" }],
+          } as Descendant,
+          { text: "." },
+        ]),
+        {
+          type: "footnote-def",
+          identifier: "old",
+          children: [{ text: "Old note" }],
+        } as Descendant,
+      ],
+      [0, 0],
+      "Claim".length,
+    );
+
+    fireEvent.keyDown(editable, { key: "ArrowRight" });
+    const input = (await screen.findByRole("textbox", {
+      name: "Edit footnote reference",
+    })) as HTMLInputElement;
+    expect(input).toHaveValue("old");
+    expect(input.selectionStart).toBe(0);
+    const chrome = input.closest("[contenteditable='false']")?.parentElement;
+    expect(chrome?.textContent).toContain("[^");
+
+    fireEvent.change(input, { target: { value: "new" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => {
+      const markdown = slateToMarkdown(editor.children);
+      expect(markdown).toContain("Claim[^new].");
+      expect(markdown).toContain("[^old]: Old note");
+      expect(markdown).toMatch(/\[\^new\]:/);
+    });
+  });
+});
