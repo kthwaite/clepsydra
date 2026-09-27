@@ -213,6 +213,91 @@ describe("FilterBar", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("hides + Filter when every field is primary", () => {
+    render(
+      <Harness
+        fields={FIELDS.slice(0, 3)}
+        primaryFieldIds={["project", "tags", "hold"]}
+      />,
+    );
+
+    expect(screen.queryByTestId("filter-bar-add")).not.toBeInTheDocument();
+  });
+
+  it("shows + Filter while a long-tail field is left to add", () => {
+    render(<Harness initial={{ text: "", facets: { status: ["open"] } }} />);
+
+    expect(screen.getByTestId("filter-bar-add")).toBeInTheDocument();
+  });
+
+  it("hides + Filter when every long-tail field is already visible", () => {
+    render(
+      <Harness
+        initial={{
+          text: "",
+          facets: { status: ["open"], owner: ["person-1"] },
+        }}
+      />,
+    );
+
+    expect(screen.queryByTestId("filter-bar-add")).not.toBeInTheDocument();
+  });
+
+  it("moves focus to the returning + Filter when clearing the last hidden long-tail field", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        initial={{
+          text: "",
+          facets: { status: ["open"], owner: ["person-1"] },
+        }}
+      />,
+    );
+
+    screen.getByRole("button", { name: "Clear STATUS filter" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByTestId("filter-bar-add")).toHaveFocus();
+  });
+
+  it("falls back to the text input when + Filter is absent after a long-tail clear", async () => {
+    const user = userEvent.setup();
+    const state = { text: "", facets: { status: ["open"] } };
+    render(
+      <FilterBar
+        fields={[FIELDS[0] as FilterField, FIELDS[4] as FilterField]}
+        state={state}
+        onChange={() => {}}
+        primaryFieldIds={["project"]}
+      />,
+    );
+    expect(screen.queryByTestId("filter-bar-add")).not.toBeInTheDocument();
+
+    screen.getByRole("button", { name: "Clear STATUS filter" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByTestId("filter-bar-input")).toHaveFocus();
+  });
+
+  it("falls back to the first primary chip when + Filter and text search are absent", async () => {
+    const user = userEvent.setup();
+    const state = { text: "", facets: { status: ["open"] } };
+    render(
+      <FilterBar
+        fields={[FIELDS[0] as FilterField, FIELDS[4] as FilterField]}
+        state={state}
+        onChange={() => {}}
+        primaryFieldIds={["project"]}
+        showText={false}
+      />,
+    );
+
+    screen.getByRole("button", { name: "Clear STATUS filter" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByTestId("filter-bar-chip-project")).toHaveFocus();
+  });
+
   it("selects options in one pane and closes only single-value panes", async () => {
     const user = userEvent.setup();
     render(<Harness />);

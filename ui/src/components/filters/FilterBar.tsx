@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Dialog,
@@ -85,6 +85,7 @@ export function FilterBar({
   const rootRef = useRef<HTMLDivElement>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
+  const [focusAddPending, setFocusAddPending] = useState(false);
 
   const configuredPrimaryIds =
     primaryFieldIds ?? fields.slice(0, 3).map((field) => field.id);
@@ -144,14 +145,27 @@ export function FilterBar({
     }
   };
 
-  const handleClearAll = () => {
-    if (showText) {
-      textInputRef.current?.focus();
+  const focusFallback = () => {
+    if (showText && textInputRef.current) {
+      textInputRef.current.focus();
     } else {
       rootRef.current
         ?.querySelector<HTMLButtonElement>("[data-filter-primary-chip]")
         ?.focus();
     }
+  };
+
+  // Clearing a long-tail field returns it to + Filter, which may only
+  // render after the state update; focus it then, or fall back.
+  useEffect(() => {
+    if (!focusAddPending) return;
+    setFocusAddPending(false);
+    if (addButtonRef.current) addButtonRef.current.focus();
+    else focusFallback();
+  });
+
+  const handleClearAll = () => {
+    focusFallback();
     onChange(clearFilter(state));
     setAddOpen(false);
     closeOptionPane();
@@ -188,7 +202,8 @@ export function FilterBar({
         const isOpen = activeFieldId === field.id;
         const clearField = () => {
           if (primaryIds.has(field.id)) focusPrimaryChip(field.id);
-          else addButtonRef.current?.focus();
+          else if (addButtonRef.current) addButtonRef.current.focus();
+          else setFocusAddPending(true);
           onChange(clearFacet(state, field.id));
           if (isOpen) closeOptionPane();
         };
@@ -269,39 +284,41 @@ export function FilterBar({
         );
       })}
 
-      <DialogTrigger isOpen={addOpen} onOpenChange={setAddOpen}>
-        <Button
-          ref={addButtonRef}
-          data-testid="filter-bar-add"
-          className={chromeButtonClasses}
-        >
-          + Filter
-        </Button>
-        <Popover hideArrow placement="bottom start">
-          <Dialog
-            aria-label="Add filter"
-            className="w-[240px] rounded-xl bg-raise p-1.5 shadow-lg outline-none"
+      {availableLongTailFields.length > 0 && (
+        <DialogTrigger isOpen={addOpen} onOpenChange={setAddOpen}>
+          <Button
+            ref={addButtonRef}
+            data-testid="filter-bar-add"
+            className={chromeButtonClasses}
           >
-            <ListBox
-              aria-label="Available filters"
-              className="flex flex-col gap-[2px] outline-none"
-              onAction={handleLongTailAction}
+            + Filter
+          </Button>
+          <Popover hideArrow placement="bottom start">
+            <Dialog
+              aria-label="Add filter"
+              className="w-[240px] rounded-xl bg-raise p-1.5 shadow-lg outline-none"
             >
-              {availableLongTailFields.map((field) => (
-                <ListBoxItem
-                  key={field.id}
-                  id={field.id}
-                  textValue={field.label}
-                  data-testid={`filter-bar-field-${field.id}`}
-                  className={cn(optionClasses, optionClassName)}
-                >
-                  {field.label}
-                </ListBoxItem>
-              ))}
-            </ListBox>
-          </Dialog>
-        </Popover>
-      </DialogTrigger>
+              <ListBox
+                aria-label="Available filters"
+                className="flex flex-col gap-[2px] outline-none"
+                onAction={handleLongTailAction}
+              >
+                {availableLongTailFields.map((field) => (
+                  <ListBoxItem
+                    key={field.id}
+                    id={field.id}
+                    textValue={field.label}
+                    data-testid={`filter-bar-field-${field.id}`}
+                    className={cn(optionClasses, optionClassName)}
+                  >
+                    {field.label}
+                  </ListBoxItem>
+                ))}
+              </ListBox>
+            </Dialog>
+          </Popover>
+        </DialogTrigger>
+      )}
 
       {active && (
         <button
