@@ -136,7 +136,7 @@ export function LinkElement({ attributes, children, element }: Props) {
         ref={setRef}
         href={safeHref}
         data-link-resource={resource ?? undefined}
-        className="cursor-pointer text-accent underline decoration-1 underline-offset-[3px] hover:decoration-2"
+        className="cl-link cl-link-underline"
         {...getReferenceProps({ onClick })}
       >
         {children}

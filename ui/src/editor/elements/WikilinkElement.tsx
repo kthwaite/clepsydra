@@ -7,7 +7,6 @@ import {
   useSlateStatic,
 } from "slate-react";
 import { CLink } from "#/components/codex/CLink";
-import { WikilinkIcon } from "#/editor/elements/WikilinkIcon";
 import { MissingWikilinkPopover } from "#/editor/MissingWikilinkPopover";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
@@ -110,7 +109,6 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   // Resolved links read as links (accent); a missing page reads mute and
   // italic, like the attendee "no page carries this name yet" state.
   const linkClassName = dangling ? "italic text-mute" : "text-accent";
-  const iconClassName = dangling ? "text-mute" : "text-accent";
 
   const handleActivation = (event: MouseEvent | KeyboardEvent) => {
     event.preventDefault();
@@ -136,16 +134,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     if (event.key === "Enter") handleActivation(event);
   };
 
-  const linkContent = (
-    <>
-      <WikilinkIcon
-        size="0.85em"
-        strokeWidth={1.8}
-        className={`mr-1 inline-block align-[-0.1em] ${iconClassName}`}
-      />
-      <span>{displayText}</span>
-    </>
-  );
+  const linkContent = <span>{displayText}</span>;
 
   return (
     <span {...attributes}>
@@ -154,7 +143,8 @@ export function WikilinkElement({ attributes, children, element }: Props) {
           <CLink
             path={resolved}
             onClick={handleActivation}
-            className={linkClassName}
+            className={cn("cl-link-underline", linkClassName)}
+            resource="wikilink"
           >
             {linkContent}
           </CLink>
@@ -173,6 +163,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
                 onKeyDown: handleKeyDown,
               }}
               tabIndex={0}
+              data-link-resource="wikilink"
               className={cn(
                 "relative cursor-pointer rounded-[3px] hover:text-ink",
                 FOCUS_RING_NATIVE,

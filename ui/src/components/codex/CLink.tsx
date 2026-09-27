@@ -40,6 +40,8 @@ type CLinkProps = {
   noNavigate?: boolean;
   className?: string;
   style?: CSSProperties;
+  /** Trailing resource mark (`[data-link-resource]` in main.css). */
+  resource?: string;
 };
 
 export function CLink({
@@ -50,6 +52,7 @@ export function CLink({
   noNavigate,
   className,
   style,
+  resource,
 }: CLinkProps) {
   const [hover, setHover] = useState(false);
   const ref = useRef<HTMLAnchorElement | null>(null);
@@ -107,6 +110,7 @@ export function CLink({
       onClick={handleClick}
       className={cn("cl-link relative cursor-pointer", className)}
       style={style}
+      data-link-resource={resource}
     >
       {children}
       {hover && note && (

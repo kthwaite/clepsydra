@@ -18,6 +18,7 @@ type CapturedCLinkProps = {
   path?: string;
   onClick?: (e: unknown) => void;
   className?: string;
+  resource?: string;
   children?: ReactNode;
 };
 
@@ -92,6 +93,7 @@ vi.mock("#/components/codex/CLink", () => ({
         }}
         tabIndex={0}
         className={props.className}
+        data-link-resource={props.resource}
       >
         {props.children}
       </a>
@@ -179,15 +181,21 @@ describe("WikilinkElement resolved", () => {
     expect(typeof clink.onClick).toBe("function");
   });
 
-  it("renders a single decorative leading icon and the target without brackets", () => {
+  it("renders the target without brackets and a trailing wikilink mark", () => {
     lookupMock.mockReturnValue("notes/clepsydra-design.md");
     renderWikilink("Clepsydra Design Notes");
 
     const link = screen.getByRole("link", { name: "Clepsydra Design Notes" });
     expect(link.textContent).toBe("Clepsydra Design Notes");
-    expect(link.firstElementChild).toMatchObject({ tagName: "svg" });
-    expect(link.firstElementChild).toHaveAttribute("data-icon", "drop-dial");
-    expect(link.querySelectorAll("svg[aria-hidden='true']")).toHaveLength(1);
+    expect(link).toHaveAttribute("data-link-resource", "wikilink");
+    expect(link.querySelector("svg")).toBeNull();
+  });
+
+  it("uses the external-link underline instead of the border underline", () => {
+    lookupMock.mockReturnValue("notes/clepsydra-design.md");
+    renderWikilink("Clepsydra Design Notes");
+
+    expect(lastCLink().className).toContain("cl-link-underline");
   });
 
   it("shows only the alias when a custom label exists", () => {
@@ -215,7 +223,9 @@ describe("WikilinkElement dangling", () => {
     expect(link).not.toHaveAttribute("href");
     expect(link).toHaveClass("text-mute", "italic");
     expect(link.textContent).toBe("Unwritten Page");
-    expect(link.querySelectorAll("svg[aria-hidden='true']")).toHaveLength(1);
+    expect(link).toHaveAttribute("data-link-resource", "wikilink");
+    expect(link).not.toHaveClass("cl-link-underline");
+    expect(link.querySelector("svg")).toBeNull();
   });
 
   it("shows only the alias for a dangling labeled link", () => {
