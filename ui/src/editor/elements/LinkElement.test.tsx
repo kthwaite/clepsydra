@@ -1,7 +1,14 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { RenderElementProps } from "slate-react";
+import { type ReactNode, useState } from "react";
+import { createEditor } from "slate";
+import { type RenderElementProps, Slate, withReact } from "slate-react";
 import { describe, expect, it, vi } from "vitest";
 import { LinkElement } from "#/editor/elements/LinkElement";
+import { INLINE_SOURCE_ADAPTERS } from "#/editor/inlineSourceAdapters";
+import {
+  InlineSourceEditingProvider,
+  useInlineSourceEditingController,
+} from "#/editor/inlineSourceEditing";
 import type { LinkElement as LinkElementType } from "#/editor/types";
 
 const openTab = vi.hoisted(() => vi.fn());
@@ -16,6 +23,25 @@ const attributes = {
   ref: () => {},
 } as unknown as RenderElementProps["attributes"];
 
+/** LinkElement reads the Slate editor and the source-editing controller. */
+function EditorContext({ children }: { children: ReactNode }) {
+  const [editor] = useState(() => withReact(createEditor()));
+  const controller = useInlineSourceEditingController(
+    editor,
+    INLINE_SOURCE_ADAPTERS,
+  );
+  return (
+    <InlineSourceEditingProvider value={controller}>
+      <Slate
+        editor={editor}
+        initialValue={[{ type: "paragraph", children: [{ text: "" }] }]}
+      >
+        {children}
+      </Slate>
+    </InlineSourceEditingProvider>
+  );
+}
+
 function renderLink(url: string) {
   const element: LinkElementType = {
     type: "link",
@@ -26,6 +52,7 @@ function renderLink(url: string) {
     <LinkElement attributes={attributes} element={element}>
       Wikipedia
     </LinkElement>,
+    { wrapper: EditorContext },
   );
   return screen.getByText("Wikipedia");
 }

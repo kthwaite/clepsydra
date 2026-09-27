@@ -30,7 +30,9 @@ function isWellFormedUtf16(value: string): boolean {
 
 function expandWiki(rawValue: string) {
   if (CONTROL_CHARACTER.test(rawValue)) return null;
-  const label = rawValue.trim().replace(/\s+/g, " ");
+  // Wikipedia treats `_` and space as one character, so a bare
+  // `wiki:Frida_Kahlo` labels itself `Frida Kahlo`.
+  const label = rawValue.replaceAll("_", " ").trim().replace(/\s+/g, " ");
   if (!label || label.includes('"')) return null;
   const slug = encodeURIComponent(label.replaceAll(" ", "_"));
   return { url: `https://en.wikipedia.org/wiki/${slug}`, label };

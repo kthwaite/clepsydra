@@ -1,13 +1,44 @@
 import { useState } from "react";
 import { Node } from "slate";
-import { type RenderElementProps, useSlateStatic } from "slate-react";
+import {
+  ReactEditor,
+  type RenderElementProps,
+  useReadOnly,
+  useSlateStatic,
+} from "slate-react";
+import { footnoteRefSourceAdapter } from "#/editor/footnoteRefSourceAdapter";
+import { InlineSourceEditor } from "#/editor/InlineSourceInput";
+import {
+  isSessionAt,
+  useInlineSourceEditing,
+} from "#/editor/inlineSourceEditing";
 import type { FootnoteRefElement as FootnoteRefElementType } from "#/editor/types";
 
 type Props = RenderElementProps & { element: FootnoteRefElementType };
 
 export function FootnoteRefElement({ attributes, children, element }: Props) {
   const editor = useSlateStatic();
+  const readOnly = useReadOnly();
+  const controller = useInlineSourceEditing();
   const [hover, setHover] = useState(false);
+
+  const session = controller.active;
+  if (
+    !readOnly &&
+    session &&
+    isSessionAt(session, ReactEditor.findPath(editor, element))
+  ) {
+    return (
+      <span {...attributes}>
+        <InlineSourceEditor
+          adapter={footnoteRefSourceAdapter}
+          element={element}
+          session={session}
+        />
+        {children}
+      </span>
+    );
+  }
 
   // Resolve the matching footnote-def's text locally from the editor tree.
   // Only walk on hover — avoids an O(doc) traversal per ref on every render.

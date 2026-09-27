@@ -177,6 +177,7 @@ export function MarkdownRenderer({
                   openTab("page", pagePath);
                 }}
                 className="underline decoration-1 underline-offset-2 hover:decoration-2"
+                data-link-resource="wikilink"
                 {...props}
               >
                 {children}

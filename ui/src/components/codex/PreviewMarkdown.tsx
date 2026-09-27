@@ -95,7 +95,11 @@ const components: Components = {
   ),
   li: ({ children }) => <li className="my-0.5">{children}</li>,
   a: ({ href, children }) => {
-    const resource = href ? classifyLinkResource(href) : null;
+    const resource = href?.startsWith("/pages/")
+      ? "wikilink"
+      : href
+        ? classifyLinkResource(href)
+        : null;
     return (
       <span
         className="text-accent underline decoration-1 underline-offset-2"

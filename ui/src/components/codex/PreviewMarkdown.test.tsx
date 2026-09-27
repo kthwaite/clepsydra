@@ -14,6 +14,15 @@ describe("PreviewMarkdown", () => {
     expect(screen.queryByRole("link", { name: "Wikipedia" })).toBeNull();
   });
 
+  it("marks wikilinks with the wikilink mark", () => {
+    render(<PreviewMarkdown content="See [[Other Page]]." />);
+
+    expect(screen.getByText("Other Page")).toHaveAttribute(
+      "data-link-resource",
+      "wikilink",
+    );
+  });
+
   it("marks prefixed external links with their resource", () => {
     render(<PreviewMarkdown content="[paper](arxiv:2301.00001)" />);
 

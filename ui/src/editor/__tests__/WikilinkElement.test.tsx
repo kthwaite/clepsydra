@@ -9,15 +9,16 @@ import {
   withReact,
 } from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as InlineSourceEditingExports from "#/editor/inlineSourceEditing";
 import { withSchema } from "#/editor/schema/withSchema";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
-import type * as WikilinkEditingExports from "#/editor/wikilinkEditing";
 import { usePreviewStore } from "#/store/preview";
 
 type CapturedCLinkProps = {
   path?: string;
   onClick?: (e: unknown) => void;
   className?: string;
+  resource?: string;
   children?: ReactNode;
 };
 
@@ -43,7 +44,8 @@ const {
     cancelMock: cancel,
     editingController: {
       active: null as {
-        path: number[];
+        type: string;
+        ref: { current: number[] | null };
         initialCaret: "start" | "end";
         returnSide: "before" | "after";
       } | null,
@@ -71,11 +73,11 @@ vi.mock("#/editor/useResolveOrCreateWikilinkTarget", () => ({
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
-vi.mock("#/editor/wikilinkEditing", async (importOriginal) => {
-  const actual = await importOriginal<typeof WikilinkEditingExports>();
+vi.mock("#/editor/inlineSourceEditing", async (importOriginal) => {
+  const actual = await importOriginal<typeof InlineSourceEditingExports>();
   return {
     ...actual,
-    useWikilinkEditing: () => editingController,
+    useInlineSourceEditing: () => editingController,
   };
 });
 vi.mock("#/components/codex/CLink", () => ({
@@ -92,6 +94,7 @@ vi.mock("#/components/codex/CLink", () => ({
         }}
         tabIndex={0}
         className={props.className}
+        data-link-resource={props.resource}
       >
         {props.children}
       </a>
@@ -123,7 +126,12 @@ function renderWikilink(
     },
   ];
   editingController.active = active
-    ? { path: [0, 1], initialCaret: "end", returnSide: "after" }
+    ? {
+        type: "wikilink",
+        ref: { current: [0, 1] },
+        initialCaret: "end",
+        returnSide: "after",
+      }
     : null;
   const renderElement = (props: RenderElementProps) =>
     props.element.type === "wikilink" ? (
@@ -179,15 +187,21 @@ describe("WikilinkElement resolved", () => {
     expect(typeof clink.onClick).toBe("function");
   });
 
-  it("renders a single decorative leading icon and the target without brackets", () => {
+  it("renders the target without brackets and a trailing wikilink mark", () => {
     lookupMock.mockReturnValue("notes/clepsydra-design.md");
     renderWikilink("Clepsydra Design Notes");
 
     const link = screen.getByRole("link", { name: "Clepsydra Design Notes" });
     expect(link.textContent).toBe("Clepsydra Design Notes");
-    expect(link.firstElementChild).toMatchObject({ tagName: "svg" });
-    expect(link.firstElementChild).toHaveAttribute("data-icon", "drop-dial");
-    expect(link.querySelectorAll("svg[aria-hidden='true']")).toHaveLength(1);
+    expect(link).toHaveAttribute("data-link-resource", "wikilink");
+    expect(link.querySelector("svg")).toBeNull();
+  });
+
+  it("uses the external-link underline instead of the border underline", () => {
+    lookupMock.mockReturnValue("notes/clepsydra-design.md");
+    renderWikilink("Clepsydra Design Notes");
+
+    expect(lastCLink().className).toContain("cl-link-underline");
   });
 
   it("shows only the alias when a custom label exists", () => {
@@ -215,7 +229,9 @@ describe("WikilinkElement dangling", () => {
     expect(link).not.toHaveAttribute("href");
     expect(link).toHaveClass("text-mute", "italic");
     expect(link.textContent).toBe("Unwritten Page");
-    expect(link.querySelectorAll("svg[aria-hidden='true']")).toHaveLength(1);
+    expect(link).toHaveAttribute("data-link-resource", "wikilink");
+    expect(link).not.toHaveClass("cl-link-underline");
+    expect(link.querySelector("svg")).toBeNull();
   });
 
   it("shows only the alias for a dangling labeled link", () => {
@@ -452,10 +468,7 @@ describe("WikilinkElement editing and navigation", () => {
 
     await user.keyboard("{Enter}");
 
-    expect(commitMock).toHaveBeenCalledWith(
-      { target: "Target", alias: "Label" },
-      "after",
-    );
+    expect(commitMock).toHaveBeenCalledWith("Target|Label", "after");
     expect(cancelMock).not.toHaveBeenCalled();
   });
 

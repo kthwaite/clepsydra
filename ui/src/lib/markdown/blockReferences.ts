@@ -22,7 +22,12 @@ export function blockIdFromHref(href: string): string | null {
   if (!href.startsWith(BLOCK_REFERENCE_SCHEME)) return null;
 
   const blockId = href.slice(BLOCK_REFERENCE_SCHEME.length);
-  return BLOCK_ID_PATTERN.test(blockId) ? blockId : null;
+  return isBlockId(blockId) ? blockId : null;
+}
+
+/** True when `value` matches the block-id grammar `[A-Za-z0-9]{10,12}`. */
+export function isBlockId(value: string): boolean {
+  return BLOCK_ID_PATTERN.test(value);
 }
 
 function splitText(value: string): PhrasingContent[] | null {
