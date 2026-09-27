@@ -70,6 +70,7 @@ import { useSetReadingProgress } from "#/components/codex/ReadingProgressContext
 import { RecipeFolioBody } from "#/components/codex/recipe/RecipeFolioBody";
 import { Section } from "#/components/codex/Section";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
+import { useEmbedTocExpander } from "#/components/codex/useEmbedTocExpander";
 import { useReadingColumn } from "#/components/codex/useReadingColumn";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { KindIcon } from "#/components/KindIcon";
@@ -957,7 +958,11 @@ export function Folio({ tabId, path }: FolioProps) {
         ]
       : null,
   );
-  const toc = useMemo(() => buildToc(visibleEditorValue), [visibleEditorValue]);
+  const expandEmbed = useEmbedTocExpander(visibleEditorValue, path);
+  const toc = useMemo(
+    () => buildToc(visibleEditorValue, expandEmbed),
+    [visibleEditorValue, expandEmbed],
+  );
   const conversationDiagnostics = useMemo(
     () =>
       isAiConversation

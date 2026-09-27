@@ -119,6 +119,11 @@ vi.mock("#/components/codex/ReadingProgressContext", () => ({
 import { useWorkspaceStore } from "#/store/workspace";
 import { Folio } from "../Folio";
 
+// Folio reads embed renders from the query cache; these tests mount it without a QueryClient.
+vi.mock("#/components/codex/useEmbedTocExpander", () => ({
+  useEmbedTocExpander: () => undefined,
+}));
+
 const PATH = "meetings/kickoff.md";
 
 function meetingEditor() {

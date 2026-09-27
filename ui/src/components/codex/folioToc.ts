@@ -8,12 +8,27 @@ type SlateNode = {
   children?: Array<SlateNode | { text?: string }>;
 };
 
-export function buildToc(value: unknown): TocEntry[] {
+/**
+ * Rendered content for a block that shows Markdown the Slate value does not
+ * hold (a template-rendered Base embed, a generated region), as Slate nodes.
+ * `null` leaves the block out of the outline.
+ */
+export type TocExpander = (node: unknown) => readonly unknown[] | null;
+
+/**
+ * Numbered outline of a Folio's headings in document order. With `expand`, a
+ * block's rendered headings join the outline at the block's position, so the
+ * entries stay in the same order as the headings in the DOM.
+ */
+export function buildToc(value: unknown, expand?: TocExpander): TocEntry[] {
   if (!Array.isArray(value)) return [];
   const counters = [0, 0, 0, 0, 0, 0];
   const entries: TocEntry[] = [];
 
-  for (const node of value as SlateNode[]) {
+  const nodes = (value as SlateNode[]).flatMap(
+    (node) => (expand?.(node) as SlateNode[] | null | undefined) ?? [node],
+  );
+  for (const node of nodes) {
     const ordinaryDepth =
       node?.type === "heading" && typeof node.level === "number"
         ? Math.max(1, Math.min(node.level, 6))

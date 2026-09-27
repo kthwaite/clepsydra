@@ -154,6 +154,11 @@ import { todayAiJournalPath, todayJournalPath } from "#/lib/journal";
 import { useWorkspaceStore } from "#/store/workspace";
 import { Folio } from "../Folio";
 
+// Folio reads embed renders from the query cache; these tests mount it without a QueryClient.
+vi.mock("#/components/codex/useEmbedTocExpander", () => ({
+  useEmbedTocExpander: () => undefined,
+}));
+
 function draftEditor() {
   return {
     isLoading: false,

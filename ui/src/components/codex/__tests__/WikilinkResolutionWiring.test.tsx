@@ -81,6 +81,11 @@ vi.mock("#/components/codex/useScrollSpy", () => ({
 
 import { Folio } from "../Folio";
 
+// Folio reads embed renders from the query cache; these tests mount it without a QueryClient.
+vi.mock("#/components/codex/useEmbedTocExpander", () => ({
+  useEmbedTocExpander: () => undefined,
+}));
+
 function loadedEditor() {
   return {
     isLoading: false,

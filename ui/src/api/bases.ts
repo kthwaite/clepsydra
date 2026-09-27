@@ -1,6 +1,7 @@
 import {
   type QueryClient,
   useInfiniteQuery,
+  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -135,20 +136,43 @@ export async function renderBase(
   return result.data;
 }
 
+function liveBaseRenderQuery(selection: RenderSelection, pagePath: string) {
+  return {
+    queryKey: [
+      "post",
+      "/api/vault/base-render/render",
+      { selection, page_path: pagePath },
+    ] as const,
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      renderBase({ selection, page_path: pagePath }, signal),
+    throwOnError: false,
+  };
+}
+
 export function useLiveBaseRender(
   selection: RenderSelection,
   pagePath: string,
 ) {
   return useQuery({
-    queryKey: [
-      "post",
-      "/api/vault/base-render/render",
-      { selection, page_path: pagePath },
-    ],
-    queryFn: ({ signal }) =>
-      renderBase({ selection, page_path: pagePath }, signal),
+    ...liveBaseRenderQuery(selection, pagePath),
     enabled: !!pagePath,
-    throwOnError: false,
+  });
+}
+
+/**
+ * The live renders the page's embeds have already fetched, read from the
+ * cache without starting a request of their own. An entry is `undefined`
+ * until its embed's render arrives.
+ */
+export function useCachedLiveBaseRenders(
+  selections: readonly RenderSelection[],
+  pagePath: string,
+) {
+  return useQueries({
+    queries: selections.map((selection) => ({
+      ...liveBaseRenderQuery(selection, pagePath),
+      enabled: false,
+    })),
   });
 }
 
