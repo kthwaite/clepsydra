@@ -15,7 +15,7 @@ import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
  * keys are its own except Escape/Enter/Tab (back to the cell) and Alt+Arrow
  * (header move).
  */
-export interface GridNavigationOptions {
+interface GridNavigationOptions {
   /** Enter on a focused body row, or on a bare cell (not on its controls). */
   onActivateRow?(tr: HTMLTableRowElement): void;
   /** Alt+ArrowLeft/Right on a focused header cell or its control. */

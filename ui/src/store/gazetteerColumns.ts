@@ -13,7 +13,7 @@ export type GazetteerColumn =
 
 export const GAZETTEER_COL_MIN = 40;
 export const GAZETTEER_COL_MAX = 640;
-export const clampGazetteerColumnWidth = (width: number): number =>
+const clampGazetteerColumnWidth = (width: number): number =>
   Math.min(GAZETTEER_COL_MAX, Math.max(GAZETTEER_COL_MIN, Math.round(width)));
 
 interface PersistedColumns {

@@ -7,7 +7,7 @@ import {
 } from "./column-widths";
 import { getViewStateStorage } from "./view-state";
 
-export interface ColumnWidthsModel {
+interface ColumnWidthsModel {
   widths: ColumnWidths;
   /** `undefined` forgets the width, so the column falls back to its default. */
   setWidth(id: string, width: number | undefined): void;

@@ -112,7 +112,7 @@ export interface DataTableProps<TRow extends RowData> {
 }
 
 /** The selection column's id; never a consumer column. */
-export const SELECT_COLUMN_ID = "__select";
+const SELECT_COLUMN_ID = "__select";
 const SELECT_WIDTH = 44;
 const DEFAULT_MIN = 40;
 const DEFAULT_MAX = 640;
