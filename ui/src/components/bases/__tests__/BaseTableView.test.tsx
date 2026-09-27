@@ -1657,18 +1657,166 @@ describe("BaseTableView", () => {
     expect(screen.queryByRole("textbox", { name: "Edit text" })).toBeNull();
   });
 
-  it("does not use forward commit navigation for Shift+Tab", async () => {
+  it("commits with Shift+Tab and opens the previous editable property, skipping read-only columns", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["title", "author", "kind", "missing", "rating"],
+          },
+        ],
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "4.5" }));
+    const rating = screen.getByRole("spinbutton", { name: "Edit number" });
+    fireEvent.change(rating, { target: { value: "3" } });
+    expect(fireEvent.keyDown(rating, { key: "Tab", shiftKey: true })).toBe(
+      false,
+    );
+
+    expect(props.onCommitCell).toHaveBeenCalledWith(
+      expect.objectContaining(row),
+      "rating",
+      3,
+      undefined,
+    );
+    expect(screen.getByRole("textbox", { name: "Edit text" })).toHaveFocus();
+  });
+
+  it("round-trips between editable properties with Tab then Shift+Tab", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["title", "author", "rating"],
+          },
+        ],
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
+    await user.tab();
+    expect(
+      screen.getByRole("spinbutton", { name: "Edit number" }),
+    ).toHaveFocus();
+
+    await user.tab({ shift: true });
+
+    expect(screen.getByRole("textbox", { name: "Edit text" })).toHaveFocus();
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+    expect(props.onCommitCell.mock.calls.map(([, key]) => key)).toEqual([
+      "author",
+      "rating",
+    ]);
+  });
+
+  it("commits the first editable property with Shift+Tab and focuses the row title", async () => {
     const user = userEvent.setup();
     const props = renderView({});
 
     await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
     const author = screen.getByRole("textbox", { name: "Edit text" });
+    fireEvent.change(author, { target: { value: "Ursula Le Guin" } });
     fireEvent.keyDown(author, { key: "Tab", shiftKey: true });
-    fireEvent.blur(author);
 
+    expect(props.onCommitCell).toHaveBeenCalledWith(
+      expect.objectContaining(row),
+      "author",
+      "Ursula Le Guin",
+      undefined,
+    );
+    expect(screen.queryByLabelText(/^Edit /)).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "The Book of the New Sun" }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it("focuses the created row title after Shift+Tab from its first editable property", async () => {
+    const user = userEvent.setup();
+    const props = renderView({ focusCreatedId: row.id });
+    const title = screen.getByRole("button", {
+      name: "The Book of the New Sun",
+    });
+    await waitFor(() => expect(title).toHaveFocus());
+
+    await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
+    await user.tab({ shift: true });
+
+    expect(props.onCommitCell).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(title).toHaveFocus());
+  });
+
+  it("focuses the stable view region when Shift+Tab has no title target", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["author", "rating"],
+          },
+        ],
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Edit text" }), {
+      key: "Tab",
+      shiftKey: true,
+    });
+    expect(props.onCommitCell).toHaveBeenCalledTimes(1);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Reading Log table view" }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it("keeps an invalid number open when Shift+Tab cannot accept it", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["title", "author", "rating"],
+          },
+        ],
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "4.5" }));
+    const rating = screen.getByRole<HTMLInputElement>("spinbutton", {
+      name: "Edit number",
+    });
+    rating.setCustomValidity("Enter a valid number");
+    rating.focus();
+    expect(fireEvent.keyDown(rating, { key: "Tab", shiftKey: true })).toBe(
+      false,
+    );
+
+    expect(rating).toHaveFocus();
+    expect(rating).toHaveValue(4.5);
     expect(props.onCommitCell).not.toHaveBeenCalled();
     expect(screen.queryByRole("textbox", { name: "Edit text" })).toBeNull();
   });
+
   it("renders a genuinely read-only preview without fake interactive controls", () => {
     const props = renderView({ readOnly: true });
 

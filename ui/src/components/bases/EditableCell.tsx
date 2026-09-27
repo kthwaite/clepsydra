@@ -23,6 +23,8 @@ interface ControlledEditableCellProps extends EditableCellCommonProps {
   onEdit: () => void;
   onCancel: () => void;
   onCommitNext: (value: CellValue, hint?: PropertyType) => void;
+  /** Shift+Tab: commit and move back. Absent, Shift+Tab stays native. */
+  onCommitPrevious?: (value: CellValue, hint?: PropertyType) => void;
 }
 
 interface UncontrolledEditableCellProps extends EditableCellCommonProps {
@@ -30,6 +32,7 @@ interface UncontrolledEditableCellProps extends EditableCellCommonProps {
   onEdit?: never;
   onCancel?: never;
   onCommitNext?: never;
+  onCommitPrevious?: never;
 }
 
 export type EditableCellProps =
@@ -54,6 +57,7 @@ export function EditableCell({
   commitOnBlur = false,
   onCommit,
   onCommitNext,
+  onCommitPrevious,
 }: EditableCellProps) {
   const controlled = isEditing !== undefined;
   const [localEditing, setLocalEditing] = useState(false);
@@ -89,6 +93,7 @@ export function EditableCell({
             onCommit(next, hint);
           }
         }}
+        onCommitPrevious={controlled ? onCommitPrevious : undefined}
         onCancel={() => {
           if (controlled) onCancel?.();
           else setLocalEditing(false);

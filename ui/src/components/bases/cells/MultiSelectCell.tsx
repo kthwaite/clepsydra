@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Select, SelectItem } from "#/components/ui/select";
-import type { CellEditorProps } from "./types";
+import { type CellEditorProps, tabCommit } from "./types";
 
 function currentValues(value: CellEditorProps["value"]): string[] {
   if (typeof value === "string") return value === "" ? [] : [value];
@@ -20,6 +20,7 @@ export function MultiSelectCell({
   definition,
   onCommit,
   onCommitNext,
+  onCommitPrevious,
   onCancel,
   ariaLabel,
   ariaDescribedBy,
@@ -47,10 +48,15 @@ export function MultiSelectCell({
   return (
     <div
       onKeyDownCapture={(event) => {
-        if (!commitOnBlur && event.key === "Tab" && !event.shiftKey) {
+        const tabSubmit = tabCommit(event, {
+          commitOnBlur,
+          onCommitNext,
+          onCommitPrevious,
+        });
+        if (tabSubmit) {
           event.preventDefault();
           event.stopPropagation();
-          commit(onCommitNext);
+          commit(tabSubmit);
           return;
         }
         if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) {

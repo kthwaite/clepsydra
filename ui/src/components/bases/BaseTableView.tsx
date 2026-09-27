@@ -549,9 +549,12 @@ export const BaseTableView = forwardRef<
   const editableColumns = visibleColumns.filter(
     (column) => SYSTEM_COLUMNS[column] === undefined && properties.has(column),
   );
-  const nextEditableColumn = (column: string): string | undefined => {
+  const adjacentEditableColumn = (
+    column: string,
+    step: 1 | -1,
+  ): string | undefined => {
     const index = editableColumns.indexOf(column);
-    return index < 0 ? undefined : editableColumns[index + 1];
+    return index < 0 ? undefined : editableColumns[index + step];
   };
   const activeRowId = activeCell?.rowId;
   const activeCellIsRendered =
@@ -910,6 +913,51 @@ export const BaseTableView = forwardRef<
       }
     : undefined;
 
+  /**
+   * Tab (`step` 1) and Shift+Tab (`step` -1) from an inline editor: commit,
+   * then open the adjacent editable column in the same row. Past the last
+   * column, focus the next row's title; before the first, this row's title.
+   */
+  const commitAndMove = (
+    rows: QueryRow[],
+    row: QueryRow,
+    column: string,
+    value: CellValue,
+    hint: PropertyType | undefined,
+    step: 1 | -1,
+  ) => {
+    const token = nextForwardFocusToken.current + 1;
+    nextForwardFocusToken.current = token;
+    pendingForwardFocus.current = undefined;
+    setForwardFocusRequest(undefined);
+    onCommitCell(row, column, value, hint);
+    const adjacentColumn = adjacentEditableColumn(column, step);
+    if (adjacentColumn) {
+      setActiveCell({
+        rowId: String(row.id),
+        column: adjacentColumn,
+        view: activeView,
+      });
+      return;
+    }
+    const rowIndex = rows.findIndex(
+      (candidate) => String(candidate.id) === String(row.id),
+    );
+    const targetRowId = String(
+      (step === 1 ? rows[rowIndex + 1]?.id : undefined) ?? row.id,
+    );
+    const request: ForwardFocusRequest = {
+      token,
+      view: equivalentActiveView,
+      rowId: targetRowId,
+      node: null,
+      ref: (node) => setForwardTitleRef(token, node),
+    };
+    pendingForwardFocus.current = request;
+    setForwardFocusRequest(request);
+    setActiveCell(null);
+  };
+
   const grid = (rows: QueryRow[], label: string, cacheIdentity: string) => (
     <Table
       key={cacheIdentity}
@@ -1124,39 +1172,12 @@ export const BaseTableView = forwardRef<
                             setActiveCell(null);
                             onCommitCell(row, column, value, hint);
                           }}
-                          onCommitNext={(value, hint) => {
-                            const token = nextForwardFocusToken.current + 1;
-                            nextForwardFocusToken.current = token;
-                            pendingForwardFocus.current = undefined;
-                            setForwardFocusRequest(undefined);
-                            onCommitCell(row, column, value, hint);
-                            const nextColumn = nextEditableColumn(column);
-                            if (nextColumn) {
-                              setActiveCell({
-                                rowId: String(row.id),
-                                column: nextColumn,
-                                view: activeView,
-                              });
-                              return;
-                            }
-                            const rowIndex = rows.findIndex(
-                              (candidate) =>
-                                String(candidate.id) === String(row.id),
-                            );
-                            const targetRowId = String(
-                              rows[rowIndex + 1]?.id ?? row.id,
-                            );
-                            const request: ForwardFocusRequest = {
-                              token,
-                              view: equivalentActiveView,
-                              rowId: targetRowId,
-                              node: null,
-                              ref: (node) => setForwardTitleRef(token, node),
-                            };
-                            pendingForwardFocus.current = request;
-                            setForwardFocusRequest(request);
-                            setActiveCell(null);
-                          }}
+                          onCommitNext={(value, hint) =>
+                            commitAndMove(rows, row, column, value, hint, 1)
+                          }
+                          onCommitPrevious={(value, hint) =>
+                            commitAndMove(rows, row, column, value, hint, -1)
+                          }
                         />
                       ) : (
                         // System fields and undeclared keys are read-only.

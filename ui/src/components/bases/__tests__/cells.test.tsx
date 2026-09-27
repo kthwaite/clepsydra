@@ -18,6 +18,7 @@ interface CellHarnessProps {
   accessibility?: AccessibilityProps;
   onCommit: EditableProps["onCommit"];
   onCommitNext: NonNullable<EditableProps["onCommitNext"]>;
+  onCommitPrevious: NonNullable<EditableProps["onCommitPrevious"]>;
 }
 
 function CellHarness({
@@ -26,6 +27,7 @@ function CellHarness({
   accessibility,
   onCommit,
   onCommitNext,
+  onCommitPrevious,
 }: CellHarnessProps) {
   const [isEditing, setIsEditing] = useState(false);
   return (
@@ -43,6 +45,10 @@ function CellHarness({
         onCommitNext(next, hint);
         setIsEditing(false);
       }}
+      onCommitPrevious={(next, hint) => {
+        onCommitPrevious(next, hint);
+        setIsEditing(false);
+      }}
       {...accessibility}
     />
   );
@@ -55,6 +61,7 @@ function renderCell(
 ) {
   const onCommit = vi.fn();
   const onCommitNext = vi.fn();
+  const onCommitPrevious = vi.fn();
   render(
     <CellHarness
       value={value}
@@ -62,9 +69,10 @@ function renderCell(
       accessibility={accessibility}
       onCommit={onCommit}
       onCommitNext={onCommitNext}
+      onCommitPrevious={onCommitPrevious}
     />,
   );
-  return { onCommit, onCommitNext };
+  return { onCommit, onCommitNext, onCommitPrevious };
 }
 
 describe("cell editors", () => {
@@ -421,6 +429,144 @@ describe("cell editors", () => {
     );
     vi.unstubAllGlobals();
   });
+  const shiftTabCases: Array<
+    [
+      name: string,
+      value: CellValue,
+      definition: PropertyDefinition,
+      display: string,
+      editor: RegExp,
+      expected: [CellValue, string | undefined],
+    ]
+  > = [
+    [
+      "text",
+      "Gene",
+      { type: "text" },
+      "Gene",
+      /Edit text/,
+      ["Gene", undefined],
+    ],
+    ["number", 9, { type: "number" }, "9", /Edit number/, [9, undefined]],
+    [
+      "date",
+      "2026-07-30",
+      { type: "date" },
+      "2026-07-30",
+      /Edit date$/,
+      ["2026-07-30", "date"],
+    ],
+    [
+      "datetime",
+      "2026-08-06T14:30:00Z",
+      { type: "datetime" },
+      "2026-08-06T14:30:00Z",
+      /Edit datetime/,
+      ["2026-08-06T14:30:00Z", "datetime"],
+    ],
+    [
+      "relation",
+      ["[[Solar Cycle]]"],
+      { type: "relation" },
+      "[[Solar Cycle]]",
+      /Edit relation/,
+      [["[[Solar Cycle]]"], undefined],
+    ],
+    [
+      "select",
+      "queued",
+      { type: "select", options: ["queued", "reading"] },
+      "queued",
+      /Edit select/,
+      ["queued", undefined],
+    ],
+    ["bool", true, { type: "bool" }, "true", /Edit boolean/, [true, undefined]],
+    [
+      "multi-select",
+      ["memory"],
+      { type: "multi_select", options: ["memory", "style"] },
+      "memory",
+      /Edit multi-select/,
+      [["memory"], undefined],
+    ],
+  ];
+
+  it.each(shiftTabCases)(
+    "%s cell commits its value with Shift+Tab through onCommitPrevious",
+    async (_name, value, definition, display, editor, expected) => {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }),
+      );
+      const user = userEvent.setup();
+      const { onCommit, onCommitNext, onCommitPrevious } = renderCell(
+        value,
+        definition,
+      );
+      await user.click(screen.getByRole("button", { name: display }));
+      const target = screen.getByLabelText(editor);
+
+      expect(fireEvent.keyDown(target, { key: "Tab", shiftKey: true })).toBe(
+        false,
+      );
+
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(onCommitNext).not.toHaveBeenCalled();
+      expect(onCommitPrevious).toHaveBeenCalledWith(...expected);
+      vi.unstubAllGlobals();
+    },
+  );
+
+  it("number cell stays open when Shift+Tab meets an invalid value", async () => {
+    const user = userEvent.setup();
+    const { onCommit, onCommitPrevious } = renderCell(9, { type: "number" });
+    await user.click(screen.getByRole("button", { name: "9" }));
+    const input = screen.getByRole<HTMLInputElement>("spinbutton", {
+      name: "Edit number",
+    });
+    input.setCustomValidity("Enter a valid number");
+
+    expect(fireEvent.keyDown(input, { key: "Tab", shiftKey: true })).toBe(
+      false,
+    );
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCommitPrevious).not.toHaveBeenCalled();
+    expect(input).toBeInTheDocument();
+  });
+
+  it.each(shiftTabCases)(
+    "%s draft editor leaves Shift+Tab to the browser",
+    async (_name, value, definition, display, editor) => {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }),
+      );
+      const user = userEvent.setup();
+      const onCommit = vi.fn();
+      render(
+        <EditableCell
+          value={value}
+          definition={definition}
+          commitOnBlur
+          onCommit={onCommit}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: display }));
+      const target = screen.getByLabelText(editor);
+
+      expect(fireEvent.keyDown(target, { key: "Tab", shiftKey: true })).toBe(
+        true,
+      );
+      expect(onCommit).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    },
+  );
+
   const accessibleEditorCases: Array<
     [name: string, value: CellValue, definition: PropertyDefinition]
   > = [

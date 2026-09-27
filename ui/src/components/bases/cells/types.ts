@@ -29,6 +29,11 @@ export interface CellEditorProps {
   onCommit: (value: CellValue, hint?: PropertyType) => void;
   /** Commit the edited value and advance to the next editable cell. */
   onCommitNext: (value: CellValue, hint?: PropertyType) => void;
+  /**
+   * Commit the edited value and move back to the previous editable cell.
+   * Absent: Shift+Tab is left to the browser.
+   */
+  onCommitPrevious?: (value: CellValue, hint?: PropertyType) => void;
   /** Abandon the edit, reverting to the display state. */
   onCancel: () => void;
 }
@@ -38,6 +43,26 @@ export type CellEditorComponent = (props: CellEditorProps) => React.ReactNode;
 /** Shared styling for inline cell inputs: a raised field inside a cobalt ring. */
 export const CELL_INPUT_CLASS =
   "w-full rounded-[4px] bg-raise px-1 py-0.5 text-[12.5px] text-ink outline-none ring-1 ring-inset ring-accent";
+
+/**
+ * The commit an inline editor's Tab key performs: Tab commits forward,
+ * Shift+Tab commits backward. `undefined` leaves the key to the browser, as
+ * draft editors (`commitOnBlur`) always do.
+ */
+export function tabCommit(
+  event: React.KeyboardEvent,
+  {
+    commitOnBlur,
+    onCommitNext,
+    onCommitPrevious,
+  }: Pick<
+    CellEditorProps,
+    "commitOnBlur" | "onCommitNext" | "onCommitPrevious"
+  >,
+): CellEditorProps["onCommit"] | undefined {
+  if (commitOnBlur || event.key !== "Tab") return undefined;
+  return event.shiftKey ? onCommitPrevious : onCommitNext;
+}
 
 /** Focus an editor after React has mounted its input. */
 export function useInitialFocus<T extends HTMLElement>() {
