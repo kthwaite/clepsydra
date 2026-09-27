@@ -2425,6 +2425,14 @@ export interface components {
       /** Format: int32 */
       total: number;
     };
+    /**
+     * @description Server-side ordering for the content index.
+     *
+     *     Every mode puts NULL values last, then breaks ties by path
+     *     (case-insensitive) and page id, so pagination is stable.
+     * @enum {string}
+     */
+    ContentIndexSort: "path" | "updated" | "created" | "title" | "words";
     /** @enum {string} */
     ConversationRoleRequest: "user" | "assistant";
     ConversationSummaryResponse: {
@@ -7436,6 +7444,8 @@ export interface operations {
         limit?: number;
         /** @description Entry offset. */
         offset?: number;
+        /** @description Ordering applied before `limit`/`offset`. Defaults to `path`. */
+        sort?: components["schemas"]["ContentIndexSort"];
       };
       header?: never;
       path?: never;
@@ -7452,7 +7462,7 @@ export interface operations {
           "application/json": components["schemas"]["ContentIndexResponse"];
         };
       };
-      /** @description Invalid Kind filter */
+      /** @description Invalid Kind filter or sort value */
       400: {
         headers: {
           [name: string]: unknown;

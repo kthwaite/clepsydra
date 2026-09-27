@@ -6323,6 +6323,24 @@ async fn content_index_pagination() {
 }
 
 #[tokio::test]
+async fn content_index_sort_param_accepts_known_values_and_rejects_unknown() {
+    let (server, _tmp) = setup_server();
+
+    for value in ["path", "updated", "created", "title", "words"] {
+        server
+            .get(&format!("/api/vault/index/content-index?sort={value}"))
+            .await
+            .assert_status_ok();
+    }
+    for value in ["bogus", "Updated", ""] {
+        server
+            .get(&format!("/api/vault/index/content-index?sort={value}"))
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+    }
+}
+
+#[tokio::test]
 async fn content_index_includes_word_count() {
     let (server, _tmp) = setup_server();
 
