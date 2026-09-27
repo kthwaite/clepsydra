@@ -235,6 +235,21 @@ describe("MobileGazetteer", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("offers the desktop sorts, Created included, and no File ID sort", async () => {
+    const user = userEvent.setup();
+    const onSortChange = vi.fn();
+    renderGazetteer({ onSortChange });
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    const group = screen.getByRole("radiogroup", { name: "Sort pages" });
+    expect(
+      within(group)
+        .getAllByRole("radio")
+        .map((r) => r.closest("label")?.textContent),
+    ).toEqual(["Edited", "Created", "Title", "Words"]);
+    await user.click(within(group).getByRole("radio", { name: "Created" }));
+    expect(onSortChange).toHaveBeenCalledWith("created");
+  });
+
   it("gives long-tail and facet listbox options 44px targets in the filter sheet", async () => {
     const user = userEvent.setup();
     renderGazetteer();

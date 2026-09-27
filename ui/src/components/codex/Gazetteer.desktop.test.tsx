@@ -1,7 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FooterControlsHost } from "#/components/codex/FooterControls";
+import { useGazetteerColumnsStore } from "#/store/gazetteerColumns";
 import { Gazetteer, type GazetteerFilters } from "./Gazetteer";
 
 const { content, useContentIndexMock, heightState } = vi.hoisted(() => ({
@@ -55,6 +56,7 @@ function entry(i: number) {
     tags: [],
     kind: "NOTE",
     updated_at: "2026-09-01T00:00:00Z",
+    created_at: i === 0 ? "2020-01-15T12:00:00Z" : null,
     word_count: 1200,
   };
 }
@@ -73,6 +75,7 @@ function makeFilters(over: Partial<GazetteerFilters> = {}): GazetteerFilters {
 
 beforeEach(() => {
   localStorage.clear();
+  useGazetteerColumnsStore.setState({ columnWidths: {} });
   heightState.value = 0;
   heightState.next = null;
   content.data = {
@@ -119,6 +122,24 @@ describe("Gazetteer header (desktop)", () => {
     expect(sort).toBeVisible();
     await userEvent.setup().click(screen.getByRole("radio", { name: "Title" }));
     expect(onSortChange).toHaveBeenCalledWith("title");
+  });
+
+  it("offers Created as a sort and no Code sort", async () => {
+    const onSortChange = vi.fn();
+    render(<Gazetteer filters={makeFilters({ onSortChange })} />);
+    expect(screen.queryByRole("radio", { name: "Code" })).toBeNull();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("radio", { name: "Created" }));
+    expect(onSortChange).toHaveBeenCalledWith("created");
+  });
+
+  it("asks the server for the chosen order", () => {
+    render(<Gazetteer filters={makeFilters({ sort: "created" })} />);
+    expect(useContentIndexMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sort: "created" }),
+      { enabled: true },
+    );
   });
 
   it("offers selection actions in the filter row", async () => {
@@ -325,6 +346,19 @@ describe("Gazetteer table (desktop)", () => {
     ).toBeNull();
   });
 
+  it("shows each page's creation date in a Created column", () => {
+    render(<Gazetteer filters={makeFilters({ sort: "created" })} />);
+    const header = screen.getByRole("columnheader", { name: /Created/ });
+    expect(header).toHaveAttribute("aria-sort", "descending");
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent?.replace(/[↓↑]/g, "").trim());
+    expect(headers.slice(-3)).toEqual(["Words", "Created", "Edited"]);
+    const [, first, second] = screen.getAllByRole("row");
+    expect(within(first).getByText("15 Jan 2020")).toBeVisible();
+    expect(within(second).getAllByText("—").length).toBeGreaterThan(0);
+  });
+
   it("says plainly when nothing matches", () => {
     content.data = { items: [], total: 0 };
     render(<Gazetteer filters={makeFilters()} />);
@@ -349,5 +383,107 @@ describe("Gazetteer errors (desktop)", () => {
     } finally {
       content.error = null;
     }
+  });
+});
+
+function col(id: string): HTMLElement {
+  const el = document.querySelector<HTMLElement>(`col[data-column="${id}"]`);
+  if (!el) throw new Error(`no <col> for ${id}`);
+  return el;
+}
+
+describe("Gazetteer column widths (desktop)", () => {
+  it("sizes every data column but Title from a colgroup", () => {
+    render(<Gazetteer filters={makeFilters()} />);
+    for (const id of ["no", "code", "tags", "words", "created", "edited"]) {
+      expect(col(id).style.width).toMatch(/^\d+px$/);
+    }
+    expect(col("title").style.width).toBe("");
+    // Title keeps a minimum: the table scrolls rather than crushing it.
+    expect(
+      Number.parseInt(screen.getByRole("table").style.minWidth, 10),
+    ).toBeGreaterThan(240);
+  });
+
+  it("fits the Code column to its widest visible code", () => {
+    const rect = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      const width = this.hasAttribute("data-code-fit") ? 71.2 : 0;
+      return { ...rect.call(this), width };
+    };
+    try {
+      render(<Gazetteer filters={makeFilters()} />);
+      // 72px of content plus the cell's 12px padding on each side.
+      expect(col("code").style.width).toBe("96px");
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = rect;
+    }
+  });
+
+  it("falls back to a readable Code width when layout reports nothing", () => {
+    render(<Gazetteer filters={makeFilters()} />);
+    expect(Number.parseInt(col("code").style.width, 10)).toBeGreaterThan(40);
+  });
+
+  it("resizes a column from its header handle and remembers it", async () => {
+    const user = userEvent.setup();
+    const view = render(<Gazetteer filters={makeFilters()} />);
+    const handle = screen.getByRole("separator", {
+      name: "Resize the Tags column",
+    });
+    const before = Number.parseInt(col("tags").style.width, 10);
+    handle.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(col("tags").style.width).toBe(`${before + 16}px`);
+    expect(localStorage.getItem("clepsydra.gazetteer.columns")).toContain(
+      `"tags":${before + 16}`,
+    );
+    view.unmount();
+    render(<Gazetteer filters={makeFilters()} />);
+    expect(col("tags").style.width).toBe(`${before + 16}px`);
+  });
+
+  it("restores a column's default width on double-click", async () => {
+    const user = userEvent.setup();
+    render(<Gazetteer filters={makeFilters()} />);
+    const handle = screen.getByRole("separator", {
+      name: "Resize the Code column",
+    });
+    const fit = col("code").style.width;
+    handle.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(col("code").style.width).not.toBe(fit);
+    await user.dblClick(handle);
+    expect(col("code").style.width).toBe(fit);
+  });
+
+  it("offers a handle for every data column except Title", () => {
+    render(<Gazetteer filters={makeFilters()} />);
+    const names = screen
+      .getAllByRole("separator")
+      .map((h) => h.getAttribute("aria-label"));
+    expect(names).toEqual([
+      "Resize the No. column",
+      "Resize the Code column",
+      "Resize the Tags column",
+      "Resize the Words column",
+      "Resize the Created column",
+      "Resize the Edited column",
+    ]);
+  });
+
+  it("drags a column one pixel per pixel, without sorting", () => {
+    const onSortChange = vi.fn();
+    render(<Gazetteer filters={makeFilters({ onSortChange })} />);
+    const handle = screen.getByRole("separator", {
+      name: "Resize the Words column",
+    });
+    fireEvent.pointerDown(handle, { clientX: 100 });
+    fireEvent.pointerMove(window, { clientX: 140 });
+    expect(col("words").style.width).toBe("116px");
+    fireEvent.pointerUp(window);
+    fireEvent.click(handle);
+    expect(col("words").style.width).toBe("116px");
+    expect(onSortChange).not.toHaveBeenCalled();
   });
 });

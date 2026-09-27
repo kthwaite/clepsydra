@@ -67,6 +67,7 @@ export type TagCountsResponse = JsonResponse<
 >;
 export type VaultStats = JsonResponse<operations["stats"]["responses"][200]>;
 export type ContentEntry = components["schemas"]["ContentEntry"];
+export type ContentIndexSort = components["schemas"]["ContentIndexSort"];
 
 export type SearchResult = components["schemas"]["SearchResultEntry"];
 export type SearchResponse = JsonResponse<

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatApiError } from "#/api/error";
 import { useContentIndex, useTags } from "#/api/index";
 import { useAssignBulk } from "#/api/pages";
@@ -13,6 +13,7 @@ import { FilterBar } from "#/components/filters/FilterBar";
 import { KindIcon } from "#/components/KindIcon";
 import { Radio, RadioGroup } from "#/components/ui/radio-group";
 import { Switch } from "#/components/ui/switch";
+import { useWidthDrag, WidthResizer } from "#/components/ui/width-resizer";
 import { useElementHeight } from "#/hooks/useElementHeight";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
@@ -27,13 +28,21 @@ import {
   resolveKind,
   sortKindsByLabel,
 } from "#/lib/kind";
-import { formatRelativeTime } from "#/lib/time";
+import { formatDayMonthYear, formatRelativeTime } from "#/lib/time";
 import { useProjects, useProjectValues } from "#/lib/useProjects";
 import { useGazetteerStore } from "#/store/gazetteer";
+import {
+  clampGazetteerColumnWidth,
+  GAZETTEER_COL_MAX,
+  GAZETTEER_COL_MIN,
+  type GazetteerColumn,
+  useGazetteerColumnsStore,
+} from "#/store/gazetteerColumns";
 import {
   appendUniqueTag,
   filterAndSortRows,
   type GazetteerSort,
+  toContentIndexSort,
 } from "./gazetteer-filter";
 import { pageItems, rangeLabel, repage, rowsThatFit } from "./gazetteer-paging";
 
@@ -49,7 +58,7 @@ export const MOBILE_GAZETTEER_PAGE_SIZE = 20;
 
 const SORT_OPTIONS: Array<{ value: GazetteerSort; label: string }> = [
   { value: "ts", label: "Edited" },
-  { value: "id", label: "Code" },
+  { value: "created", label: "Created" },
   { value: "title", label: "Title" },
   { value: "words", label: "Words" },
 ];
@@ -60,8 +69,41 @@ const SORT_DIRECTION: Record<GazetteerSort, "ascending" | "descending"> = {
   ts: "descending",
   words: "descending",
   title: "ascending",
-  id: "ascending",
+  created: "descending",
 };
+
+/** Default widths of the fixed-default columns. Code fits its content. */
+const COLUMN_DEFAULT: Record<Exclude<GazetteerColumn, "code">, number> = {
+  no: 52,
+  tags: 210,
+  words: 76,
+  created: 110,
+  edited: 110,
+};
+const COLUMN_LABEL: Record<GazetteerColumn, string> = {
+  no: "No.",
+  code: "Code",
+  tags: "Tags",
+  words: "Words",
+  created: "Created",
+  edited: "Edited",
+};
+const COLUMN_ORDER: GazetteerColumn[] = [
+  "no",
+  "code",
+  "tags",
+  "words",
+  "created",
+  "edited",
+];
+const CHECKBOX_WIDTH = 44;
+/** Title is the remainder; below this the table scrolls instead. */
+const TITLE_MIN_WIDTH = 240;
+/** A cell's `px-3`, both sides. */
+const CELL_PADDING = 24;
+/** Code's width before layout can be measured (or when it reports 0). */
+const CODE_FIT_FALLBACK = 112;
+const COLUMN_STEP = 16;
 
 export interface GazetteerFilters {
   filterState: FilterState;
@@ -153,6 +195,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
           project,
           limit: pageSize,
           offset: (shownPage - 1) * pageSize,
+          sort: toContentIndexSort(sort),
         }
       : { kind, project, limit: 500 },
     { enabled: measured },
@@ -191,13 +234,17 @@ export function Gazetteer({ initialTag, filters }: Props) {
   );
 
   const items = content?.items ?? [];
+  // Route mode pages on the server, which already sorted: its order is
+  // authoritative. Store mode fetches one large batch and sorts it here.
   const rowsForPage = useMemo(
     () =>
-      filterAndSortRows(items, {
-        tags: filters ? [] : [...(filterState.facets.tags ?? [])],
-        query: filters ? "" : query,
-        sort,
-      }),
+      filters
+        ? items
+        : filterAndSortRows(items, {
+            tags: [...(filterState.facets.tags ?? [])],
+            query,
+            sort,
+          }),
     [filters, items, query, filterState.facets.tags, sort],
   );
   const filteredCount = filters ? (content?.total ?? 0) : rowsForPage.length;
@@ -213,6 +260,51 @@ export function Gazetteer({ initialTag, filters }: Props) {
     const start = (currentPage - 1) * pageSize;
     return rowsForPage.slice(start, start + pageSize);
   }, [currentPage, filters, pageSize, rowsForPage]);
+
+  const columnWidths = useGazetteerColumnsStore((s) => s.columnWidths);
+  const setColumnWidth = useGazetteerColumnsStore((s) => s.setColumnWidth);
+  const resetColumnWidth = useGazetteerColumnsStore((s) => s.resetColumnWidth);
+  const tableEl = useRef<HTMLTableElement>(null);
+  const [codeFit, setCodeFit] = useState(CODE_FIT_FALLBACK);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the visible codes or their type size change
+  useLayoutEffect(() => {
+    const table = tableEl.current;
+    if (!table || rows.length === 0) return;
+    let widest = 0;
+    for (const el of table.querySelectorAll<HTMLElement>("[data-code-fit]")) {
+      widest = Math.max(widest, el.getBoundingClientRect().width);
+    }
+    const next =
+      widest > 0 ? Math.ceil(widest) + CELL_PADDING : CODE_FIT_FALLBACK;
+    setCodeFit((prev) => (prev === next ? prev : next));
+  }, [rows, compact]);
+  // A drag previews its width here and writes the store once, on release.
+  const [dragPreview, setDragPreview] = useState<{
+    col: GazetteerColumn;
+    width: number;
+  } | null>(null);
+  const defaultWidth = (col: GazetteerColumn) =>
+    col === "code" ? codeFit : COLUMN_DEFAULT[col];
+  const widthOf = (col: GazetteerColumn) =>
+    dragPreview?.col === col
+      ? clampGazetteerColumnWidth(dragPreview.width)
+      : (columnWidths[col] ?? defaultWidth(col));
+  const tableMinWidth =
+    CHECKBOX_WIDTH +
+    TITLE_MIN_WIDTH +
+    COLUMN_ORDER.reduce((sum, col) => sum + widthOf(col), 0);
+  const resizer = (col: GazetteerColumn) => (
+    <ColumnResizer
+      label={`Resize the ${COLUMN_LABEL[col]} column`}
+      width={widthOf(col)}
+      onPreview={(width) => setDragPreview({ col, width })}
+      onCommit={(width) => {
+        setDragPreview(null);
+        setColumnWidth(col, width);
+      }}
+      onReset={() => resetColumnWidth(col)}
+    />
+  );
 
   useLayoutEffect(() => {
     if (
@@ -461,9 +553,24 @@ export function Gazetteer({ initialTag, filters }: Props) {
           </p>
         ) : (
           <table
+            ref={tableEl}
             data-density={compact ? "compact" : "comfortable"}
             className="w-full table-fixed border-collapse text-left"
+            style={{ minWidth: tableMinWidth }}
           >
+            <colgroup>
+              <col style={{ width: CHECKBOX_WIDTH }} />
+              <col data-column="no" style={{ width: widthOf("no") }} />
+              <col data-column="code" style={{ width: widthOf("code") }} />
+              <col data-column="title" />
+              <col data-column="tags" style={{ width: widthOf("tags") }} />
+              <col data-column="words" style={{ width: widthOf("words") }} />
+              <col
+                data-column="created"
+                style={{ width: widthOf("created") }}
+              />
+              <col data-column="edited" style={{ width: widthOf("edited") }} />
+            </colgroup>
             <thead className="sticky top-0 z-10 bg-ground">
               <tr
                 className={cn(
@@ -471,7 +578,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
                   compact ? "h-[34px]" : "h-10",
                 )}
               >
-                <th className="w-[44px] px-3 font-normal">
+                <th className="px-3 font-normal">
                   <input
                     type="checkbox"
                     aria-label="Select all visible rows"
@@ -481,30 +588,34 @@ export function Gazetteer({ initialTag, filters }: Props) {
                     className="cursor-pointer accent-accent"
                   />
                 </th>
-                <Th w="52px">No.</Th>
-                <Th
-                  w="250px"
-                  sorted={sort === "id" ? SORT_DIRECTION.id : undefined}
-                >
-                  Code
-                </Th>
+                <Th resizer={resizer("no")}>No.</Th>
+                <Th resizer={resizer("code")}>Code</Th>
                 <Th
                   sorted={sort === "title" ? SORT_DIRECTION.title : undefined}
                 >
                   Title
                 </Th>
-                <Th w="210px">Tags</Th>
+                <Th resizer={resizer("tags")}>Tags</Th>
                 <Th
-                  w="76px"
                   right
                   sorted={sort === "words" ? SORT_DIRECTION.words : undefined}
+                  resizer={resizer("words")}
                 >
                   Words
                 </Th>
                 <Th
-                  w="110px"
+                  right
+                  sorted={
+                    sort === "created" ? SORT_DIRECTION.created : undefined
+                  }
+                  resizer={resizer("created")}
+                >
+                  Created
+                </Th>
+                <Th
                   right
                   sorted={sort === "ts" ? SORT_DIRECTION.ts : undefined}
+                  resizer={resizer("edited")}
                 >
                   Edited
                 </Th>
@@ -548,7 +659,10 @@ export function Gazetteer({ initialTag, filters }: Props) {
                       )}
                     </td>
                     <td className={cn("truncate px-3 text-mute", meta)}>
-                      <span className="inline-flex items-center gap-2 align-middle">
+                      <span
+                        data-code-fit
+                        className="inline-flex items-center gap-2 align-middle"
+                      >
                         <KindIcon
                           kind={kind}
                           size={14}
@@ -615,6 +729,14 @@ export function Gazetteer({ initialTag, filters }: Props) {
                     </td>
                     <td
                       className={cn(
+                        "truncate px-3 text-right tabular-nums text-mute",
+                        meta,
+                      )}
+                    >
+                      {n.created_at ? formatDayMonthYear(n.created_at) : "—"}
+                    </td>
+                    <td
+                      className={cn(
                         "rounded-r-[10px] px-3 text-right text-mute",
                         meta,
                       )}
@@ -627,7 +749,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
               {rows.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-3 py-6 text-center text-[13.5px] text-mute"
                   >
                     {selectedTags.length === 0 && !query
@@ -708,29 +830,63 @@ export function Gazetteer({ initialTag, filters }: Props) {
 
 function Th({
   children,
-  w,
   right,
   sorted,
+  resizer,
 }: {
   children: React.ReactNode;
-  w?: string;
   right?: boolean;
   sorted?: "ascending" | "descending";
+  resizer?: React.ReactNode;
 }) {
+  const labelId = useId();
   return (
     <th
       aria-sort={sorted}
+      // The handle has a name of its own; keep it out of the header's.
+      aria-labelledby={resizer ? labelId : undefined}
       className={cn(
-        "px-3 font-normal",
+        "relative truncate px-3 font-normal",
         right ? "text-right" : "text-left",
         sorted && "text-ink",
       )}
-      style={w ? { width: w } : undefined}
     >
-      {children}
+      <span id={labelId}>{children}</span>
       {sorted && (
         <span aria-hidden>{sorted === "descending" ? " ↓" : " ↑"}</span>
       )}
+      {resizer}
     </th>
+  );
+}
+
+/** A header's right-edge drag handle. Arrow keys step it; a double-click
+ *  restores the column's default width. */
+function ColumnResizer({
+  label,
+  width,
+  onPreview,
+  onCommit,
+  onReset,
+}: {
+  label: string;
+  width: number;
+  onPreview(width: number): void;
+  onCommit(width: number): void;
+  onReset(): void;
+}) {
+  const drag = useWidthDrag({ width, onPreview, onCommit, scale: 1 });
+  return (
+    <WidthResizer
+      label={label}
+      width={width}
+      min={GAZETTEER_COL_MIN}
+      max={GAZETTEER_COL_MAX}
+      step={COLUMN_STEP}
+      className="left-auto right-0 translate-x-0"
+      onWidth={onCommit}
+      onReset={onReset}
+      onDragStart={drag.onDragStart}
+    />
   );
 }
