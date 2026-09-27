@@ -20,7 +20,7 @@ type GazetteerSearchPatch = Partial<
   Pick<GazetteerSearch, "q" | "tags" | "kind" | "project" | "sort" | "page">
 >;
 
-const SORTS: GazetteerSort[] = ["ts", "id", "title", "words"];
+const SORTS: GazetteerSort[] = ["ts", "created", "title", "words"];
 
 export const Route = createFileRoute("/gazetteer")({
   staticData: { codexView: "gazetteer" },

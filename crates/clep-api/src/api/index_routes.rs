@@ -1440,6 +1440,48 @@ pub struct ContentIndexQuery {
     pub limit: Option<u32>,
     /// Entry offset.
     pub offset: Option<u32>,
+    /// Ordering applied before `limit`/`offset`. Defaults to `path`.
+    pub sort: Option<ContentIndexSort>,
+}
+
+/// Server-side ordering for the content index.
+///
+/// Every mode puts NULL values last, then breaks ties by path
+/// (case-insensitive) and page id, so pagination is stable.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+#[schema(rename_all = "lowercase")]
+pub enum ContentIndexSort {
+    /// Path A→Z, case-insensitive (default).
+    #[default]
+    Path,
+    /// Last updated, newest first.
+    Updated,
+    /// Created, newest first.
+    Created,
+    /// Title A→Z, case-insensitive; untitled pages sort by path.
+    Title,
+    /// Word count, most first.
+    Words,
+}
+
+impl ContentIndexSort {
+    /// The fixed `ORDER BY` body for this mode. Never built from user input.
+    fn order_by(self) -> &'static str {
+        match self {
+            Self::Path => "p.path COLLATE NOCASE, p.id",
+            Self::Updated => {
+                "julianday(p.updated_at) IS NULL, julianday(p.updated_at) DESC, \
+                 p.path COLLATE NOCASE, p.id"
+            }
+            Self::Created => {
+                "julianday(p.created_at) IS NULL, julianday(p.created_at) DESC, \
+                 p.path COLLATE NOCASE, p.id"
+            }
+            Self::Title => "COALESCE(p.title, p.path) COLLATE NOCASE, p.path COLLATE NOCASE, p.id",
+            Self::Words => "p.word_count IS NULL, p.word_count DESC, p.path COLLATE NOCASE, p.id",
+        }
+    }
 }
 
 #[utoipa::path(
@@ -1450,7 +1492,7 @@ pub struct ContentIndexQuery {
     params(ContentIndexQuery),
     responses(
         (status = 200, description = "Content index", body = ContentIndexResponse),
-        (status = 400, description = "Invalid Kind filter", body = ApiError),
+        (status = 400, description = "Invalid Kind filter or sort value", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
@@ -1486,6 +1528,7 @@ pub async fn content_index(
         .collect::<Vec<_>>();
     let limit = query.limit;
     let offset = query.offset.unwrap_or(0);
+    let order_by = query.sort.unwrap_or_default().order_by();
 
     let (entries, total) = state
         .index
@@ -1561,7 +1604,7 @@ pub async fn content_index(
                 .prepare(&format!(
                     "SELECT p.id, p.path, p.title, p.kind, p.kind_inferred, p.project
                        FROM pages p{where_clause}
-                      ORDER BY p.path COLLATE NOCASE, p.id
+                      ORDER BY {order_by}
                       LIMIT ? OFFSET ?"
                 ))
                 .map_err(|error| ApiError::internal(error.to_string()))?;
@@ -1753,6 +1796,7 @@ Some quoted text.\n";
                 tags: None,
                 limit: None,
                 offset: None,
+                sort: None,
             }),
         )
         .await
@@ -1847,6 +1891,7 @@ Atlas notes.\n",
                 tags: Some("project,research".to_string()),
                 limit: Some(1),
                 offset: Some(0),
+                sort: None,
             }),
         )
         .await
@@ -1861,6 +1906,233 @@ Atlas notes.\n",
             response.items[0]
                 .computed_tags
                 .contains(&"project".to_string())
+        );
+    }
+
+    /// One sort-fixture page: `(path, title, created_at, updated_at, word_count)`.
+    /// The timestamp and word-count columns are written straight into the
+    /// `pages` row after indexing, so tests control exact stored values
+    /// (NULLs and non-UTC offsets included).
+    type SortRow = (
+        &'static str,
+        &'static str,
+        Option<&'static str>,
+        Option<&'static str>,
+        Option<i64>,
+    );
+
+    async fn seed_sort_fixture(state: &Arc<AppState>, rows: &[SortRow]) {
+        for (i, (path, title, _, _, _)) in rows.iter().enumerate() {
+            let abs = state.vault.root().join(path);
+            std::fs::create_dir_all(abs.parent().unwrap()).unwrap();
+            std::fs::write(
+                &abs,
+                format!(
+                    "---\nid: 01900000-0000-7000-8000-0000000001{i:02}\ntitle: {title}\n---\n\nBody.\n"
+                ),
+            )
+            .unwrap();
+        }
+        let rows = rows.to_vec();
+        state
+            .index
+            .with_index(move |index, vault| {
+                for (path, _, created, updated, words) in &rows {
+                    index
+                        .index_page(vault, &VaultPath::new(path).unwrap())
+                        .unwrap();
+                    let changed = index
+                        .connection()
+                        .execute(
+                            "UPDATE pages SET created_at = ?1, updated_at = ?2, word_count = ?3
+                              WHERE path = ?4",
+                            rusqlite::params![created, updated, words, path],
+                        )
+                        .unwrap();
+                    assert_eq!(changed, 1, "fixture row for {path} not found");
+                }
+                Ok::<_, IndexError>(())
+            })
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    async fn sorted_paths(
+        state: &Arc<AppState>,
+        sort: Option<ContentIndexSort>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Vec<String> {
+        content_index(
+            State(state.clone()),
+            Query(ContentIndexQuery {
+                q: None,
+                kind: None,
+                project: None,
+                tags: None,
+                limit,
+                offset,
+                sort,
+            }),
+        )
+        .await
+        .unwrap()
+        .0
+        .items
+        .into_iter()
+        .map(|entry| entry.path)
+        .collect()
+    }
+
+    #[tokio::test]
+    async fn content_index_sort_created_desc_applies_before_pagination() {
+        let (state, _tmp) = make_state().await;
+        // Path order (a, b, c, d) is the reverse of created order.
+        seed_sort_fixture(
+            &state,
+            &[
+                ("a.md", "A", Some("2026-01-01T00:00:00+00:00"), None, None),
+                ("b.md", "B", Some("2026-02-01T00:00:00+00:00"), None, None),
+                ("c.md", "C", Some("2026-03-01T00:00:00+00:00"), None, None),
+                ("d.md", "D", Some("2026-04-01T00:00:00+00:00"), None, None),
+            ],
+        )
+        .await;
+
+        let first = sorted_paths(&state, Some(ContentIndexSort::Created), Some(2), Some(0)).await;
+        let second = sorted_paths(&state, Some(ContentIndexSort::Created), Some(2), Some(2)).await;
+        assert_eq!(first, ["d.md", "c.md"]);
+        assert_eq!(second, ["b.md", "a.md"]);
+    }
+
+    #[tokio::test]
+    async fn content_index_sort_created_puts_null_last() {
+        let (state, _tmp) = make_state().await;
+        seed_sort_fixture(
+            &state,
+            &[
+                ("a.md", "A", None, None, None),
+                ("b.md", "B", Some("2026-01-01T00:00:00+00:00"), None, None),
+                ("c.md", "C", Some("2026-02-01T00:00:00+00:00"), None, None),
+            ],
+        )
+        .await;
+
+        let paths = sorted_paths(&state, Some(ContentIndexSort::Created), None, None).await;
+        assert_eq!(paths, ["c.md", "b.md", "a.md"]);
+    }
+
+    #[tokio::test]
+    async fn content_index_sort_created_orders_mixed_offsets_by_instant() {
+        let (state, _tmp) = make_state().await;
+        // String order would be a > c > b; instant order is b > c > a.
+        //   a = 2026-01-01T09:00+09:00 = 00:00Z
+        //   b = 2026-01-01T00:30:00.5Z  (fractional seconds)
+        //   c = 2025-12-31T19:15-05:00 = 00:15Z
+        seed_sort_fixture(
+            &state,
+            &[
+                ("a.md", "A", Some("2026-01-01T09:00:00+09:00"), None, None),
+                ("b.md", "B", Some("2026-01-01T00:30:00.5+00:00"), None, None),
+                ("c.md", "C", Some("2025-12-31T19:15:00-05:00"), None, None),
+            ],
+        )
+        .await;
+
+        let paths = sorted_paths(&state, Some(ContentIndexSort::Created), None, None).await;
+        assert_eq!(paths, ["b.md", "c.md", "a.md"]);
+    }
+
+    #[tokio::test]
+    async fn content_index_sort_updated_desc_with_null_last() {
+        let (state, _tmp) = make_state().await;
+        seed_sort_fixture(
+            &state,
+            &[
+                ("a.md", "A", None, Some("2026-05-01T00:00:00+00:00"), None),
+                ("b.md", "B", None, None, None),
+                ("c.md", "C", None, Some("2026-06-01T00:00:00+00:00"), None),
+            ],
+        )
+        .await;
+
+        let paths = sorted_paths(&state, Some(ContentIndexSort::Updated), None, None).await;
+        assert_eq!(paths, ["c.md", "a.md", "b.md"]);
+    }
+
+    #[tokio::test]
+    async fn content_index_sort_title_ascending_case_insensitive() {
+        let (state, _tmp) = make_state().await;
+        seed_sort_fixture(
+            &state,
+            &[
+                ("a.md", "zebra", None, None, None),
+                ("b.md", "Apple", None, None, None),
+                ("c.md", "mango", None, None, None),
+            ],
+        )
+        .await;
+
+        let paths = sorted_paths(&state, Some(ContentIndexSort::Title), None, None).await;
+        assert_eq!(paths, ["b.md", "c.md", "a.md"]);
+    }
+
+    #[tokio::test]
+    async fn content_index_sort_words_desc_with_null_last() {
+        let (state, _tmp) = make_state().await;
+        seed_sort_fixture(
+            &state,
+            &[
+                ("a.md", "A", None, None, Some(10)),
+                ("b.md", "B", None, None, None),
+                ("c.md", "C", None, None, Some(300)),
+                ("d.md", "D", None, None, Some(10)),
+            ],
+        )
+        .await;
+
+        let paths = sorted_paths(&state, Some(ContentIndexSort::Words), None, None).await;
+        // a and d tie on 10 words; the path tie-break keeps a before d.
+        assert_eq!(paths, ["c.md", "a.md", "d.md", "b.md"]);
+    }
+
+    #[tokio::test]
+    async fn content_index_default_sort_is_path() {
+        let (state, _tmp) = make_state().await;
+        seed_sort_fixture(
+            &state,
+            &[
+                (
+                    "c.md",
+                    "A",
+                    Some("2026-03-01T00:00:00+00:00"),
+                    None,
+                    Some(1),
+                ),
+                (
+                    "B.md",
+                    "C",
+                    Some("2026-01-01T00:00:00+00:00"),
+                    None,
+                    Some(3),
+                ),
+                (
+                    "a.md",
+                    "B",
+                    Some("2026-02-01T00:00:00+00:00"),
+                    None,
+                    Some(2),
+                ),
+            ],
+        )
+        .await;
+
+        let expected = ["a.md", "B.md", "c.md"];
+        assert_eq!(sorted_paths(&state, None, None, None).await, expected);
+        assert_eq!(
+            sorted_paths(&state, Some(ContentIndexSort::Path), None, None).await,
+            expected
         );
     }
 

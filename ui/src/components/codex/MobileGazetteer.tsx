@@ -41,7 +41,7 @@ export interface MobileGazetteerProps {
 
 const sortOptions: { value: GazetteerSort; label: string }[] = [
   { value: "ts", label: "Edited" },
-  { value: "id", label: "File ID" },
+  { value: "created", label: "Created" },
   { value: "title", label: "Title" },
   { value: "words", label: "Words" },
 ];

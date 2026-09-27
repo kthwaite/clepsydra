@@ -147,6 +147,7 @@ describe("Gazetteer route filters", () => {
           project: "clepsydra",
           limit: 20,
           offset: 20,
+          sort: "title",
         },
         { enabled: true },
       );
@@ -169,6 +170,7 @@ describe("Gazetteer route filters", () => {
         project: "clepsydra",
         limit: 20,
         offset: 20,
+        sort: "title",
       },
       { enabled: true },
     );
@@ -189,9 +191,72 @@ describe("Gazetteer route filters", () => {
         project: "clepsydra",
         limit: 20,
         offset: 20,
+        sort: "title",
       },
       { enabled: true },
     );
+  });
+
+  it("accepts created as a sort and falls an old Code sort back to Edited", () => {
+    const validateSearch = Route.options.validateSearch;
+    if (typeof validateSearch !== "function") {
+      throw new Error("Expected a callable search validator");
+    }
+    const sortOf = (sort: string) =>
+      (
+        validateSearch({
+          ...completeSearch,
+          __TSearchSchemaInput__: "TSearchSchemaInput",
+          sort,
+        }) as { sort: string }
+      ).sort;
+    expect(sortOf("created")).toBe("created");
+    expect(sortOf("id")).toBe("ts");
+  });
+
+  it("asks the server to sort by creation date", () => {
+    routeMocks.search.sort = "created";
+    render(<GazetteerPage />);
+    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sort: "created" }),
+      { enabled: true },
+    );
+  });
+
+  it("keeps the server's row order instead of re-sorting the page", () => {
+    routeMocks.search.sort = "title";
+    const row = (path: string, title: string): ContentEntry => ({
+      created_at: "2026-08-01T12:00:00Z",
+      description: "",
+      inferred: false,
+      kind: "NOTE",
+      links: [],
+      path,
+      project: null,
+      tags: [],
+      computed_tags: [],
+      title,
+      updated_at: null,
+      word_count: 1,
+    });
+    routeMocks.useContentIndex.mockReturnValue({
+      data: {
+        items: [row("notes/z.md", "Zulu"), row("notes/a.md", "Alpha")],
+        total: 2,
+      },
+      isSuccess: true,
+    });
+    try {
+      render(<GazetteerPage />);
+      const titles = screen
+        .getAllByRole("row")
+        .slice(1)
+        .map((r) => r.textContent ?? "");
+      expect(titles[0]).toContain("Zulu");
+      expect(titles[1]).toContain("Alpha");
+    } finally {
+      routeMocks.useContentIndex.mockReset();
+    }
   });
 
   it("gives the text filter an accessible name of Search pages", () => {
@@ -212,6 +277,7 @@ describe("Gazetteer route filters", () => {
         project: "clepsydra",
         limit: 20,
         offset: 20,
+        sort: "title",
       },
       { enabled: true },
     );
@@ -234,6 +300,7 @@ describe("Gazetteer route filters", () => {
         project: "atlas",
         limit: 20,
         offset: 0,
+        sort: "updated",
       },
       { enabled: true },
     );
@@ -248,6 +315,7 @@ describe("Gazetteer route filters", () => {
         project: "clepsydra",
         limit: 20,
         offset: 20,
+        sort: "title",
       },
       { enabled: true },
     );

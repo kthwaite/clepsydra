@@ -395,10 +395,12 @@ export interface ContentIndexOptions {
   project?: string;
   limit?: number;
   offset?: number;
+  /** Server-side order, applied before `limit`/`offset`. */
+  sort?: components["schemas"]["ContentIndexSort"];
 }
 
 export function useContentIndex(
-  { q, tags, kind, project, limit, offset }: ContentIndexOptions = {},
+  { q, tags, kind, project, limit, offset, sort }: ContentIndexOptions = {},
   { enabled = true }: { enabled?: boolean } = {},
 ) {
   const query = {
@@ -408,6 +410,7 @@ export function useContentIndex(
     project,
     limit,
     offset,
+    sort,
   };
   return $api.useQuery(
     "get",

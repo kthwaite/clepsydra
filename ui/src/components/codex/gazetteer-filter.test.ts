@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { filterAndSortRows, type GazetteerRow } from "./gazetteer-filter";
+import {
+  filterAndSortRows,
+  type GazetteerRow,
+  toContentIndexSort,
+} from "./gazetteer-filter";
 
 const items: GazetteerRow[] = [
   {
@@ -8,6 +12,7 @@ const items: GazetteerRow[] = [
     description: "first note",
     tags: ["x", "y"],
     updated_at: "2026-05-03T00:00:00Z",
+    created_at: "2026-01-02T00:00:00Z",
     word_count: 100,
   },
   {
@@ -16,6 +21,7 @@ const items: GazetteerRow[] = [
     description: "second",
     tags: ["x"],
     updated_at: "2026-05-01T00:00:00Z",
+    created_at: "2026-03-01T00:00:00Z",
     word_count: 300,
   },
   {
@@ -24,6 +30,7 @@ const items: GazetteerRow[] = [
     description: "third note",
     tags: ["y"],
     updated_at: "2026-05-02T00:00:00Z",
+    created_at: null,
     word_count: 200,
   },
 ];
@@ -89,7 +96,7 @@ describe("filterAndSortRows", () => {
     expect(out.map((r) => r.path)).toEqual(["a.md"]);
   });
 
-  it("sorts by words desc, title asc, and id (path) asc", () => {
+  it("sorts by words desc and title asc", () => {
     expect(
       filterAndSortRows(items, { tags: [], query: "", sort: "words" }).map(
         (r) => r.path,
@@ -100,16 +107,28 @@ describe("filterAndSortRows", () => {
         (r) => r.title,
       ),
     ).toEqual(["Alpha", "Beta", "Gamma"]);
+  });
+
+  it("sorts by created_at newest first, undated rows last", () => {
     expect(
-      filterAndSortRows(items, { tags: [], query: "", sort: "id" }).map(
+      filterAndSortRows(items, { tags: [], query: "", sort: "created" }).map(
         (r) => r.path,
       ),
-    ).toEqual(["a.md", "b.md", "c.md"]);
+    ).toEqual(["b.md", "a.md", "c.md"]);
   });
 
   it("does not mutate the input array", () => {
     const snapshot = items.map((r) => r.path);
     filterAndSortRows(items, { tags: [], query: "", sort: "words" });
     expect(items.map((r) => r.path)).toEqual(snapshot);
+  });
+});
+
+describe("toContentIndexSort", () => {
+  it("maps each Gazetteer sort to the server's content-index order", () => {
+    expect(toContentIndexSort("ts")).toBe("updated");
+    expect(toContentIndexSort("created")).toBe("created");
+    expect(toContentIndexSort("title")).toBe("title");
+    expect(toContentIndexSort("words")).toBe("words");
   });
 });

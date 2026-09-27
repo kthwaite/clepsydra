@@ -294,6 +294,7 @@ describe("Gazetteer controller", () => {
         project: undefined,
         limit: 20,
         offset: 20,
+        sort: "updated",
       },
       { enabled: true },
     );
