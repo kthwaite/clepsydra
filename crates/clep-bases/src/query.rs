@@ -903,8 +903,9 @@ pub struct QuerySpec {
     pub group_row_limit: GroupRowLimit,
 }
 
-/// One result row: system fields plus materialized columns (`ord = 0`
-/// projections as canonical JSON).
+/// One result row: system fields plus materialized columns (each property's
+/// full frontmatter value as canonical JSON; arrays keep every element in
+/// frontmatter order).
 #[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct QueryRow {
     pub id: String,
@@ -1558,13 +1559,25 @@ pub fn body_excerpt(markdown: &str) -> String {
     excerpt
 }
 
+/// Select one frontmatter property as JSON text from `p.meta_json`, binding
+/// the key as a parameter (no JSON-path escaping). `json_each` yields SQL
+/// values for scalars, so they are re-encoded; booleans arrive as 0/1 and
+/// are spelled out.
+const PROPERTY_VALUE_SELECT: &str = ", (SELECT CASE je.type
+       WHEN 'true' THEN 'true'
+       WHEN 'false' THEN 'false'
+       WHEN 'array' THEN je.value
+       WHEN 'object' THEN je.value
+       ELSE json_quote(je.value)
+     END FROM json_each(p.meta_json) je WHERE je.key = ?)";
+
 enum AppendedColumn {
     Json(String),
     Body,
 }
 
 /// Fetch result rows: filter + optional group restriction + sort + paging,
-/// with requested columns materialized from `ord = 0` projections.
+/// with requested property columns materialized whole from `meta_json`.
 fn fetch_rows(
     conn: &Connection,
     spec: &QuerySpec,
@@ -1585,7 +1598,7 @@ fn fetch_rows(
     let mut appended_columns: Vec<AppendedColumn> = Vec::new();
     let mut system_columns: Vec<(String, SysField)> = Vec::new();
     let mut body_joined = false;
-    for (i, name) in spec.columns.iter().enumerate() {
+    for name in &spec.columns {
         if name == BODY_COLUMN {
             if !body_joined {
                 column_joins.push_str(BODY_PROJECTION_JOIN);
@@ -1610,12 +1623,15 @@ fn fetch_rows(
             }
             ResolvedField::Sys(sys) => system_columns.push((name.clone(), sys)),
             ResolvedField::Prop { key, .. } => {
-                let alias = format!("c{i}");
-                column_joins.push_str(&format!(
-                    " LEFT JOIN page_properties {alias} ON {alias}.page_id = p.id AND {alias}.key = ? AND {alias}.ord = 0"
-                ));
+                // The whole frontmatter value, shape and order intact: a
+                // multi_select or relation array keeps every element. The
+                // `page_properties` projection splits arrays into one row
+                // per element, so it cannot answer "all values, in order,
+                // and was it an array?". `meta_json` holds the same
+                // `toml_value_to_json` rendering the file-backed
+                // `project_page_field_value` returns.
+                select_cols.push_str(PROPERTY_VALUE_SELECT);
                 column_params.push(SqlValue::Text(key));
-                select_cols.push_str(&format!(", {alias}.value_json"));
                 appended_columns.push(AppendedColumn::Json(name.clone()));
             }
         }
@@ -3068,11 +3084,18 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
     }
 
     #[test]
-    fn columns_materialize_from_ord_zero_projections() {
+    fn scalar_property_columns_materialize_as_scalars() {
         let (_tmp, index, base) = fixture();
         let spec = QuerySpec {
             filter: book_filter(),
-            columns: vec!["title".into(), "author".into(), "rating".into()],
+            columns: vec![
+                "title".into(),
+                "author".into(),
+                "rating".into(),
+                "done".into(),
+                "started".into(),
+                "moment".into(),
+            ],
             ..Default::default()
         };
         let out = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
@@ -3083,8 +3106,140 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
         assert_eq!(a.columns["author"], serde_json::json!("Wolfe"));
         assert_eq!(a.columns["rating"], serde_json::json!(9));
         assert_eq!(a.columns["title"], serde_json::json!("Book A"));
+        assert_eq!(a.columns["done"], serde_json::json!(true));
+        assert_eq!(a.columns["started"], serde_json::json!("2026-07-01"));
+        assert_eq!(
+            a.columns["moment"],
+            serde_json::json!("2026-08-09T12:34:56Z")
+        );
         let e = rows.iter().find(|r| r.path == "e.md").unwrap();
         assert_eq!(e.columns["rating"], serde_json::Value::Null);
+        assert_eq!(e.columns["done"], serde_json::Value::Null);
+    }
+
+    /// A vault whose one BOOK carries a three-value multi_select (not in
+    /// alphabetical order) and a two-target relation.
+    fn multi_value_fixture() -> (tempfile::TempDir, VaultIndex, BaseDefinition) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        std::fs::write(tmp.path().join("bases/reading.base.toml"), READING_BASE).unwrap();
+        let write = |name: &str, content: String| {
+            std::fs::write(tmp.path().join(name), content).unwrap();
+        };
+        write(
+            "multi.md",
+            page(
+                "0190f8a0-0000-7000-8000-0000000000f1",
+                "BOOK",
+                "Multi",
+                "author = \"Wolfe\"\nstatus = \"reading\"\nthemes = [\"zeta\", \"alpha\", \"mid\"]\nseries = [\"[[Solar Cycle]]\", \"[[Book of the New Sun]]\"]\n",
+            ),
+        );
+        write(
+            "single.md",
+            page(
+                "0190f8a0-0000-7000-8000-0000000000f2",
+                "BOOK",
+                "Single",
+                "status = \"reading\"\nthemes = [\"only\"]\n",
+            ),
+        );
+        for (name, id, title) in [
+            (
+                "solar-cycle.md",
+                "0190f8a0-0000-7000-8000-0000000000f3",
+                "Solar Cycle",
+            ),
+            (
+                "book-of-the-new-sun.md",
+                "0190f8a0-0000-7000-8000-0000000000f4",
+                "Book of the New Sun",
+            ),
+        ] {
+            write(name, page(id, "NOTE", title, ""));
+        }
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db"))
+            .unwrap()
+            .with_linkable_properties(Box::new(crate::base::BaseLinkableProperties));
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+        index.resolve_links().unwrap();
+        let registry = crate::base::BaseRegistry::load(tmp.path());
+        let base = registry.get("reading").unwrap().clone();
+        (tmp, index, base)
+    }
+
+    fn multi_value_spec(group_by: Option<&str>) -> QuerySpec {
+        QuerySpec {
+            filter: book_filter(),
+            group_by: group_by.map(str::to_string),
+            columns: vec!["author".into(), "themes".into(), "series".into()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn multi_select_column_returns_every_value_in_frontmatter_order() {
+        let (_tmp, index, base) = multi_value_fixture();
+        let out = evaluate(
+            index.connection(),
+            &multi_value_spec(None),
+            &QueryContext::for_base(&base),
+        )
+        .unwrap();
+        let QueryOutput::Flat { rows, .. } = out else {
+            panic!("expected flat");
+        };
+        let multi = rows.iter().find(|r| r.path == "multi.md").unwrap();
+        assert_eq!(
+            multi.columns["themes"],
+            serde_json::json!(["zeta", "alpha", "mid"])
+        );
+        // Scalars stay scalars; a one-element array stays an array.
+        assert_eq!(multi.columns["author"], serde_json::json!("Wolfe"));
+        let single = rows.iter().find(|r| r.path == "single.md").unwrap();
+        assert_eq!(single.columns["themes"], serde_json::json!(["only"]));
+        assert_eq!(single.columns["series"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn relation_column_returns_every_target_in_frontmatter_order() {
+        let (_tmp, index, base) = multi_value_fixture();
+        let out = evaluate(
+            index.connection(),
+            &multi_value_spec(None),
+            &QueryContext::for_base(&base),
+        )
+        .unwrap();
+        let QueryOutput::Flat { rows, .. } = out else {
+            panic!("expected flat");
+        };
+        let multi = rows.iter().find(|r| r.path == "multi.md").unwrap();
+        assert_eq!(
+            multi.columns["series"],
+            serde_json::json!(["[[Solar Cycle]]", "[[Book of the New Sun]]"])
+        );
+    }
+
+    #[test]
+    fn grouped_rows_return_every_multi_value_in_frontmatter_order() {
+        let (_tmp, index, base) = multi_value_fixture();
+        let out = evaluate(
+            index.connection(),
+            &multi_value_spec(Some("status")),
+            &QueryContext::for_base(&base),
+        )
+        .unwrap();
+        let group = only_group(out);
+        let multi = group.rows.iter().find(|r| r.path == "multi.md").unwrap();
+        assert_eq!(
+            multi.columns["themes"],
+            serde_json::json!(["zeta", "alpha", "mid"])
+        );
+        assert_eq!(
+            multi.columns["series"],
+            serde_json::json!(["[[Solar Cycle]]", "[[Book of the New Sun]]"])
+        );
     }
 
     #[test]

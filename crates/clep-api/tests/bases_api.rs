@@ -1396,6 +1396,83 @@ async fn saved_view_returns_body_excerpt_without_a_page_detail_request() {
     assert_eq!(body["rows"][0]["columns"]["body"], "A readable label.");
 }
 
+fn seed_multi_value_columns(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/brewing.base.toml"),
+        r#"name = "Brewing"
+
+[filter]
+all = [ { field = "kind", op = "eq", value = "RECIPE" } ]
+
+[properties]
+Hops    = { type = "multi_select", options = [] }
+related = { type = "relation" }
+
+[[views]]
+name = "All"
+columns = ["title", "Hops", "related"]
+"#,
+    )
+    .unwrap();
+    let page = |id: &str, title: &str, kind: &str, extras: &str| {
+        format!("+++\nid = \"{id}\"\ntitle = \"{title}\"\ntype = \"{kind}\"\n{extras}+++\nbody\n")
+    };
+    fs::write(
+        root.join("bitter.md"),
+        page(
+            "0190f8a0-0000-7000-8000-0000000000e1",
+            "Bitter",
+            "RECIPE",
+            "Hops = [\"Saaz\", \"Hallertau\", \"Fuggle\"]\nrelated = [\"[[Pale Ale]]\", \"[[Mild]]\"]\n",
+        ),
+    )
+    .unwrap();
+    for (name, id, title) in [
+        (
+            "pale-ale.md",
+            "0190f8a0-0000-7000-8000-0000000000e2",
+            "Pale Ale",
+        ),
+        ("mild.md", "0190f8a0-0000-7000-8000-0000000000e3", "Mild"),
+    ] {
+        fs::write(root.join(name), page(id, title, "NOTE", "")).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn view_evaluation_returns_every_multi_value_in_frontmatter_order() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_multi_value_columns)
+        .build()
+        .into_server_and_temp();
+
+    let saved = server.get("/api/vault/bases/brewing/views/all").await;
+    saved.assert_status_ok();
+    let evaluated = server
+        .post("/api/vault/bases/brewing/views/all/evaluate")
+        .json(&serde_json::json!({}))
+        .await;
+    evaluated.assert_status_ok();
+
+    let evaluated: serde_json::Value = evaluated.json();
+    for output in [
+        saved.json::<serde_json::Value>(),
+        evaluated["output"].clone(),
+    ] {
+        let columns = &output["rows"][0]["columns"];
+        assert_eq!(columns["title"], "Bitter");
+        assert_eq!(
+            columns["Hops"],
+            serde_json::json!(["Saaz", "Hallertau", "Fuggle"])
+        );
+        assert_eq!(
+            columns["related"],
+            serde_json::json!(["[[Pale Ale]]", "[[Mild]]"])
+        );
+    }
+}
+
 #[tokio::test]
 async fn grouped_saved_view_without_limit_keeps_default_fifty_row_cap() {
     let (server, _tmp) = ApiFixture::builder()
