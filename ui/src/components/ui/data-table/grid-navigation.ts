@@ -83,8 +83,11 @@ export function isEditorTarget(el: Element): boolean {
   if (el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
     return true;
   }
+  // The nearest contenteditable decides: a grid inside a non-editable island
+  // of a rich-text editor (a Base embed in Slate) is not text entry.
+  const editable = el.closest("[contenteditable]");
   return (
-    el.closest('[contenteditable]:not([contenteditable="false"])') !== null
+    editable !== null && editable.getAttribute("contenteditable") !== "false"
   );
 }
 

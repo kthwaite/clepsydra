@@ -166,6 +166,23 @@ describe("isEditorTarget", () => {
     expect(isEditorTarget(at("check"))).toBe(false);
     expect(isEditorTarget(at("plain"))).toBe(false);
   });
+
+  it("does not treat a non-editable island inside a rich-text editor as an editor", () => {
+    // A Base embed: the grid sits in a contenteditable="false" void inside
+    // the Slate editor; its cells are grid keys, not text.
+    const host = document.createElement("div");
+    host.innerHTML = `
+      <div contenteditable="true">
+        <fieldset contenteditable="false">
+          <button id="cell">x</button>
+          <div contenteditable="true"><span id="nested">y</span></div>
+        </fieldset>
+      </div>
+    `;
+    const at = (id: string) => host.querySelector(`#${id}`) as Element;
+    expect(isEditorTarget(at("cell"))).toBe(false);
+    expect(isEditorTarget(at("nested"))).toBe(true);
+  });
 });
 
 describe("useGridNavigation — single tab stop", () => {
