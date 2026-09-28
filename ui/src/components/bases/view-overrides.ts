@@ -22,6 +22,8 @@ export interface ViewOverridesState {
   quickFilters: QuickFilter[];
   group: GroupOverride | undefined;
   hiddenColumns: string[];
+  /** A request-time column order; absent when it equals the saved order. */
+  columnOrder?: string[];
 }
 
 export const EMPTY_OVERRIDES: ViewOverridesState = {
@@ -92,6 +94,71 @@ export function withoutHiddenColumns(
   return { ...state, hiddenColumns: [] };
 }
 
+/**
+ * `columns` in `order`: ids not in `columns` are dropped, columns missing from
+ * `order` follow in their own order, and `title` stays first when present.
+ */
+export function orderColumns(
+  columns: string[],
+  order: string[] | undefined,
+): string[] {
+  if (order === undefined) return columns;
+  const known = new Set(columns);
+  const ordered = [...new Set(order)].filter((column) => known.has(column));
+  const placed = new Set(ordered);
+  const result = [...ordered, ...columns.filter((c) => !placed.has(c))];
+  return known.has("title")
+    ? ["title", ...result.filter((c) => c !== "title")]
+    : result;
+}
+
+function sameColumns(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((column, i) => column === b[i]);
+}
+
+/** Order the view's `baseColumns` as `order`; an order equal to the saved
+ * one is no override, so it drops `columnOrder` instead of storing it. */
+export function withColumnOrder(
+  state: ViewOverridesState,
+  order: string[],
+  baseColumns: string[],
+): ViewOverridesState {
+  const next = orderColumns(baseColumns, order);
+  if (sameColumns(next, baseColumns)) return withoutColumnOrder(state);
+  if (state.columnOrder && sameColumns(state.columnOrder, next)) return state;
+  return { ...state, columnOrder: next };
+}
+
+export function withoutColumnOrder(
+  state: ViewOverridesState,
+): ViewOverridesState {
+  if (state.columnOrder === undefined) return state;
+  const { columnOrder: _dropped, ...rest } = state;
+  return rest;
+}
+
+/**
+ * `columns` with `column` moved one place past its visible neighbour, hidden
+ * columns keeping their slots; undefined when it cannot move that way —
+ * `title`, a missing or hidden column, an edge, or a `title` neighbour.
+ */
+export function movedColumnOrder(
+  columns: string[],
+  hidden: string[],
+  column: string,
+  delta: -1 | 1,
+): string[] | undefined {
+  if (column === "title") return undefined;
+  const visible = columns.filter((c) => !hidden.includes(c));
+  const at = visible.indexOf(column);
+  if (at < 0) return undefined;
+  const neighbour = visible[at + delta];
+  if (neighbour === undefined || neighbour === "title") return undefined;
+  const rest = columns.filter((c) => c !== column);
+  const slot = rest.indexOf(neighbour) + (delta > 0 ? 1 : 0);
+  return [...rest.slice(0, slot), column, ...rest.slice(slot)];
+}
+
 export function hasOverrides(
   state: ViewOverridesState,
   sort: SortKey[] | undefined,
@@ -100,6 +167,7 @@ export function hasOverrides(
     state.quickFilters.length > 0 ||
     state.group !== undefined ||
     state.hiddenColumns.length > 0 ||
+    state.columnOrder !== undefined ||
     (sort !== undefined && sort.length > 0)
   );
 }
@@ -149,8 +217,8 @@ export function applyOverridesToView(
   if (state.group?.kind === "by") next.group_by = state.group.field;
   if (state.group?.kind === "flat") delete next.group_by;
   if (sort !== undefined && sort.length > 0) next.sort = sort;
-  if (state.hiddenColumns.length > 0) {
-    next.columns = renderedColumns.filter(
+  if (state.columnOrder !== undefined || state.hiddenColumns.length > 0) {
+    next.columns = orderColumns(renderedColumns, state.columnOrder).filter(
       (c) => !state.hiddenColumns.includes(c),
     );
   }

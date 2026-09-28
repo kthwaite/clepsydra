@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   CELL_INPUT_CLASS,
   type CellEditorProps,
+  tabCommit,
   useInitialFocus,
 } from "./types";
 
@@ -9,6 +10,7 @@ export function NumberCell({
   value,
   onCommit,
   onCommitNext,
+  onCommitPrevious,
   onCancel,
   ariaLabel,
   ariaDescribedBy,
@@ -48,11 +50,16 @@ export function NumberCell({
         }
       }}
       onKeyDown={(e) => {
-        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
+        const tabSubmit = tabCommit(e, {
+          commitOnBlur,
+          onCommitNext,
+          onCommitPrevious,
+        });
+        if (tabSubmit) {
           e.preventDefault();
           e.stopPropagation();
           if (!e.currentTarget.validity.valid) return;
-          commit(onCommitNext);
+          commit(tabSubmit);
           return;
         }
         if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {

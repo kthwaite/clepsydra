@@ -28,6 +28,10 @@ export interface BaseHeaderMenuProps {
   /** True when the effective grouping already uses this column. */
   groupedByThis: boolean;
   hideable: boolean;
+  canMoveLeft: boolean;
+  canMoveRight: boolean;
+  /** The column has a width handle to hand focus to. */
+  resizable: boolean;
   presets: QuickFilter[];
   /** Options the presets left out, from `headerOptionOverflow`. */
   optionOverflow: number;
@@ -35,7 +39,27 @@ export interface BaseHeaderMenuProps {
   onAddQuickFilter(filter: QuickFilter): void;
   onSetGroup(group: GroupOverride | undefined): void;
   onHideColumn(column: string): void;
+  /** Move this column one place among the visible columns. */
+  onMove(delta: -1 | 1): void;
   children: ReactNode;
+}
+
+type HeaderMenuProps = Omit<BaseHeaderMenuProps, "children"> & {
+  /** Hand focus to the column's resizer once the menu has closed. */
+  onResize(): void;
+};
+
+/** Why a column refuses to move one way, for the disabled item's description. */
+function moveBlocker(column: string, delta: -1 | 1): string {
+  if (column === "title") return "The title column stays first";
+  return delta < 0 ? "Cannot move further left" : "Cannot move further right";
+}
+
+/** Why a column has no resizer, for the disabled item's description. */
+function resizeBlocker(column: string): string {
+  return column === "title"
+    ? "The title column takes the remaining width"
+    : "This column cannot be resized";
 }
 
 /** Why a column refuses to hide, for the disabled item's description. */
@@ -52,13 +76,18 @@ function HeaderMenu({
   groupable,
   groupedByThis,
   hideable,
+  canMoveLeft,
+  canMoveRight,
+  resizable,
   presets,
   optionOverflow,
   onSortChange,
   onAddQuickFilter,
   onSetGroup,
   onHideColumn,
-}: Omit<BaseHeaderMenuProps, "children">) {
+  onMove,
+  onResize,
+}: HeaderMenuProps) {
   // Keyed by the filter's own identity: a preset keeps its key when the
   // column's options change, and a repeated preset collapses into one item.
   const byIdentity = new Map(
@@ -82,6 +111,9 @@ function HeaderMenu({
             groupedByThis ? { kind: "flat" } : { kind: "by", field: column },
           );
         else if (id === "hide") onHideColumn(column);
+        else if (id === "move-left") onMove(-1);
+        else if (id === "move-right") onMove(1);
+        else if (id === "resize") onResize();
         else addPreset(id);
       }}
     >
@@ -133,6 +165,28 @@ function HeaderMenu({
       >
         Hide column
       </MenuItem>
+      <MenuSeparator />
+      <MenuItem
+        id="move-left"
+        isDisabled={!canMoveLeft}
+        description={canMoveLeft ? undefined : moveBlocker(column, -1)}
+      >
+        Move left
+      </MenuItem>
+      <MenuItem
+        id="move-right"
+        isDisabled={!canMoveRight}
+        description={canMoveRight ? undefined : moveBlocker(column, 1)}
+      >
+        Move right
+      </MenuItem>
+      <MenuItem
+        id="resize"
+        isDisabled={!resizable}
+        description={resizable ? undefined : resizeBlocker(column)}
+      >
+        Resize column
+      </MenuItem>
     </Menu>
   );
 }
@@ -143,15 +197,15 @@ function HeaderMenu({
  *
  * The button's `aria-label` becomes part of the column header's accessible
  * name ("author author column menu"), which is accepted: `aria-hidden` would
- * take the menu away from keyboard users, `Column` drops an `aria-label` of
- * its own (React Aria filters it out), and React Aria collections will not let
- * the button live outside the `<Column>`. The row menu's button does the same
- * to its row header cell, which reads "Zulu Row actions for Zulu".
+ * take the menu away from keyboard users, and the header is named by its
+ * content. The row menu's button does the same to its row header cell, which
+ * reads "Zulu Row actions for Zulu".
  */
 export function BaseHeaderMenu(props: BaseHeaderMenuProps) {
   const { children, ...rest } = props;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const resizeRequested = useRef(false);
   const summon = (point: ContextMenuPoint) => {
     if (!triggerRef.current) return false;
     forwardContextMenu(triggerRef.current, point);
@@ -159,10 +213,10 @@ export function BaseHeaderMenu(props: BaseHeaderMenuProps) {
   };
   return (
     <div className="flex items-center gap-1" data-column={rest.column}>
-      {/* Not focusable: React Aria focuses a column header's first focusable
+      {/* Not focusable: the grid focuses a column header's first focusable
           child, which must stay the `⋯` button. Nothing inside can hold focus,
           so there is no context-menu key to catch here — only the pointer. */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: this handler only forwards the platform's context-menu gesture to the `⋯` button, which is the real, focusable control; a role here would both misdescribe the header and claim the focus React Aria owes that button. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: this handler only forwards the platform's context-menu gesture to the `⋯` button, which is the real, focusable control; a role here would both misdescribe the header and claim the focus the grid owes that button. */}
       <div
         className="flex min-w-0 flex-1 items-center"
         onContextMenu={(event) => {
@@ -171,7 +225,22 @@ export function BaseHeaderMenu(props: BaseHeaderMenuProps) {
       >
         {children}
       </div>
-      <MenuTrigger trigger="contextMenu" onOpenChange={setIsOpen}>
+      <MenuTrigger
+        trigger="contextMenu"
+        onOpenChange={(open) => {
+          setIsOpen(open);
+          if (open || !resizeRequested.current) return;
+          resizeRequested.current = false;
+          // The header's own cell has no reachable Enter (focus lands on
+          // this button), so the menu is the keyboard way into resize mode.
+          // React Aria hands focus back to this button as the menu closes;
+          // take it over once that has happened.
+          const header = triggerRef.current?.closest("th");
+          window.setTimeout(() => {
+            header?.querySelector<HTMLElement>('[role="separator"]')?.focus();
+          }, 0);
+        }}
+      >
         <Button
           ref={triggerRef}
           variant="ghost"
@@ -192,7 +261,12 @@ export function BaseHeaderMenu(props: BaseHeaderMenuProps) {
         {/* Built eagerly, unlike the row menu's `isOpen` gate: a header menu's
             items are bounded by the column's options (`HEADER_OPTION_CAP`) and
             there is one per column, not one per cell. */}
-        <HeaderMenu {...rest} />
+        <HeaderMenu
+          {...rest}
+          onResize={() => {
+            resizeRequested.current = true;
+          }}
+        />
       </MenuTrigger>
     </div>
   );

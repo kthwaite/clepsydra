@@ -380,19 +380,29 @@ Open `/bases` to discover, create, configure, open, or delete bases. Open `/base
 
 The view bar holds **Filter**, **Sort** and **Group** beside **Fields**. Filter offers each column's presets (the same ones as its header menu); Sort picks a column and a direction; Group picks a column or **No grouping**. The pills name the effective sort and grouping, and turn cobalt while they carry an override; **Use the view's sort** and **Use the view's grouping** drop the override. The **Compact** switch in the header toggles 32px and 42px rows — Bases start comfortable — and is remembered on this device. The footer shows the base file and its row count.
 
-System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions.
+System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions. The multi-select editor is a tag input: type any value and press <kbd>Enter</kbd> to add it, pick a suggestion (the declared options plus values already used in that column), or press <kbd>Backspace</kbd> in the empty field to remove the last value.
+
+While a cell editor is open, <kbd>Tab</kbd> saves it and opens the next editable cell in the row, and <kbd>Shift</kbd>+<kbd>Tab</kbd> saves it and opens the previous one. Past the last editable cell, focus moves to the next row's title; before the first, to this row's title. <kbd>Enter</kbd> saves and <kbd>Escape</kbd> cancels. Arrow keys inside an editor move the text cursor, not the table focus.
 
 Each commit fetches the page's current revision, sends only the changed property key with its type hint, and updates `updated_at`. For TOML `+++` frontmatter, the server splices that edit into the existing bytes, preserving untouched keys and comments. The first inline property edit on legacy YAML `---` frontmatter instead converts it to TOML through full serialization, so YAML frontmatter comments are not preserved. A stale edit is rejected rather than overwriting a newer page revision; the table refetches the winning state and reports the failed key.
 
 ### Column, cell, and row menus
 
-Every column header has a `⋯` menu — also reachable by right-clicking the header, and the first thing keyboard focus lands on in a header (Enter opens it): **Sort ascending**, **Sort descending**, **Filter ▸** presets (is empty / is not empty, checked / unchecked, the relative-date presets, and up to twelve declared select options), **Group by** / **Ungroup**, and **Hide column**. The title column and the last visible column cannot be hidden.
+Every column header has a `⋯` menu — also reachable by right-clicking the header, and the first thing keyboard focus lands on in a header (Enter opens it): **Sort ascending**, **Sort descending**, **Filter ▸** presets (is empty / is not empty, checked / unchecked, the relative-date presets, and up to twelve declared select options), **Group by** / **Ungroup**, **Hide column**, **Move left** / **Move right**, and **Resize column**. The title column and the last visible column cannot be hidden; the title column always stays first and fills the remaining width.
 
 Right-click any cell (or press <kbd>Shift</kbd>+<kbd>F10</kbd> / <kbd>⌃</kbd><kbd>Enter</kbd> on a focused cell control) for a quick filter derived from the cell's value — `Status is reading`, `Tags has fiction`, `Due is 2026-08-28`, `Done is checked`, `Author is empty` — a **Filter by date ▸** submenu on date columns, **Copy value**, and the row actions: **Open**, **Open in new tab**, **Copy wikilink**, **Duplicate**, and **Archive…**. A ghost `⋯` button in the first cell opens the row actions alone.
 
-Sort, quick filters, grouping, and hidden columns are **view overrides**: they apply to the table you are looking at and appear as removable chips in a strip under the view bar. **Clear** drops them all; **Save to view** writes them into the saved view (`filter`, `sort`, `group_by`, `columns`) through the revision-guarded definition update, so a base edited elsewhere in the meantime is reported instead of overwritten. Switching views drops the overrides.
+Sort, quick filters, grouping, hidden columns, and column order are **view overrides**: they apply to the table you are looking at and appear as removable chips in a strip under the view bar. **Clear** drops them all; **Save to view** writes them into the saved view (`filter`, `sort`, `group_by`, `columns`) through the revision-guarded definition update, so a base edited elsewhere in the meantime is reported instead of overwritten. Switching views drops the overrides.
 
 **Duplicate** creates a new page through the member endpoint with the same declared properties, kind, project, and tags, titled `<title> (copy)`; the body is not copied, and the new page must still match the view. **Archive…** asks for confirmation and moves the page to the Rubbish Bin; focus returns to the next row.
+
+### Column width and order
+
+Drag a column's right edge to resize it; double-click the edge to restore its default width. From the keyboard, choose **Resize column** in the header menu, use <kbd>←</kbd>/<kbd>→</kbd> (<kbd>Home</kbd>/<kbd>End</kbd> for the minimum and maximum), then <kbd>Enter</kbd> or <kbd>Escape</kbd> to return to the header. Widths are remembered in this browser per base and view; they are not written to the `.base.toml` file.
+
+Drag a column header to move it, or press <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> on a focused header; **Move left** and **Move right** in the header menu do the same. A new order is a view override: it shows as a **Column order** chip, its × restores the saved order, and **Save to view** writes it into the view's `columns`.
+
+In the table, arrow keys move between cells and rows, <kbd>Home</kbd>/<kbd>End</kbd> go to the start or end of a row, and <kbd>Ctrl</kbd>+<kbd>Home</kbd>/<kbd>End</kbd> to the first or last row. The table is a single <kbd>Tab</kbd> stop.
 
 ### Group collapse and fields
 

@@ -50,4 +50,32 @@ describe("useViewOverrides", () => {
     expect(result.current.state.hiddenColumns).toEqual([]);
     expect(result.current.state.group).toBeUndefined();
   });
+
+  it("reorders columns against the base order and resets the order", () => {
+    const base = ["title", "author", "rating"];
+    const { result, rerender } = renderHook(
+      ({ key }) => useViewOverrides(key),
+      { initialProps: { key: "k" } },
+    );
+    act(() =>
+      result.current.reorderColumns(["title", "rating", "author"], base),
+    );
+    expect(result.current.state.columnOrder).toEqual([
+      "title",
+      "rating",
+      "author",
+    ]);
+    act(() => result.current.reorderColumns(base, base));
+    expect(result.current.state.columnOrder).toBeUndefined();
+    act(() =>
+      result.current.reorderColumns(["title", "rating", "author"], base),
+    );
+    act(() => result.current.resetColumnOrder());
+    expect(result.current.state.columnOrder).toBeUndefined();
+    act(() =>
+      result.current.reorderColumns(["title", "rating", "author"], base),
+    );
+    rerender({ key: "other" });
+    expect(result.current.state.columnOrder).toBeUndefined();
+  });
 });

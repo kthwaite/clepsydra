@@ -1,8 +1,8 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatApiError } from "#/api/error";
 import { useContentIndex, useTags } from "#/api/index";
 import { useAssignBulk } from "#/api/pages";
-import type { BulkAssignResponse } from "#/api/types";
+import type { BulkAssignResponse, ContentEntry } from "#/api/types";
 import { FooterControls } from "#/components/codex/FooterControls";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { KindSelect } from "#/components/codex/KindSelect";
@@ -11,9 +11,14 @@ import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { Tick } from "#/components/codex/Tick";
 import { FilterBar } from "#/components/filters/FilterBar";
 import { KindIcon } from "#/components/KindIcon";
+import { Button } from "#/components/ui/button";
+import {
+  type DataColumn,
+  DataTable,
+  type RowSelectionState,
+} from "#/components/ui/data-table";
 import { Radio, RadioGroup } from "#/components/ui/radio-group";
 import { Switch } from "#/components/ui/switch";
-import { useWidthDrag, WidthResizer } from "#/components/ui/width-resizer";
 import { useElementHeight } from "#/hooks/useElementHeight";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
@@ -32,7 +37,6 @@ import { formatDayMonthYear, formatRelativeTime } from "#/lib/time";
 import { useProjects, useProjectValues } from "#/lib/useProjects";
 import { useGazetteerStore } from "#/store/gazetteer";
 import {
-  clampGazetteerColumnWidth,
   GAZETTEER_COL_MAX,
   GAZETTEER_COL_MIN,
   type GazetteerColumn,
@@ -45,14 +49,6 @@ import {
   toContentIndexSort,
 } from "./gazetteer-filter";
 import { pageItems, rangeLabel, repage, rowsThatFit } from "./gazetteer-paging";
-
-/** Pure: returns a NEW Set with `value` toggled (added if absent, removed if present). */
-export function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
-  const next = new Set(set);
-  if (next.has(value)) next.delete(value);
-  else next.add(value);
-  return next;
-}
 
 export const MOBILE_GAZETTEER_PAGE_SIZE = 20;
 
@@ -88,7 +84,18 @@ const COLUMN_LABEL: Record<GazetteerColumn, string> = {
   created: "Created",
   edited: "Edited",
 };
-const COLUMN_ORDER: GazetteerColumn[] = [
+/** The default order after the checkbox. No. is pinned; Title fills. */
+const DEFAULT_ORDER = [
+  "no",
+  "code",
+  "title",
+  "tags",
+  "words",
+  "created",
+  "edited",
+] as const;
+type GazetteerColumnId = (typeof DEFAULT_ORDER)[number];
+const RESIZABLE: GazetteerColumn[] = [
   "no",
   "code",
   "tags",
@@ -96,14 +103,32 @@ const COLUMN_ORDER: GazetteerColumn[] = [
   "created",
   "edited",
 ];
-const CHECKBOX_WIDTH = 44;
+/** Which sort each header shows. */
+const SORTED_BY: Partial<Record<GazetteerColumnId, GazetteerSort>> = {
+  title: "title",
+  words: "words",
+  created: "created",
+  edited: "ts",
+};
 /** Title is the remainder; below this the table scrolls instead. */
 const TITLE_MIN_WIDTH = 240;
 /** A cell's `px-3`, both sides. */
 const CELL_PADDING = 24;
 /** Code's width before layout can be measured (or when it reports 0). */
 const CODE_FIT_FALLBACK = 112;
-const COLUMN_STEP = 16;
+
+function sameOrder(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+/** The stored order read as DataTable reads it: known ids, missing ones
+ *  appended, No. first. */
+function effectiveOrder(order: readonly string[]): string[] {
+  const known: string[] = [...DEFAULT_ORDER];
+  const kept = [...new Set(order.filter((id) => known.includes(id)))];
+  const all = [...kept, ...known.filter((id) => !kept.includes(id))];
+  return ["no", ...all.filter((id) => id !== "no")];
+}
 
 export interface GazetteerFilters {
   filterState: FilterState;
@@ -146,7 +171,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
   const setSort = filters?.onSortChange ?? store.setSort;
   const setPage: (page: number, replace?: boolean) => void =
     filters?.onPageChange ?? store.setPage;
-  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [selection, setSelection] = useState<RowSelectionState>({});
   const [compact, setCompact] = useTableCompact("gazetteer", true);
 
   useLayoutEffect(() => {
@@ -262,8 +287,11 @@ export function Gazetteer({ initialTag, filters }: Props) {
   }, [currentPage, filters, pageSize, rowsForPage]);
 
   const columnWidths = useGazetteerColumnsStore((s) => s.columnWidths);
+  const columnOrder = useGazetteerColumnsStore((s) => s.columnOrder);
   const setColumnWidth = useGazetteerColumnsStore((s) => s.setColumnWidth);
   const resetColumnWidth = useGazetteerColumnsStore((s) => s.resetColumnWidth);
+  const setColumnOrder = useGazetteerColumnsStore((s) => s.setColumnOrder);
+  const resetColumns = useGazetteerColumnsStore((s) => s.resetColumns);
   const tableEl = useRef<HTMLTableElement>(null);
   const [codeFit, setCodeFit] = useState(CODE_FIT_FALLBACK);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the visible codes or their type size change
@@ -278,33 +306,17 @@ export function Gazetteer({ initialTag, filters }: Props) {
       widest > 0 ? Math.ceil(widest) + CELL_PADDING : CODE_FIT_FALLBACK;
     setCodeFit((prev) => (prev === next ? prev : next));
   }, [rows, compact]);
-  // A drag previews its width here and writes the store once, on release.
-  const [dragPreview, setDragPreview] = useState<{
-    col: GazetteerColumn;
-    width: number;
-  } | null>(null);
   const defaultWidth = (col: GazetteerColumn) =>
     col === "code" ? codeFit : COLUMN_DEFAULT[col];
-  const widthOf = (col: GazetteerColumn) =>
-    dragPreview?.col === col
-      ? clampGazetteerColumnWidth(dragPreview.width)
-      : (columnWidths[col] ?? defaultWidth(col));
-  const tableMinWidth =
-    CHECKBOX_WIDTH +
-    TITLE_MIN_WIDTH +
-    COLUMN_ORDER.reduce((sum, col) => sum + widthOf(col), 0);
-  const resizer = (col: GazetteerColumn) => (
-    <ColumnResizer
-      label={`Resize the ${COLUMN_LABEL[col]} column`}
-      width={widthOf(col)}
-      onPreview={(width) => setDragPreview({ col, width })}
-      onCommit={(width) => {
-        setDragPreview(null);
-        setColumnWidth(col, width);
-      }}
-      onReset={() => resetColumnWidth(col)}
-    />
-  );
+  // Reset columns shows only when the viewer's layout differs from the
+  // defaults: a moved column, or a width other than its default.
+  const columnsCustomised =
+    !sameOrder(effectiveOrder(columnOrder), DEFAULT_ORDER) ||
+    RESIZABLE.some(
+      (col) =>
+        columnWidths[col] !== undefined &&
+        columnWidths[col] !== defaultWidth(col),
+    );
 
   useLayoutEffect(() => {
     if (
@@ -335,7 +347,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
         : { size: pageSize, page: requestedPage },
     );
   }, [isMobile, measured, pageSize, requestedPage, shownPage, setPage]);
-  const selected = [...selectedPaths];
+  const selected = Object.keys(selection).filter((path) => selection[path]);
   // A gap is keyed by the page before it: stable, unlike its index.
   const pageLinks = pageItems(currentPage, pageCount).map((item, i, all) => ({
     item,
@@ -352,29 +364,15 @@ export function Gazetteer({ initialTag, filters }: Props) {
     }
   };
 
-  const toggleRow = (path: string) => {
-    setSelectedPaths((cur) => toggleInSet(cur, path));
-  };
-
   const clearSelection = () => {
-    setSelectedPaths(new Set());
-  };
-
-  const allVisibleSelected =
-    rows.length > 0 && rows.every((n) => selectedPaths.has(n.path));
-
-  const toggleAllVisible = () => {
-    if (rows.length === 0) return;
-    setSelectedPaths(
-      allVisibleSelected ? new Set() : new Set(rows.map((n) => n.path)),
-    );
+    setSelection({});
   };
 
   const onBulkDone = (data: BulkAssignResponse) => {
-    setSelectedPaths((current) => {
-      const remaining = new Set(current);
-      for (const [source] of data.moved) remaining.delete(source);
-      for (const path of data.unchanged) remaining.delete(path);
+    setSelection((current) => {
+      const remaining = { ...current };
+      for (const [source] of data.moved) delete remaining[source];
+      for (const path of data.unchanged) delete remaining[path];
       return remaining;
     });
   };
@@ -397,6 +395,126 @@ export function Gazetteer({ initialTag, filters }: Props) {
       { onSuccess: onBulkDone },
     );
   };
+
+  const meta = compact ? "text-[12.5px]" : "text-[13px]";
+  const sortedColumn = (Object.keys(SORTED_BY) as GazetteerColumnId[]).find(
+    (id) => SORTED_BY[id] === sort,
+  );
+  const resizable = (
+    id: GazetteerColumn,
+    rest: Omit<DataColumn<ContentEntry>, "id" | "label" | "width">,
+  ): DataColumn<ContentEntry> => ({
+    id,
+    label: COLUMN_LABEL[id],
+    width: defaultWidth(id),
+    minWidth: GAZETTEER_COL_MIN,
+    maxWidth: GAZETTEER_COL_MAX,
+    // Only the sorted column carries aria-sort; the Sort control sorts.
+    sortable: sortedColumn === id,
+    ...rest,
+  });
+  const columns: DataColumn<ContentEntry>[] = [
+    resizable("no", {
+      pinned: true,
+      cellClassName: cn("tabular-nums text-faint", meta),
+      cell: (_, i) =>
+        String((currentPage - 1) * pageSize + i + 1).padStart(3, "0"),
+    }),
+    resizable("code", {
+      cellClassName: cn("truncate text-mute", meta),
+      cell: (n) => {
+        const kind = resolveKind({ path: n.path, kind: n.kind });
+        return (
+          <span
+            data-code-fit
+            className="inline-flex items-center gap-2 align-middle"
+          >
+            <KindIcon
+              kind={kind}
+              size={14}
+              className="flex-shrink-0"
+              title={kindDisplayLabel(kind)}
+            />
+            {shortFolio(n.path)}
+          </span>
+        );
+      },
+    }),
+    {
+      id: "title",
+      label: "Title",
+      fill: true,
+      minWidth: TITLE_MIN_WIDTH,
+      sortable: sortedColumn === "title",
+      cellClassName: "truncate",
+      cell: (n) => (
+        <>
+          <span
+            className={cn(
+              "text-ink",
+              compact ? "text-[13.5px]" : "text-[14.5px]",
+            )}
+          >
+            {n.title || n.path}
+          </span>
+          {n.description && (
+            <span className={cn("ml-2.5 text-mute", meta)}>
+              {n.description}
+            </span>
+          )}
+        </>
+      ),
+    },
+    resizable("tags", {
+      cellClassName: cn("truncate", meta),
+      cell: (n) =>
+        (n.tags ?? []).length > 0 ? (
+          <span className="flex gap-1.5 overflow-hidden whitespace-nowrap">
+            {(n.tags ?? []).map((tag) => {
+              const tagSelected = selectedTags.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  aria-label={`Filter by tag ${tag}`}
+                  aria-pressed={tagSelected}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    applyResultTag(tag);
+                  }}
+                  className={cn(
+                    "shrink-0 rounded-sm",
+                    FOCUS_RING_NATIVE,
+                    tagSelected
+                      ? "cursor-default text-mute"
+                      : "cursor-pointer text-accent hover:text-hot",
+                  )}
+                >
+                  #{tag}
+                </button>
+              );
+            })}
+          </span>
+        ) : (
+          <span className="text-faint">—</span>
+        ),
+    }),
+    resizable("words", {
+      align: "end",
+      cellClassName: cn("tabular-nums text-mute", meta),
+      cell: (n) => (n.word_count != null ? fmt(n.word_count) : "—"),
+    }),
+    resizable("created", {
+      align: "end",
+      cellClassName: cn("truncate tabular-nums text-mute", meta),
+      cell: (n) => (n.created_at ? formatDayMonthYear(n.created_at) : "—"),
+    }),
+    resizable("edited", {
+      align: "end",
+      cellClassName: cn("text-mute", meta),
+      cell: (n) => formatRelativeTime(n.updated_at),
+    }),
+  ];
 
   const loadError = contentQuery.error
     ? formatApiError(contentQuery.error, "Gazetteer could not be loaded.")
@@ -464,6 +582,11 @@ export function Gazetteer({ initialTag, filters }: Props) {
           {tagSummary}
         </span>
         <div className="flex-1" />
+        {columnsCustomised && (
+          <Button variant="ghost" size="sm" onPress={resetColumns}>
+            Reset columns
+          </Button>
+        )}
         <Switch isSelected={compact} onChange={setCompact}>
           Compact
         </Switch>
@@ -552,218 +675,55 @@ export function Gazetteer({ initialTag, filters }: Props) {
             {loadError}
           </p>
         ) : (
-          <table
-            ref={tableEl}
-            data-density={compact ? "compact" : "comfortable"}
-            className="w-full table-fixed border-collapse text-left"
-            style={{ minWidth: tableMinWidth }}
-          >
-            <colgroup>
-              <col style={{ width: CHECKBOX_WIDTH }} />
-              <col data-column="no" style={{ width: widthOf("no") }} />
-              <col data-column="code" style={{ width: widthOf("code") }} />
-              <col data-column="title" />
-              <col data-column="tags" style={{ width: widthOf("tags") }} />
-              <col data-column="words" style={{ width: widthOf("words") }} />
-              <col
-                data-column="created"
-                style={{ width: widthOf("created") }}
-              />
-              <col data-column="edited" style={{ width: widthOf("edited") }} />
-            </colgroup>
-            <thead className="sticky top-0 z-10 bg-ground">
-              <tr
-                className={cn(
-                  "text-[12.5px] text-mute",
-                  compact ? "h-[34px]" : "h-10",
-                )}
-              >
-                <th className="px-3 font-normal">
-                  <input
-                    type="checkbox"
-                    aria-label="Select all visible rows"
-                    checked={allVisibleSelected}
-                    onChange={toggleAllVisible}
-                    disabled={rows.length === 0}
-                    className="cursor-pointer accent-accent"
-                  />
-                </th>
-                <Th resizer={resizer("no")}>No.</Th>
-                <Th resizer={resizer("code")}>Code</Th>
-                <Th
-                  sorted={sort === "title" ? SORT_DIRECTION.title : undefined}
-                >
-                  Title
-                </Th>
-                <Th resizer={resizer("tags")}>Tags</Th>
-                <Th
-                  right
-                  sorted={sort === "words" ? SORT_DIRECTION.words : undefined}
-                  resizer={resizer("words")}
-                >
-                  Words
-                </Th>
-                <Th
-                  right
-                  sorted={
-                    sort === "created" ? SORT_DIRECTION.created : undefined
-                  }
-                  resizer={resizer("created")}
-                >
-                  Created
-                </Th>
-                <Th
-                  right
-                  sorted={sort === "ts" ? SORT_DIRECTION.ts : undefined}
-                  resizer={resizer("edited")}
-                >
-                  Edited
-                </Th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((n, i) => {
-                const kind = resolveKind({ path: n.path, kind: n.kind });
-                const isSelected = selectedPaths.has(n.path);
-                const meta = compact ? "text-[12.5px]" : "text-[13px]";
-                return (
-                  <tr
-                    key={n.path}
-                    onClick={() => openTab("page", n.path, n.title || n.path)}
-                    className={cn(
-                      "cursor-pointer",
-                      compact ? "h-8" : "h-[42px]",
-                      isSelected
-                        ? "[&>td]:bg-accent-tint"
-                        : "hover:[&>td]:bg-sink",
-                    )}
-                  >
-                    <td
-                      className="rounded-l-[10px] px-3"
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    >
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${n.title || n.path}`}
-                        checked={isSelected}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={() => toggleRow(n.path)}
-                        className="cursor-pointer accent-accent"
-                      />
-                    </td>
-                    <td className={cn("px-3 tabular-nums text-faint", meta)}>
-                      {String((currentPage - 1) * pageSize + i + 1).padStart(
-                        3,
-                        "0",
-                      )}
-                    </td>
-                    <td className={cn("truncate px-3 text-mute", meta)}>
-                      <span
-                        data-code-fit
-                        className="inline-flex items-center gap-2 align-middle"
-                      >
-                        <KindIcon
-                          kind={kind}
-                          size={14}
-                          className="flex-shrink-0"
-                          title={kindDisplayLabel(kind)}
-                        />
-                        {shortFolio(n.path)}
-                      </span>
-                    </td>
-                    <td className="truncate px-3">
-                      <span
-                        className={cn(
-                          "text-ink",
-                          compact ? "text-[13.5px]" : "text-[14.5px]",
-                        )}
-                      >
-                        {n.title || n.path}
-                      </span>
-                      {n.description && (
-                        <span className={cn("ml-2.5 text-mute", meta)}>
-                          {n.description}
-                        </span>
-                      )}
-                    </td>
-                    <td className={cn("truncate px-3", meta)}>
-                      {(n.tags ?? []).length > 0 ? (
-                        <span className="flex gap-1.5 overflow-hidden whitespace-nowrap">
-                          {(n.tags ?? []).map((tag) => {
-                            const tagSelected = selectedTags.includes(tag);
-                            return (
-                              <button
-                                key={tag}
-                                type="button"
-                                aria-label={`Filter by tag ${tag}`}
-                                aria-pressed={tagSelected}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  applyResultTag(tag);
-                                }}
-                                className={cn(
-                                  "shrink-0 rounded-sm",
-                                  FOCUS_RING_NATIVE,
-                                  tagSelected
-                                    ? "cursor-default text-mute"
-                                    : "cursor-pointer text-accent hover:text-hot",
-                                )}
-                              >
-                                #{tag}
-                              </button>
-                            );
-                          })}
-                        </span>
-                      ) : (
-                        <span className="text-faint">—</span>
-                      )}
-                    </td>
-                    <td
-                      className={cn(
-                        "px-3 text-right tabular-nums text-mute",
-                        meta,
-                      )}
-                    >
-                      {n.word_count != null ? fmt(n.word_count) : "—"}
-                    </td>
-                    <td
-                      className={cn(
-                        "truncate px-3 text-right tabular-nums text-mute",
-                        meta,
-                      )}
-                    >
-                      {n.created_at ? formatDayMonthYear(n.created_at) : "—"}
-                    </td>
-                    <td
-                      className={cn(
-                        "rounded-r-[10px] px-3 text-right text-mute",
-                        meta,
-                      )}
-                    >
-                      {formatRelativeTime(n.updated_at)}
-                    </td>
-                  </tr>
-                );
-              })}
-              {rows.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="px-3 py-6 text-center text-[13.5px] text-mute"
-                  >
-                    {selectedTags.length === 0 && !query
-                      ? "No pages match."
-                      : `No pages${
-                          selectedTags.length > 0
-                            ? ` under ${selectedTags.map((t) => `#${t}`).join(" ")}`
-                            : ""
-                        }${query ? ` match “${query}”` : ""}.`}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <DataTable
+            tableRef={tableEl}
+            ariaLabel="Pages"
+            rows={rows}
+            columns={columns}
+            getRowId={(n) => n.path}
+            density={compact ? "compact" : "comfortable"}
+            sort={
+              sortedColumn
+                ? { column: sortedColumn, direction: SORT_DIRECTION[sort] }
+                : undefined
+            }
+            columnOrder={columnOrder}
+            onColumnOrderChange={(next) =>
+              setColumnOrder(sameOrder(next, DEFAULT_ORDER) ? [] : next)
+            }
+            columnWidths={columnWidths as Record<string, number>}
+            onColumnWidthChange={(id, width) => {
+              const col = id as GazetteerColumn;
+              if (width === undefined) resetColumnWidth(col);
+              else setColumnWidth(col, width);
+            }}
+            selection={{
+              selected: selection,
+              onChange: setSelection,
+              allLabel: "Select all visible rows",
+              rowLabel: (n) => `Select ${n.title || n.path}`,
+            }}
+            onRowActivate={(n) => openTab("page", n.path, n.title || n.path)}
+            rowClassName={(_, { selected: isSelected }) =>
+              cn(
+                compact ? "h-8" : "h-[42px]",
+                "[&>td:first-child]:rounded-l-[10px] [&>td:last-child]:rounded-r-[10px]",
+                isSelected ? "[&>td]:bg-accent-tint" : "hover:[&>td]:bg-sink",
+              )
+            }
+            stickyHeader
+            emptyState={
+              <p className="px-3 py-6 text-center text-[13.5px] text-mute">
+                {selectedTags.length === 0 && !query
+                  ? "No pages match."
+                  : `No pages${
+                      selectedTags.length > 0
+                        ? ` under ${selectedTags.map((t) => `#${t}`).join(" ")}`
+                        : ""
+                    }${query ? ` match “${query}”` : ""}.`}
+              </p>
+            }
+          />
         )}
       </div>
       <FooterControls>
@@ -825,68 +785,5 @@ export function Gazetteer({ initialTag, filters }: Props) {
         </nav>
       </FooterControls>
     </div>
-  );
-}
-
-function Th({
-  children,
-  right,
-  sorted,
-  resizer,
-}: {
-  children: React.ReactNode;
-  right?: boolean;
-  sorted?: "ascending" | "descending";
-  resizer?: React.ReactNode;
-}) {
-  const labelId = useId();
-  return (
-    <th
-      aria-sort={sorted}
-      // The handle has a name of its own; keep it out of the header's.
-      aria-labelledby={resizer ? labelId : undefined}
-      className={cn(
-        "relative truncate px-3 font-normal",
-        right ? "text-right" : "text-left",
-        sorted && "text-ink",
-      )}
-    >
-      <span id={labelId}>{children}</span>
-      {sorted && (
-        <span aria-hidden>{sorted === "descending" ? " ↓" : " ↑"}</span>
-      )}
-      {resizer}
-    </th>
-  );
-}
-
-/** A header's right-edge drag handle. Arrow keys step it; a double-click
- *  restores the column's default width. */
-function ColumnResizer({
-  label,
-  width,
-  onPreview,
-  onCommit,
-  onReset,
-}: {
-  label: string;
-  width: number;
-  onPreview(width: number): void;
-  onCommit(width: number): void;
-  onReset(): void;
-}) {
-  const drag = useWidthDrag({ width, onPreview, onCommit, scale: 1 });
-  return (
-    <WidthResizer
-      label={label}
-      width={width}
-      min={GAZETTEER_COL_MIN}
-      max={GAZETTEER_COL_MAX}
-      step={COLUMN_STEP}
-      className="left-auto right-0 translate-x-0"
-      onWidth={onCommit}
-      onReset={onReset}
-      onDragStart={drag.onDragStart}
-    />
   );
 }

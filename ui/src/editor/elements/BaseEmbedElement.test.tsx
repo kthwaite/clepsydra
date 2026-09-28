@@ -264,6 +264,8 @@ function controllerModel(
     onHideColumn: vi.fn(),
     onShowColumn: vi.fn(),
     onShowHiddenColumns: vi.fn(),
+    onReorderColumns: vi.fn(),
+    onResetColumnOrder: vi.fn(),
     onClearOverrides: vi.fn(),
     onSaveOverrides: vi.fn(),
     onReloadDefinition: vi.fn(),

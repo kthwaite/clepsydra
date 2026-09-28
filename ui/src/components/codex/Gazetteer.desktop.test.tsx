@@ -5,17 +5,20 @@ import { FooterControlsHost } from "#/components/codex/FooterControls";
 import { useGazetteerColumnsStore } from "#/store/gazetteerColumns";
 import { Gazetteer, type GazetteerFilters } from "./Gazetteer";
 
-const { content, useContentIndexMock, heightState } = vi.hoisted(() => ({
-  content: {
-    data: { items: [] as Array<Record<string, unknown>>, total: 0 } as
-      | { items: Array<Record<string, unknown>>; total: number }
-      | undefined,
-    error: null as Error | null,
-    isSuccess: true,
-  },
-  useContentIndexMock: vi.fn(),
-  heightState: { value: 0 as number | null, next: null as number | null },
-}));
+const { content, useContentIndexMock, heightState, openTab } = vi.hoisted(
+  () => ({
+    content: {
+      data: { items: [] as Array<Record<string, unknown>>, total: 0 } as
+        | { items: Array<Record<string, unknown>>; total: number }
+        | undefined,
+      error: null as Error | null,
+      isSuccess: true,
+    },
+    useContentIndexMock: vi.fn(),
+    heightState: { value: 0 as number | null, next: null as number | null },
+    openTab: vi.fn(),
+  }),
+);
 
 vi.mock("#/api/index", () => ({
   useContentIndex: (...args: unknown[]) => {
@@ -33,7 +36,7 @@ vi.mock("#/api/pages", () => ({
   useAssignBulk: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 vi.mock("#/hooks/useMobileLayout", () => ({ useMobileLayout: () => false }));
-vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
+vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => openTab }));
 vi.mock("#/lib/useProjects", () => ({
   useProjects: () => ["atlas"],
   useProjectValues: () => ["atlas"],
@@ -75,7 +78,7 @@ function makeFilters(over: Partial<GazetteerFilters> = {}): GazetteerFilters {
 
 beforeEach(() => {
   localStorage.clear();
-  useGazetteerColumnsStore.setState({ columnWidths: {} });
+  useGazetteerColumnsStore.setState({ columnWidths: {}, columnOrder: [] });
   heightState.value = 0;
   heightState.next = null;
   content.data = {
@@ -84,6 +87,7 @@ beforeEach(() => {
   };
   content.isSuccess = true;
   useContentIndexMock.mockClear();
+  openTab.mockClear();
 });
 
 describe("Gazetteer header (desktop)", () => {
@@ -178,14 +182,11 @@ const COMPACT_10 = 48 + 32 * 10; // 368px: ten compact rows, seven comfortable
 describe("Gazetteer table (desktop)", () => {
   it("marks the table's density and switches it", async () => {
     render(<Gazetteer filters={makeFilters()} />);
-    expect(screen.getByRole("table")).toHaveAttribute(
-      "data-density",
-      "compact",
-    );
+    expect(screen.getByRole("grid")).toHaveAttribute("data-density", "compact");
     await userEvent
       .setup()
       .click(screen.getByRole("switch", { name: "Compact" }));
-    expect(screen.getByRole("table")).toHaveAttribute(
+    expect(screen.getByRole("grid")).toHaveAttribute(
       "data-density",
       "comfortable",
     );
@@ -270,7 +271,8 @@ describe("Gazetteer table (desktop)", () => {
         <FooterControlsHost />
       </>,
     );
-    expect(screen.getByRole("status")).toHaveTextContent("1–10 of 45");
+    // The grid has a status region of its own (reorder announcements).
+    expect(screen.getByText("1–10 of 45")).toHaveAttribute("role", "status");
   });
 
   it("does not clamp the page against placeholder data", () => {
@@ -401,7 +403,7 @@ describe("Gazetteer column widths (desktop)", () => {
     expect(col("title").style.width).toBe("");
     // Title keeps a minimum: the table scrolls rather than crushing it.
     expect(
-      Number.parseInt(screen.getByRole("table").style.minWidth, 10),
+      Number.parseInt(screen.getByRole("grid").style.minWidth, 10),
     ).toBeGreaterThan(240);
   });
 
@@ -485,5 +487,166 @@ describe("Gazetteer column widths (desktop)", () => {
     fireEvent.click(handle);
     expect(col("words").style.width).toBe("116px");
     expect(onSortChange).not.toHaveBeenCalled();
+  });
+});
+
+function header(name: string | RegExp): HTMLElement {
+  return screen.getByRole("columnheader", { name });
+}
+
+function headerTexts(): string[] {
+  return screen
+    .getAllByRole("columnheader")
+    .slice(1)
+    .map((h) => h.textContent?.replace(/[↓↑]/g, "").trim() ?? "");
+}
+
+describe("Gazetteer keyboard (desktop)", () => {
+  it("opens the focused row's page on Enter", async () => {
+    render(<Gazetteer filters={makeFilters()} />);
+    screen.getAllByRole("row")[2].focus();
+    await userEvent.setup().keyboard("{Enter}");
+    expect(openTab).toHaveBeenCalledWith("page", "notes/page-2.md", "Page 2");
+  });
+
+  it("opens a page on row click but not from a tag button", async () => {
+    content.data = {
+      items: [{ ...entry(0), tags: ["research"] }],
+      total: 1,
+    };
+    const user = userEvent.setup();
+    render(<Gazetteer filters={makeFilters()} />);
+    await user.click(
+      screen.getByRole("button", { name: "Filter by tag research" }),
+    );
+    expect(openTab).not.toHaveBeenCalled();
+    await user.click(screen.getByText("Page 1"));
+    expect(openTab).toHaveBeenCalledWith("page", "notes/page-1.md", "Page 1");
+  });
+});
+
+describe("Gazetteer column order (desktop)", () => {
+  it("keeps the checkbox and No. first and lets Title move", () => {
+    render(<Gazetteer filters={makeFilters()} />);
+    expect(header("No.")).not.toHaveAttribute("aria-keyshortcuts");
+    expect(header("Title")).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Alt+ArrowLeft Alt+ArrowRight",
+    );
+  });
+
+  it("moves a column with Alt+Arrow and remembers it", async () => {
+    const user = userEvent.setup();
+    const view = render(<Gazetteer filters={makeFilters()} />);
+    header("Tags").focus();
+    await user.keyboard("{Alt>}{ArrowRight}{/Alt}");
+    const moved = [
+      "No.",
+      "Code",
+      "Title",
+      "Words",
+      "Tags",
+      "Created",
+      "Edited",
+    ];
+    expect(headerTexts()).toEqual(moved);
+    expect(header("Tags")).toHaveFocus();
+    expect(localStorage.getItem("clepsydra.gazetteer.columns")).toContain(
+      '"columnOrder":["no","code","title","words","tags","created","edited"]',
+    );
+    view.unmount();
+    render(<Gazetteer filters={makeFilters()} />);
+    expect(headerTexts()).toEqual(moved);
+    expect(
+      screen.getAllByRole("separator").map((h) => h.getAttribute("aria-label")),
+    ).toEqual([
+      "Resize the No. column",
+      "Resize the Code column",
+      "Resize the Words column",
+      "Resize the Tags column",
+      "Resize the Created column",
+      "Resize the Edited column",
+    ]);
+  });
+
+  it("never moves a column in front of No.", async () => {
+    render(<Gazetteer filters={makeFilters()} />);
+    header("Code").focus();
+    await userEvent.setup().keyboard("{Alt>}{ArrowLeft}{/Alt}");
+    expect(headerTexts().slice(0, 2)).toEqual(["No.", "Code"]);
+  });
+});
+
+describe("Gazetteer Reset columns (desktop)", () => {
+  const reset = () => screen.queryByRole("button", { name: "Reset columns" });
+
+  it("appears only once widths differ from the defaults, and resets them", async () => {
+    const user = userEvent.setup();
+    render(<Gazetteer filters={makeFilters()} />);
+    expect(reset()).toBeNull();
+    const before = col("tags").style.width;
+    screen.getByRole("separator", { name: "Resize the Tags column" }).focus();
+    await user.keyboard("{ArrowRight}");
+    expect(col("tags").style.width).not.toBe(before);
+    await user.click(reset() as HTMLElement);
+    expect(col("tags").style.width).toBe(before);
+    expect(reset()).toBeNull();
+  });
+
+  it("appears once the order differs from the default, and restores it", async () => {
+    const user = userEvent.setup();
+    render(<Gazetteer filters={makeFilters()} />);
+    const defaults = headerTexts();
+    header("Title").focus();
+    await user.keyboard("{Alt>}{ArrowRight}{/Alt}");
+    expect(headerTexts()).not.toEqual(defaults);
+    await user.click(reset() as HTMLElement);
+    expect(headerTexts()).toEqual(defaults);
+    expect(reset()).toBeNull();
+  });
+
+  it("hides again when a column is moved back to its default place", async () => {
+    const user = userEvent.setup();
+    render(<Gazetteer filters={makeFilters()} />);
+    header("Title").focus();
+    await user.keyboard("{Alt>}{ArrowRight}{/Alt}");
+    expect(reset()).not.toBeNull();
+    header("Title").focus();
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+    expect(reset()).toBeNull();
+  });
+});
+
+describe("Gazetteer selection across pages (desktop)", () => {
+  function pageOf(start: number) {
+    return Array.from({ length: 20 }, (_, i) => entry(start + i));
+  }
+
+  it("keeps a selection across pages; the header checkbox takes exactly the visible rows, then clears all", async () => {
+    const user = userEvent.setup();
+    const view = render(<Gazetteer filters={makeFilters()} />);
+    await user.click(screen.getByRole("checkbox", { name: "Select Page 1" }));
+    content.data = { items: pageOf(20), total: 45 };
+    view.rerender(<Gazetteer filters={makeFilters({ page: 2 })} />);
+    expect(screen.getByText("1 selected")).toBeVisible();
+    const all = screen.getByRole("checkbox", {
+      name: "Select all visible rows",
+    }) as HTMLInputElement;
+    expect(all).not.toBeChecked();
+    expect(all.indeterminate).toBe(false);
+    await user.click(screen.getByRole("checkbox", { name: "Select Page 21" }));
+    expect(screen.getByText("2 selected")).toBeVisible();
+    expect(all.indeterminate).toBe(true);
+    await user.click(all);
+    // Exactly the visible rows: page 1's row is dropped.
+    expect(screen.getByText("20 selected")).toBeVisible();
+    expect(all).toBeChecked();
+    await user.click(all);
+    expect(screen.queryByText(/selected$/)).toBeNull();
+    content.data = { items: pageOf(0), total: 45 };
+    view.rerender(<Gazetteer filters={makeFilters()} />);
+    expect(
+      screen.getByRole("checkbox", { name: "Select Page 1" }),
+    ).not.toBeChecked();
   });
 });

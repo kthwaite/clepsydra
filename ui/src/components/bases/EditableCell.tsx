@@ -11,6 +11,8 @@ interface EditableCellCommonProps {
   ariaLabel?: string;
   ariaDescribedBy?: string;
   commitOnBlur?: boolean;
+  /** Extra editor suggestions, e.g. values used elsewhere in the column. */
+  suggestions?: string[];
   /** Focus the display affordance when an external async action closes edit mode. */
   focusOnDisplay?: boolean;
   /** Keep a controlled draft mounted while focus moves to sibling recovery actions. */
@@ -23,6 +25,8 @@ interface ControlledEditableCellProps extends EditableCellCommonProps {
   onEdit: () => void;
   onCancel: () => void;
   onCommitNext: (value: CellValue, hint?: PropertyType) => void;
+  /** Shift+Tab: commit and move back. Absent, Shift+Tab stays native. */
+  onCommitPrevious?: (value: CellValue, hint?: PropertyType) => void;
 }
 
 interface UncontrolledEditableCellProps extends EditableCellCommonProps {
@@ -30,6 +34,7 @@ interface UncontrolledEditableCellProps extends EditableCellCommonProps {
   onEdit?: never;
   onCancel?: never;
   onCommitNext?: never;
+  onCommitPrevious?: never;
 }
 
 export type EditableCellProps =
@@ -52,8 +57,10 @@ export function EditableCell({
   focusOnDisplay = false,
   preserveEditingOnBlur = false,
   commitOnBlur = false,
+  suggestions,
   onCommit,
   onCommitNext,
+  onCommitPrevious,
 }: EditableCellProps) {
   const controlled = isEditing !== undefined;
   const [localEditing, setLocalEditing] = useState(false);
@@ -77,8 +84,12 @@ export function EditableCell({
         ariaLabel={ariaLabel}
         ariaDescribedBy={ariaDescribedBy}
         commitOnBlur={commitOnBlur}
+        suggestions={suggestions}
         onCommit={(next, hint) => {
-          if (!controlled) setLocalEditing(false);
+          // An inline commit (Enter) returns focus to the cell, as Escape
+          // does; a draft commit happens on blur, so focus has already moved.
+          if (controlled) restoreFocusRef.current = true;
+          else setLocalEditing(false);
           onCommit(next, hint);
         }}
         onCommitNext={(next, hint) => {
@@ -89,6 +100,7 @@ export function EditableCell({
             onCommit(next, hint);
           }
         }}
+        onCommitPrevious={controlled ? onCommitPrevious : undefined}
         onCancel={() => {
           if (controlled) onCancel?.();
           else setLocalEditing(false);
@@ -98,6 +110,9 @@ export function EditableCell({
 
     return (
       <fieldset
+        // The grid leaves every key inside an open editor alone: arrows move
+        // the caret or the Select, not focus.
+        data-grid-editor=""
         className="m-0 min-w-0 border-0 p-0"
         onBlurCapture={(event) => {
           if (preserveEditingOnBlur) event.stopPropagation();

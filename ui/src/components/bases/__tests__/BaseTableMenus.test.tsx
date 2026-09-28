@@ -188,6 +188,8 @@ const overrideSpies = () => ({
   onSetGroup: vi.fn(),
   onHideColumn: vi.fn(),
   onShowHiddenColumns: vi.fn(),
+  onReorderColumns: vi.fn(),
+  onResetColumnOrder: vi.fn(),
   onClearOverrides: vi.fn(),
   onSaveOverrides: vi.fn(),
   onReloadDefinition: vi.fn(),
@@ -313,6 +315,106 @@ describe("column header menu", () => {
     expect(
       within(menu).getByRole("menuitem", { name: "Sort ascending" }),
     ).toBeVisible();
+  });
+
+  it("moves a column left or right from its header menu", async () => {
+    const user = userEvent.setup();
+    const spies = overrideSpies();
+    renderView({ ...spies, overrides: EMPTY_OVERRIDES });
+    await user.click(
+      screen.getByRole("button", { name: "status column menu" }),
+    );
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Move left" }),
+    );
+    expect(spies.onReorderColumns).toHaveBeenLastCalledWith([
+      "title",
+      "status",
+      "author",
+      "due",
+    ]);
+    await user.click(
+      screen.getByRole("button", { name: "status column menu" }),
+    );
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Move right" }),
+    );
+    expect(spies.onReorderColumns).toHaveBeenLastCalledWith([
+      "title",
+      "author",
+      "due",
+      "status",
+    ]);
+  });
+
+  it("disables moves for title and at the edges", async () => {
+    const user = userEvent.setup();
+    renderView({ ...overrideSpies(), overrides: EMPTY_OVERRIDES });
+    const items = async (column: string) => {
+      await user.click(
+        screen.getByRole("button", { name: `${column} column menu` }),
+      );
+      const left = await screen.findByRole("menuitem", { name: /Move left/ });
+      const right = screen.getByRole("menuitem", { name: /Move right/ });
+      const result = [
+        left.getAttribute("aria-disabled") === "true",
+        right.getAttribute("aria-disabled") === "true",
+      ];
+      await user.keyboard("{Escape}");
+      return result;
+    };
+    expect(await items("title")).toEqual([true, true]);
+    expect(await items("author")).toEqual([true, false]);
+    expect(await items("due")).toEqual([false, true]);
+  });
+
+  it("renders the override order and moves past hidden columns", async () => {
+    const user = userEvent.setup();
+    const spies = overrideSpies();
+    const view = renderView({ ...spies, overrides: EMPTY_OVERRIDES });
+    const headers = () =>
+      screen
+        .getAllByRole("columnheader")
+        .map((header) =>
+          header.querySelector("[data-column]")?.getAttribute("data-column"),
+        );
+    const cells = () =>
+      Array.from(
+        screen.getAllByRole("row")[1].querySelectorAll("td, th"),
+        (cell) => cell.textContent,
+      );
+    expect(headers()).toEqual(["title", "author", "status", "due"]);
+    const grid = screen.getByRole("grid");
+    // An order-only change keeps the grid mounted; the cells still follow.
+    view.rerender({
+      overrides: {
+        ...EMPTY_OVERRIDES,
+        columnOrder: ["title", "due", "author", "status"],
+      },
+    });
+    expect(screen.getByRole("grid")).toBe(grid);
+    expect(headers()).toEqual(["title", "due", "author", "status"]);
+    expect(cells().slice(1)).toEqual(["2026-08-28", "Gene Wolfe", "reading"]);
+    view.rerender({
+      overrides: {
+        ...EMPTY_OVERRIDES,
+        columnOrder: ["title", "due", "author", "status"],
+        hiddenColumns: ["author"],
+      },
+    });
+    expect(headers()).toEqual(["title", "due", "status"]);
+    expect(cells()[1]).toContain("2026");
+    expect(cells()[2]).toContain("reading");
+    await user.click(screen.getByRole("button", { name: "due column menu" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Move right" }),
+    );
+    expect(spies.onReorderColumns).toHaveBeenLastCalledWith([
+      "title",
+      "author",
+      "status",
+      "due",
+    ]);
   });
 
   it("is absent when read-only", () => {
@@ -741,6 +843,23 @@ describe("overrides strip", () => {
       within(strip).getByRole("button", { name: "Save to view" }),
     );
     expect(spies.onSaveOverrides).toHaveBeenCalled();
+  });
+
+  it("shows a column order chip that resets the order", async () => {
+    const user = userEvent.setup();
+    const spies = overrideSpies();
+    renderView({
+      ...spies,
+      overrides: {
+        ...EMPTY_OVERRIDES,
+        columnOrder: ["title", "due", "author", "status"],
+      },
+    });
+    const strip = screen.getByRole("group", { name: "View overrides" });
+    await user.click(
+      within(strip).getByRole("button", { name: "Remove Column order" }),
+    );
+    expect(spies.onResetColumnOrder).toHaveBeenCalledTimes(1);
   });
 
   it("hides the strip without overrides and shows the conflict with a reload", async () => {

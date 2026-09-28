@@ -13,6 +13,30 @@ describe("TagInput", () => {
     expect(screen.getByText("beta")).toBeDefined();
   });
 
+  it("can hide its visible label while keeping it accessible", () => {
+    render(<TagInput label="Tags" hideLabel values={[]} onChange={() => {}} />);
+    expect(screen.getByText("Tags:")).toHaveClass("sr-only");
+    expect(screen.getByRole("group", { name: "Tags" })).toBeInTheDocument();
+  });
+
+  it("names the chip group separately from the input when asked", () => {
+    render(
+      <TagInput
+        label="Tags"
+        values={["alpha"]}
+        ariaLabel="Edit tags"
+        valuesLabel="Edit tags values"
+        onChange={() => {}}
+      />,
+    );
+    expect(
+      screen.getByRole("grid", { name: "Edit tags values" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "Edit tags" }),
+    ).toBeInTheDocument();
+  });
+
   it("renders placeholder when empty", () => {
     render(
       <TagInput

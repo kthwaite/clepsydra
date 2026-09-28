@@ -1,11 +1,12 @@
 import { Select, SelectItem } from "#/components/ui/select";
-import type { CellEditorProps } from "./types";
+import { type CellEditorProps, tabCommit } from "./types";
 
 export function SelectCell({
   value,
   definition,
   onCommit,
   onCommitNext,
+  onCommitPrevious,
   onCancel,
   ariaLabel,
   ariaDescribedBy,
@@ -33,10 +34,15 @@ export function SelectCell({
   return (
     <div
       onKeyDownCapture={(event) => {
-        if (!commitOnBlur && event.key === "Tab" && !event.shiftKey) {
+        const tabSubmit = tabCommit(event, {
+          commitOnBlur,
+          onCommitNext,
+          onCommitPrevious,
+        });
+        if (tabSubmit) {
           event.preventDefault();
           event.stopPropagation();
-          onCommitNext(current === "" ? null : current);
+          tabSubmit(current === "" ? null : current);
           return;
         }
         if (event.key === "Escape") {

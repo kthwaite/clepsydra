@@ -283,6 +283,27 @@ describe("Fields popover", () => {
     ).toBeEnabled();
   });
 
+  it("lists columns in the effective order", async () => {
+    const user = userEvent.setup();
+    renderView({
+      overrides: {
+        ...EMPTY_OVERRIDES,
+        columnOrder: ["title", "rating", "author"],
+      },
+      onHideColumn: vi.fn(),
+      onShowColumn: vi.fn(),
+      onShowHiddenColumns: vi.fn(),
+    });
+    await user.click(screen.getByRole("button", { name: "Fields" }));
+    const dialog = screen.getByRole("dialog", { name: "Fields" });
+    const boxes = within(dialog).getAllByRole("checkbox");
+    expect(
+      ["title", "rating", "Writer"].map((name) =>
+        boxes.indexOf(within(dialog).getByRole("checkbox", { name })),
+      ),
+    ).toEqual([0, 1, 2]);
+  });
+
   it("is absent when read-only or when a callback is missing", () => {
     const { unmount } = renderView({
       readOnly: true,

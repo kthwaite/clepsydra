@@ -4,8 +4,10 @@ import {
   type GroupOverride,
   type QuickFilter,
   type ViewOverridesState,
+  withColumnOrder,
   withGroup,
   withHiddenColumn,
+  withoutColumnOrder,
   withoutHiddenColumn,
   withoutHiddenColumns,
   withoutQuickFilter,
@@ -26,6 +28,9 @@ export interface ViewOverridesModel {
   hideColumn(column: string): void;
   showColumn(column: string): void;
   showHiddenColumns(): void;
+  /** Order the columns; `baseColumns` is the saved order, so matching it clears the override. */
+  reorderColumns(order: string[], baseColumns: string[]): void;
+  resetColumnOrder(): void;
   clear(): void;
 }
 
@@ -75,6 +80,12 @@ export function useViewOverrides(resetKey: string): ViewOverridesModel {
       () => update(withoutHiddenColumns),
       [update],
     ),
+    reorderColumns: useCallback(
+      (order, baseColumns) =>
+        update((s) => withColumnOrder(s, order, baseColumns)),
+      [update],
+    ),
+    resetColumnOrder: useCallback(() => update(withoutColumnOrder), [update]),
     clear: useCallback(() => update(() => EMPTY_OVERRIDES), [update]),
   };
 }
