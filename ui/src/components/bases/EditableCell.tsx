@@ -86,7 +86,10 @@ export function EditableCell({
         commitOnBlur={commitOnBlur}
         suggestions={suggestions}
         onCommit={(next, hint) => {
-          if (!controlled) setLocalEditing(false);
+          // An inline commit (Enter) returns focus to the cell, as Escape
+          // does; a draft commit happens on blur, so focus has already moved.
+          if (controlled) restoreFocusRef.current = true;
+          else setLocalEditing(false);
           onCommit(next, hint);
         }}
         onCommitNext={(next, hint) => {

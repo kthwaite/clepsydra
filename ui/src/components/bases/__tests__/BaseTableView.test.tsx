@@ -1290,6 +1290,17 @@ describe("BaseTableView", () => {
     expect(props.onCommitCell).not.toHaveBeenCalled();
   });
 
+  it("restores the controlled display button after an Enter commit", async () => {
+    const user = userEvent.setup();
+    const props = renderView({});
+
+    await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
+    await user.keyboard("{End}!{Enter}");
+
+    expect(props.onCommitCell).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Gene Wolfe" })).toHaveFocus();
+  });
+
   it("closes a controlled editor when the active saved view changes", async () => {
     const user = userEvent.setup();
     const sharedColumnDefinition: BaseDetailResponse = {
