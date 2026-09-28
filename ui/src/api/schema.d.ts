@@ -3253,8 +3253,9 @@ export interface components {
       };
     };
     /**
-     * @description One result row: system fields plus materialized columns (`ord = 0`
-     *     projections as canonical JSON).
+     * @description One result row: system fields plus materialized columns (each property's
+     *     full frontmatter value as canonical JSON; arrays keep every element in
+     *     frontmatter order).
      */
     QueryRow: {
       columns: {
