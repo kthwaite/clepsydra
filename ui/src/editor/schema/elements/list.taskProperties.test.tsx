@@ -161,39 +161,6 @@ describe("task property chips", () => {
     );
   });
 
-  it("keeps chips out of the content column when the task nests a sub-list", () => {
-    renderList([
-      {
-        type: "bulleted-list",
-        children: [
-          item("parent task", {
-            checked: false,
-            properties: { due: "2026-08-20" },
-            children: [
-              { type: "paragraph", children: [{ text: "parent task" }] },
-              {
-                type: "bulleted-list",
-                children: [item("nested child")],
-              },
-            ],
-          }),
-        ],
-      },
-    ]);
-
-    const listItem = screen.getByText("parent task").closest("li");
-    if (!listItem) throw new Error("No list item renders the parent task");
-    const content = listItem.querySelector<HTMLElement>("[data-task-content]");
-    const chips = chipContainer("parent task");
-    const chip = screen.getByRole("button", { name: "Due 2026-08-20" });
-
-    expect(content).toContainElement(screen.getByText("nested child"));
-    expect(content).not.toContainElement(chip);
-    expect(chips.parentElement).toBe(listItem);
-    expect(content?.parentElement).toBe(listItem);
-    expect(chips.previousElementSibling).toBe(content);
-  });
-
   it("holds the chips outside the editable content", () => {
     renderList(
       list(

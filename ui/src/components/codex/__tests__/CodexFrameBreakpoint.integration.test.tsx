@@ -383,9 +383,6 @@ describe("CodexFrame real breakpoint transitions", () => {
     await user.click(screen.getByRole("switch", { name: "Hide journals" }));
 
     act(() => matchMediaController.setMatches(false));
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Constellation" }),
-    ).toBeVisible();
     expect(screen.getByRole("heading", { name: "Hubs" })).toBeVisible();
     act(() => matchMediaController.setMatches(true));
 

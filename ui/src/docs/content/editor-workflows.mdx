@@ -8,6 +8,9 @@ Folio is a structured editor backed by portable Markdown. It saves body and
 frontmatter changes through the same revision guard and preserves unsupported
 Markdown when a metadata-only edit does not need to rewrite the body.
 
+The editable title wraps to fit the Folio column, with room below its last line
+to keep letter descenders visible above the tags.
+
 ## Prerequisites
 
 - Open an existing Folio in `/workspace`, or create one with **Inscribe new
@@ -34,6 +37,14 @@ The header reports **Saved**, **Saving…**, **Unsaved changes**, or
 **Save failed**. A save sends the revision that was loaded with the Folio; it
 never silently overwrites a newer revision.
 
+### Turn selected text into a list
+
+Select text and choose **Bulleted list** or **Numbered list** in the floating
+formatting toolbar. Each selected line becomes an item, including soft line
+breaks within a paragraph. Partial-line selections format the whole line;
+inline formatting and links are preserved. Undo restores the conversion in
+one step.
+
 ### Format with Markdown shortcuts
 
 Folio rewrites Markdown shorthand as you type. Block triggers fire when you
@@ -59,7 +70,7 @@ Only the empty `[] ` form can be typed: in a non-empty bracket pair the closing
 `]` fires the link scaffold or the inline-property rule described below instead.
 The `[ ] ` and `[x] ` forms are still recognized in pasted or loaded Markdown.
 Typing `[] ` or `[x] ` at the start of an existing bullet promotes it to a Todo
-and keeps its text.
+and keeps its text. Todo items retain the list's bullet alongside their checkbox.
 
 Inline triggers fire on their closing character.
 

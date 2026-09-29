@@ -39,15 +39,6 @@ describe("Constellation", () => {
     useWorkspaceStore.setState({ tabs: [], activeTabId: null });
   });
 
-  it("titles the map with a serif heading and a sentence-case count", () => {
-    render(<Constellation />);
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Constellation" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Map")).toBeInTheDocument();
-    expect(screen.getByText("3 nodes · 2 edges")).toBeInTheDocument();
-  });
-
   it("lists hubs by degree and opens one", async () => {
     const user = userEvent.setup();
     render(<Constellation />);

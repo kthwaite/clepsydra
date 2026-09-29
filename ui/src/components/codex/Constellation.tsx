@@ -1,11 +1,12 @@
-import { useMemo } from "react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { useId, useMemo, useState } from "react";
 import { useGraph } from "#/api/index";
 import type { GraphNode } from "#/api/types";
 import { applyFilters } from "#/components/codex/constellation-filters";
 import { MobileConstellation } from "#/components/codex/MobileConstellation";
 import { Section } from "#/components/codex/Section";
-import { Tick } from "#/components/codex/Tick";
 import { ForceGraph, KindGlyph } from "#/components/ForceGraph";
+import { IconButton } from "#/components/ui/icon-button";
 import { Switch } from "#/components/ui/switch";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
@@ -20,6 +21,8 @@ export function Constellation() {
   const { data: graph, isLoading } = useGraph();
   const openTab = useOpenTab();
   const isMobile = useMobileLayout();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const sidebarId = useId();
 
   const {
     selectedAnchorId,
@@ -114,24 +117,28 @@ export function Constellation() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-ground text-ink">
-      <div className="flex shrink-0 items-end gap-7 px-10 pt-10">
-        <div className="flex flex-col gap-2.5">
-          <span className="flex items-center gap-2.5">
-            <Tick />
-            <span className="font-serif text-[19px] text-mute italic">Map</span>
-          </span>
-          <h1 className="m-0 font-serif text-[56px] leading-none tracking-[-0.015em]">
-            Constellation
-          </h1>
-        </div>
-        <span className="pb-1.5 text-[14px] text-mute">
-          {filtered.nodes.length} {pluralize(filtered.nodes.length, "node")} ·{" "}
-          {filtered.edges.length} {pluralize(filtered.edges.length, "edge")}
-        </span>
-      </div>
-
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_272px] grid-rows-[minmax(0,1fr)] gap-12 px-10 pt-7 pb-8">
+      <div
+        className={cn(
+          "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] px-10 pt-7 pb-8",
+          sidebarOpen
+            ? "grid-cols-[minmax(0,1fr)_272px] gap-12"
+            : "grid-cols-[minmax(0,1fr)]",
+        )}
+      >
         <div className="relative min-h-0 min-w-0 overflow-hidden rounded-2xl bg-raise px-[22px] py-[18px]">
+          <IconButton
+            aria-label={sidebarOpen ? "Hide right sidebar" : "Show right sidebar"}
+            aria-expanded={sidebarOpen}
+            aria-controls={sidebarId}
+            onPress={() => setSidebarOpen((open) => !open)}
+            className="absolute top-3 right-3 z-10 bg-sink"
+          >
+            {sidebarOpen ? (
+              <PanelRightClose aria-hidden="true" />
+            ) : (
+              <PanelRightOpen aria-hidden="true" />
+            )}
+          </IconButton>
           <ForceGraph
             nodes={filtered.nodes}
             edges={filtered.edges}
@@ -139,7 +146,19 @@ export function Constellation() {
           />
         </div>
 
-        <aside className="cl-noscroll flex min-h-0 min-w-0 flex-col gap-7 overflow-auto">
+        <aside
+          id={sidebarId}
+          aria-label="Constellation details"
+          hidden={!sidebarOpen}
+          className={cn(
+            "cl-noscroll min-h-0 min-w-0 flex-col gap-7 overflow-auto",
+            sidebarOpen ? "flex" : "hidden",
+          )}
+        >
+          <p className="m-0 text-[14px] text-mute">
+            {filtered.nodes.length} {pluralize(filtered.nodes.length, "node")} ·{" "}
+            {filtered.edges.length} {pluralize(filtered.edges.length, "edge")}
+          </p>
           <Section compact label="Hubs">
             {hubs.length > 0 ? (
               <div className="flex flex-col">

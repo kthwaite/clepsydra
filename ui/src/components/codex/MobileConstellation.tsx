@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { Button as AriaButton } from "react-aria-components";
 import type { GraphEdge, GraphNode } from "#/api/types";
 import { Section } from "#/components/codex/Section";
-import { Tick } from "#/components/codex/Tick";
 import { ForceGraph } from "#/components/ForceGraph";
 import { Button } from "#/components/ui/button";
 import { Select, SelectItem } from "#/components/ui/select";
@@ -128,31 +127,6 @@ export function MobileConstellation({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-ground text-ink">
-      <header className="flex shrink-0 items-end gap-3 px-5 pt-1.5">
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <span className="flex items-center gap-2.5">
-            <Tick />
-            <span className="truncate font-serif text-[18px] text-mute italic">
-              Map · {visibleGraph.nodes.length}{" "}
-              {pluralize(visibleGraph.nodes.length, "page")} ·{" "}
-              {visibleGraph.edges.length}{" "}
-              {pluralize(visibleGraph.edges.length, "link")}
-            </span>
-          </span>
-          <h1 className="m-0 font-serif text-[44px] leading-none">
-            Constellation
-          </h1>
-        </div>
-        <Button
-          aria-label="Hubs and orphans"
-          aria-haspopup="dialog"
-          className="min-h-11 shrink-0"
-          onPress={() => setDetailsOpen(true)}
-        >
-          Details
-        </Button>
-      </header>
-
       <section
         aria-label="Constellation controls"
         className="flex shrink-0 flex-col gap-2.5 px-4 pt-[18px]"
@@ -247,6 +221,14 @@ export function MobileConstellation({
           >
             Show orphans
           </Switch>
+          <Button
+            aria-label="Hubs and orphans"
+            aria-haspopup="dialog"
+            className="min-h-11 shrink-0"
+            onPress={() => setDetailsOpen(true)}
+          >
+            Details
+          </Button>
         </div>
       </section>
 
@@ -334,6 +316,12 @@ export function MobileConstellation({
               Close
             </Button>
           </div>
+          <p className="m-0 text-[14px] text-mute">
+            {visibleGraph.nodes.length}{" "}
+            {pluralize(visibleGraph.nodes.length, "node")} ·{" "}
+            {visibleGraph.edges.length}{" "}
+            {pluralize(visibleGraph.edges.length, "edge")}
+          </p>
 
           <Section compact headingLevel={3} label="Hubs by degree">
             {hubs.length > 0 ? (

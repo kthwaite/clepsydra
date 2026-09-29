@@ -258,20 +258,26 @@ export const NumberedList: Story = {
 export const ListItemTask: Story = {
   name: "List Item (task checkboxes)",
   render: () =>
-    renderWithProviders([
-      makeBulletedList({
-        children: [
-          makeListItem({
-            checked: true,
-            children: [makeParagraph({ children: [{ text: "Done task" }] })],
-          }),
-          makeListItem({
-            checked: false,
-            children: [makeParagraph({ children: [{ text: "Open task" }] })],
-          }),
-        ],
-      }),
-    ]),
+    renderWithProviders(
+      [
+        makeBulletedList({
+          children: [
+            makeListItem({
+              checked: true,
+              children: [makeParagraph({ children: [{ text: "Done task" }] })],
+            }),
+            makeListItem({
+              checked: false,
+              children: [makeParagraph({ children: [{ text: "Open task" }] })],
+            }),
+            makeListItem({
+              children: [makeParagraph({ children: [{ text: "Regular item" }] })],
+            }),
+          ],
+        }),
+      ],
+      true,
+    ),
 };
 
 export const ThematicBreak: Story = {

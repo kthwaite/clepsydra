@@ -2,12 +2,13 @@ import {
   Editor,
   Node,
   Path,
-  type Range,
+  Point,
+  Range,
   Element as SlateElement,
   Transforms,
 } from "slate";
 import { HistoryEditor } from "slate-history";
-import type { ListType } from "#/editor/plugins/listUtils";
+import { isListElement, type ListType } from "#/editor/plugins/listUtils";
 import { makeBlockquote } from "#/editor/schema/elements/blockquote";
 import {
   makeBulletedList,
@@ -91,6 +92,69 @@ export function applyBlockConversion(
         });
         break;
       }
+    }
+  });
+}
+
+/** Format selected lines as a list without flattening their inline content. */
+export function applySelectionList(editor: Editor, listType: ListType): void {
+  if (!editor.selection || Range.isCollapsed(editor.selection)) return;
+
+  withBatch(editor, () => {
+    // Split existing list containers at the selection, leaving other items alone.
+    Transforms.unwrapNodes(editor, {
+      match: isListElement,
+      split: true,
+    });
+    Transforms.unwrapNodes(editor, {
+      match: (node) =>
+        SlateElement.isElement(node) && node.type === "list-item",
+      split: true,
+    });
+
+    const isTextBlock = (node: Node) =>
+      SlateElement.isElement(node) &&
+      (node.type === "paragraph" || node.type === "heading");
+    const blocks = Array.from(Editor.nodes(editor, { match: isTextBlock }));
+
+    // Work backwards so splitting a later line never invalidates earlier paths.
+    for (const [block, path] of blocks.reverse()) {
+      for (const [leaf, leafPath] of Array.from(Node.texts(block)).reverse()) {
+        for (let offset = leaf.text.lastIndexOf("\n"); offset >= 0; ) {
+          const point = { path: [...path, ...leafPath], offset };
+          Transforms.delete(editor, {
+            at: { anchor: point, focus: { ...point, offset: offset + 1 } },
+          });
+          Transforms.splitNodes(editor, {
+            at: point,
+            match: isTextBlock,
+            always: true,
+          });
+          offset = leaf.text.lastIndexOf("\n", offset - 1);
+          if (point.offset === 0) break;
+        }
+      }
+    }
+
+    if (!editor.selection) return;
+    const [start, end] = Range.edges(editor.selection);
+    const paths = Array.from(Editor.nodes(editor, { match: isTextBlock }))
+      .filter(
+        ([, path]) =>
+          Point.compare(Editor.start(editor, path), end) < 0 &&
+          Point.compare(Editor.end(editor, path), start) >= 0,
+      )
+      .map(([, path]) => Editor.pathRef(editor, path));
+    try {
+      for (const ref of paths) {
+        const path = ref.current;
+        if (!path) continue;
+        Transforms.setNodes(editor, { type: "paragraph" }, { at: path });
+        Transforms.unsetNodes(editor, "level", { at: path });
+        wrapInList(editor, path, listType);
+      }
+    } finally {
+      for (const ref of paths) ref.unref();
     }
   });
 }

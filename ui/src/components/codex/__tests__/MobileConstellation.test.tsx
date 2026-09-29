@@ -69,14 +69,6 @@ async function graphTitles(): Promise<string[]> {
 }
 
 describe("MobileConstellation", () => {
-  it("titles the map with a serif heading and a sentence-case count", () => {
-    render(<Harness />);
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Constellation" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Map · 5 pages · 3 links")).toBeInTheDocument();
-  });
-
   it("says so when no page matches the controls", async () => {
     const user = userEvent.setup();
     render(<Harness sourceGraph={{ nodes: [], edges: [] }} />);

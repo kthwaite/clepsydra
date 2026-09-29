@@ -217,43 +217,42 @@ function ListItem({
     <li
       {...attributes}
       data-block-id={element.blockId}
-      className={cn(
-        "group flex items-baseline max-md:items-start",
-        checked === true && "text-mute line-through",
-      )}
+      className={cn("group", checked === true && "text-mute line-through")}
     >
-      <label
-        contentEditable={false}
-        className="mr-3 inline-flex size-4 shrink-0 cursor-pointer select-none max-md:-ml-3.5 max-md:min-h-11 max-md:min-w-11 max-md:items-start max-md:justify-start max-md:pt-1 max-md:pl-3.5"
-      >
-        <input
-          type="checkbox"
-          aria-label={label}
-          checked={checked}
-          disabled={readOnly}
-          onChange={() => {
-            if (readOnly) return;
-            HistoryEditor.withNewBatch(editor, () => {
-              const path = ReactEditor.findPath(editor, element);
-              Transforms.setNodes(
-                editor,
-                { checked: !checked } as Partial<Element>,
-                { at: path },
-              );
-            });
-          }}
-          className="size-4 cursor-pointer accent-accent disabled:cursor-default"
-        />
-      </label>
-      {/* Chips sit outside the content column so they stay on the first line
-          even when the item carries a nested sub-list. */}
-      <div data-task-content="" className="min-w-0 flex-1">
-        <div data-task-content-row="" className="max-md:min-h-11">
-          {renderedChildren.slice(0, firstRowEnd)}
+      <div className="flex items-baseline max-md:items-start">
+        <label
+          contentEditable={false}
+          className="mr-3 inline-flex size-4 shrink-0 cursor-pointer select-none max-md:-ml-3.5 max-md:min-h-11 max-md:min-w-11 max-md:items-start max-md:justify-start max-md:pt-1 max-md:pl-3.5"
+        >
+          <input
+            type="checkbox"
+            aria-label={label}
+            checked={checked}
+            disabled={readOnly}
+            onChange={() => {
+              if (readOnly) return;
+              HistoryEditor.withNewBatch(editor, () => {
+                const path = ReactEditor.findPath(editor, element);
+                Transforms.setNodes(
+                  editor,
+                  { checked: !checked } as Partial<Element>,
+                  { at: path },
+                );
+              });
+            }}
+            className="size-4 cursor-pointer accent-accent disabled:cursor-default"
+          />
+        </label>
+        {/* Chips sit outside the content column so they stay on the first line
+            even when the item carries a nested sub-list. */}
+        <div data-task-content="" className="min-w-0 flex-1">
+          <div data-task-content-row="" className="max-md:min-h-11">
+            {renderedChildren.slice(0, firstRowEnd)}
+          </div>
+          {renderedChildren.slice(firstRowEnd)}
         </div>
-        {renderedChildren.slice(firstRowEnd)}
+        <TaskPropertyControls element={element} />
       </div>
-      <TaskPropertyControls element={element} />
     </li>
   );
 }

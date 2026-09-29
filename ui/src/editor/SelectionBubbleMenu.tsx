@@ -12,6 +12,8 @@ import {
   Highlighter,
   Italic,
   Link2,
+  List,
+  ListOrdered,
   type LucideIcon,
   Palette,
   Strikethrough,
@@ -47,6 +49,7 @@ import { VesselTooltip } from "#/components/ui/tooltip";
 import { makeLink } from "#/editor/schema/elements/link";
 import { makeWikilink } from "#/editor/schema/elements/wikilink";
 import type { CustomText } from "#/editor/schema/types";
+import { applySelectionList } from "#/editor/transforms/blockConversions";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { createRangeReference } from "./floatingSelectionReference";
@@ -519,6 +522,26 @@ export function SelectionBubbleMenu({
             </TooltipIconButton>
           );
         })}
+        <TooltipIconButton
+          label="Bulleted list"
+          onPress={() =>
+            applyToPreservedRange(() =>
+              applySelectionList(editor, "bulleted-list"),
+            )
+          }
+        >
+          <List />
+        </TooltipIconButton>
+        <TooltipIconButton
+          label="Numbered list"
+          onPress={() =>
+            applyToPreservedRange(() =>
+              applySelectionList(editor, "numbered-list"),
+            )
+          }
+        >
+          <ListOrdered />
+        </TooltipIconButton>
         {linkable && (
           <TooltipIconButton
             label="Add link"
