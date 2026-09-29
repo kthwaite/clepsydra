@@ -41,6 +41,7 @@ import {
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { type ArchivedPage, useAssignPage } from "#/api/pages";
 import type { PageMeta } from "#/api/types";
+import { useAttachmentDropUpload } from "#/components/attachments/useAttachmentDropUpload";
 import { AiConversationControls } from "#/components/codex/AiConversationControls";
 import { CLink } from "#/components/codex/CLink";
 import {
@@ -86,7 +87,7 @@ import { ConversationPresentationProvider } from "#/editor/conversation/presenta
 import { insertConversationTurn } from "#/editor/conversation/transforms";
 import { PageEditorHeader, RawMarkdownButton } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
-import { SlateEditor } from "#/editor/SlateEditor";
+import { SlateEditor, type SlateEditorProps } from "#/editor/SlateEditor";
 import type { CustomEditor } from "#/editor/types";
 import { usePageEditor } from "#/editor/usePageEditor";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
@@ -117,7 +118,11 @@ import {
   serializeRecipeMarkdown,
 } from "#/recipe/recipeCodec";
 import { useFolioDock } from "#/store/folioDock";
-import { FOLIO_LEFT_RAIL, FOLIO_RIGHT_RAIL } from "#/store/folioRails";
+import {
+  FOLIO_LEFT_RAIL,
+  FOLIO_RIGHT_RAIL,
+  useFolioRails,
+} from "#/store/folioRails";
 import {
   clearFolioRestoration,
   consumeFolioHistoryRestorationRequest,
@@ -1256,9 +1261,16 @@ export function Folio({ tabId, path }: FolioProps) {
                     beginGeneratedChange: editor.beginGeneratedChange,
                   }}
                 >
-                  <SlateEditor
+                  <FolioSlateEditor
                     key={`${path}:${editor.editorRevision}`}
                     initialValue={currentEditorValue}
+                    protectedPage={encrypted}
+                    onUploaded={() => {
+                      setAttachmentsOpen(true);
+                      useFolioRails
+                        .getState()
+                        .setCollapsed(FOLIO_LEFT_RAIL, false);
+                    }}
                     onChange={editor.onSlateChange}
                     onSaveNow={editor.saveNow}
                     insertionRequest={attachmentInsertion}
@@ -1692,6 +1704,28 @@ export function Folio({ tabId, path }: FolioProps) {
       onJump={scrollTo}
       protection={overlays}
     />
+  );
+}
+
+// Shares the editor's page/revision key so a pending drop cannot outlive its body.
+function FolioSlateEditor({
+  protectedPage,
+  onUploaded,
+  ...props
+}: SlateEditorProps & {
+  protectedPage: boolean;
+  onUploaded: () => void;
+}) {
+  const { uploadFiles, feedback } = useAttachmentDropUpload({
+    protectedPage,
+    onUploaded,
+    disabled: props.readOnly,
+  });
+  return (
+    <>
+      <SlateEditor {...props} onFilesDrop={uploadFiles} />
+      {feedback}
+    </>
   );
 }
 

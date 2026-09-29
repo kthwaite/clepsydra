@@ -27,6 +27,33 @@ byte size. Choose the filename to open the served file in a new browser tab.
 The server reports a MIME type inferred from the attachment path and otherwise
 uses `application/octet-stream`.
 
+### Drop files into a Folio
+
+Drag one or more local files onto the editable Folio body. A caret marks the
+insertion position and a floating label identifies the file or file count.
+Drop to upload the files in order and insert their references at that position:
+images render inline; other files become links. Successful uploads automatically
+refresh and expand **Manage attachments**, including reopening a collapsed
+desktop details sidebar. No separate **Upload** or **Insert** click is needed.
+
+You can continue editing while uploads run; the drop position follows those
+edits rather than the current cursor. Leaving the page, replacing its editor,
+or making it read-only cancels pending insertion and stops subsequent uploads.
+A request already sent to the server may still store its file. If you delete
+the insertion position, the editor reports that the uploaded files are available
+in the attachment manager; choose **Show all attachments** to find unreferenced
+files and insert them elsewhere.
+
+Protected Folios require a separate plaintext-storage acknowledgment before
+each file uploads. Cancelling stops the remaining batch; earlier successful
+uploads still receive references. Failed files show their names and errors
+without inserting broken references, while other files continue. A filename
+collision never overwrites the existing attachment.
+
+File drops are disabled in read-only bodies. Ordinary text and internal editor
+drags retain their existing behavior. The **Upload** picker below remains the
+keyboard-accessible alternative.
+
 ### Upload a file
 
 1. Choose **Upload** and select one file.

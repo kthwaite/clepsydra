@@ -90,6 +90,7 @@ import {
   insertJournalTimeHeading,
 } from "./transforms/journalTime";
 import { selectAdjacentVoidBlock } from "./transforms/voidNavigation";
+import { useFileDrop } from "./useFileDrop";
 import { useVim, VimStatusBar } from "./vim";
 import { WikilinkCombobox } from "./WikilinkCombobox";
 
@@ -168,6 +169,7 @@ export interface SlateEditorProps {
   onSaveNow: () => void | Promise<void>;
   insertionRequest?: { id: number; markdown: string } | null;
   onInsertionHandled?: (id: number) => void;
+  onFilesDrop?: (files: File[]) => Promise<string | null>;
   readOnly?: boolean;
   /** `YYYY-MM-DD` of the journal page being edited, or null elsewhere. Dated
    *  time headings hide a date that matches it. */
@@ -238,6 +240,7 @@ export function SlateEditor({
   onSaveNow,
   insertionRequest,
   onInsertionHandled,
+  onFilesDrop,
   readOnly = false,
   journalDate = null,
   editorRef,
@@ -265,6 +268,7 @@ export function SlateEditor({
     [],
   );
   if (editorRef) editorRef.current = editor;
+  const fileDrop = useFileDrop({ editor, readOnly, onFilesDrop });
 
   useEffect(() => {
     if (editorRef) editorRef.current = editor;
@@ -903,6 +907,7 @@ export function SlateEditor({
               <InlineSourceEditingProvider value={inlineSourceEditing}>
                 <TaskPropertyPopoverProvider value={taskProperties.opener}>
                   <Editable
+                    {...fileDrop.handlers}
                     data-folio-heading-root
                     renderElement={renderElement}
                     renderLeaf={renderLeaf}
@@ -926,6 +931,7 @@ export function SlateEditor({
             </MathEditingProvider>
           </BaseEmbedEditingProvider>
         </Slate>
+        {fileDrop.feedback}
 
         {!readOnly && wikilinkTrigger && (
           <WikilinkCombobox

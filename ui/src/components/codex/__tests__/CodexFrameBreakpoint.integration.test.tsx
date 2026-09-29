@@ -124,6 +124,14 @@ vi.mock("#/api/index", () => ({
   useSyncConflicts: () => ({ data: undefined }),
 }));
 vi.mock("#/api/feeds", () => ({ useFeeds: () => ({ data: undefined }) }));
+vi.mock("#/api/attachments", async (importOriginal) => ({
+  ...(await importOriginal()),
+  useUploadAttachment: () => ({
+    mutateAsync: () => {
+      throw new Error("Unexpected attachment upload in isolated Folio test.");
+    },
+  }),
+}));
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
 }));
