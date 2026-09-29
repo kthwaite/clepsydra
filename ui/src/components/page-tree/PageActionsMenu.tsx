@@ -4,7 +4,12 @@ import {
   type MutationPreviewRequest,
   usePreviewMutation,
 } from "#/api/index";
-import { type ArchivedPage, useArchivePage, useMovePage } from "#/api/pages";
+import {
+  type ArchivedPage,
+  fetchWordExport,
+  useArchivePage,
+  useMovePage,
+} from "#/api/pages";
 import { MutationPreviewDialog } from "#/components/page-tree/MutationPreviewDialog";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
@@ -54,6 +59,7 @@ export function PageActionsMenu({
 }) {
   return (
     <div className="grid gap-1">
+      <ExportWordAction key={path} path={path} />
       {archiveOnly ? null : (
         <MovePageAction
           path={path}
@@ -67,6 +73,56 @@ export function PageActionsMenu({
         onArchived={onArchived}
       />
     </div>
+  );
+}
+
+function ExportWordAction({ path }: { path: string }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function download() {
+    setPending(true);
+    setError(null);
+    try {
+      const { blob, filename } = await fetchWordExport(path);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      try {
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.append(anchor);
+        anchor.click();
+      } finally {
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      }
+    } catch (failure) {
+      setError(mutationError(failure));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className={cn(
+          RAIL_ACTION,
+          "text-mute hover:text-ink disabled:cursor-wait disabled:opacity-50",
+        )}
+        title="Downloads the saved page; unsaved changes are not included."
+        disabled={pending}
+        onClick={() => void download()}
+      >
+        {pending ? "Exporting to Word…" : "Export to Word (.docx)"}
+      </button>
+      {error ? (
+        <p className="m-0 text-[13px] text-hot" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </>
   );
 }
 

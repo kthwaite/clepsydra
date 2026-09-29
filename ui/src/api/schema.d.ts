@@ -1477,6 +1477,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/vault/pages-export/word/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Export one saved plaintext page as a read-only Word snapshot. */
+    get: operations["export_word"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/vault/pages-move/{path}": {
     parameters: {
       query?: never;
@@ -8584,6 +8601,74 @@ export interface operations {
         };
       };
       /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  export_word: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Vault-relative saved Markdown page path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Word document download */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document": string;
+        };
+      };
+      /** @description Invalid page path */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Encrypted, excluded, private, or unsafe source */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page or attachment not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Unavailable embed, remote or unsupported image, recursive content, or export resource limit */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Export worker failed */
       500: {
         headers: {
           [name: string]: unknown;

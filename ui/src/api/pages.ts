@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { isOfflineUncached } from "#/offline/swPolicy";
-import { $api } from "./client";
+import { $api, fetchClient } from "./client";
+import { formatApiError } from "./error";
 import {
   invalidatePageContent,
   invalidatePageStructure,
@@ -9,6 +10,29 @@ import {
 import type { components } from "./schema";
 
 export type ArchivedPage = components["schemas"]["RubbishItemSummary"];
+
+/** Download a fresh snapshot of the saved page, never the editor's draft. */
+export async function fetchWordExport(path: string) {
+  const { data, error, response } = await fetchClient.GET(
+    "/api/vault/pages-export/word/{path}",
+    {
+      params: { path: { path } },
+      parseAs: "blob",
+      cache: "no-store",
+    },
+  );
+  if (error || !data) {
+    throw new Error(
+      formatApiError(error, "Could not export this page to Word."),
+    );
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const encodedFilename = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  const filename = encodedFilename
+    ? decodeURIComponent(encodedFilename)
+    : (/filename="([^"]+)"/i.exec(disposition)?.[1] ?? "page.docx");
+  return { blob: data, filename };
+}
 
 export function usePages() {
   return $api.useQuery(

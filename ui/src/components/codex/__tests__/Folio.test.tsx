@@ -1847,7 +1847,7 @@ describe("Folio page archival wiring", () => {
     });
 
     render(<TabContent />);
-    await user.click(screen.getByRole("button", { name: "Manage paths" }));
+    await user.click(screen.getByRole("button", { name: "Page actions" }));
     await user.click(
       await screen.findByRole("button", { name: "Archive page" }),
     );
@@ -1872,7 +1872,7 @@ describe("Folio page archival wiring", () => {
       within(detailsDialog).getByRole("tab", { name: "Properties" }),
     );
     await user.click(
-      within(detailsDialog).getByRole("button", { name: "Manage paths" }),
+      within(detailsDialog).getByRole("button", { name: "Page actions" }),
     );
     await user.click(
       await within(detailsDialog).findByRole("button", {

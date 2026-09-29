@@ -140,9 +140,38 @@ booked in), and the attendees as chips you add to with
 the person combobox and remove from in place, with the **1:1** toggle beside
 the attendee label.
 
+### Export a page to Word
+
+Open **Organization → Page actions → Export to Word (.docx)** in the Folio
+rail. In reading mode, the export action is shown directly under Organization.
+Export is available for saved plaintext pages of every Kind, including
+read-only pages.
+
+The download contains the **saved title and body**, not unsaved editor changes.
+It does not modify the page. Frontmatter is omitted; wikilinks retain their
+visible labels without private vault destinations. Ordinary web links remain
+clickable. The document uses editable Word headings, lists, tables, callouts,
+code styling, embedded images, and page numbers.
+
+Page, heading, and block embeds are expanded. Live Base views and templates
+become a static snapshot; previously generated regions retain their saved
+content. Base views export all matching rows unless their embed declares a
+limit, with a visible note when that limit omits rows. Rich body columns appear
+in full beneath the table. Exports exceeding 1,000 Base rows, 32 embed levels,
+16 MiB of page input, 4 MiB of expanded Markdown, or 32 MiB of image input fail
+rather than silently truncate.
+
+Local PNG, JPEG, GIF, WebP, BMP, and TIFF images and archived CAS images are
+embedded; animations become static images. Remote images are not fetched:
+save them as vault attachments first. Encrypted pages cannot be exported
+because their decryption keys remain in the browser. Missing or inaccessible
+embeds, unsupported images, raw HTML, mathematical notation, and images or
+tables inside footnotes produce an error instead of an incomplete download.
+Export requires a server connection and is not stored in the offline cache.
+
 ### Move or rename a page
 
-1. In an editable Folio, open **Manage paths** under **Organization**.
+1. In an editable Folio, open **Page actions** under **Organization**.
 2. Choose **Move or rename page**.
 3. Enter the complete vault-relative destination, including `.md`.
 4. Choose **Preview move**, review the server-generated file operations and
@@ -161,7 +190,7 @@ immediately before confirming, especially after any other vault activity.
 
 ### Create, move, or delete folders
 
-Open **Manage folders** in the same **Manage paths** panel.
+Open **Manage folders** in the same **Page actions** panel.
 
 - **Create** accepts a vault-relative folder such as `notes/research` and does
   not require a preview.
@@ -177,7 +206,7 @@ Open **Manage folders** in the same **Manage paths** panel.
 
 ### Archive, restore, or permanently delete a page
 
-Choose **Archive page** from **Manage paths**. Clepsydra saves the current
+Choose **Archive page** from **Page actions**. Clepsydra saves the current
 Folio first, then moves the page into the Rubbish Bin. The page disappears
 from normal views; inbound links remain byte-identical and become unresolved.
 Archiving closes every open tab for that page.

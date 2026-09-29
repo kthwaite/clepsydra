@@ -1460,7 +1460,7 @@ export function Folio({ tabId, path }: FolioProps) {
               )}
               onClick={() => setOrganizationOpen((open) => !open)}
             >
-              <span>Manage paths</span>
+              <span>Page actions</span>
               <span aria-hidden>{organizationOpen ? "⌄" : "›"}</span>
             </button>
             {organizationOpen ? (

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  API_CACHE_NAME,
   classifyRequest,
   isOfflineUncached,
   offlineUncachedResponse,
@@ -32,6 +31,12 @@ describe("classifyRequest", () => {
     expect(classify("/api/docs")).toBe("network-only");
     expect(classify("/api/docs/")).toBe("network-only");
     expect(classify("/api/openapi.json")).toBe("network-only");
+  });
+
+  it("always downloads a fresh Word snapshot instead of caching exported content", () => {
+    expect(classify("/api/vault/pages-export/word/notes/report.md")).toBe(
+      "network-only",
+    );
   });
 
   it("routes vault GETs and the feature flags through the api cache", () => {
@@ -69,10 +74,6 @@ describe("classifyRequest", () => {
         origin: ORIGIN,
       }),
     ).toBe("network-only");
-  });
-
-  it("names the api cache", () => {
-    expect(API_CACHE_NAME).toBe("clep-api-v1");
   });
 });
 

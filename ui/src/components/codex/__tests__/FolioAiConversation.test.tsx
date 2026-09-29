@@ -423,7 +423,7 @@ describe("Folio AI conversation presentation", () => {
     expect(
       screen.queryByRole("button", { name: "Manage attachments" }),
     ).toBeNull();
-    expect(screen.queryByRole("button", { name: "Manage paths" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Page actions" })).toBeNull();
     expect(
       screen.queryByRole("button", { name: "Raw Markdown" }),
     ).not.toBeInTheDocument();
@@ -444,7 +444,7 @@ describe("Folio AI conversation presentation", () => {
     expect(
       screen.getByRole("button", { name: "Manage attachments" }),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Manage paths" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Page actions" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Raw Markdown" })).toBeVisible();
   });
 

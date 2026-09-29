@@ -30,9 +30,12 @@ clep-index = { workspace = true }
 clep-mutate = { workspace = true }
 clep-vault = { workspace = true }
 dirs = { workspace = true }
+docx-rs = { workspace = true }
+image = { workspace = true }
 mime_guess = { workspace = true }
 parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
+pulldown-cmark = { workspace = true }
 quick-xml = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
@@ -62,6 +65,7 @@ http-body = { workspace = true }
 axum-test = { workspace = true }
 serial_test = { workspace = true }
 wiremock = { workspace = true }
+zip = { workspace = true }
 clep-archive = { workspace = true, features = ["test-failpoints"] }
 clep-doctor = { workspace = true }
 clep-feeds = { workspace = true, features = ["test-failpoints"] }

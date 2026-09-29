@@ -12,6 +12,7 @@ const NETWORK_ONLY_PREFIXES = [
   "/api/vault/events",
   "/api/vault/cas/",
   "/api/vault/attachments",
+  "/api/vault/pages-export/",
   "/api/docs",
   "/api/openapi.json",
 ];

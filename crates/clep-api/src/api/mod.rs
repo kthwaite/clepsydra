@@ -31,6 +31,7 @@ pub mod rubbish;
 pub mod sync;
 pub mod tasks;
 pub mod uptime;
+pub mod word_export;
 
 use std::sync::Arc;
 
@@ -222,6 +223,10 @@ pub fn api_router_with_archive_limit(
         .nest("/pages", pages::router())
         .nest("/pages-move", pages::move_router())
         .nest("/pages-assign", pages::assign_router())
+        .route(
+            "/pages-export/word/{*path}",
+            axum::routing::get(word_export::export_word),
+        )
         .nest("/rubbish", rubbish::router())
         .nest("/sync", sync::router())
         .route(

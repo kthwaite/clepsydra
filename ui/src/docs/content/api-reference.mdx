@@ -362,6 +362,17 @@ Update location. Responses: `200` Updated vault location; `400` Latitude or long
 
 ### `GET /api/vault/pages`
 List pages. Responses: `200` List pages; `400` Unknown kind token; `500` Internal server error.
+### `GET /api/vault/pages-export/word/{path}`
+Download a styled `.docx` snapshot of a saved plaintext page, with local images
+and expanded embeds/Base views. No vault writes, frontmatter, or offline cache;
+unsaved editor changes are not included. Success returns
+`application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+an attachment filename, and `Cache-Control: no-store`. Responses: `200` Word
+document; `400` Invalid path; `403` Encrypted, excluded, or unsafe page; `404`
+Page not found; `422` Unavailable content, unsupported media, or export limit;
+`500` Export worker failed. See [Word export](/docs/pages-and-authoring#export-a-page-to-word)
+for supported content and limits.
+
 ### `POST /api/vault/pages`
 Create a page in the default folder. Responses: `201` Page created; `400` Invalid input; `409` Page already exists; `500` Internal server error.
 ### `POST /api/vault/pages-assign-bulk`

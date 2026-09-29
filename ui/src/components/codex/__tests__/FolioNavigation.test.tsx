@@ -1117,7 +1117,7 @@ describe("mobile Folio Back", () => {
 
     await user.click(screen.getByRole("button", { name: "Page details" }));
     await user.click(screen.getByRole("tab", { name: "Properties" }));
-    await user.click(screen.getByRole("button", { name: "Manage paths" }));
+    await user.click(screen.getByRole("button", { name: "Page actions" }));
     await user.click(
       await screen.findByRole("button", { name: "Complete page archival" }),
     );
@@ -1179,7 +1179,7 @@ describe("mobile Folio Back", () => {
           readFolioHistoryDestination(router.history.location.state),
         ).toMatchObject({ folioPath: "notes/beta.md" }),
       );
-      await user.click(screen.getByRole("button", { name: "Manage paths" }));
+      await user.click(screen.getByRole("button", { name: "Page actions" }));
       await user.click(
         await screen.findByRole("button", { name: "Complete page archival" }),
       );

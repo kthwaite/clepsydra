@@ -4,6 +4,7 @@ pub mod deeplink;
 pub use clep_feeds as feeds;
 pub mod sync_runtime;
 pub mod vault;
+mod word_export;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

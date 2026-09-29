@@ -165,6 +165,7 @@ impl Modify for SchemaOverrides {
         crate::api::archive::view_snapshot,
         crate::api::archive::head_snapshot,
         crate::api::archive::serve_blob,
+        crate::api::word_export::export_word,
         // Conversations
         crate::api::conversations::capture_conversation,
         crate::api::journal::get_today,

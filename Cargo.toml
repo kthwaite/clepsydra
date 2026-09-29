@@ -35,10 +35,12 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.56", features = ["derive"] }
 config = "0.15.19"
 dirs = "6"
+docx-rs = { version = "0.4.22", default-features = false }
 feed-rs = "2"
 fs4 = "1.1"
 gethostname = "1"
 glob = "0.3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 lol_html = "3.0.1"
 mime_guess = "2"
 minijinja = { version = "=2.24.0", default-features = false, features = ["builtins", "debug", "fuel", "serde"] }
@@ -84,3 +86,4 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 axum-test = "18"
 serial_test = "3"
 wiremock = "0.6"
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
