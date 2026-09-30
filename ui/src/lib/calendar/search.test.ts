@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CALENDAR_FILTER_URL,
+  calendarViewToSearch,
+  DEFAULT_SPAN,
   parseCalendarFilters,
   parseCalendarView,
   SPANS,
@@ -139,16 +141,29 @@ describe("calendar search", () => {
         }),
       ).toMatchObject({
         mode: "months",
-        span: 3,
+        span: undefined,
         date: undefined,
         day: "2026-09-15",
       });
+      expect(validateCalendarSearch({ mode: "months", span: 6 })).toMatchObject(
+        { mode: "months", span: 6 },
+      );
+    });
+
+    it("omits mode and span when they are the defaults", () => {
+      expect(validateCalendarSearch({})).toMatchObject({
+        mode: undefined,
+        span: undefined,
+      });
+      expect(
+        validateCalendarSearch({ mode: "month", span: "1" }),
+      ).toMatchObject({ mode: undefined, span: undefined });
     });
 
     it("canonicalises ?mode=weeks&kind=note", () => {
       expect(validateCalendarSearch({ mode: "weeks", kind: "note" })).toEqual({
         mode: "weeks",
-        span: 2,
+        span: undefined,
         date: undefined,
         day: undefined,
         kind: ["NOTE"],
@@ -174,6 +189,54 @@ describe("calendar search", () => {
         date: "2026-09-01",
       });
       expect(validateCalendarSearch(once)).toEqual(once);
+    });
+
+    it("is idempotent over defaults", () => {
+      const once = validateCalendarSearch({ mode: "months" });
+      expect(validateCalendarSearch(once)).toEqual(once);
+      expect(parseCalendarView(once)).toEqual({ mode: "months", span: 3 });
+    });
+  });
+
+  describe("calendarViewToSearch", () => {
+    it("drops default mode and span", () => {
+      expect(calendarViewToSearch({ mode: "month", span: 1 })).toEqual({
+        mode: undefined,
+        span: undefined,
+        date: undefined,
+        day: undefined,
+      });
+    });
+
+    it("keeps a non-default mode but drops its default span", () => {
+      expect(
+        calendarViewToSearch({ mode: "weeks", span: 2, date: "2026-09-01" }),
+      ).toEqual({
+        mode: "weeks",
+        span: undefined,
+        date: "2026-09-01",
+        day: undefined,
+      });
+    });
+
+    it("keeps a non-default span", () => {
+      expect(
+        calendarViewToSearch({ mode: "months", span: 12, day: "2026-09-15" }),
+      ).toMatchObject({ mode: "months", span: 12, day: "2026-09-15" });
+    });
+
+    it("round-trips through parseCalendarView", () => {
+      for (const view of [
+        { mode: "month" as const, span: 1 },
+        { mode: "months" as const, span: 6, date: "2026-01-31" },
+        { mode: "weeks" as const, span: 4, day: "2026-09-15" },
+      ]) {
+        expect(parseCalendarView(calendarViewToSearch(view))).toEqual(view);
+      }
+    });
+
+    it("exposes each mode's default span", () => {
+      expect(DEFAULT_SPAN).toEqual({ month: 1, months: 3, weeks: 2 });
     });
   });
 });

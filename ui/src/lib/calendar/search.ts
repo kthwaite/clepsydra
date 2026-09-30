@@ -31,7 +31,7 @@ export const SPANS: Record<CalendarMode, readonly number[]> = {
   weeks: [1, 2, 4],
 };
 
-const DEFAULT_SPAN: Record<CalendarMode, number> = {
+export const DEFAULT_SPAN: Record<CalendarMode, number> = {
   month: 1,
   months: 3,
   weeks: 2,
@@ -93,18 +93,30 @@ export function parseCalendarFilters(
   };
 }
 
+/** The URL form of a view: the default mode and each mode's default span
+ *  are omitted, so the bare `/calendar` URL stays clean. */
+export function calendarViewToSearch(view: CalendarViewSearch): {
+  mode: CalendarMode | undefined;
+  span: number | undefined;
+  date: DateKey | undefined;
+  day: DateKey | undefined;
+} {
+  return {
+    mode: view.mode === "month" ? undefined : view.mode,
+    span: view.span === DEFAULT_SPAN[view.mode] ? undefined : view.span,
+    date: view.date,
+    day: view.day,
+  };
+}
+
 export function validateCalendarSearch(
   search: Record<string, unknown>,
 ): Record<string, unknown> {
   const canonical = canonicalizeFilterSearch(search, CALENDAR_FILTER_URL);
   const kinds = parseCalendarFilters(search).facets.kind;
-  const view = parseCalendarView(search);
   return {
     ...canonical,
     kind: kinds ? [...kinds] : undefined,
-    mode: view.mode,
-    span: view.span,
-    date: view.date,
-    day: view.day,
+    ...calendarViewToSearch(parseCalendarView(search)),
   };
 }
