@@ -23,6 +23,7 @@ const OWN_CODEX_VIEW_BY_ROUTE_ID: Record<string, string> = {
   __root__: "atrium",
   "/": "atrium",
   "/gazetteer": "gazetteer",
+  "/calendar": "calendar",
   "/stats": "stats",
   "/tasking": "tasking",
   "/academic": "academic",

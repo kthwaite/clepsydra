@@ -336,6 +336,17 @@ describe("CommandPalette keyboard navigation", () => {
     expect(useUiStore.getState().isSearchOpen).toBe(false);
   });
 
+  it("opens the Calendar with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    const query = screen.getByRole("textbox", { name: "Command query" });
+    await user.type(query, "Open Calendar{Enter}");
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/calendar" });
+    expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+
   it("opens the Academic library with the keyboard", async () => {
     const user = userEvent.setup();
     render(<CommandPalette />);

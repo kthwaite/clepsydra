@@ -85,7 +85,7 @@ describe("Stone & Lamp registry", () => {
       { group: "Write", views: ["folio", "agenda"] },
       {
         group: "Organise",
-        views: ["constellation", "gazetteer", "tasking", "bases"],
+        views: ["constellation", "gazetteer", "calendar", "tasking", "bases"],
       },
       { group: "Gather", views: ["academic", "feeds"] },
       {
@@ -132,6 +132,10 @@ describe("goToView", () => {
     goToView("rubbish", rubbish);
     expect(rubbish.navigate).toHaveBeenCalledWith({ to: "/rubbish" });
     expect(rubbish.leaveWorkspace).toHaveBeenCalledOnce();
+    const calendar = deps();
+    goToView("calendar", calendar);
+    expect(calendar.navigate).toHaveBeenCalledWith({ to: "/calendar" });
+    expect(calendar.leaveWorkspace).toHaveBeenCalledOnce();
   });
   it("routes docs to the default slug", () => {
     const d = deps();

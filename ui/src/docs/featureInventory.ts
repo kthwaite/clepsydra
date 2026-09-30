@@ -56,6 +56,12 @@ export const FEATURE_INVENTORY = [
     disposition: { kind: "guide", slug: "capture-feeds-and-archives" },
   },
   {
+    id: "/calendar",
+    label: "Calendar",
+    surface: "route",
+    disposition: { kind: "guide", slug: "tasks-agenda-journals-and-board" },
+  },
+  {
     id: "/gazetteer",
     label: "Gazetteer",
     surface: "route",
@@ -182,6 +188,12 @@ export const FEATURE_INVENTORY = [
     label: "Open Gazetteer",
     surface: "command",
     disposition: { kind: "guide", slug: "getting-started" },
+  },
+  {
+    id: "nav.calendar",
+    label: "Open Calendar",
+    surface: "command",
+    disposition: { kind: "guide", slug: "tasks-agenda-journals-and-board" },
   },
   {
     id: "nav.bases",

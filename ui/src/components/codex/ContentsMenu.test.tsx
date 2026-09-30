@@ -70,7 +70,7 @@ describe("ContentsMenu", () => {
       within(organise)
         .getAllByRole("option")
         .map((o) => o.dataset.view),
-    ).toEqual(["constellation", "gazetteer", "tasking", "bases"]);
+    ).toEqual(["constellation", "gazetteer", "calendar", "tasking", "bases"]);
   });
 
   it("marks the core three", async () => {

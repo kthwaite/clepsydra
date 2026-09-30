@@ -8,6 +8,7 @@ export type StaticCommandAction =
   | "open-capture-aside"
   | "open-constellation"
   | "navigate-gazetteer"
+  | "navigate-calendar"
   | "navigate-bases"
   | "navigate-academic"
   | "navigate-repairs"
@@ -176,6 +177,11 @@ export const STATIC_COMMANDS: readonly StaticCommandDescriptor[] = [
     title: "Open Gazetteer (index)",
     shortcut: "nav.gazetteer",
     action: "navigate-gazetteer",
+  },
+  {
+    id: "nav.calendar",
+    title: "Open Calendar",
+    action: "navigate-calendar",
   },
   {
     id: "nav.bases",

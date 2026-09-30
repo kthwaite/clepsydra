@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AcademicRouteImport } from './routes/academic'
 import { Route as AgendaRouteImport } from './routes/agenda'
+import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as ConflictsRouteImport } from './routes/conflicts'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as FeedsRouteImport } from './routes/feeds'
@@ -43,6 +44,11 @@ const AcademicRoute = AcademicRouteImport.update({
 const AgendaRoute = AgendaRouteImport.update({
   id: '/agenda',
   path: '/agenda',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CalendarRoute = CalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConflictsRoute = ConflictsRouteImport.update({
@@ -135,6 +141,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
+  '/calendar': typeof CalendarRoute
   '/conflicts': typeof ConflictsRoute
   '/docs': typeof DocsRouteWithChildren
   '/feeds': typeof FeedsRoute
@@ -157,6 +164,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
+  '/calendar': typeof CalendarRoute
   '/conflicts': typeof ConflictsRoute
   '/docs': typeof DocsRouteWithChildren
   '/feeds': typeof FeedsRoute
@@ -180,6 +188,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
+  '/calendar': typeof CalendarRoute
   '/conflicts': typeof ConflictsRoute
   '/docs': typeof DocsRouteWithChildren
   '/feeds': typeof FeedsRoute
@@ -204,6 +213,7 @@ export interface FileRouteTypes {
     | '/'
     | '/academic'
     | '/agenda'
+    | '/calendar'
     | '/conflicts'
     | '/docs'
     | '/feeds'
@@ -226,6 +236,7 @@ export interface FileRouteTypes {
     | '/'
     | '/academic'
     | '/agenda'
+    | '/calendar'
     | '/conflicts'
     | '/docs'
     | '/feeds'
@@ -248,6 +259,7 @@ export interface FileRouteTypes {
     | '/'
     | '/academic'
     | '/agenda'
+    | '/calendar'
     | '/conflicts'
     | '/docs'
     | '/feeds'
@@ -271,6 +283,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AcademicRoute: typeof AcademicRoute
   AgendaRoute: typeof AgendaRoute
+  CalendarRoute: typeof CalendarRoute
   ConflictsRoute: typeof ConflictsRoute
   DocsRoute: typeof DocsRouteWithChildren
   FeedsRoute: typeof FeedsRoute
@@ -309,6 +322,13 @@ declare module '@tanstack/react-router' {
       path: '/agenda'
       fullPath: '/agenda'
       preLoaderRoute: typeof AgendaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/calendar': {
+      id: '/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof CalendarRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/conflicts': {
@@ -459,6 +479,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AcademicRoute: AcademicRoute,
   AgendaRoute: AgendaRoute,
+  CalendarRoute: CalendarRoute,
   ConflictsRoute: ConflictsRoute,
   DocsRoute: DocsRouteWithChildren,
   FeedsRoute: FeedsRoute,

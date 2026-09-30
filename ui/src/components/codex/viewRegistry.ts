@@ -131,6 +131,17 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     mobile: null,
     go: ({ navigate }) => void navigate({ to: "/gazetteer" }),
   },
+  calendar: {
+    label: "Calendar",
+    group: "Organise",
+    description: "Pages by the day they were made.",
+    shortcut: null,
+    showsSheaf: false,
+    feature: null,
+    navRoot: "calendar",
+    mobile: null,
+    go: ({ navigate }) => void navigate({ to: "/calendar" }),
+  },
   stats: {
     label: "Stats",
     group: "Maintain",

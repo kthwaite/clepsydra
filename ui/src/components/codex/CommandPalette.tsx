@@ -174,6 +174,14 @@ function CommandPaletteContent() {
                 leaveWorkspace,
               });
               return;
+            case "navigate-calendar":
+              goToView("calendar", {
+                navigate,
+                openTab,
+                activateTab,
+                leaveWorkspace,
+              });
+              return;
             case "navigate-bases":
               goToView("bases", {
                 navigate,
