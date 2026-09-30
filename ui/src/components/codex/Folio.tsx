@@ -42,6 +42,7 @@ import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { type ArchivedPage, useAssignPage } from "#/api/pages";
 import type { PageMeta } from "#/api/types";
 import { useAttachmentDropUpload } from "#/components/attachments/useAttachmentDropUpload";
+import { FolioCalendarSection } from "#/components/calendar/FolioCalendarSection";
 import { AiConversationControls } from "#/components/codex/AiConversationControls";
 import { CLink } from "#/components/codex/CLink";
 import {
@@ -1552,6 +1553,13 @@ export function Folio({ tabId, path }: FolioProps) {
       b.source_path !== path &&
       all.findIndex((o) => o.source_path === b.source_path) === i,
   );
+  const calendar = (
+    <FolioCalendarSection
+      path={path}
+      kind={editor.kind}
+      createdAt={editor.createdAt}
+    />
+  );
   const relationships = (
     <>
       <Section compact label="Linked from" caption={String(linkedFrom.length)}>
@@ -1695,6 +1703,7 @@ export function Folio({ tabId, path }: FolioProps) {
       document={document}
       details={details}
       supplementalDetails={supplementalDetails}
+      calendar={calendar}
       relationships={relationships}
       contents={contents}
       bodyRef={bodyRef}
@@ -1736,6 +1745,7 @@ function DesktopFolioLayout({
   header,
   document,
   details,
+  calendar,
   relationships,
   supplementalDetails,
   contents,
@@ -1749,6 +1759,8 @@ function DesktopFolioLayout({
   header: React.ReactNode;
   document: React.ReactNode;
   details: React.ReactNode;
+  /** Desktop only: the mobile layout has no right rail for it (Q3). */
+  calendar: React.ReactNode;
   relationships: React.ReactNode;
   contents: React.ReactNode;
   supplementalDetails: React.ReactNode;
@@ -1854,6 +1866,7 @@ function DesktopFolioLayout({
         >
           <Resizer onPointerDown={right.onResizeStart} side="left" />
           <RailHideButton side="right" onCollapse={right.toggle} />
+          {calendar}
           {relationships}
         </aside>
       )}

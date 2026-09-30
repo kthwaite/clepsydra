@@ -41,6 +41,11 @@ const {
   usePageEditorMock: vi.fn(),
 }));
 
+// The rail calendar queries the index; Folio mounts here without a QueryClient.
+vi.mock("#/components/calendar/FolioCalendarSection", () => ({
+  FolioCalendarSection: () => null,
+}));
+
 vi.mock("@tanstack/react-router", () => ({
   useBlocker: () => ({ status: "idle" }),
   useNavigate: () => navigateMock,

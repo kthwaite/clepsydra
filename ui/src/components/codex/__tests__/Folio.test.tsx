@@ -348,6 +348,14 @@ vi.mock("#/components/codex/useEmbedTocExpander", () => ({
   useEmbedTocExpander: () => undefined,
 }));
 
+// The rail calendar queries the index; these tests mount Folio without a QueryClient.
+const calendarSectionMock = vi.hoisted(() =>
+  vi.fn((_props: unknown): ReactNode => null),
+);
+vi.mock("#/components/calendar/FolioCalendarSection", () => ({
+  FolioCalendarSection: (props: unknown) => calendarSectionMock(props),
+}));
+
 beforeEach(() => {
   useCollapsibleRailMock.mockImplementation(() => ({
     collapsed: false,
@@ -781,6 +789,32 @@ describe("Folio invalid-tab recovery", () => {
     expect(
       within(dl).getByRole("button", { name: /Plaintext · protect/ }),
     ).toBeInTheDocument();
+  });
+
+  it("renders the calendar section at the top of the desktop right rail", () => {
+    calendarSectionMock.mockImplementation(() => (
+      <div data-testid="rail-calendar" />
+    ));
+    try {
+      usePageEditorMock.mockReturnValue(editableEditor());
+      render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+      const rail = screen.getByRole("complementary", { name: "Page links" });
+      const hide = within(rail).getByRole("button", {
+        name: "Hide right sidebar",
+      });
+      expect(hide.nextElementSibling).toBe(
+        within(rail).getByTestId("rail-calendar"),
+      );
+      expect(calendarSectionMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          path: "notes/alpha.md",
+          createdAt: "2026-08-08T00:00:00Z",
+        }),
+      );
+    } finally {
+      calendarSectionMock.mockImplementation(() => null);
+    }
   });
 
   it("stacks Linked from, Links out and Similar with no tabs", () => {

@@ -77,6 +77,11 @@ const {
 });
 
 vi.stubGlobal("matchMedia", matchMediaController.query);
+// The rail calendar queries the index; Folio mounts here without a QueryClient.
+vi.mock("#/components/calendar/FolioCalendarSection", () => ({
+  FolioCalendarSection: () => null,
+}));
+
 vi.mock("@tanstack/react-query", () => ({
   useIsMutating: () => 0,
   useQueryClient: () => ({

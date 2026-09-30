@@ -26,6 +26,11 @@ import { createEditor, type Descendant, type Editor, Transforms } from "slate";
 import { Editable, Slate, withReact } from "slate-react";
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
+// The rail calendar queries the index; Folio mounts here without a QueryClient.
+vi.mock("#/components/calendar/FolioCalendarSection", () => ({
+  FolioCalendarSection: () => null,
+}));
+
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal()),
   useIsMutating: () => 0,

@@ -13,6 +13,11 @@ const { usePageEditorMock, providerPaths } = vi.hoisted(() => ({
   providerPaths: [] as string[],
 }));
 
+// The rail calendar queries the index; Folio mounts here without a QueryClient.
+vi.mock("#/components/calendar/FolioCalendarSection", () => ({
+  FolioCalendarSection: () => null,
+}));
+
 vi.mock("#/editor/wikilinkResolution", () => ({
   WikilinkResolutionProvider: ({
     path,
