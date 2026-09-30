@@ -9,6 +9,12 @@ export const KANBAN_COL_DEFAULT = 282;
 export const clampColumnWidth = (width: number): number =>
   Math.min(KANBAN_COL_MAX, Math.max(KANBAN_COL_MIN, Math.round(width)));
 
+export const SCOPE_RAIL_MIN = 180;
+export const SCOPE_RAIL_MAX = 360;
+export const SCOPE_RAIL_DEFAULT = 232;
+export const clampRailWidth = (width: number): number =>
+  Math.min(SCOPE_RAIL_MAX, Math.max(SCOPE_RAIL_MIN, Math.round(width)));
+
 interface BoardState {
   // Persisted
   mode: BoardMode;
@@ -17,6 +23,7 @@ interface BoardState {
   /** Cycle code | "BACKLOG" | "" (resolved to active cycle at render) */
   cycleSel: string;
   railOpen: boolean;
+  railWidth: number;
   /** Kanban column id → persisted pixel width (unset = default basis) */
   columnWidths: Record<string, number>;
   /** List ("backlog") mode: show SEALED tasks (hidden by default). */
@@ -35,6 +42,7 @@ interface BoardActions {
   setOpFilter: (filter: string) => void;
   setCycleSel: (cycle: string) => void;
   setRailOpen: (open: boolean) => void;
+  setRailWidth: (width: number) => void;
   setColumnWidth: (col: string, width: number) => void;
   resetColumnWidth: (col: string) => void;
   setShowCompleted: (show: boolean) => void;
@@ -59,6 +67,7 @@ export const useBoardStore = create<BoardState & BoardActions>()(
       opFilter: "ALL",
       cycleSel: "",
       railOpen: true,
+      railWidth: SCOPE_RAIL_DEFAULT,
       columnWidths: {},
       showCompleted: false,
       // Ephemeral defaults
@@ -70,6 +79,7 @@ export const useBoardStore = create<BoardState & BoardActions>()(
       setOpFilter: (opFilter) => set({ opFilter }),
       setCycleSel: (cycleSel) => set({ cycleSel }),
       setRailOpen: (railOpen) => set({ railOpen }),
+      setRailWidth: (width) => set({ railWidth: clampRailWidth(width) }),
       setColumnWidth: (col, width) =>
         set((state) => ({
           columnWidths: {
@@ -97,6 +107,7 @@ export const useBoardStore = create<BoardState & BoardActions>()(
         opFilter: state.opFilter,
         cycleSel: state.cycleSel,
         railOpen: state.railOpen,
+        railWidth: state.railWidth,
         columnWidths: state.columnWidths,
         showCompleted: state.showCompleted,
       }),

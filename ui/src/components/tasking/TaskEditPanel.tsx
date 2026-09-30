@@ -1,19 +1,10 @@
 /**
- * TaskEditPanel — floating right dock for editing a board task.
+ * TaskEditPanel — full-height right sidebar for editing a board task.
  *
- * Opens when editTaskId is set in the board store and the task exists in the
- * current board data. The dock floats inside the board body on `raise`
- * (18px radius, overlay shadow). There is no dim scrim: the board stays
- * undimmed (approved Stone & Lamp ruling). A transparent layer behind the
- * dock still closes it on an outside click.
- *
- * A11y deviation from the house react-aria Dialog: the right-dock layout is
- * absolutely positioned inside the board body (not a centered portal overlay),
- * so the RAC ModalOverlay/Modal primitives don't fit. We hand-roll role=dialog
- * + aria-modal and an Escape-to-close listener, but focus containment and
- * restore are delegated to react-aria's `FocusScope` (contain + restoreFocus
- * + autoFocus) wrapping the panel — it traps Tab inside the panel while open
- * and restores focus to the previously-focused element on close.
+ * The dock sits beside the board on wide workspaces and overlays its right
+ * edge on narrower ones. It is non-modal: cards and board controls remain
+ * usable, including switching directly to another task. FocusScope supplies
+ * initial focus and restores focus on close without trapping Tab.
  *
  * All edits are sent as optimistic PATCHes:
  *   - Immediate: disposition (status), priority, project select, cycle select,
@@ -52,7 +43,7 @@ import {
   priColor,
 } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
-import type { ProjectScope } from "./board-projects";
+import { type ProjectScope, scopeLabel } from "./board-projects";
 import { checklistProgress } from "./board-stats";
 import { DispositionRow, EdField, INPUT_CLS, PriorityRow } from "./fields";
 
@@ -263,9 +254,7 @@ export function TaskEditPanel({
     }
   }, [needsFocus]);
 
-  // Focus containment and restore are handled by the FocusScope wrapping the
-  // panel below (see header comment); panelRef remains for its tabIndex={-1}
-  // fallback focus target.
+  // Fallback focus target for the non-modal editor.
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Every Tasking PATCH enters one serial queue. `mutateAsync` retains the
@@ -415,10 +404,10 @@ export function TaskEditPanel({
     (c) => c.state !== "CLOSED" || c.code === task.cycle,
   );
 
-  // Active project code for header display
-  const opCode = task.project
-    ? (projects.find((p) => p.slug === task.project)?.code ?? task.project)
-    : "No project";
+  const projectScope = projects.find((p) => p.slug === task.project);
+  const projectLabel = projectScope
+    ? scopeLabel(projectScope)
+    : (task.project ?? "No project");
 
   const confirmArchive = async () => {
     if (archiving) return;
@@ -452,374 +441,357 @@ export function TaskEditPanel({
   };
 
   return (
-    <>
-      {/* Transparent click-outside layer — no dimming (the board stays
-          undimmed by design); it only catches the dismissing click. */}
-      <button
-        type="button"
-        aria-label="Close task editor"
-        className="absolute inset-0 z-40 cursor-default bg-transparent"
-        onClick={onClose}
-        disabled={archiving}
-        data-testid="edit-panel-dismiss"
-      />
+    <FocusScope restoreFocus autoFocus>
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        className="absolute inset-y-0 right-0 z-30 flex w-[480px] max-w-full min-h-0 shrink-0 flex-col overflow-hidden rounded-l-xl bg-raise shadow-lg outline-none @min-[1100px]:relative @min-[1100px]:w-[clamp(400px,32cqw,560px)] @min-[1100px]:shadow-none"
+        data-testid="edit-panel"
+        role="dialog"
+        aria-label="Edit task"
+      >
+        {/* Dock header */}
+        <div className="flex shrink-0 items-center gap-2.5 pt-4 pr-4 pl-6">
+          {/* Priority bar */}
+          <span
+            className="h-4 w-[3px] shrink-0 rounded-sm"
+            style={{ background: barColor }}
+            aria-hidden
+          />
+          <span
+            className="min-w-0 truncate text-[12.5px] text-ink-2 tabular-nums"
+            data-testid="edit-panel-code"
+            title={task.code}
+          >
+            {task.code}
+          </span>
+          <span
+            className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[12px]"
+            style={{
+              color: priTextColor,
+              background: `color-mix(in srgb, ${priTextColor} 10%, transparent)`,
+            }}
+            data-testid="edit-panel-priority"
+          >
+            {task.priority}
+            {PRI_LABEL[task.priority] ? ` · ${PRI_LABEL[task.priority]}` : ""}
+          </span>
+          <span
+            className="ml-auto min-w-0 truncate text-[12.5px] text-mute"
+            data-testid="edit-panel-op"
+            title={projectLabel}
+          >
+            {projectLabel}
+          </span>
+          <IconButton
+            className="h-9 w-9 shrink-0 text-mute"
+            onPress={onClose}
+            isDisabled={archiving}
+            data-testid="edit-panel-close"
+            aria-label="Close"
+          >
+            <X aria-hidden />
+          </IconButton>
+        </div>
 
-      {/* Dock */}
-      <FocusScope contain restoreFocus autoFocus>
-        <div
-          ref={panelRef}
-          tabIndex={-1}
-          className="absolute top-3.5 right-4 bottom-3.5 z-50 flex w-[420px] max-w-[calc(100%-2rem)] flex-col overflow-hidden rounded-[18px] bg-raise shadow-lg outline-none"
-          data-testid="edit-panel"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Edit task"
-        >
-          {/* Dock header */}
-          <div className="flex shrink-0 items-center gap-2.5 pt-4 pr-4 pl-6">
-            {/* Priority bar */}
-            <span
-              className="h-4 w-[3px] shrink-0 rounded-sm"
-              style={{ background: barColor }}
-              aria-hidden
+        {/* Dock body — a fade at the foot hints at more fields below */}
+        <div className="relative min-h-0 flex-1">
+          <fieldset
+            className="m-0 flex h-full min-w-0 flex-col gap-4.5 overflow-y-auto px-6 pt-3 pb-6 [&>*]:shrink-0"
+            disabled={archiving}
+            data-testid="edit-panel-fields"
+          >
+            <legend className="sr-only">Task fields</legend>
+
+            {/* Title — serif, borderless */}
+            <textarea
+              className={cn(
+                "-mx-2.5 resize-none rounded-[10px] bg-transparent px-2.5 py-1.5 font-serif text-[26px] leading-[1.15] text-ink hover:bg-sink/50",
+                FOCUS_RING_NATIVE,
+              )}
+              rows={2}
+              aria-label="Title"
+              value={titleVal}
+              onChange={(e) => setTitleVal(e.target.value)}
+              data-testid="edit-panel-title"
             />
-            <span
-              className="text-[13.5px] text-ink-2 tabular-nums"
-              data-testid="edit-panel-code"
-            >
-              {task.code}
-            </span>
-            <span
-              className="inline-flex h-5.5 items-center rounded-full px-2 text-[12px]"
-              style={{
-                color: priTextColor,
-                background: `color-mix(in srgb, ${priTextColor} 10%, transparent)`,
-              }}
-              data-testid="edit-panel-priority"
-            >
-              {task.priority}
-              {PRI_LABEL[task.priority] ? ` · ${PRI_LABEL[task.priority]}` : ""}
-            </span>
-            <span
-              className="ml-auto min-w-0 truncate text-[12.5px] text-mute"
-              data-testid="edit-panel-op"
-            >
-              {opCode}
-            </span>
-            <IconButton
-              className="h-9 w-9 text-mute"
-              onPress={onClose}
-              isDisabled={archiving}
-              data-testid="edit-panel-close"
-              aria-label="Close"
-            >
-              <X aria-hidden />
-            </IconButton>
-          </div>
 
-          {/* Dock body — a fade at the foot hints at more fields below */}
-          <div className="relative min-h-0 flex-1">
-            <fieldset
-              className="m-0 flex h-full min-w-0 flex-col gap-4.5 overflow-y-auto px-6 pt-3 pb-6 [&>*]:shrink-0"
-              disabled={archiving}
-              data-testid="edit-panel-fields"
-            >
-              <legend className="sr-only">Task fields</legend>
-
-              {/* Title — serif, borderless */}
-              <textarea
-                className={cn(
-                  "-mx-2.5 resize-none rounded-[10px] bg-transparent px-2.5 py-1.5 font-serif text-[26px] leading-[1.15] text-ink hover:bg-sink/50",
-                  FOCUS_RING_NATIVE,
-                )}
-                rows={2}
-                aria-label="Title"
-                value={titleVal}
-                onChange={(e) => setTitleVal(e.target.value)}
-                data-testid="edit-panel-title"
+            <EdField label="Status">
+              <DispositionRow
+                value={task.status}
+                onChange={(colId) => patchNow("status", { status: colId })}
+                testIdPrefix="edit-panel"
+                colLabel={colLabel}
               />
+            </EdField>
 
-              <EdField label="Status">
-                <DispositionRow
-                  value={task.status}
-                  onChange={(colId) => patchNow("status", { status: colId })}
-                  testIdPrefix="edit-panel"
-                  colLabel={colLabel}
-                />
+            <EdField label="Priority">
+              <PriorityRow
+                value={task.priority}
+                onChange={(p) => patchNow("priority", { priority: p })}
+                testIdPrefix="edit-panel"
+              />
+            </EdField>
+
+            {/* Project + cycle */}
+            <div className="grid grid-cols-2 gap-3.5">
+              <EdField label="Project">
+                <Select
+                  aria-label="Project"
+                  value={task.project ?? ""}
+                  onChange={(key) =>
+                    /* empty string is the sentinel for clear → UNFILED */
+                    patchNow("project", {
+                      project: key === null ? "" : String(key),
+                    })
+                  }
+                  isDisabled={archiving}
+                  data-testid="edit-panel-project"
+                >
+                  <SelectItem id="">No project</SelectItem>
+                  {assignableScopes.map((scope) => (
+                    <SelectItem
+                      key={scope.key}
+                      id={scope.key}
+                      textValue={scopeLabel(scope)}
+                    >
+                      {scopeLabel(scope)}
+                    </SelectItem>
+                  ))}
+                </Select>
               </EdField>
-
-              <EdField label="Priority">
-                <PriorityRow
-                  value={task.priority}
-                  onChange={(p) => patchNow("priority", { priority: p })}
-                  testIdPrefix="edit-panel"
-                />
+              <EdField label="Cycle">
+                <Select
+                  aria-label="Cycle"
+                  value={task.cycle ?? "BACKLOG"}
+                  onChange={(key) => {
+                    const value = key === null ? "BACKLOG" : String(key);
+                    /* BACKLOG → send null to clear cycle */
+                    patchNow("cycle", {
+                      cycle: value === "BACKLOG" ? null : value,
+                    });
+                  }}
+                  isDisabled={archiving}
+                  data-testid="edit-panel-cycle"
+                >
+                  <SelectItem id="BACKLOG">Backlog</SelectItem>
+                  {selectableCycles.map((c) => (
+                    <SelectItem
+                      key={c.id}
+                      id={c.code}
+                      textValue={`${c.code} (${cycleStateLabel(c.state)})`}
+                    >
+                      {c.code} ({cycleStateLabel(c.state)})
+                    </SelectItem>
+                  ))}
+                </Select>
               </EdField>
+            </div>
 
-              {/* Project + cycle */}
-              <div className="grid grid-cols-2 gap-3.5">
-                <EdField label="Project">
-                  <Select
-                    aria-label="Project"
-                    value={task.project ?? ""}
-                    onChange={(key) =>
-                      /* empty string is the sentinel for clear → UNFILED */
-                      patchNow("project", {
-                        project: key === null ? "" : String(key),
-                      })
-                    }
-                    isDisabled={archiving}
-                    data-testid="edit-panel-project"
-                  >
-                    <SelectItem id="">No project</SelectItem>
-                    {assignableScopes.map((scope) => (
-                      <SelectItem
-                        key={scope.key}
-                        id={scope.key}
-                        textValue={scope.code}
-                      >
-                        {scope.code}
-                      </SelectItem>
-                    ))}
-                  </Select>
-                </EdField>
-                <EdField label="Cycle">
-                  <Select
-                    aria-label="Cycle"
-                    value={task.cycle ?? "BACKLOG"}
-                    onChange={(key) => {
-                      const value = key === null ? "BACKLOG" : String(key);
-                      /* BACKLOG → send null to clear cycle */
-                      patchNow("cycle", {
-                        cycle: value === "BACKLOG" ? null : value,
-                      });
-                    }}
-                    isDisabled={archiving}
-                    data-testid="edit-panel-cycle"
-                  >
-                    <SelectItem id="BACKLOG">Backlog</SelectItem>
-                    {selectableCycles.map((c) => (
-                      <SelectItem
-                        key={c.id}
-                        id={c.code}
-                        textValue={`${c.code} (${cycleStateLabel(c.state)})`}
-                      >
-                        {c.code} ({cycleStateLabel(c.state)})
-                      </SelectItem>
-                    ))}
-                  </Select>
-                </EdField>
-              </div>
-
-              {/* Assignee + estimate */}
-              <div className="grid grid-cols-2 gap-3.5">
-                <EdField label="Assignee">
-                  <input
-                    type="text"
-                    aria-label="Assignee"
-                    className={INPUT_CLS}
-                    value={assigneeVal}
-                    onChange={(e) => setAssigneeVal(e.target.value)}
-                    data-testid="edit-panel-assignee"
-                  />
-                </EdField>
-                <EdField label="Estimate">
-                  <input
-                    type="text"
-                    aria-label="Estimate"
-                    className={INPUT_CLS}
-                    value={estimateVal}
-                    onChange={(e) => setEstimateVal(e.target.value)}
-                    data-testid="edit-panel-estimate"
-                  />
-                </EdField>
-              </div>
-
-              {/* Start + due */}
-              <div className="grid grid-cols-2 gap-3.5">
-                <EdField label="Start date">
-                  <input
-                    type="date"
-                    aria-label="Start date"
-                    className={INPUT_CLS}
-                    value={startVal}
-                    onChange={(e) => setStartVal(e.target.value)}
-                    data-testid="edit-panel-start"
-                  />
-                </EdField>
-                <EdField label="Due date">
-                  <input
-                    type="date"
-                    aria-label="Due date"
-                    className={INPUT_CLS}
-                    value={dueVal}
-                    onChange={(e) => setDueVal(e.target.value)}
-                    data-testid="edit-panel-due"
-                  />
-                </EdField>
-              </div>
-
-              {/* Checklist — read-only (plan decision 7). The markdown body is
-                  the source of truth for checklist items; we show progress
-                  and an "Open page" affordance. */}
-              <EdField
-                label="Checklist"
-                hint={total ? `${done} of ${total} done` : "No items"}
-              >
-                <div className="flex items-center gap-3.5">
-                  <ChecklistBar
-                    percent={pct}
-                    isComplete={isComplete}
-                    className="h-1.5 flex-1"
-                    indicatorTestId="edit-panel-checklist-bar"
-                  />
-                  <Button
-                    size="sm"
-                    className="shrink-0 rounded-full"
-                    onPress={() => onOpenPage?.(task.path)}
-                    data-testid="edit-panel-open-page"
-                  >
-                    Open page
-                    <ArrowRight aria-hidden className="h-3 w-3" />
-                  </Button>
-                </div>
-              </EdField>
-
-              <EdField label="Tags" hint="Comma-separated">
+            {/* Assignee + estimate */}
+            <div className="grid grid-cols-2 gap-3.5">
+              <EdField label="Assignee">
                 <input
                   type="text"
-                  aria-label="Tags"
+                  aria-label="Assignee"
                   className={INPUT_CLS}
-                  value={tagsVal}
-                  onChange={(e) => setTagsVal(e.target.value)}
-                  data-testid="edit-panel-tags"
+                  value={assigneeVal}
+                  onChange={(e) => setAssigneeVal(e.target.value)}
+                  data-testid="edit-panel-assignee"
                 />
               </EdField>
+              <EdField label="Estimate">
+                <input
+                  type="text"
+                  aria-label="Estimate"
+                  className={INPUT_CLS}
+                  value={estimateVal}
+                  onChange={(e) => setEstimateVal(e.target.value)}
+                  data-testid="edit-panel-estimate"
+                />
+              </EdField>
+            </div>
 
-              {/* Blocker — a switch-looking toggle button */}
-              <EdField label="Blocker">
-                <div className="flex flex-col gap-2">
-                  <button
-                    type="button"
-                    aria-pressed={Boolean(task.hold)}
+            {/* Start + due */}
+            <div className="grid grid-cols-2 gap-3.5">
+              <EdField label="Start date">
+                <input
+                  type="date"
+                  aria-label="Start date"
+                  className={INPUT_CLS}
+                  value={startVal}
+                  onChange={(e) => setStartVal(e.target.value)}
+                  data-testid="edit-panel-start"
+                />
+              </EdField>
+              <EdField label="Due date">
+                <input
+                  type="date"
+                  aria-label="Due date"
+                  className={INPUT_CLS}
+                  value={dueVal}
+                  onChange={(e) => setDueVal(e.target.value)}
+                  data-testid="edit-panel-due"
+                />
+              </EdField>
+            </div>
+
+            {/* Checklist — read-only (plan decision 7). The markdown body is
+                  the source of truth for checklist items; we show progress
+                  and an "Open page" affordance. */}
+            <EdField
+              label="Checklist"
+              hint={total ? `${done} of ${total} done` : "No items"}
+            >
+              <div className="flex items-center gap-3.5">
+                <ChecklistBar
+                  percent={pct}
+                  isComplete={isComplete}
+                  className="h-1.5 flex-1"
+                  indicatorTestId="edit-panel-checklist-bar"
+                />
+                <Button
+                  size="sm"
+                  className="shrink-0 rounded-full"
+                  onPress={() => onOpenPage?.(task.path)}
+                  data-testid="edit-panel-open-page"
+                >
+                  Open page
+                  <ArrowRight aria-hidden className="h-3 w-3" />
+                </Button>
+              </div>
+            </EdField>
+
+            <EdField label="Tags" hint="Comma-separated">
+              <input
+                type="text"
+                aria-label="Tags"
+                className={INPUT_CLS}
+                value={tagsVal}
+                onChange={(e) => setTagsVal(e.target.value)}
+                data-testid="edit-panel-tags"
+              />
+            </EdField>
+
+            {/* Blocker — a switch-looking toggle button */}
+            <EdField label="Blocker">
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  aria-pressed={Boolean(task.hold)}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-3 self-start rounded-full text-[14px] text-ink-2",
+                    FOCUS_RING_NATIVE,
+                  )}
+                  onClick={() => {
+                    if (!task.hold) focusReasonOnHold.current = true;
+                    patchNow("holdToggle", {
+                      hold: task.hold ? null : "BLOCKED",
+                    });
+                  }}
+                  data-testid="edit-panel-hold-toggle"
+                >
+                  <span
+                    aria-hidden
                     className={cn(
-                      "flex cursor-pointer items-center gap-3 self-start rounded-full text-[14px] text-ink-2",
-                      FOCUS_RING_NATIVE,
+                      "relative h-5 w-8.5 shrink-0 rounded-full transition-colors",
+                      task.hold ? "bg-hot" : "bg-faint",
                     )}
-                    onClick={() => {
-                      if (!task.hold) focusReasonOnHold.current = true;
-                      patchNow("holdToggle", {
-                        hold: task.hold ? null : "BLOCKED",
-                      });
-                    }}
-                    data-testid="edit-panel-hold-toggle"
                   >
                     <span
-                      aria-hidden
                       className={cn(
-                        "relative h-5 w-8.5 shrink-0 rounded-full transition-colors",
-                        task.hold ? "bg-hot" : "bg-faint",
+                        "absolute top-0.75 h-3.5 w-3.5 rounded-full bg-raise shadow-sm transition-[left]",
+                        task.hold ? "left-4.25" : "left-0.75",
                       )}
-                    >
-                      <span
-                        className={cn(
-                          "absolute top-0.75 h-3.5 w-3.5 rounded-full bg-raise shadow-sm transition-[left]",
-                          task.hold ? "left-4.25" : "left-0.75",
-                        )}
-                      />
-                    </span>
-                    {task.hold ? "Blocked" : "Not blocked"}
-                  </button>
-                  {task.hold && (
-                    <input
-                      ref={holdReasonRef}
-                      type="text"
-                      aria-label="Blocker"
-                      className={INPUT_CLS}
-                      value={holdReason}
-                      onChange={(e) => setHoldReason(e.target.value)}
-                      data-testid="edit-panel-hold-reason"
                     />
-                  )}
-                </div>
-              </EdField>
-
-              {/* Related page */}
-              <EdField label="Related page" hint="Optional">
-                <div className="flex gap-2">
+                  </span>
+                  {task.hold ? "Blocked" : "Not blocked"}
+                </button>
+                {task.hold && (
                   <input
+                    ref={holdReasonRef}
                     type="text"
-                    aria-label="Related page"
-                    className={cn(
-                      INPUT_CLS,
-                      "flex-1",
-                      linkVal && "text-accent",
-                    )}
-                    placeholder="[[page]]"
-                    value={linkVal}
-                    onChange={(e) => setLinkVal(e.target.value)}
-                    data-testid="edit-panel-link"
+                    aria-label="Blocker"
+                    className={INPUT_CLS}
+                    value={holdReason}
+                    onChange={(e) => setHoldReason(e.target.value)}
+                    data-testid="edit-panel-hold-reason"
                   />
-                  {link && (
-                    <Button
-                      size="sm"
-                      className="h-9.5 shrink-0 rounded-full"
-                      onPress={() => onOpenDossier?.(link)}
-                      data-testid="edit-panel-open-dossier"
-                      aria-label="Open related page"
-                    >
-                      Open
-                      <ArrowRight aria-hidden className="h-3 w-3" />
-                    </Button>
-                  )}
-                </div>
-              </EdField>
-            </fieldset>
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-linear-to-b from-transparent to-raise"
-            />
-          </div>
+                )}
+              </div>
+            </EdField>
 
-          {/* Footer — leaving it disarms a pending archive */}
-          <div
-            className="flex shrink-0 items-center justify-between gap-3 bg-ground px-6 pt-3 pb-3.5"
-            onPointerLeave={() => {
-              if (archiveArmed && !archiving) disarmArchive();
-            }}
-            data-testid="edit-panel-foot"
-          >
-            {/* Two-step archive */}
-            {archiveArmed ? (
-              <Button
-                variant="danger"
-                size="sm"
-                onPress={() => void confirmArchive()}
-                isDisabled={archiving}
-                data-testid="edit-panel-archive-confirm"
-              >
-                {archiving ? "Archiving…" : "Confirm archive"}
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="-ml-3.5 text-hot data-[hovered]:text-hot"
-                onPress={armArchive}
-                data-testid="edit-panel-archive"
-              >
-                Archive
-              </Button>
-            )}
-            <span className="flex items-center gap-1.5 text-[12.5px] text-mute">
-              {!archiving && <Check aria-hidden className="h-3 w-3" />}
-              {archiving
-                ? "Moving to Rubbish Bin…"
-                : "Changes saved automatically"}
-            </span>
-          </div>
+            {/* Related page */}
+            <EdField label="Related page" hint="Optional">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  aria-label="Related page"
+                  className={cn(INPUT_CLS, "flex-1", linkVal && "text-accent")}
+                  placeholder="[[page]]"
+                  value={linkVal}
+                  onChange={(e) => setLinkVal(e.target.value)}
+                  data-testid="edit-panel-link"
+                />
+                {link && (
+                  <Button
+                    size="sm"
+                    className="h-9.5 shrink-0 rounded-full"
+                    onPress={() => onOpenDossier?.(link)}
+                    data-testid="edit-panel-open-dossier"
+                    aria-label="Open related page"
+                  >
+                    Open
+                    <ArrowRight aria-hidden className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
+            </EdField>
+          </fieldset>
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-linear-to-b from-transparent to-raise"
+          />
         </div>
-      </FocusScope>
-    </>
+
+        {/* Footer — leaving it disarms a pending archive */}
+        <div
+          className="flex shrink-0 items-center justify-between gap-3 bg-ground px-6 pt-3 pb-3.5"
+          onPointerLeave={() => {
+            if (archiveArmed && !archiving) disarmArchive();
+          }}
+          data-testid="edit-panel-foot"
+        >
+          {/* Two-step archive */}
+          {archiveArmed ? (
+            <Button
+              variant="danger"
+              size="sm"
+              onPress={() => void confirmArchive()}
+              isDisabled={archiving}
+              data-testid="edit-panel-archive-confirm"
+            >
+              {archiving ? "Archiving…" : "Confirm archive"}
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-3.5 text-hot data-[hovered]:text-hot"
+              onPress={armArchive}
+              data-testid="edit-panel-archive"
+            >
+              Archive
+            </Button>
+          )}
+          <span className="flex items-center gap-1.5 text-[12.5px] text-mute">
+            {!archiving && <Check aria-hidden className="h-3 w-3" />}
+            {archiving
+              ? "Moving to Rubbish Bin…"
+              : "Changes saved automatically"}
+          </span>
+        </div>
+      </div>
+    </FocusScope>
   );
 }

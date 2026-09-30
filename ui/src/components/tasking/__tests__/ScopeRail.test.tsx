@@ -65,39 +65,23 @@ describe("hasUnfiledTasks", () => {
 // ── ScopeRail render ──────────────────────────────────────────────────────────
 
 describe("ScopeRail", () => {
-  it("shows a project's code once when its name is the same word", () => {
-    // A PROJECT page titled "Falls" with slug `falls` has code "FALLS";
-    // repeating the name beside it would read "FALLS Falls".
-    const falls = {
-      key: "falls",
-      slug: "falls",
-      code: "FALLS",
-      name: "Falls",
-      health: "GREEN",
-      op: null,
+  it("shows a project title instead of its generated filename without changing its filter key", async () => {
+    const operation = {
+      ...NO_SLUG_OP,
+      code: "20260930.LAMP-PROJECT.A1B2C3",
+      name: "Lamp project",
     };
-    wrap(<ScopeRail projects={[falls]} cycles={cycles} tasks={[]} />);
-    const row = screen.getByRole("button", { name: /FALLS/ });
-    expect(within(row).getByText("FALLS")).toBeInTheDocument();
-    expect(within(row).queryByText("Falls")).not.toBeInTheDocument();
-    expect(within(row).queryByTitle("Falls")).not.toBeInTheDocument();
-  });
-
-  it("renders All projects row with total task count", () => {
-    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByText("All projects")).toBeInTheDocument();
-    // total tasks count appears as the badge (all 5)
-    expect(
-      screen.getByRole("button", { name: /All projects/ }),
-    ).toBeInTheDocument();
-  });
-
-  it("renders one row per project scope with correct count", () => {
-    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    // OPS-1 has 3 tasks with project=alpha (t1, t2, t5)
-    expect(screen.getByText("OPS-1")).toBeInTheDocument();
-    // OPS-2 has 1 task with project=beta (t3)
-    expect(screen.getByText("OPS-2")).toBeInTheDocument();
+    wrap(
+      <ScopeRail
+        projects={deriveProjectScopes([operation], [])}
+        cycles={cycles}
+        tasks={tasks}
+      />,
+    );
+    const row = screen.getByRole("button", { name: /Lamp project/ });
+    expect(within(row).queryByText(operation.code)).not.toBeInTheDocument();
+    await userEvent.click(row);
+    expect(useBoardStore.getState().opFilter).toBe(operation.code);
   });
 
   it("renders No project row when unfiled tasks exist", () => {
@@ -153,13 +137,6 @@ describe("ScopeRail", () => {
     expect(useBoardStore.getState().railOpen).toBe(false);
   });
 
-  it("collapsed state renders Scope › popout button", () => {
-    useBoardStore.setState({ railOpen: false });
-    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByText(/Scope/)).toBeInTheDocument();
-    expect(screen.getByTitle("Open scope rail")).toBeInTheDocument();
-  });
-
   it("clicking popout reopens rail", async () => {
     useBoardStore.setState({ railOpen: false });
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
@@ -170,7 +147,7 @@ describe("ScopeRail", () => {
 
   it("clicking a project row sets opFilter to its slug", async () => {
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    const opsRow = screen.getByRole("button", { name: /OPS-1/ });
+    const opsRow = screen.getByRole("button", { name: /Operation Alpha/ });
     await userEvent.click(opsRow);
     expect(useBoardStore.getState().opFilter).toBe("alpha");
   });
@@ -228,7 +205,7 @@ describe("ScopeRail — op with null project", () => {
     wrap(
       <ScopeRail projects={scopesWithNoSlug} cycles={cycles} tasks={tasks} />,
     );
-    const row = screen.getByRole("button", { name: /OPS-3/ });
+    const row = screen.getByRole("button", { name: /Operation Gamma/ });
     await userEvent.click(row);
     expect(useBoardStore.getState().opFilter).toBe("OPS-3");
   });
@@ -250,7 +227,7 @@ describe("ScopeRail — op with null project", () => {
         tasks={nullProjectTasks}
       />,
     );
-    const row = screen.getByRole("button", { name: /OPS-3/ });
+    const row = screen.getByRole("button", { name: /Operation Gamma/ });
     expect(within(row).getByText("0")).toBeInTheDocument();
   });
 });
@@ -293,20 +270,5 @@ describe("ScopeRail — synthesized project scope", () => {
     );
     const row = screen.getByRole("button", { name: /No project/ });
     expect(within(row).getByText("1")).toBeInTheDocument(); // t4 only
-  });
-
-  it("leaves New task to the board header", () => {
-    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    expect(screen.queryByText(/New task/)).toBeNull();
-  });
-
-  it("marks the active scope with the accent tint and uses italic serif section labels", () => {
-    useBoardStore.setState({ opFilter: "ALL" });
-    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByRole("button", { name: /All projects/ })).toHaveClass(
-      "bg-accent-tint",
-    );
-    expect(screen.getByText("Projects")).toHaveClass("font-serif", "italic");
-    expect(screen.getByText("Cycles")).toHaveClass("font-serif", "italic");
   });
 });

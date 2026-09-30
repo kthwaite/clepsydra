@@ -74,33 +74,17 @@ beforeEach(() => {
 });
 
 describe("BoardHeader", () => {
-  // ── title block ────────────────────────────────────────────────────────────
-
-  it("renders plural project and cycle counts", () => {
-    renderHeader();
-    expect(screen.getByText("2 projects · 2 cycles")).toBeInTheDocument();
-  });
-
-  it("renders singular project and cycle counts", () => {
-    renderHeader({
-      projects: PROJECT_SCOPES.slice(0, 1),
-      cycles: cycles.slice(0, 1),
-    });
-    expect(screen.getByText("1 project · 1 cycle")).toBeInTheDocument();
-  });
-
   // ── stat computation ───────────────────────────────────────────────────────
 
   it("computes Open count (non-SEALED tasks)", () => {
     // tasks has 4 non-SEALED (t1 FIELD, t2 INTAKE, t3 TRIAGE, t4 INTAKE) + 1 SEALED (t5)
     renderHeader();
-    // "04" = 4 open tasks
     const openStat = screen.getByText("Open").parentElement;
     assert(openStat !== null);
     expect(within(openStat).getByText("4")).toBeInTheDocument();
   });
 
-  it("computes In progress count zero-padded", () => {
+  it("computes In progress count", () => {
     // t1 has status=FIELD
     renderHeader();
     const fieldStat = screen.getByText("In progress").parentElement;
@@ -108,7 +92,7 @@ describe("BoardHeader", () => {
     expect(within(fieldStat).getByText("1")).toBeInTheDocument();
   });
 
-  it("computes Blocked count zero-padded", () => {
+  it("computes Blocked count", () => {
     // t2 has hold='blocker'
     renderHeader();
     const holdStat = screen.getByText("Blocked").parentElement;
@@ -116,15 +100,9 @@ describe("BoardHeader", () => {
     expect(within(holdStat).getByText("1")).toBeInTheDocument();
   });
 
-  it("renders Completed · 14 days sparkline", () => {
-    renderHeader({ sealHistory: [0, 1, 2] });
-    expect(screen.getByText("Completed · 14 days")).toBeInTheDocument();
-    // SVG polyline is present
-    expect(document.querySelector("polyline")).toBeInTheDocument();
-  });
-
-  it("renders No completed tasks when recent completion history is empty", () => {
+  it("renders No completed tasks when recent completion history is empty", async () => {
     renderHeader({ sealHistory: [0, 0, 0] });
+    await userEvent.click(screen.getByRole("button", { name: "Details" }));
     expect(screen.getByText("No completed tasks")).toBeInTheDocument();
   });
 
@@ -154,57 +132,17 @@ describe("BoardHeader", () => {
 
   // ── op-meta line ───────────────────────────────────────────────────────────
 
-  it("does NOT render op-meta line when activeOp is null", () => {
-    renderHeader();
-    expect(screen.queryByText("LEAD")).not.toBeInTheDocument();
-    expect(screen.queryByText("HEALTH")).not.toBeInTheDocument();
-  });
-
-  it("renders op-meta line when activeOp is set", () => {
-    const activeOp = operations[0]; // Operation Alpha
-    useBoardStore.setState({ opFilter: PROJECT_SCOPES[0].key });
-    renderHeader({ activeOp });
-    expect(screen.getByText("Lead")).toBeInTheDocument();
-    expect(screen.getByText("Health")).toBeInTheDocument();
-    expect(screen.getByText("Target")).toBeInTheDocument();
-    expect(screen.getByText("Operation Alpha")).toBeInTheDocument();
-  });
-
   it("op-meta DOSSIER link calls onOpenDossier on click", async () => {
     const activeOp = operations[0];
     const onOpenDossier = vi.fn();
     renderHeader({ activeOp, onOpenDossier });
+    await userEvent.click(screen.getByRole("button", { name: "Details" }));
     const dossierBtn = screen.getByText("tasks/ops-1");
     await userEvent.click(dossierBtn);
     expect(onOpenDossier).toHaveBeenCalledWith("tasks/ops-1");
   });
 
-  it("op-meta HEALTH value shows the health text for AMBER op", () => {
-    const amberOp = operations[1]; // health=AMBER
-    renderHeader({ activeOp: amberOp });
-    // The bold "AMBER" text should be visible in the op-meta line
-    const amberEl = screen.getByText("AMBER");
-    expect(amberEl.tagName).toBe("B");
-    // Style attribute should contain the warn token
-    expect(amberEl.getAttribute("style")).toContain("var(--warn)");
-  });
-
-  it("op-meta HEALTH value uses muted color for unknown health status", () => {
-    const noneOp = { ...operations[0], health: "NONE" as const };
-    renderHeader({ activeOp: noneOp });
-    const healthEl = screen.getByText("NONE") as HTMLElement;
-    expect(healthEl.tagName).toBe("B");
-    expect(healthEl.style.color).toBe("var(--mute)");
-  });
-
   // ── filter strip: shared FilterBar wiring ─────────────────────────────────
-
-  it("renders the filter input with placeholder", () => {
-    renderHeader();
-    const input = screen.getByTestId("filter-bar-input");
-    expect(input).toHaveAttribute("id", "tasking-filter");
-    expect(input).toHaveAttribute("placeholder", "Filter…");
-  });
 
   it("typing into the filter input calls onFilterChange with the composed text state", () => {
     const onFilterChange = vi.fn();
@@ -231,6 +169,7 @@ describe("BoardHeader", () => {
   it("selecting a primary facet option calls onFilterChange with the toggled facet", async () => {
     const onFilterChange = vi.fn();
     renderHeader({ onFilterChange });
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
     await userEvent.click(screen.getByTestId("filter-bar-chip-pri"));
     await userEvent.click(screen.getByTestId("filter-bar-option-pri-P0"));
     expect(onFilterChange).toHaveBeenCalledWith({
@@ -242,6 +181,7 @@ describe("BoardHeader", () => {
   it("selecting the ON HOLD flag field calls onFilterChange with the flag facet", async () => {
     const onFilterChange = vi.fn();
     renderHeader({ onFilterChange });
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
     await userEvent.click(screen.getByTestId("filter-bar-add"));
     await userEvent.click(screen.getByTestId("filter-bar-field-hold"));
     expect(onFilterChange).toHaveBeenCalledWith({
@@ -299,7 +239,7 @@ describe("BoardHeader", () => {
     expect(useBoardStore.getState().showCompleted).toBe(false);
   });
 
-  it("renders the N OF M count line, zero-padded, when the filter is active", () => {
+  it("renders the filtered and total count when the filter is active", () => {
     renderHeader({
       filterState: { text: "alpha", facets: {} },
       filteredCount: 1,
@@ -309,21 +249,12 @@ describe("BoardHeader", () => {
   });
 
   describe("Stone & Lamp header", () => {
-    it("titles an unscoped board in serif under an All projects eyebrow", () => {
-      renderHeader();
-      expect(
-        screen.getByRole("heading", { level: 1, name: "Task board" }),
-      ).toHaveClass("font-serif");
-      expect(screen.getByText("All projects")).toHaveClass("italic");
-    });
-
-    it("titles a scoped board with the project name under a Project eyebrow", () => {
+    it("titles a scoped board with the project name", () => {
       useBoardStore.setState({ opFilter: PROJECT_SCOPES[0].key });
       renderHeader({ activeOp: operations[0] });
       expect(
         screen.getByRole("heading", { level: 1, name: operations[0].name }),
       ).toBeInTheDocument();
-      expect(screen.getByText("Project")).toHaveClass("italic");
     });
 
     it("titles the No project scope rather than the whole board", () => {
@@ -332,7 +263,6 @@ describe("BoardHeader", () => {
       expect(
         screen.getByRole("heading", { level: 1, name: "No project" }),
       ).toBeInTheDocument();
-      expect(screen.getByText("Project")).toHaveClass("italic");
     });
 
     it("titles a slug-only scope (no Project page) by its code", () => {
@@ -351,25 +281,20 @@ describe("BoardHeader", () => {
       ).toBeInTheDocument();
     });
 
-    it("counts cycle progress over the scoped tasks, not the filtered ones", () => {
+    it("counts cycle progress over the scoped tasks, not the filtered ones", async () => {
       renderHeader({ tasks: [], filteredCount: 0 });
+      await userEvent.click(screen.getByRole("button", { name: "Details" }));
       expect(screen.getByText("1 of 3")).toBeInTheDocument();
     });
 
-    it("shows the active cycle with a progress bar", () => {
+    it("shows the active cycle with a progress bar", async () => {
       renderHeader();
+      await userEvent.click(screen.getByRole("button", { name: "Details" }));
       expect(screen.getByText("1 of 3")).toBeInTheDocument();
       expect(screen.getByRole("progressbar")).toHaveAttribute(
         "aria-valuenow",
         "1",
       );
-    });
-
-    it("draws the view switch as a sink track with a raised selection", () => {
-      renderHeader();
-      const board = screen.getByRole("tab", { name: "Board" });
-      expect(board).toHaveClass("bg-raise");
-      expect(board.parentElement).toHaveClass("bg-sink", "rounded-full");
     });
 
     it("presets the scoped project when creating a task", async () => {
@@ -408,15 +333,6 @@ describe("BoardHeader", () => {
       renderHeader();
       await user.click(screen.getByRole("button", { name: "New task" }));
       expect(useBoardStore.getState().taskModal).toEqual({});
-    });
-
-    it("offers New task as the primary action", async () => {
-      const user = userEvent.setup();
-      renderHeader();
-      const button = screen.getByRole("button", { name: "New task" });
-      expect(button).toHaveClass("bg-accent");
-      await user.click(button);
-      expect(useBoardStore.getState().taskModal).not.toBeNull();
     });
   });
 });

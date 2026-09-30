@@ -1,14 +1,16 @@
+import { Dialog, DialogTrigger } from "react-aria-components";
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { Tick } from "#/components/codex/Tick";
 import { FilterBar } from "#/components/filters/FilterBar";
 import { Button } from "#/components/ui/button";
+import { Popover } from "#/components/ui/popover";
 import { Spark } from "#/components/ui/spark";
 import { cn } from "#/lib/cn";
 import type { FilterField, FilterState } from "#/lib/filters/model";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useBoardStore } from "#/store/board";
 import { HealthDot, healthColor, MODES } from "./board-constants";
-import type { ProjectScope } from "./board-projects";
+import { type ProjectScope, scopeLabel } from "./board-projects";
 
 // ── BoardHeader ──────────────────────────────────────────────────────────────
 
@@ -102,140 +104,247 @@ export function BoardHeader({
       : opFilter === "UNFILED"
         ? "No project"
         : scope
-          ? scope.name || scope.code
+          ? scopeLabel(scope)
           : (activeOp?.name ?? "Task board");
   const cycleDone = cycleTasks.filter((t) => t.status === "SEALED").length;
   const cycleTotal = cycleTasks.length;
 
+  const activeFacetCount = Object.values(filterState.facets).filter(
+    (values) => values.length > 0,
+  ).length;
+
   return (
-    <header className="flex-none px-10 pt-12">
-      <div className="flex flex-wrap items-end gap-x-10 gap-y-6">
-        {/* Title block */}
-        <div className="flex flex-col gap-2.5">
-          <span className="flex items-center gap-2.5">
-            <Tick />
-            <span className="font-serif text-[19px] italic text-mute">
-              {opFilter === "ALL" ? "All projects" : "Project"}
-            </span>
-          </span>
-          <h1 className="font-serif text-[clamp(40px,4.5vw,56px)] leading-none tracking-[-0.015em] text-ink">
+    <header className="min-w-0 flex-none space-y-3 px-5 py-4">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex min-w-0 flex-[1_1_180px] items-center gap-2.5">
+          <Tick />
+          <h1
+            className="min-w-0 truncate font-serif text-[30px] leading-tight text-ink"
+            title={title}
+          >
             {title}
           </h1>
-          <span className="text-[13px] text-mute">
-            {projects.length} {projects.length === 1 ? "project" : "projects"} ·{" "}
-            {cycles.length} {cycles.length === 1 ? "cycle" : "cycles"}
-          </span>
         </div>
-
-        {/* Cycle meta */}
-        {activeCycle && (
-          <div className="flex flex-col gap-2 pb-1.5 text-[14px] text-mute">
-            <span>
-              Cycle <span className="text-ink">{activeCycle.code}</span>
-              {activeCycle.start && activeCycle.end
-                ? ` · ${activeCycle.start} – ${activeCycle.end}`
-                : ""}
-            </span>
-            <span className="flex items-center gap-2.5">
-              <span
-                role="progressbar"
-                aria-label="Cycle progress"
-                aria-valuemin={0}
-                aria-valuemax={cycleTotal}
-                aria-valuenow={cycleDone}
-                className="block h-1 w-[120px] overflow-hidden rounded-full bg-sink"
-              >
-                <span
-                  className="block h-1 rounded-full bg-accent"
-                  style={{
-                    width: `${cycleTotal ? (cycleDone / cycleTotal) * 100 : 0}%`,
-                  }}
-                />
-              </span>
-              <span className="tabular-nums">
-                {cycleDone} of {cycleTotal}
-              </span>
-            </span>
-          </div>
-        )}
-
-        <div className="flex-1" />
-
-        {/* Stats */}
-        <div className="flex items-end gap-7 pb-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <Stat label="Open" value={open} />
           <Stat label="In progress" value={inField} accent />
           <Stat label="Blocked" value={onHold} hot={onHold > 0} />
-          <div className="flex flex-col gap-1">
-            <span className="text-[12.5px] text-mute">Completed · 14 days</span>
-            {!sealHistoryApplicable ? (
-              <span className="text-[12.5px] text-mute">Not applicable</span>
-            ) : sealHistoryPending ? (
-              <span className="text-[12.5px] text-mute">Loading</span>
-            ) : sealHistoryError ? (
-              <span className="text-[12.5px] text-hot">Unavailable</span>
-            ) : sealHistory.length === 0 ||
-              sealHistory.every((count) => count === 0) ? (
-              <span className="text-[12.5px] text-mute">
-                No completed tasks
-              </span>
-            ) : (
-              <figure
-                className="m-0"
-                aria-labelledby="board-completed-history-caption"
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <DialogTrigger>
+            <Button variant="ghost" size="sm">
+              Details
+            </Button>
+            <Popover hideArrow placement="bottom end">
+              <Dialog
+                aria-label="Board details"
+                className="max-h-[min(70vh,560px)] w-[360px] max-w-[calc(100vw-24px)] space-y-5 overflow-y-auto rounded-xl bg-raise p-5 text-[13px] text-ink shadow-lg outline-none [overflow-wrap:anywhere]"
               >
-                <div aria-hidden="true">
-                  <Spark
-                    data={sealHistory}
-                    width={96}
-                    height={26}
-                    accent="var(--accent)"
-                  />
+                <div>
+                  <h2 className="font-serif text-[24px]">{title}</h2>
+                  <p className="mt-1 text-mute">
+                    {projects.length}{" "}
+                    {projects.length === 1 ? "project" : "projects"} ·{" "}
+                    {cycles.length} {cycles.length === 1 ? "cycle" : "cycles"}
+                  </p>
                 </div>
-                <figcaption
-                  id="board-completed-history-caption"
-                  className="sr-only"
-                >
-                  14-day completed task history: {sealHistory.join(", ")}
-                </figcaption>
-              </figure>
-            )}
-          </div>
+                {activeCycle && (
+                  <div className="space-y-2">
+                    <p>
+                      Cycle <span className="text-ink">{activeCycle.code}</span>
+                      {activeCycle.start && activeCycle.end
+                        ? ` · ${activeCycle.start} – ${activeCycle.end}`
+                        : ""}
+                    </p>
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        role="progressbar"
+                        aria-label="Cycle progress"
+                        aria-valuemin={0}
+                        aria-valuemax={cycleTotal}
+                        aria-valuenow={cycleDone}
+                        className="block h-1 w-[120px] overflow-hidden rounded-full bg-sink"
+                      >
+                        <span
+                          className="block h-1 rounded-full bg-accent"
+                          style={{
+                            width: `${cycleTotal ? (cycleDone / cycleTotal) * 100 : 0}%`,
+                          }}
+                        />
+                      </span>
+                      <span className="tabular-nums text-mute">
+                        {cycleDone} of {cycleTotal}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {activeOp && (
+                  <div className="space-y-2">
+                    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2">
+                      <dt className="text-mute">Lead</dt>
+                      <dd>{activeOp.lead ?? "—"}</dd>
+                      <dt className="text-mute">Health</dt>
+                      <dd className="flex items-center gap-2">
+                        <HealthDot health={activeOp.health} />
+                        <span style={{ color: opHealthColor }}>
+                          {activeOp.health}
+                        </span>
+                      </dd>
+                      <dt className="text-mute">Target</dt>
+                      <dd>{activeOp.target ?? "—"}</dd>
+                      {dossier && (
+                        <>
+                          <dt className="text-mute">Dossier</dt>
+                          <dd>
+                            <button
+                              type="button"
+                              className={cn(
+                                "cursor-pointer rounded-sm text-left text-accent hover:underline",
+                                FOCUS_RING_NATIVE,
+                              )}
+                              onClick={() => onOpenDossier?.(dossier)}
+                            >
+                              {dossier}
+                            </button>
+                          </dd>
+                        </>
+                      )}
+                    </dl>
+                    {activeOp.note && (
+                      <p className="text-ink-2">{activeOp.note}</p>
+                    )}
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <p className="text-mute">Completed · 14 days</p>
+                  {!sealHistoryApplicable ? (
+                    <p className="text-mute">Not applicable</p>
+                  ) : sealHistoryPending ? (
+                    <p className="text-mute">Loading</p>
+                  ) : sealHistoryError ? (
+                    <p className="text-hot">Unavailable</p>
+                  ) : sealHistory.length === 0 ||
+                    sealHistory.every((count) => count === 0) ? (
+                    <p className="text-mute">No completed tasks</p>
+                  ) : (
+                    <figure
+                      className="m-0"
+                      aria-labelledby="board-completed-history-caption"
+                    >
+                      <div aria-hidden="true">
+                        <Spark
+                          data={sealHistory}
+                          width={240}
+                          height={40}
+                          accent="var(--accent)"
+                        />
+                      </div>
+                      <figcaption
+                        id="board-completed-history-caption"
+                        className="sr-only"
+                      >
+                        14-day completed task history: {sealHistory.join(", ")}
+                      </figcaption>
+                    </figure>
+                  )}
+                </div>
+              </Dialog>
+            </Popover>
+          </DialogTrigger>
+          <Button variant="primary" size="sm" onPress={handleNewTask}>
+            New task
+          </Button>
         </div>
       </div>
 
-      {/* View switch · completed toggle · New task */}
-      <div className="mt-8 flex flex-wrap items-center gap-4">
-        <div role="tablist" className="flex gap-1 rounded-full bg-sink p-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <div
+          role="tablist"
+          aria-label="Board view"
+          className="flex max-w-full gap-0.5 overflow-x-auto rounded-full bg-sink p-0.5"
+        >
           {MODES.map((m) => (
             <button
               key={m.id}
               type="button"
               role="tab"
               aria-selected={mode === m.id}
+              tabIndex={mode === m.id ? 0 : -1}
               className={cn(
-                "h-[34px] cursor-pointer rounded-full px-4 text-[14px] transition-colors",
+                "h-8 shrink-0 cursor-pointer rounded-full px-3 text-[13px] transition-colors",
                 FOCUS_RING_NATIVE,
                 mode === m.id
                   ? "bg-raise font-medium text-ink shadow-sm"
                   : "text-mute hover:text-ink",
               )}
               onClick={() => setMode(m.id)}
+              onKeyDown={(event) => {
+                const index = MODES.findIndex((item) => item.id === m.id);
+                let next: number;
+                if (event.key === "ArrowRight") {
+                  next = (index + 1) % MODES.length;
+                } else if (event.key === "ArrowLeft") {
+                  next = (index + MODES.length - 1) % MODES.length;
+                } else if (event.key === "Home") {
+                  next = 0;
+                } else if (event.key === "End") {
+                  next = MODES.length - 1;
+                } else {
+                  return;
+                }
+                event.preventDefault();
+                setMode(MODES[next].id);
+                event.currentTarget.parentElement
+                  ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+                  ?.[next]?.focus();
+              }}
             >
               {m.label}
             </button>
           ))}
         </div>
-
-        {/* Completed toggle — list mode hides SEALED tasks by default. Absent
-            when there is nothing to reveal and nothing is revealed. */}
+        {/* Keep search mounted for the board's / keyboard shortcut. Facet
+            options live in an overlay rather than pushing cards down. */}
+        <FilterBar
+          fields={[]}
+          state={filterState}
+          onChange={onFilterChange}
+          textInputId="tasking-filter"
+          filteredCount={filteredCount}
+          totalCount={opFilteredCount}
+          className="min-w-0 flex-[1_1_160px] [&_input]:w-36 [&_input]:min-w-0 [&_input]:flex-1"
+        />
+        <DialogTrigger>
+          <Button
+            variant={activeFacetCount > 0 ? "secondary" : "ghost"}
+            size="sm"
+            className={activeFacetCount > 0 ? "bg-accent-tint" : undefined}
+          >
+            Filters{activeFacetCount > 0 ? ` · ${activeFacetCount}` : ""}
+          </Button>
+          <Popover hideArrow placement="bottom end">
+            <Dialog
+              aria-label="Board filters"
+              className="max-h-[min(70vh,560px)] w-[420px] max-w-[calc(100vw-24px)] space-y-3 overflow-y-auto rounded-xl bg-raise p-4 shadow-lg outline-none"
+            >
+              <h2 className="text-[14px] font-medium text-ink">Filter tasks</h2>
+              <FilterBar
+                fields={filterFields}
+                primaryFieldIds={["project", "status", "pri"]}
+                state={filterState}
+                onChange={onFilterChange}
+                showText={false}
+              />
+            </Dialog>
+          </Popover>
+        </DialogTrigger>
         {mode === "backlog" && (hiddenCompletedCount > 0 || showCompleted) && (
           <button
             type="button"
             aria-pressed={showCompleted}
             data-testid="board-show-completed"
             className={cn(
-              "h-9 cursor-pointer rounded-full px-4 text-[13.5px] transition-colors",
+              "h-8 cursor-pointer rounded-full px-3 text-[13px] transition-colors",
               FOCUS_RING_NATIVE,
               showCompleted
                 ? "bg-accent-tint text-ink"
@@ -248,78 +357,7 @@ export function BoardHeader({
               : `Show ${hiddenCompletedCount} completed`}
           </button>
         )}
-
-        <div className="flex-1" />
-
-        <Button variant="primary" onPress={handleNewTask}>
-          New task
-        </Button>
       </div>
-
-      {/* Filter strip: shared FilterBar (text search + facet chips + count) */}
-      <FilterBar
-        fields={filterFields}
-        primaryFieldIds={["project", "status", "pri"]}
-        state={filterState}
-        onChange={onFilterChange}
-        textInputId="tasking-filter"
-        filteredCount={filteredCount}
-        totalCount={opFilteredCount}
-        className="mt-5"
-      />
-
-      {/* Op-meta line — only when a real op is selected */}
-      {activeOp && (
-        <div className="mt-4 flex items-center gap-3 overflow-hidden whitespace-nowrap text-[13px] text-mute">
-          <HealthDot health={activeOp.health} />
-          <span>
-            Lead
-            <b className="ml-1.5 font-medium text-ink">
-              {activeOp.lead ?? "—"}
-            </b>
-          </span>
-          <span aria-hidden>·</span>
-          <span>
-            Health
-            <b className="ml-1.5 font-medium" style={{ color: opHealthColor }}>
-              {activeOp.health}
-            </b>
-          </span>
-          <span aria-hidden>·</span>
-          <span>
-            Target
-            <b className="ml-1.5 font-medium text-ink">
-              {activeOp.target ?? "—"}
-            </b>
-          </span>
-          {dossier && (
-            <>
-              <span aria-hidden>·</span>
-              <span>
-                Dossier{" "}
-                <button
-                  type="button"
-                  className={cn(
-                    "cursor-pointer rounded-sm text-accent hover:underline",
-                    FOCUS_RING_NATIVE,
-                  )}
-                  onClick={() => onOpenDossier?.(dossier)}
-                >
-                  {dossier}
-                </button>
-              </span>
-            </>
-          )}
-          {activeOp.note && (
-            <>
-              <span aria-hidden>·</span>
-              <span className="overflow-hidden text-ellipsis text-ink-2">
-                {activeOp.note}
-              </span>
-            </>
-          )}
-        </div>
-      )}
     </header>
   );
 }
@@ -336,11 +374,11 @@ function Stat({
   hot?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex items-baseline gap-1.5 whitespace-nowrap">
       <span className="text-[12.5px] text-mute">{label}</span>
       <span
         className={cn(
-          "font-serif text-[26px] leading-none tabular-nums",
+          "text-[14px] font-medium tabular-nums",
           hot ? "text-hot" : accent ? "text-accent" : "text-ink",
         )}
       >

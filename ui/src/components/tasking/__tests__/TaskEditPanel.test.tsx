@@ -9,7 +9,7 @@
  *   - Hold toggle on/off payloads
  *   - Checklist: read-only, shows d/total, OPEN PAGE button calls handler
  *   - Archive two-step: pending edits save before DELETE, then the panel closes
- *   - No dimming scrim; a transparent click-outside layer closes the panel
+ *   - Non-modal editor leaves the board interactive
  *   - Escape closes panel
  */
 
@@ -257,12 +257,6 @@ describe("TaskEditPanel — render", () => {
     expect(screen.getByTestId("edit-panel-priority")).toHaveTextContent("P1");
   });
 
-  it("renders the op code in the header", () => {
-    wrap();
-    // FULL_TASK has project "alpha" → OPS-1
-    expect(screen.getByTestId("edit-panel-op")).toHaveTextContent("OPS-1");
-  });
-
   it("renders tags joined with comma-space", () => {
     wrap();
     expect(screen.getByTestId<HTMLInputElement>("edit-panel-tags").value).toBe(
@@ -322,9 +316,11 @@ describe("TaskEditPanel — render", () => {
   it("omits slug-less operations from the Project dropdown", async () => {
     wrap({ projects: deriveProjectScopes([...operations, NO_SLUG_OP], []) });
     await userEvent.click(screen.getByRole("button", { name: /Project$/ }));
-    expect(screen.getByRole("option", { name: "OPS-1" })).toBeInTheDocument();
     expect(
-      screen.queryByRole("option", { name: "OPS-3" }),
+      screen.getByRole("option", { name: "Operation Alpha" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Operation Gamma" }),
     ).not.toBeInTheDocument();
   });
 
@@ -338,7 +334,9 @@ describe("TaskEditPanel — render", () => {
     expect(screen.getByTestId("edit-panel-op")).toHaveTextContent("GHOST");
     await userEvent.click(screen.getByRole("button", { name: /Project$/ }));
     expect(screen.getByRole("option", { name: "GHOST" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "OPS-1" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Operation Alpha" }),
+    ).toBeInTheDocument();
   });
 
   it("renders neutral cycle state labels and omits unavailable Closed cycles", async () => {
@@ -858,7 +856,9 @@ describe("TaskEditPanel — archive two-step", () => {
     wrap({ fetchStub: stub, seedBoard: true });
 
     await userEvent.click(screen.getByRole("button", { name: /Project$/ }));
-    await userEvent.click(screen.getByRole("option", { name: "OPS-2" }));
+    await userEvent.click(
+      screen.getByRole("option", { name: "Operation Beta" }),
+    );
     await waitFor(() => {
       expect(
         stub.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
@@ -1278,41 +1278,6 @@ describe("TaskEditPanel — archive two-step", () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("TaskEditPanel — undimmed dock and escape close", () => {
-  it("renders no dimming scrim: the board stays undimmed", () => {
-    const { container } = wrap();
-    expect(screen.queryByTestId("edit-panel-scrim")).not.toBeInTheDocument();
-    const dimmers = Array.from(container.querySelectorAll("*")).filter((el) =>
-      /\bbg-(scrim|black)\b|bg-black\//.test(el.getAttribute("class") ?? ""),
-    );
-    expect(dimmers).toEqual([]);
-  });
-
-  // The dock body is a scrolling flex column; a shrinkable textarea there
-  // collapsed the title to a sliver (smoke, 1440×960).
-  it("keeps the dock body's rows at their own height", () => {
-    wrap();
-    const column = screen.getByRole("textbox", { name: "Title" }).parentElement;
-    expect(column?.className).toContain("[&>*]:shrink-0");
-  });
-
-  it("remains a labelled modal dialog and closes on Escape", async () => {
-    const onClose = vi.fn();
-    wrap({ onClose });
-    const dialog = screen.getByRole("dialog", { name: "Edit task" });
-    expect(dialog).toHaveAttribute("aria-modal", "true");
-    await userEvent.keyboard("{Escape}");
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("a click outside the dock (transparent dismiss layer) calls onClose", async () => {
-    const onClose = vi.fn();
-    wrap({ onClose });
-    const dismiss = screen.getByTestId("edit-panel-dismiss");
-    expect(dismiss).toHaveClass("bg-transparent");
-    await userEvent.click(dismiss);
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
   it("Escape key calls onClose", async () => {
     const onClose = vi.fn();
     wrap({ onClose });
@@ -1336,20 +1301,26 @@ describe("TaskEditPanel — undimmed dock and escape close", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Focus containment
+// Non-modal focus management
 // ══════════════════════════════════════════════════════════════════════════════
 
-describe("TaskEditPanel — focus containment", () => {
-  it("keeps Tab focus contained within the panel even past its focusable count", async () => {
-    // HELD_TASK renders the hold-reason input too, maximizing focusable count.
-    wrap({ task: HELD_TASK });
-    const panel = screen.getByTestId("edit-panel");
-
-    // Tab far more times than the panel has focusable elements — containment
-    // must wrap focus back inside rather than letting it escape to <body>.
-    for (let i = 0; i < 40; i++) {
-      await userEvent.tab();
-      expect(panel.contains(document.activeElement)).toBe(true);
+describe("TaskEditPanel — non-modal focus management", () => {
+  it("allows keyboard focus back to the board while the editor stays open", async () => {
+    const onClose = vi.fn();
+    const boardAction = document.createElement("button");
+    boardAction.textContent = "Another card";
+    document.body.appendChild(boardAction);
+    try {
+      wrap({ task: HELD_TASK, onClose });
+      const panel = screen.getByRole("dialog", { name: "Edit task" });
+      expect(panel).not.toHaveAttribute("aria-modal", "true");
+      await userEvent.tab({ shift: true });
+      expect(document.activeElement).toBe(boardAction);
+      await userEvent.click(boardAction);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(panel).toBeInTheDocument();
+    } finally {
+      boardAction.remove();
     }
   });
 

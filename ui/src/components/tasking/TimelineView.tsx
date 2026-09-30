@@ -32,7 +32,7 @@ import {
   HealthDot,
   priColor,
 } from "./board-constants";
-import type { ProjectScope } from "./board-projects";
+import { type ProjectScope, scopeLabel } from "./board-projects";
 import { parseDay, pct, taskRange, windowOf } from "./timeline-math";
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -297,15 +297,13 @@ export function TimelineView({
               {/* Group header */}
               <h2 className="mb-2.5 flex items-center gap-2.5 px-5 font-normal">
                 <HealthDot health={g.scope?.health ?? "NONE"} />
-                <span className="font-serif text-[22px] italic text-ink">
-                  {g.scope ? g.scope.name : "No project"}
+                <span
+                  className="min-w-0 truncate font-serif text-[22px] italic text-ink"
+                  title={g.scope ? scopeLabel(g.scope) : undefined}
+                >
+                  {g.scope ? scopeLabel(g.scope) : "No project"}
                 </span>
-                {g.scope && (
-                  <span className="text-[12.5px] text-mute tabular-nums">
-                    {g.scope.code}
-                  </span>
-                )}
-                <span className="text-[12.5px] text-mute tabular-nums">
+                <span className="shrink-0 text-[12.5px] text-mute tabular-nums">
                   {g.items.length} scheduled
                 </span>
               </h2>

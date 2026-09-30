@@ -197,7 +197,7 @@ function KanbanDropColumn({
   return (
     <div
       ref={ref}
-      className="relative flex min-h-0 flex-[1_0_282px] flex-col rounded-xl"
+      className="relative flex min-h-0 min-w-0 flex-[1_0_282px] flex-col rounded-xl"
       style={{
         ...(isDropTarget
           ? {
@@ -287,7 +287,7 @@ export function KanbanView({
           >
             {/* Column header — one fixed-height row; only the sub-label may truncate */}
             <div
-              className="sticky top-0 z-[2] flex h-11 items-center gap-2 bg-ground px-3"
+              className="sticky top-0 z-[2] flex h-11 shrink-0 items-center gap-2 bg-ground px-3"
               data-testid={`kb-head-${col.id}`}
             >
               <Tick variant={FAINT_COLUMNS.has(col.id) ? "faint" : "live"} />

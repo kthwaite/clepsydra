@@ -112,9 +112,10 @@ export function NewTaskModal({
   const selectableCycles = cycles.filter((c) => c.state !== "CLOSED");
 
   // Derived display for the sub-header
-  const opLabel = project
-    ? (projects.find((p) => p.key === project)?.code ?? project)
-    : "No project";
+  const selectedScope = projects.find((scope) => scope.key === project);
+  const opLabel = selectedScope
+    ? scopeLabel(selectedScope)
+    : project || "No project";
   const dirty =
     title !== "" ||
     brief !== "" ||

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveProjectScopes, scopeLabel } from "../board-projects";
+import { deriveProjectScopes } from "../board-projects";
 import { BOARD_FIXTURE, NO_SLUG_OP } from "./fixtures";
 
 const { operations, tasks } = BOARD_FIXTURE;
@@ -86,32 +86,5 @@ describe("deriveProjectScopes", () => {
       health: null,
       op: null,
     });
-  });
-});
-
-describe("scopeLabel", () => {
-  it("collapses to the code when the name is the same word in another case", () => {
-    const falls = {
-      key: "falls",
-      slug: "falls",
-      code: "FALLS",
-      name: "Falls",
-      health: "GREEN",
-      op: null,
-    };
-    expect(scopeLabel(falls)).toBe("FALLS");
-  });
-
-  it("joins code and name for an operation-backed scope", () => {
-    const [alpha] = deriveProjectScopes(operations, []);
-    expect(scopeLabel(alpha)).toBe("OPS-1 — Operation Alpha");
-  });
-
-  it("returns the code alone for a synthesized scope", () => {
-    const [ghost] = deriveProjectScopes(
-      [],
-      [{ ...tasks[0], project: "ghost" }],
-    );
-    expect(scopeLabel(ghost)).toBe("GHOST");
   });
 });

@@ -140,11 +140,6 @@ describe("NewTaskModal — render", () => {
     expect(screen.getByText(/No project · Create task/)).toBeInTheDocument();
   });
 
-  it("shows the project code in the sub-header when a project preset matches", () => {
-    wrap(undefined, { project: "alpha" });
-    expect(screen.getByText(/OPS-1 · Create task/)).toBeInTheDocument();
-  });
-
   it("exposes approved field names, choices, and placeholders", async () => {
     wrap();
 
@@ -260,10 +255,10 @@ describe("NewTaskModal — render", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Project$/ }));
     expect(
-      screen.getByRole("option", { name: "OPS-1 — Operation Alpha" }),
+      screen.getByRole("option", { name: "Operation Alpha" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "OPS-2 — Operation Beta" }),
+      screen.getByRole("option", { name: "Operation Beta" }),
     ).toBeInTheDocument();
   });
 
@@ -338,7 +333,7 @@ describe("NewTaskModal — render", () => {
     await user.click(screen.getByRole("button", { name: /Project$/ }));
     expect(screen.getByRole("option", { name: "GHOST" })).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "OPS-1 — Operation Alpha" }),
+      screen.getByRole("option", { name: "Operation Alpha" }),
     ).toBeInTheDocument();
   });
 
@@ -359,10 +354,10 @@ describe("NewTaskModal — render", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Project$/ }));
     expect(
-      screen.getByRole("option", { name: "OPS-1 — Operation Alpha" }),
+      screen.getByRole("option", { name: "Operation Alpha" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("option", { name: /OPS-3/ }),
+      screen.queryByRole("option", { name: "Operation Gamma" }),
     ).not.toBeInTheDocument();
   });
 });
@@ -384,9 +379,7 @@ describe("NewTaskModal — submit payload", () => {
 
     // Select operation "alpha" (OPS-1)
     await user.click(screen.getByRole("button", { name: /Project$/ }));
-    await user.click(
-      screen.getByRole("option", { name: "OPS-1 — Operation Alpha" }),
-    );
+    await user.click(screen.getByRole("option", { name: "Operation Alpha" }));
 
     await user.click(screen.getByRole("button", { name: /Cycle$/ }));
     await user.click(
