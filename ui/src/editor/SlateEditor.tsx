@@ -610,6 +610,9 @@ export function SlateEditor({
   }, [slashTrigger, editor]);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    // A capture-phase suggestion handler may complete and close its popup before
+    // this handler runs. Respect its claim even when the trigger is now cleared.
+    if (event.defaultPrevented) return;
     if (
       event.target instanceof Element &&
       event.target.closest('[contenteditable="false"]')
