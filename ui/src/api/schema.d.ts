@@ -1060,6 +1060,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/vault/index/calendar": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Pages placed on calendar days in a window.
+     * @description Journal-kind pages with a `journal_date` are placed on that date and are
+     *     returned when it lies in `[date(from), date(to)]` (each date in its own
+     *     offset; padded on purpose, the client trims). Every other page is placed
+     *     on `created_at` and is returned when `from <= created_at < to`.
+     */
+    get: operations["calendar_entries"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/vault/index/content-index": {
     parameters: {
       query?: never;
@@ -1406,7 +1429,13 @@ export interface paths {
     /** GET /journal/:date — get a journal page by date. */
     get: operations["get_by_date"];
     put?: never;
-    post?: never;
+    /**
+     * POST /journal/:date — create the journal for any date if missing
+     *     (get-or-create).
+     * @description Returns 201 with the page when it was created, 200 when it already
+     *     existed, 400 when the date is not `YYYY-MM-DD`.
+     */
+    post: operations["ensure_by_date"];
     delete?: never;
     options?: never;
     head?: never;
@@ -2316,6 +2345,21 @@ export interface components {
       moved: [string, string][];
       /** @description Paths assigned successfully without relocation. */
       unchanged: string[];
+    };
+    /** @description One page placed in the window. */
+    CalendarEntry: {
+      /** @description RFC3339 UTC creation time; the placement date for non-journal pages. */
+      created_at?: string | null;
+      /** @description `YYYY-MM-DD`; the placement date for journal-kind pages. */
+      journal_date?: string | null;
+      kind: components["schemas"]["Kind"];
+      path: string;
+      title?: string | null;
+    };
+    CalendarResponse: {
+      entries: components["schemas"]["CalendarEntry"][];
+      /** @description True when more pages matched than `entries` carries. */
+      truncated: boolean;
     };
     CandidateEntry: {
       page_id: string;
@@ -7447,6 +7491,55 @@ export interface operations {
       };
     };
   };
+  calendar_entries: {
+    parameters: {
+      query: {
+        /** @description Inclusive window start, RFC3339 with offset (client local midnight). */
+        from: string;
+        /** @description Exclusive window end, RFC3339 with offset. */
+        to: string;
+        /** @description Comma-separated canonical Kind tokens; omitted = all kinds. */
+        kind?: string;
+        /** @description Exact tag. */
+        tag?: string;
+        /** @description Exact project slug. */
+        project?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Calendar entries */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CalendarResponse"];
+        };
+      };
+      /** @description Invalid window or kind */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
   content_index: {
     parameters: {
       query?: {
@@ -8319,6 +8412,56 @@ export interface operations {
       };
       /** @description Journal not found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  ensure_by_date: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Journal date in YYYY-MM-DD format */
+        date: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Existing journal */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PageDetailResponse"];
+        };
+      };
+      /** @description Created journal */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PageDetailResponse"];
+        };
+      };
+      /** @description Invalid date */
+      400: {
         headers: {
           [name: string]: unknown;
         };
