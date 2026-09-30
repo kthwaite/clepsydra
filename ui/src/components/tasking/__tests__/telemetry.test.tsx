@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchClient } from "#/api/client";
 import { useBoardStore } from "#/store/board";
@@ -76,6 +77,9 @@ describe("tasking telemetry", () => {
   it("renders backend completion counts in the 14-day history", async () => {
     const get = stubTelemetryFetch();
     renderScreen();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Details" }),
+    );
 
     expect(
       await screen.findByLabelText("14-day completed task history: 0, 2, 1"),
@@ -91,6 +95,9 @@ describe("tasking telemetry", () => {
     useBoardStore.setState({ opFilter: "UNFILED" });
     const get = stubTelemetryFetch();
     renderScreen();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Details" }),
+    );
 
     expect(
       await screen.findByLabelText("14-day completed task history: 0, 2, 1"),
@@ -106,6 +113,9 @@ describe("tasking telemetry", () => {
     useBoardStore.setState({ opFilter: "OPS-3" });
     const get = stubTelemetryFetch({ board: BOARD_FIXTURE_WITH_NO_SLUG_OP });
     renderScreen();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Details" }),
+    );
 
     expect(await screen.findByText("Not applicable")).toBeInTheDocument();
     expect(get).not.toHaveBeenCalled();
@@ -125,6 +135,9 @@ describe("tasking telemetry", () => {
     useBoardStore.setState({ mode: "cycle", cycleSel: "C-01" });
     stubTelemetryFetch({ empty: true });
     renderScreen();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Details" }),
+    );
 
     expect(await screen.findByText("No completed tasks")).toBeInTheDocument();
     expect(
@@ -153,6 +166,7 @@ describe("tasking telemetry", () => {
     renderScreen();
 
     expect(await screen.findByText("Task board")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Details" }));
     await waitFor(() => {
       const burndown = screen.getByTestId("cv-burndown");
       // Board header completed-history state, outside the cycle burndown.

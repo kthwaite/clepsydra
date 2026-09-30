@@ -238,6 +238,25 @@ The Task Board has four views:
   choose **Backlog** for Tasks that are not assigned to a Cycle.
 - **Timeline** lays out scheduled Tasks across Projects and Cycles.
 
+The compact toolbar keeps search and view switching above the cards. Open
+**Filters** for Project, status, priority, Tags, and Blocked facets; its badge
+counts active facets. **Details** holds Project metadata, active Cycle progress,
+and the 14-day completion history without reducing the board's working height.
+
+Open a card in the full-height right-hand editor. On wide workspaces it sits
+beside the board, so you can select another card without closing the editor.
+On narrower workspaces it overlays the right edge. Its fields scroll separately
+from the cards; **Close** or Escape closes it. Pending edits are saved when
+closing or switching cards. **Open page** opens the Task's full body and Checklist.
+
+Project labels use the page title rather than its generated filename. Drag the
+Scope rail's right edge to resize it, or focus that edge and use the arrow keys
+(Home/End select the minimum/maximum width). Double-click the edge to reset its
+width. The width persists across reloads and collapsing/reopening the rail.
+Long names truncate with the full label available on hover; counts remain visible.
+Board columns can also be resized at their right edge, and each column scrolls
+independently.
+
 The Scope rail groups Tasks by Project and Cycle, with Backlog for Tasks not assigned to a Cycle.
 Every Project page appears in the rail; set `board = false` in a Project
 page's frontmatter to hide it. Pages that declare a `project` slug share one

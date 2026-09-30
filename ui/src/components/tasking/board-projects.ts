@@ -65,18 +65,7 @@ export function deriveProjectScopes(
   );
 }
 
-/**
- * True when `name` adds nothing to `code` — empty, or the same word in a
- * different case (a PROJECT page titled "Falls" with slug `falls` has code
- * "FALLS"). Consumers then show the code alone rather than "FALLS — Falls".
- */
-export function scopeNameIsRedundant(scope: ProjectScope): boolean {
-  return scope.name.trim().toUpperCase() === scope.code;
-}
-
-/** "CODE — name" for an operation-backed scope, "CODE" when name adds nothing. */
+/** Prefer the page title; a scope without one still has its original code. */
 export function scopeLabel(scope: ProjectScope): string {
-  return scope.name && !scopeNameIsRedundant(scope)
-    ? `${scope.code} — ${scope.name}`
-    : scope.code;
+  return scope.name.trim() || scope.code;
 }

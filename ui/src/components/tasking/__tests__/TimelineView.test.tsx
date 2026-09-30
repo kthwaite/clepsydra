@@ -394,20 +394,6 @@ describe("TimelineView — operation groups", () => {
     expect(heading).toHaveTextContent("1 scheduled");
   });
 
-  it("renders group header with op code and name", () => {
-    wrap(
-      <TimelineView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[TL_TASK_ALPHA]}
-        projects={TL_SCOPES}
-        cycles={TL_CYCLES}
-      />,
-    );
-    const grp = screen.getByTestId("tl-grp-alpha");
-    expect(grp.textContent).toContain("OPS-1");
-    expect(grp.textContent).toContain("Operation Alpha");
-  });
-
   it("renders both groups when both ops have scheduled tasks", () => {
     wrap(
       <TimelineView

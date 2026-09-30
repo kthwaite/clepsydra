@@ -23,7 +23,11 @@ import {
   PRI_ORDER,
   taskStatusLabel,
 } from "./board-constants";
-import { deriveProjectScopes, type ProjectScope } from "./board-projects";
+import {
+  deriveProjectScopes,
+  type ProjectScope,
+  scopeLabel,
+} from "./board-projects";
 import { CycleView, resolveCycle } from "./CycleView";
 import { KanbanView } from "./KanbanView";
 import { NewCycleModal } from "./NewCycleModal";
@@ -88,7 +92,6 @@ export function TaskingScreen({
   const mode = useBoardStore((s) => s.mode);
   const opFilter = useBoardStore((s) => s.opFilter);
   const cycleSel = useBoardStore((s) => s.cycleSel);
-  const railOpen = useBoardStore((s) => s.railOpen);
   const editTaskId = useBoardStore((s) => s.editTaskId);
   const taskModal = useBoardStore((s) => s.taskModal);
   const cycleModal = useBoardStore((s) => s.cycleModal);
@@ -179,10 +182,11 @@ export function TaskingScreen({
         id: "project",
         kind: "multi",
         label: "Project",
-        options: projects
-          .flatMap((p) => (p.slug ? [p.slug] : []))
-          .sort()
-          .map((value) => ({ value })),
+        options: projects.flatMap((project) =>
+          project.slug
+            ? [{ value: project.slug, label: scopeLabel(project) }]
+            : [],
+        ),
       },
       {
         id: "tags",
@@ -286,17 +290,10 @@ export function TaskingScreen({
         <SealCycleModal cycle={cycleModalCycle} cycles={cycles} tasks={tasks} />
       )}
 
-      <div className="relative flex h-full overflow-hidden">
-        {/* Left scope rail — renders popout button when collapsed */}
-        {railOpen ? (
-          <div className="w-[232px] flex-none">
-            <ScopeRail projects={projects} cycles={cycles} tasks={tasks} />
-          </div>
-        ) : (
-          <ScopeRail projects={projects} cycles={cycles} tasks={tasks} />
-        )}
+      <div className="@container relative flex h-full min-h-0 min-w-0 overflow-hidden">
+        <ScopeRail projects={projects} cycles={cycles} tasks={tasks} />
 
-        {/* Main — always flex-1, always full width when rail is collapsed */}
+        {/* Header and board share the space left by the two sidebars. */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <BoardHeader
             projects={projects}
@@ -367,24 +364,23 @@ export function TaskingScreen({
                 colLabel={colLabel}
               />
             )}
-
-            {/* Right-dock edit panel — keyed by task id so switching tasks
-                is a real remount: the unmount flush delivers any pending
-                debounced edit for the old task before the new panel mounts. */}
-            {editTask && (
-              <TaskEditPanel
-                key={editTask.id}
-                task={editTask}
-                projects={projects}
-                cycles={cycles}
-                colLabel={colLabel}
-                onClose={() => setEditTaskId(null)}
-                onOpenPage={onOpenPage}
-                onOpenDossier={onOpenDossier}
-              />
-            )}
           </div>
         </div>
+        {/* Right-dock edit panel — keyed by task id so switching tasks
+                is a real remount: the unmount flush delivers any pending
+                debounced edit for the old task before the new panel mounts. */}
+        {editTask && (
+          <TaskEditPanel
+            key={editTask.id}
+            task={editTask}
+            projects={projects}
+            cycles={cycles}
+            colLabel={colLabel}
+            onClose={() => setEditTaskId(null)}
+            onOpenPage={onOpenPage}
+            onOpenDossier={onOpenDossier}
+          />
+        )}
       </div>
     </>
   );

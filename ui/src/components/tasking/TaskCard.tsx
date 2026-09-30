@@ -71,7 +71,7 @@ export function TaskCard({
     <div
       ref={cardRef}
       className={cn(
-        "group pointer-events-none relative cursor-grab rounded-[14px] px-[18px] pb-[15px] pt-4 transition-[background,box-shadow] duration-[120ms] active:cursor-grabbing",
+        "group pointer-events-none relative min-w-0 shrink-0 cursor-grab rounded-[14px] px-3.5 py-3 transition-[background,box-shadow] duration-[120ms] active:cursor-grabbing",
         sealed
           ? "bg-transparent hover:bg-sink"
           : "bg-raise hover:shadow-[0_1px_4px_rgb(0_0_0/0.08)]",
@@ -133,7 +133,7 @@ export function TaskCard({
       <div
         data-card-title
         className={cn(
-          "text-[14.5px] leading-[1.45] [text-wrap:pretty]",
+          "break-words text-[14.5px] leading-[1.45] [text-wrap:pretty]",
           sealed ? "text-mute" : "text-ink",
         )}
       >
@@ -142,7 +142,7 @@ export function TaskCard({
 
       {t.body_excerpt && (
         <p
-          className="mt-1.5 line-clamp-3 text-[13px] leading-[1.45] text-mute"
+          className="mt-1.5 line-clamp-2 break-words text-[13px] leading-[1.45] text-mute"
           data-testid={`task-excerpt-${t.id}`}
         >
           {t.body_excerpt}
