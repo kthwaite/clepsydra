@@ -1,7 +1,7 @@
 # Constellation: Sigma / Graphology evaluation
 
 Date: 2026-09-29
-Status: plan only; no prototype or measurements yet.
+Status: executed; experiment archived on `spike/constellation-sigma` (`eb97cf36`), with visible-link and collision-checked-label corrections at `8758adc5`. Results on that branch: `docs/design-notes/2026-09-29-constellation-sigma-results.md`. Original performance measurements did not establish visual parity; the readable revision needs re-benchmarking. Active-layout responsiveness and native Safari/iOS verification still block migration. D3 remains the production default.
 Input: [`graph.md`](../../../graph.md).
 
 ## Decision to answer
