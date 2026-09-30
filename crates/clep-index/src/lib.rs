@@ -1,6 +1,7 @@
 //! The SQLite index, derivation chain, hooks traits, and filesystem sync over a
 //! `clep_vault::Vault`.
 
+mod calendar;
 pub mod derivation;
 pub mod derivers;
 pub mod grep;

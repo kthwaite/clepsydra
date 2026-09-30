@@ -8,6 +8,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
+pub use crate::calendar::{CalendarEntry, CalendarPage, CalendarQuery};
 use crate::derivation::{Deriver, IndexedPage};
 use crate::derivers::blocks::BlockDeriver;
 use crate::derivers::canonical_names::CanonicalNameDeriver;
@@ -236,6 +237,7 @@ CREATE TABLE IF NOT EXISTS tags (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pages_journal_date ON pages(journal_date) WHERE journal_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pages_created_at ON pages(created_at) WHERE created_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_pages_kind ON pages(kind);
 CREATE INDEX IF NOT EXISTS idx_pages_project ON pages(project) WHERE project IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_pages_path ON pages(path);
