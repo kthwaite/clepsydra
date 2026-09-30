@@ -193,9 +193,7 @@ describe("FolioCalendarSection", () => {
     const user = userEvent.setup();
     render(<FolioCalendarSection {...NOTE_PAGE} />);
     await user.click(dayButton(15));
-    await user.click(
-      screen.getByRole("button", { name: /Open journal · written/ }),
-    );
+    await user.click(screen.getByRole("button", { name: "Open journal" }));
     expect(openJournal).toHaveBeenCalledWith(
       "2026-09-15",
       "journals/2026-09-15.md",
@@ -207,7 +205,7 @@ describe("FolioCalendarSection", () => {
     const user = userEvent.setup();
     render(<FolioCalendarSection {...NOTE_PAGE} />);
     await user.click(dayButton(16));
-    await user.click(screen.getByRole("button", { name: "Open journal" }));
+    await user.click(screen.getByRole("button", { name: "Create journal" }));
     expect(openJournal).toHaveBeenCalledWith("2026-09-16", undefined);
   });
 

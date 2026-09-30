@@ -139,6 +139,11 @@ export function rangeForView(v: {
   return monthGridRange(y, m);
 }
 
+/** One local day: `[key local midnight, next local midnight)`. */
+export function dayRange(key: DateKey): LocalRange {
+  return { from: localMidnight(key), to: localMidnight(addDays(key, 1)) };
+}
+
 /** RFC3339 local time with its UTC offset, e.g. "2026-03-30T00:00:00+01:00". */
 export function toOffsetIso(d: Date): string {
   const offset = -d.getTimezoneOffset();

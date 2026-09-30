@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addMonths,
+  dayRange,
   isoWeek,
   mondayOf,
   monthGrid,
@@ -112,6 +113,15 @@ describe("calendar dates", () => {
       const r = monthGridRange(2026, 2);
       expect(toOffsetIso(r.from)).toBe("2026-02-23T00:00:00+00:00");
       expect(toOffsetIso(r.to)).toBe("2026-04-06T00:00:00+01:00");
+    });
+  });
+
+  it("dayRange spans one local day, even across the DST end", () => {
+    withTz("Europe/London", () => {
+      const r = dayRange("2026-10-25");
+      expect(toOffsetIso(r.from)).toBe("2026-10-25T00:00:00+01:00");
+      expect(toOffsetIso(r.to)).toBe("2026-10-26T00:00:00+00:00");
+      expect(rangeKeys(r)).toEqual({ first: "2026-10-25", last: "2026-10-25" });
     });
   });
 

@@ -28,7 +28,7 @@ import { FOCUS_RING } from "#/lib/focusRing";
 import { KIND_META } from "#/lib/kind";
 import { parseLocalDate } from "#/lib/time";
 
-export type MonthCalendarVariant = "rail" | "page";
+export type MonthCalendarVariant = "rail" | "compact" | "page";
 
 export interface MonthCalendarProps {
   /** Any day in the first visible month. */
@@ -45,7 +45,8 @@ export interface MonthCalendarProps {
   /** The day whose popover or panel is open. */
   activeDate?: DateKey | null;
   onDayActivate: (key: DateKey, cell: HTMLElement) => void;
-  /** rail = dots, 32px rows; page = dots + count, taller rows. */
+  /** rail = dots, 32px rows; compact = dots in slightly roomier tiles (the
+   *  Months planner); page = tall tiles with dots + count. */
   variant: MonthCalendarVariant;
   /** The screen puts its mode switch here. */
   headerExtra?: ReactNode;
@@ -59,6 +60,7 @@ const NO_ENTRIES: readonly CalendarEntryLike[] = [];
 const HEAD_ROW = "h-7";
 const ROW: Record<MonthCalendarVariant, string> = {
   rail: "h-8",
+  compact: "h-10",
   page: "h-24",
 };
 
@@ -145,7 +147,7 @@ function WeekColumn({
           className={cn(
             ROW[variant],
             "flex justify-center",
-            variant === "rail" ? "items-center" : "items-start pt-2",
+            variant === "page" ? "items-start pt-3" : "items-center",
           )}
         >
           {row.week}
@@ -243,11 +245,18 @@ function DayFace({
       data-selected={isSelected || undefined}
       data-active={isActive || undefined}
       data-outside={isOutside || undefined}
+      data-variant={variant}
       className={cn(
-        "absolute inset-[2px] flex rounded-[10px] transition-colors",
-        variant === "rail"
-          ? "flex-col items-center justify-center gap-[3px]"
-          : "flex-col justify-between p-2",
+        "absolute flex transition-colors",
+        variant === "page"
+          ? "inset-[3px] flex-col justify-between rounded-[12px] p-2"
+          : variant === "compact"
+            ? "inset-[2px] flex-col items-center justify-center gap-1 rounded-[10px]"
+            : "inset-[2px] flex-col items-center justify-center gap-[3px] rounded-[10px]",
+        variant !== "rail" &&
+          (isOutside
+            ? "bg-sink/15 group-data-[hovered]:bg-sink/30"
+            : "bg-sink/40 group-data-[hovered]:bg-sink/70"),
         isOutside ? "text-faint" : "text-ink-2",
         isSelected && "bg-accent-tint text-ink",
         isToday && "text-accent ring-1 ring-accent/50 ring-inset",
@@ -255,21 +264,9 @@ function DayFace({
       )}
     >
       {count > 0 && <NoteCount count={count} />}
-      {variant === "rail" ? (
+      {variant === "page" ? (
         <>
-          <span
-            className={cn(
-              "text-[13px] leading-none tabular-nums",
-              isToday && "font-semibold",
-            )}
-          >
-            {label}
-          </span>
-          <KindDots entries={entries} dim={isOutside} />
-        </>
-      ) : (
-        <>
-          <span className="flex items-baseline justify-between gap-1">
+          <span className="flex items-baseline gap-1.5">
             <span
               className={cn(
                 "text-[14px] leading-none tabular-nums",
@@ -287,6 +284,19 @@ function DayFace({
                 {count}
               </span>
             )}
+          </span>
+          <KindDots entries={entries} dim={isOutside} />
+        </>
+      ) : (
+        <>
+          <span
+            className={cn(
+              "leading-none tabular-nums",
+              variant === "compact" ? "text-[14px]" : "text-[13px]",
+              isToday && "font-semibold",
+            )}
+          >
+            {label}
           </span>
           <KindDots entries={entries} dim={isOutside} />
         </>
@@ -411,7 +421,9 @@ export function MonthCalendar({
         className={cn(
           "grid gap-x-8 gap-y-6",
           count > 1 &&
-            "grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))]",
+            (variant === "compact"
+              ? "grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))]"
+              : "grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))]"),
         )}
       >
         <StartWatcher onStart={handleStart} />
@@ -431,7 +443,10 @@ export function MonthCalendar({
                     <CalendarHeaderCell
                       className={cn(
                         HEAD_ROW,
-                        "p-0 text-center align-middle text-[12px] font-normal text-faint",
+                        "p-0 align-middle text-[12px] font-normal text-faint",
+                        variant === "page"
+                          ? "pl-[11px] text-left"
+                          : "text-center",
                       )}
                     >
                       {day}
@@ -445,7 +460,8 @@ export function MonthCalendar({
                       <CalendarCell
                         date={date}
                         className={cn(
-                          "relative block w-full cursor-pointer rounded-[12px] data-[disabled]:cursor-default data-[hovered]:bg-sink/60",
+                          "group relative block w-full cursor-pointer rounded-[12px] data-[disabled]:cursor-default",
+                          variant === "rail" && "data-[hovered]:bg-sink/60",
                           rowClass,
                           FOCUS_RING,
                         )}

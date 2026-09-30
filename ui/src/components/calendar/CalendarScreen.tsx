@@ -16,6 +16,7 @@ import { bucketEntries, type CalendarEntryLike } from "#/lib/calendar/bucket";
 import {
   type CalendarMode,
   type DateKey,
+  dayRange,
   rangeForView,
   rangeKeys,
   type WeekRow,
@@ -164,17 +165,39 @@ export function CalendarScreen({
     [view.mode, anchor, view.span],
   );
   const facets = filterState.facets;
-  const query = useCalendarEntries({
-    range,
+  const filters = {
     kinds: facets.kind as readonly Kind[] | undefined,
     tag: facets.tag?.[0],
     project: facets.project?.[0],
-  });
+  };
+  const query = useCalendarEntries({ range, ...filters });
   const entries = query.data?.entries;
+  const visibleKeys = useMemo(() => rangeKeys(range), [range]);
   const byDay = useMemo(
-    () => bucketEntries(entries ?? [], rangeKeys(range)),
-    [entries, range],
+    () => bucketEntries(entries ?? [], visibleKeys),
+    [entries, visibleKeys],
   );
+
+  // A selected day outside the visible range (e.g. a shared link) gets its
+  // own one-day window with the same filters.
+  const day = view.day;
+  const dayOutside =
+    day !== undefined && (day < visibleKeys.first || day > visibleKeys.last);
+  const oneDay = useMemo(() => dayRange(day ?? anchor), [day, anchor]);
+  const dayQuery = useCalendarEntries(
+    { range: oneDay, ...filters },
+    { enabled: dayOutside },
+  );
+  const dayQueryEntries = dayQuery.data?.entries;
+  const outsideByDay = useMemo(
+    () =>
+      dayOutside
+        ? bucketEntries(dayQueryEntries ?? [], rangeKeys(oneDay))
+        : null,
+    [dayOutside, dayQueryEntries, oneDay],
+  );
+  const dayLoading =
+    dayOutside && (dayQuery.isLoading || dayQuery.isPlaceholderData === true);
 
   const setAnchor = useCallback(
     (date: DateKey) => onViewChange({ date }),
@@ -189,13 +212,17 @@ export function CalendarScreen({
     [onViewChange],
   );
 
-  const day = view.day;
-  const dayEntries = day ? (byDay.get(day) ?? NO_ENTRIES) : NO_ENTRIES;
+  const dayEntries =
+    day && !dayLoading
+      ? ((outsideByDay ?? byDay).get(day) ?? NO_ENTRIES)
+      : NO_ENTRIES;
   const journalPath = dayEntries.find((e) => e.kind === "JOURNAL")?.path;
   const dayList = day ? (
     <DayNotesList
       dateKey={day}
+      today={today}
       entries={dayEntries}
+      loading={dayLoading}
       journalPath={journalPath}
       onOpenJournal={() => void openJournal(day, journalPath)}
     />
@@ -273,7 +300,7 @@ export function CalendarScreen({
               today={today}
               activeDate={day ?? null}
               onDayActivate={(key) => activateDay(key)}
-              variant="page"
+              variant={view.mode === "months" ? "compact" : "page"}
             />
           )}
         </div>

@@ -221,6 +221,53 @@ describe("MonthCalendar", () => {
     ).toBeNull();
   });
 
+  it("page variant draws each day as a tonal tile with its count beside the date", () => {
+    const { container } = renderCalendar({ variant: "page" });
+    const face = day(container, "2026-09-15");
+    expect(face.dataset.variant).toBe("page");
+    expect(face.className).toMatch(/\bbg-sink\/40\b/);
+    const count = face.querySelector<HTMLElement>("[data-day-count]");
+    // The count shares the date's row, right after the date, inside the tile.
+    expect(count?.previousElementSibling?.textContent).toBe("15");
+    expect(count?.parentElement?.className).not.toMatch(/justify-between/);
+  });
+
+  it("page variant keeps outside-month tiles faint", () => {
+    const { container } = renderCalendar({ variant: "page" });
+    const outside = day(container, "2026-08-31");
+    expect(outside).toHaveAttribute("data-outside");
+    expect(outside.className).toMatch(/\btext-faint\b/);
+    expect(outside.className).not.toMatch(/\bbg-sink\/40\b/);
+  });
+
+  it("page variant left-aligns weekday headings with the day content", () => {
+    renderCalendar({ variant: "page" });
+    const headers = screen.getAllByRole("columnheader", { hidden: true });
+    for (const h of headers) {
+      expect(h.className).toMatch(/\btext-left\b/);
+      expect(h.className).not.toMatch(/\btext-center\b/);
+    }
+  });
+
+  it("compact variant shows dots but no count text, and describes the count", () => {
+    const { container } = renderCalendar({ variant: "compact", months: 3 });
+    expect(container.querySelector("[data-day-count]")).toBeNull();
+    const face = day(container, "2026-09-15");
+    expect(face.dataset.variant).toBe("compact");
+    expect(face.querySelectorAll("[data-kind-dot]").length).toBeGreaterThan(0);
+    expect(dayButton(15)).toHaveAccessibleDescription("6 notes");
+  });
+
+  it("compact variant rows are denser than page rows and match the week column", () => {
+    const { container } = renderCalendar({ variant: "compact" });
+    const cell = dayButton(15);
+    expect(cell.className).toMatch(/\bh-10\b/);
+    expect(cell.className).not.toMatch(/\bh-24\b/);
+    for (const n of container.querySelectorAll("[data-week-number]")) {
+      expect(n.className).toMatch(/\bh-10\b/);
+    }
+  });
+
   it("rail variant shows no count", () => {
     const { container } = renderCalendar();
     expect(container.querySelector("[data-day-count]")).toBeNull();

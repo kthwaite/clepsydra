@@ -71,18 +71,39 @@ describe("DayNotesList", () => {
     expect(screen.queryAllByRole("list")).toHaveLength(0);
   });
 
-  it("Open journal calls onOpenJournal; label reflects an existing journal", async () => {
+  it("the journal action calls onOpenJournal", async () => {
     const user = userEvent.setup();
-    const { onOpenJournal } = renderList({ entries: [] });
+    const { onOpenJournal } = renderList({
+      journalPath: "journals/2026-09-30.md",
+    });
     await user.click(screen.getByRole("button", { name: "Open journal" }));
     expect(onOpenJournal).toHaveBeenCalledTimes(1);
   });
 
-  it("labels the action as written when a journal exists", () => {
-    renderList({ journalPath: "journals/2026-09-30.md" });
-    expect(
-      screen.getByRole("button", { name: "Open journal · written" }),
-    ).toBeTruthy();
+  it("labels the action Open journal when the day has a journal", () => {
+    renderList({
+      dateKey: "2026-09-12",
+      today: "2026-09-30",
+      journalPath: "journals/2026-09-12.md",
+    });
+    expect(screen.getByRole("button", { name: "Open journal" })).toBeTruthy();
+  });
+
+  it("labels the action Create journal for a past day without one", () => {
+    renderList({ dateKey: "2026-09-12", today: "2026-09-30", entries: [] });
+    expect(screen.getByRole("button", { name: "Create journal" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Open journal/ })).toBeNull();
+  });
+
+  it("labels the action Open journal for today even before it is written", () => {
+    renderList({ dateKey: "2026-09-30", today: "2026-09-30", entries: [] });
+    expect(screen.getByRole("button", { name: "Open journal" })).toBeTruthy();
+  });
+
+  it("while loading, shows a loading line instead of claiming the day is empty", () => {
+    renderList({ entries: [], loading: true });
+    expect(screen.getByRole("status")).toHaveTextContent("Loading…");
+    expect(screen.queryByText("Nothing created this day.")).toBeNull();
   });
 
   it("colour dots are aria-hidden and use KIND_META colours", () => {

@@ -167,12 +167,13 @@ a ring. Use the previous and next buttons or **Today** to change month.
 - Choose a day to open a popover. It lists that day's pages, grouped by kind,
   with journals first. Choosing a page opens it in a Folio tab and closes the
   popover.
-- The popover ends with **Open journal**. It reads **Open journal · written**
-  when that day's journal exists, and opens it. For today, it opens the draft
-  path, as **Today's journal** does. For any other day, it creates the journal
-  page through `POST /api/vault/journal/{date}` and then opens it. If that
-  request fails, Clepsydra shows an error and opens nothing. **Open journal**
-  always means your own journal, never the AI journal.
+- The popover ends with a journal button. It reads **Open journal** when that
+  day's journal exists, and opens it. For today, it also reads **Open journal**
+  and opens the draft path, as **Today's journal** does. For any other day
+  without a journal, it reads **Create journal**: it creates the journal page
+  through `POST /api/vault/journal/{date}` and then opens it. If that request
+  fails, Clepsydra shows an error and opens nothing. The button always means
+  your own journal, never the AI journal.
 - When a month matches more than 5000 pages, the section caption reads
   **5000+** and some days are incomplete.
 
@@ -180,13 +181,15 @@ a ring. Use the previous and next buttons or **Today** to change month.
 run **Open Calendar** from the command palette. The screen has three modes:
 
 - **Month** shows one month grid. Each day has kind dots and a page count.
-- **Months** shows 3, 6, or 12 month grids side by side.
+- **Months** shows 3, 6, or 12 compact month grids side by side, like a year
+  planner. Each day has kind dots only.
 - **Weeks** shows 1, 2, or 4 ISO weeks as rows. Each day lists up to eight page
   titles inline; the rest show as "N more" and open through the day panel.
 
 Changing the mode resets the span to its default: 3 for Months, 2 for Weeks.
-Choose a day to open the day panel. It holds the same list and **Open journal**
-button as the rail popover. On a desktop the panel sits beside the grid; on a
+Choose a day to open the day panel. It holds the same list and journal button
+as the rail popover. A day outside the visible range (from a shared link) loads
+its own pages. On a desktop the panel sits beside the grid; on a
 phone it opens as a bottom sheet.
 
 The filter bar filters by kind (several allowed), one tag, and one project. The

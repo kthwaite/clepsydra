@@ -221,6 +221,96 @@ describe("CalendarScreen", () => {
     expect(onViewChange).toHaveBeenCalledWith({ day: undefined });
   });
 
+  it("a selected day outside the visible range fetches its own window with the same filters", () => {
+    const sep7: CalendarEntry[] = [
+      {
+        path: "notes/s7a.md",
+        title: "Seventh A",
+        kind: "NOTE",
+        created_at: at("2026-09-07"),
+      },
+      {
+        path: "notes/s7b.md",
+        title: "Seventh B",
+        kind: "NOTE",
+        created_at: at("2026-09-07", 15),
+      },
+      {
+        path: "notes/s7c.md",
+        title: "Seventh C",
+        kind: "RECIPE",
+        created_at: at("2026-09-07", 8),
+      },
+    ];
+    mocks.entries.mockImplementation((opts: { range: { from: Date } }) =>
+      opts.range.from.getTime() === new Date(2026, 8, 7).getTime()
+        ? queryState({ entries: sep7 })
+        : queryState(),
+    );
+    renderScreen(
+      { mode: "weeks", span: 2, date: "2026-09-15", day: "2026-09-07" },
+      { text: "", facets: { tag: ["wine"] } },
+    );
+    expect(mocks.entries).toHaveBeenCalledWith(
+      {
+        range: { from: new Date(2026, 8, 7), to: new Date(2026, 8, 8) },
+        kinds: undefined,
+        tag: "wine",
+        project: undefined,
+      },
+      { enabled: true },
+    );
+    const panel = screen.getByRole("complementary", { name: "Day" });
+    expect(
+      within(panel).getByRole("link", { name: /Seventh A/ }),
+    ).toBeVisible();
+    expect(
+      within(panel).getByRole("link", { name: /Seventh C/ }),
+    ).toBeVisible();
+    expect(within(panel).queryByText("Nothing created this day.")).toBeNull();
+  });
+
+  it("does not claim an out-of-range day is empty while its window loads", () => {
+    mocks.entries.mockImplementation((opts: { range: { from: Date } }) =>
+      opts.range.from.getTime() === new Date(2026, 8, 7).getTime()
+        ? { data: undefined, isLoading: true, isError: false }
+        : queryState(),
+    );
+    renderScreen({
+      mode: "weeks",
+      span: 2,
+      date: "2026-09-15",
+      day: "2026-09-07",
+    });
+    const panel = screen.getByRole("complementary", { name: "Day" });
+    expect(within(panel).queryByText("Nothing created this day.")).toBeNull();
+    expect(within(panel).getByRole("status")).toHaveTextContent("Loading…");
+  });
+
+  it("an in-range day reads the visible-range query and leaves the day query disabled", () => {
+    renderScreen({ day: "2026-09-15" });
+    expect(mocks.entries).toHaveBeenCalledWith(expect.anything(), {
+      enabled: false,
+    });
+  });
+
+  it("months mode draws compact cells without count text", () => {
+    const { container } = renderScreen({ mode: "months", span: 3 });
+    const face = container.querySelector<HTMLElement>(
+      '[data-date="2026-09-15"]:not([data-outside])',
+    );
+    expect(face?.dataset.variant).toBe("compact");
+    expect(container.querySelector("[data-day-count]")).toBeNull();
+  });
+
+  it("month mode draws page cells", () => {
+    const { container } = renderScreen();
+    const face = container.querySelector<HTMLElement>(
+      '[data-date="2026-09-15"]',
+    );
+    expect(face?.dataset.variant).toBe("page");
+  });
+
   it("has no side panel without view.day", () => {
     renderScreen();
     expect(screen.queryByRole("complementary", { name: "Day" })).toBeNull();

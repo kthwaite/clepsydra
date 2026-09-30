@@ -7,13 +7,18 @@ import type { DateKey } from "#/lib/calendar/dates";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { KIND_META, kindDisplayLabel } from "#/lib/kind";
-import { parseLocalDate } from "#/lib/time";
+import { localDateKey, parseLocalDate } from "#/lib/time";
 
 export interface DayNotesListProps {
   dateKey: DateKey;
   entries: readonly CalendarEntryLike[];
   /** The day's journal, when one is written. */
   journalPath?: string | null;
+  /** Today's key; defaults to the local clock. A past or future day with no
+   *  journal offers "Create journal". */
+  today?: DateKey;
+  /** The day's entries are still loading: don't claim the day is empty. */
+  loading?: boolean;
   onOpenJournal: () => void;
   headingLevel?: 3 | 4;
   className?: string;
@@ -33,18 +38,27 @@ export function DayNotesList({
   dateKey,
   entries,
   journalPath,
+  today,
+  loading = false,
   onOpenJournal,
   headingLevel = 3,
   className,
 }: DayNotesListProps) {
   const Heading = `h${headingLevel}` as const;
   const groups = groupByKind(entries);
+  const isToday = dateKey === (today ?? localDateKey(new Date()));
+  const journalLabel =
+    journalPath || isToday ? "Open journal" : "Create journal";
   return (
     <div className={cn("flex min-w-0 flex-col gap-4", className)}>
       <Heading className="m-0 font-serif text-[20px] italic leading-tight text-ink">
         {longDate(dateKey)}
       </Heading>
-      {groups.length === 0 ? (
+      {loading ? (
+        <p role="status" className="m-0 text-[13px] text-mute">
+          Loading…
+        </p>
+      ) : groups.length === 0 ? (
         <p className="m-0 text-[13px] text-mute">Nothing created this day.</p>
       ) : (
         <div className="flex flex-col gap-4">
@@ -95,7 +109,7 @@ export function DayNotesList({
       <div>
         <Button variant="secondary" size="sm" onPress={onOpenJournal}>
           <CalendarDays aria-hidden="true" className="h-3.5 w-3.5" />
-          {journalPath ? "Open journal · written" : "Open journal"}
+          {journalLabel}
         </Button>
       </div>
     </div>
