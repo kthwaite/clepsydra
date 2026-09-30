@@ -87,9 +87,22 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     mobile: { label: "Folio" },
     go: ({ activateTab, leaveWorkspace, navigate }) => {
       const store = useWorkspaceStore.getState();
-      const firstPage = store.tabs.find((tab) => tab.type === "page");
-      if (firstPage) {
-        activateTab(firstPage.id);
+      let page = store.tabs.find(
+        (tab) => tab.id === store.activeTabId && tab.type === "page",
+      );
+      if (!page) {
+        // Graph activation replaces activeTabId, but page recency is persisted.
+        for (const tab of store.tabs) {
+          if (
+            tab.type === "page" &&
+            (!page || (tab.lastActiveAt ?? 0) > (page.lastActiveAt ?? 0))
+          ) {
+            page = tab;
+          }
+        }
+      }
+      if (page) {
+        activateTab(page.id);
         return;
       }
       leaveWorkspace(() => {
