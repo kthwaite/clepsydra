@@ -44,6 +44,7 @@ import {
   EMBED_WIDTH_MIN,
 } from "./embed-presentation";
 import { validateBaseEmbedSemantics } from "./embed-semantic-validation";
+import { validateFilterDraft } from "./filter-diagnostics";
 import { asciiCaseFold } from "./local-validation";
 import { OrderedSortEditor } from "./OrderedSortEditor";
 import {
@@ -405,6 +406,7 @@ export function BaseEmbedInspector({
     })),
     ...domainDiagnostics,
     ...detailDiagnostics,
+    ...validateFilterDraft(candidate?.filter, selectedSlug),
   ];
   const refreshing = registryRefreshing || detailRefreshing;
   const saveDisabled =
@@ -753,6 +755,7 @@ export function BaseEmbedInspector({
                   label="Embed filter"
                   value={draft.filter}
                   properties={properties}
+                  allowAttendees={false}
                   diagnostics={diagnostics}
                   diagnosticRoot="filter"
                   onChange={(filter) =>

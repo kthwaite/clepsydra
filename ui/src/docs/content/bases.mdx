@@ -24,7 +24,7 @@ definition format and each authoring path.
 
 ## Create and configure a base
 
-Open `/bases` from the **Bases** header item or run **Open Bases** in the command palette. The index lists saved bases and files that need repair. Choose **Create base**, or run **Create Base** in the command palette, to open guided creation. Enter a name and slug, optionally define the first membership rule, and create the base. Clepsydra opens `/bases/<slug>/edit` with an `All` table view and `title` column ready to configure.
+Open `/bases` from the **Bases** header item or run **Open Bases** in the command palette. The index lists saved bases and files that need repair. Choose **Create base**, or run **Create Base** in the command palette, to open guided creation. Enter a name and slug, optionally add membership conditions, and create the base. Clepsydra opens `/bases/<slug>/edit` with an `All` table view and `title` column ready to configure.
 
 The Configure workspace has five sections:
 
@@ -174,6 +174,12 @@ An omitted preview label falls back to that canonical output key. If every contr
 Protected pages return an empty Base preview projection. Link and tab cards suppress the whole projected-property region—including cached values, conflict markers, remainder counts, and projection-error copy—and show the protected-page state instead.
 
 ## Membership and saved-view filters
+
+The shared filter editor is used during creation, in Configure, and for saved-view and embed filters. **Add condition** keeps every existing rule; adding a second rule combines them with **All** by default. Choose **Any** to match at least one rule. Each row has a remove control and an advanced menu for grouping, negation, and reordering. Wrapping a rule never replaces its contents. Incomplete rows show an inline error and must be completed or removed before saving.
+
+Values follow their field: **Kind** offers the known kinds, **Project** offers project values already present in the vault (including orphan slugs), **Tags** uses chips with suggestions, and **Attendees → includes** searches existing person pages. Selecting an attendee stores the person's page UUID, not a substring of their name, and never creates a person page. Creating or configuring an attendee rule adds an `attendees` relation declaration if none exists; an explicit property declaration is never overwritten. Embed filters cannot add declarations, so Attendees is available there only when the Base already declares it.
+
+For Jerry's one-to-ones, choose **All** with three conditions: **Kind → is → Meeting**, **Tags → Has all of → 1:1**, and **Attendees → includes → Jerry Maguire**. Add further tag chips to require each of those tags too. Dates, numbers, booleans, and declared option fields retain their typed controls; title and other text fields remain free text.
 
 A comparison filter has `field`, `op`, and usually `value`:
 

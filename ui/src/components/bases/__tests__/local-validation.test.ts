@@ -26,6 +26,32 @@ function draft(overrides: Partial<BaseDraft> = {}): BaseDraft {
 }
 
 describe("validateBaseDraftStructure", () => {
+  it("locates incomplete nested rules without rejecting zero, false, or valueless operators", () => {
+    const diagnostics = validateBaseDraftStructure(
+      "meetings",
+      draft({
+        filter: {
+          all: [
+            { field: "word_count", op: "eq", value: 0 },
+            { field: "done", op: "eq", value: false },
+            { field: "tags", op: "is_empty" },
+            { not: { field: "attendees", op: "links_to", value: "" } },
+          ],
+        },
+        views: [
+          {
+            ...draft().views[0],
+            filter: { any: [{ field: "kind", op: "in", value: [] }] },
+          },
+        ],
+      }),
+    );
+    expect(diagnostics.map(({ path }) => path)).toEqual([
+      "filter.all[3].not.value",
+      "views[0].filter.any[0].value",
+    ]);
+  });
+
   it("reports exact paths for empty base and view names", () => {
     const diagnostics = validateBaseDraftStructure(
       "reading-log",

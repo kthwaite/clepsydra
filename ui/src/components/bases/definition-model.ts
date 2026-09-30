@@ -95,7 +95,45 @@ export function fromWire(detail: BaseFile): BaseDraft {
   };
 }
 
+function usesAttendeeRelation(filter: BaseFilter | undefined): boolean {
+  if (!filter) return false;
+  if ("field" in filter) {
+    return (
+      (filter.field === "attendees" || filter.field === "prop.attendees") &&
+      filter.op === "links_to"
+    );
+  }
+  if ("not" in filter) return usesAttendeeRelation(filter.not);
+  return ("all" in filter ? filter.all : filter.any).some(usesAttendeeRelation);
+}
+
+/** Guided attendee rules need the same relation schema for preview and saving.
+ * Existing declarations always win; never reinterpret an author's property. */
+export function withFilterProperties(draft: BaseDraft): BaseDraft {
+  if (
+    draft.properties.some(({ key }) => key === "attendees") ||
+    !(
+      usesAttendeeRelation(draft.filter) ||
+      draft.views.some((view) => usesAttendeeRelation(view.filter))
+    )
+  ) {
+    return draft;
+  }
+  return {
+    ...draft,
+    properties: [
+      ...draft.properties,
+      {
+        id: crypto.randomUUID(),
+        key: "attendees",
+        definition: { type: "relation", many: true },
+      },
+    ],
+  };
+}
+
 export function toWire(draft: BaseDraft): BaseFile {
+  draft = withFilterProperties(draft);
   const wire = {
     name: draft.name,
     description: draft.description,

@@ -5,7 +5,13 @@ import { Header } from "#/components/ui/list-box";
 import { Select, SelectItem, SelectSection } from "#/components/ui/select";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { KINDS, kindDisplayLabel, sortKindsByLabel } from "#/lib/kind";
 import { type DraftProperty, operatorsFor } from "./definition-model";
+import {
+  FilterValuePicker,
+  PersonFilterValuePicker,
+  ProjectFilterValuePicker,
+} from "./FilterValuePicker";
 import type { FilterDiagnosticScope } from "./filter-diagnostics";
 import { OPERATOR_LABELS, VALUELESS_OPERATORS } from "./operator-labels";
 
@@ -31,6 +37,21 @@ const SYSTEM_FIELDS: readonly FieldCapability[] = [
 ];
 export const CANONICAL_FILTER_FIELDS = SYSTEM_FIELDS.map(({ key }) => key);
 
+const KIND_CHOICES = sortKindsByLabel(KINDS).map((kind) => ({
+  id: kind,
+  label: kindDisplayLabel(kind),
+}));
+
+function fieldOperators(capability: FieldCapability): FilterOp[] {
+  if (capability.key === "kind" || capability.key === "project") {
+    return ["eq", "ne", "in", "is_empty", "not_empty"];
+  }
+  if (capability.key === "attendees" && capability.type === "relation") {
+    return ["links_to", "is_empty", "not_empty"];
+  }
+  return operatorsFor(capability.type);
+}
+
 function comparison(field: string, op: FilterOp, value: unknown): BaseFilter {
   return VALUELESS_OPERATORS[op] ? { field, op } : { field, op, value };
 }
@@ -38,6 +59,13 @@ function comparison(field: string, op: FilterOp, value: unknown): BaseFilter {
 function defaultValue(capability: FieldCapability, op: FilterOp): unknown {
   if (VALUELESS_OPERATORS[op]) return undefined;
   if (op === "in") return [];
+  if (
+    capability.key === "kind" ||
+    capability.key === "project" ||
+    (capability.key === "attendees" && capability.type === "relation")
+  ) {
+    return "";
+  }
   if (capability.type === "bool") return true;
   return capability.options?.[0] ?? "";
 }
@@ -122,6 +150,7 @@ interface FilterComparisonEditorProps {
   properties: DraftProperty[];
   onChange(value: BaseFilter): void;
   diagnosticScope: FilterDiagnosticScope;
+  allowAttendees?: boolean;
 }
 
 export function FilterComparisonEditor({
@@ -130,9 +159,14 @@ export function FilterComparisonEditor({
   properties,
   onChange,
   diagnosticScope,
+  allowAttendees = true,
 }: FilterComparisonEditorProps) {
   const [relationSuggestions, setRelationSuggestions] = useState<string[]>([]);
-  const [freeformDraft, setFreeformDraft] = useState<string>();
+  const [freeformDraft, setFreeformDraft] = useState<{
+    field: string;
+    op: FilterOp;
+    text: string;
+  }>();
   const relationListId = useId();
   const diagnosticId = useId();
 
@@ -143,11 +177,18 @@ export function FilterComparisonEditor({
     )
     .map((property) => ({
       key: property.key,
-      label: property.key,
+      label: property.key === "attendees" ? "Attendees" : property.key,
       type: property.definition.type,
       options: property.definition.options,
     }));
-  const fields = [...SYSTEM_FIELDS, ...declaredFields];
+  const pageFields: readonly FieldCapability[] =
+    allowAttendees && !declaredFields.some((field) => field.key === "attendees")
+      ? [
+          ...SYSTEM_FIELDS,
+          { key: "attendees", label: "Attendees", type: "relation" },
+        ]
+      : SYSTEM_FIELDS;
+  const fields = [...pageFields, ...declaredFields];
   const filterValue =
     "field" in value
       ? value
@@ -162,7 +203,7 @@ export function FilterComparisonEditor({
       label: filterValue.field,
       type: "system-scalar",
     } satisfies FieldCapability);
-  const operators = operatorsFor(capability.type);
+  const operators = fieldOperators(capability);
   const operatorOptions = operators.includes(filterValue.op)
     ? operators
     : [...operators, filterValue.op];
@@ -173,7 +214,16 @@ export function FilterComparisonEditor({
     : filterValue.value == null
       ? ""
       : String(filterValue.value);
-  const displayValueText = freeformDraft ?? valueText;
+  const activeDraft =
+    freeformDraft?.field === filterValue.field &&
+    freeformDraft.op === activeOperator
+      ? freeformDraft.text
+      : undefined;
+  const displayValueText = activeDraft ?? valueText;
+  const constrainedKind = capability.key === "kind";
+  const constrainedProject = capability.key === "project";
+  const constrainedPerson =
+    capability.key === "attendees" && capability.type === "relation";
   const declaredOptions = capability.options ?? [];
   const selectedOptionValues = Array.isArray(filterValue.value)
     ? filterValue.value.map(String)
@@ -201,7 +251,11 @@ export function FilterComparisonEditor({
 
   useEffect(() => {
     let cancelled = false;
-    if (capability.type !== "relation" || displayValueText.trim() === "") {
+    if (
+      capability.type !== "relation" ||
+      constrainedPerson ||
+      displayValueText.trim() === ""
+    ) {
       setRelationSuggestions([]);
       return;
     }
@@ -222,7 +276,7 @@ export function FilterComparisonEditor({
     return () => {
       cancelled = true;
     };
-  }, [capability.type, displayValueText]);
+  }, [capability.type, constrainedPerson, displayValueText]);
 
   if (!("field" in value)) return null;
 
@@ -255,6 +309,24 @@ export function FilterComparisonEditor({
     onChange(comparison(filterValue.field, activeOperator, nextValue));
   }
 
+  const pickerProps = {
+    ariaLabel: `Value for condition ${position}`,
+    ariaDescribedBy: valueDiagnostics.length > 0 ? valueErrorId : undefined,
+    isInvalid: valueInvalid,
+    isMultiple: activeOperator === "in",
+    selectedValues: selectedOptionValues,
+    inputRef: (element: HTMLInputElement | null) =>
+      diagnosticScope.register("value", element),
+    onChange: (values: string[]) =>
+      onChange(
+        comparison(
+          filterValue.field,
+          activeOperator,
+          activeOperator === "in" ? values : (values[0] ?? ""),
+        ),
+      ),
+  };
+
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-3">
       <div className="min-w-0">
@@ -273,7 +345,8 @@ export function FilterComparisonEditor({
               (field) => field.key === String(key),
             );
             if (!nextCapability) return;
-            const nextOperator = operatorsFor(nextCapability.type)[0];
+            setFreeformDraft(undefined);
+            const nextOperator = fieldOperators(nextCapability)[0];
             onChange(
               comparison(
                 nextCapability.key,
@@ -293,7 +366,7 @@ export function FilterComparisonEditor({
           )}
           <SelectSection>
             <Header>Page fields</Header>
-            {SYSTEM_FIELDS.map((field) => (
+            {pageFields.map((field) => (
               <SelectItem key={field.key} id={field.key}>
                 {field.label}
               </SelectItem>
@@ -336,6 +409,7 @@ export function FilterComparisonEditor({
               (operator) => operator === key,
             );
             if (!nextOperator) return;
+            setFreeformDraft(undefined);
             const nextValue =
               nextOperator === "in"
                 ? Array.isArray(filterValue.value)
@@ -354,7 +428,9 @@ export function FilterComparisonEditor({
           {operatorOptions.map((operator) => (
             <SelectItem key={operator} id={operator}>
               {operators.includes(operator)
-                ? OPERATOR_LABELS[operator]
+                ? constrainedPerson && operator === "links_to"
+                  ? "includes"
+                  : OPERATOR_LABELS[operator]
                 : `${operator} (unsupported)`}
             </SelectItem>
           ))}
@@ -374,7 +450,23 @@ export function FilterComparisonEditor({
 
       {hasValue && (
         <div className="min-w-0">
-          {capability.type === "bool" ? (
+          {constrainedKind ? (
+            <FilterValuePicker
+              key={`${filterValue.field}:${activeOperator}`}
+              {...pickerProps}
+              choices={KIND_CHOICES}
+            />
+          ) : constrainedProject ? (
+            <ProjectFilterValuePicker
+              key={`${filterValue.field}:${activeOperator}`}
+              {...pickerProps}
+            />
+          ) : constrainedPerson && activeOperator === "links_to" ? (
+            <PersonFilterValuePicker
+              key={`${filterValue.field}:${activeOperator}`}
+              {...pickerProps}
+            />
+          ) : capability.type === "bool" ? (
             <ConditionalValueSelect
               ariaLabel={`Value for condition ${position}`}
               ariaDescribedBy={
@@ -463,13 +555,17 @@ export function FilterComparisonEditor({
                 }
                 value={displayValueText}
                 onBlur={(event) => {
-                  if (activeOperator === "in" && freeformDraft !== undefined) {
+                  if (activeOperator === "in" && activeDraft !== undefined) {
                     commitFreeform(event.currentTarget.value);
                   }
                   setFreeformDraft(undefined);
                 }}
                 onChange={(event) => {
-                  setFreeformDraft(event.target.value);
+                  setFreeformDraft({
+                    field: filterValue.field,
+                    op: activeOperator,
+                    text: event.target.value,
+                  });
                   if (activeOperator !== "in") {
                     commitFreeform(event.target.value);
                   }

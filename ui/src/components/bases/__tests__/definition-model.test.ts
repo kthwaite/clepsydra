@@ -40,6 +40,44 @@ function stripResponseFields(detail: BaseDetailFixture): BaseFile {
 }
 
 describe("base definition model", () => {
+  it("declares attendee relations used by nested membership and saved-view filters", () => {
+    const draft = createMinimalDraft("Meetings", undefined, {
+      all: [
+        { field: "kind", op: "eq", value: "MEETING" },
+        { field: "tags", op: "contains", value: "1:1" },
+        {
+          not: { field: "attendees", op: "links_to", value: "people/jerry.md" },
+        },
+      ],
+    });
+    expect(toWire(draft).properties).toEqual([
+      { key: "attendees", definition: { type: "relation", many: true } },
+    ]);
+    draft.filter = undefined;
+    draft.views[0].filter = {
+      any: [
+        { field: "prop.attendees", op: "links_to", value: "people/jerry.md" },
+      ],
+    };
+    expect(toWire(draft).properties).toEqual([
+      { key: "attendees", definition: { type: "relation", many: true } },
+    ]);
+  });
+
+  it("never overwrites an explicit attendee property declaration", () => {
+    const draft = createMinimalDraft("Meetings", undefined, {
+      field: "attendees",
+      op: "links_to",
+      value: "people/jerry.md",
+    });
+    draft.properties = [
+      { id: "existing", key: "attendees", definition: { type: "text" } },
+    ];
+    expect(toWire(draft).properties).toEqual([
+      { key: "attendees", definition: { type: "text" } },
+    ]);
+  });
+
   it("round-trips the complete model while preserving property and view order", () => {
     const detail = baseDetail({
       filter: {

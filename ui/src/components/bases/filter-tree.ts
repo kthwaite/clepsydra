@@ -40,7 +40,7 @@ function applyAction(
   if ("any" in filter) {
     return { value: { any: [...filter.any, action.value] } };
   }
-  return { value: filter };
+  return { value: { all: [filter, action.value] } };
 }
 
 function updateFilterAtOffset(

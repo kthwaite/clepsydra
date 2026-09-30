@@ -953,7 +953,7 @@ describe("pure Base embed validation bounds", () => {
           ...(_name === "body bytes" ? { limit: undefined } : {}),
         }),
       );
-      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      expect(screen.getByText("Save", { selector: "button" })).toBeEnabled();
     },
     15_000,
   );
@@ -1026,11 +1026,9 @@ describe("pure Base embed validation bounds", () => {
                 ? screen.getByRole("button", {
                     name: selectTriggerName("Sort field 1"),
                   })
-                : screen.getByRole("textbox", {
-                    name: "Value for condition 1",
-                  });
+                : screen.getByLabelText("Value for condition 1");
       expect(owner).toHaveAccessibleDescription(message);
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.getByText("Save", { selector: "button" })).toBeDisabled();
     },
     15_000,
   );

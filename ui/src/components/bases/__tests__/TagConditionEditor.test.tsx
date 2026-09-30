@@ -173,6 +173,7 @@ describe("TagConditionEditor", () => {
       value: ["beer"],
     });
 
+    await user.click(screen.getByText("Tag options", { selector: "summary" }));
     await user.click(
       screen.getByRole("button", {
         name: /edit condition 1 as an advanced condition/i,

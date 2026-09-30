@@ -17,6 +17,7 @@ import {
   slugifyBaseName,
   toWire,
 } from "./definition-model";
+import { validateFilterDraft } from "./filter-diagnostics";
 
 interface CreateBaseDialogProps {
   isOpen: boolean;
@@ -41,9 +42,12 @@ export function CreateBaseDialog({
   const [slugError, setSlugError] = useState<string>();
   const [requestError, setRequestError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
+  const nameInput = useRef<HTMLInputElement>(null);
+  const filterFocusTargets = useRef(new Map<string, HTMLElement>());
   const slugInput = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState<BaseFilter>();
   const busy = isPending || submitting;
+  const filterDiagnostics = validateFilterDraft(filter, slug);
 
   useEffect(() => {
     if (!isOpen) {
@@ -90,7 +94,16 @@ export function CreateBaseDialog({
     setNameError(nextNameError);
     setSlugError(nextSlugError);
     setRequestError(undefined);
-    if (nextNameError || nextSlugError) return;
+    if (nextNameError) {
+      nameInput.current?.focus();
+      return;
+    }
+    if (nextSlugError) return;
+    if (filterDiagnostics.length > 0) {
+      const path = filterDiagnostics[0].path;
+      if (path) filterFocusTargets.current.get(path)?.focus();
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -99,7 +112,6 @@ export function CreateBaseDialog({
       );
       const response = await onCreate({ slug: normalizedSlug, definition });
       onClose();
-      // The editor route is added by the following task; preserve its final URL now.
       const destination = {
         to: "/bases/$slug/edit",
         params: { slug: response.slug },
@@ -124,8 +136,10 @@ export function CreateBaseDialog({
         if (!open && !busy) onClose();
       }}
       title="Create base"
+      className="max-w-3xl"
       description="Save a reusable view over pages without moving or owning them."
       isDismissable={!busy}
+      isCloseDisabled={busy}
       footer={
         <>
           <Button variant="secondary" onPress={onClose} isDisabled={busy}>
@@ -143,42 +157,50 @@ export function CreateBaseDialog({
       }
     >
       <form id="create-base-form" className="space-y-4" onSubmit={submit}>
-        <TextField
-          label="Name"
-          value={name}
-          onChange={changeName}
-          autoFocus
-          isDisabled={busy}
-          isInvalid={!!nameError}
-          errorMessage={nameError}
-          placeholder="Reading Log"
-        />
-        <TextField
-          label="Slug"
-          value={slug}
-          onChange={changeSlug}
-          isDisabled={busy}
-          inputRef={slugInput}
-          isInvalid={!!slugError}
-          errorMessage={slugError}
-          description="Vault filename: letters, numbers, underscores, and hyphens."
-          placeholder="reading-log"
-        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TextField
+            label="Name"
+            value={name}
+            onChange={changeName}
+            inputRef={nameInput}
+            autoFocus
+            isDisabled={busy}
+            isInvalid={!!nameError}
+            errorMessage={nameError}
+            placeholder="Reading Log"
+          />
+          <TextField
+            label="Slug"
+            value={slug}
+            onChange={changeSlug}
+            isDisabled={busy}
+            inputRef={slugInput}
+            isInvalid={!!slugError}
+            errorMessage={slugError}
+            description="Vault filename: letters, numbers, underscores, and hyphens."
+            placeholder="reading-log"
+          />
+        </div>
         <section
           aria-labelledby="base-membership-heading"
-          className="rounded-xl bg-sink px-4 py-4"
+          className="rounded-xl bg-ground p-3 sm:p-4"
         >
           <h3
             id="base-membership-heading"
             className="font-serif text-[19px] italic text-ink"
           >
-            Membership
+            Include pages
           </h3>
           <div className="mt-3">
             <BaseFilterEditor
               value={filter}
               properties={[]}
               onChange={setFilter}
+              diagnostics={filterDiagnostics}
+              registerFocus={(path, element) => {
+                if (element) filterFocusTargets.current.set(path, element);
+                else filterFocusTargets.current.delete(path);
+              }}
             />
           </div>
           <p className="mt-3 text-[12.5px] text-mute">

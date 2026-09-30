@@ -1,5 +1,6 @@
 import type { BaseDetailResponse } from "#/api/bases";
 import { type BaseDraft, canSort } from "./definition-model";
+import { validateFilterDraft } from "./filter-diagnostics";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
 
 type BaseDiagnostic = BaseDetailResponse["diagnostics"][number];
@@ -77,7 +78,7 @@ export function validateBaseDraftStructure(
   slug: string,
   draft: BaseDraft,
 ): BaseDiagnostic[] {
-  const diagnostics: BaseDiagnostic[] = [];
+  const diagnostics = validateFilterDraft(draft.filter, slug);
 
   if (draft.name.trim().length === 0) {
     diagnostics.push({
@@ -137,6 +138,9 @@ export function validateBaseDraftStructure(
     }
   }
   for (const [index, view] of draft.views.entries()) {
+    diagnostics.push(
+      ...validateFilterDraft(view.filter, slug, `views[${index}].filter`),
+    );
     if (view.name.trim().length === 0) {
       diagnostics.push({
         slug,

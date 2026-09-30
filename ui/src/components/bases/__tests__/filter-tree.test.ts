@@ -243,7 +243,7 @@ describe("filter tree transactions", () => {
     }
   });
 
-  it("returns the same root object when append or move targets a non-group", () => {
+  it("appends beside a non-group under All while ignoring non-sibling movement", () => {
     const root = {
       not: { field: "kind", op: "eq", value: "NOTE" },
     } satisfies BaseFilter;
@@ -255,7 +255,10 @@ describe("filter tree transactions", () => {
 
     expect(
       updateFilterTree(root, { type: "append", path: ["not"], value: child }),
-    ).toBe(root);
+    ).toEqual({ not: { all: [root.not, child] } });
+    expect(
+      updateFilterTree(root, { type: "append", path: [], value: child }),
+    ).toEqual({ all: [root, child] });
     expect(
       updateFilterTree(root, { type: "move", path: ["not"], offset: 1 }),
     ).toBe(root);

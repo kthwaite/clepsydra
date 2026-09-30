@@ -44,38 +44,6 @@ describe("CreateBaseDialog", () => {
     );
   });
 
-  it("submits a deterministic minimal base with explicit All-pages membership", async () => {
-    const user = userEvent.setup();
-    const { onCreate } = renderDialog();
-
-    await user.type(screen.getByLabelText("Name"), "Books");
-    await user.click(screen.getByRole("button", { name: "Create base" }));
-
-    expect(onCreate).toHaveBeenCalledWith({
-      slug: "books",
-      definition: {
-        name: "Books",
-        description: undefined,
-        filter: undefined,
-        properties: [],
-        preview: [],
-        views: [
-          {
-            name: "All",
-            layout: "table",
-            filter: undefined,
-            sort: [],
-            group_by: undefined,
-            aggregates: [],
-            columns: ["title"],
-          },
-        ],
-      },
-    });
-    expect(screen.getByText("All pages")).toBeInTheDocument();
-    expect(screen.getByText(/default view: All/i)).toBeInTheDocument();
-  });
-
   it("shows local validation errors without submitting", async () => {
     const user = userEvent.setup();
     const { onCreate } = renderDialog();

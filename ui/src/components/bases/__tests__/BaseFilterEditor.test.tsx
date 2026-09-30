@@ -10,7 +10,7 @@ function selectTriggerName(label: string) {
   return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
 
-/** Filter actions now live behind menus: open the trigger, pick the item. */
+/** Advanced operations preserve the predicate they act on. */
 async function chooseMenuAction(
   user: UserEvent,
   trigger: string | RegExp,
@@ -154,7 +154,7 @@ describe("BaseFilterEditor", () => {
       />,
     );
 
-    await chooseMenuAction(user, "Add rule", "Condition");
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith({
@@ -184,10 +184,8 @@ describe("BaseFilterEditor", () => {
       all: [{ not: { field: "kind", op: "eq", value: "NOTE" } }],
     });
 
-    await chooseMenuAction(
-      user,
-      "Excluded condition actions",
-      "Remove excluded condition",
+    await user.click(
+      screen.getByRole("button", { name: "Remove excluded condition" }),
     );
 
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -201,7 +199,7 @@ describe("BaseFilterEditor", () => {
       all: [{ field: "kind", op: "eq", value: "NOTE" }],
     });
 
-    await chooseMenuAction(user, "Add to Match all", "Condition");
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenLastCalledWith({
@@ -245,11 +243,10 @@ describe("BaseFilterEditor", () => {
       ],
     });
 
-    await chooseMenuAction(
-      user,
-      "Add to Match all",
-      "Condition",
-      screen.getByRole("group", { name: "Match all of 1 condition" }),
+    await user.click(
+      within(
+        screen.getByRole("group", { name: "Match all of 1 condition" }),
+      ).getByRole("button", { name: "Add condition" }),
     );
 
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -277,11 +274,10 @@ describe("BaseFilterEditor", () => {
       ],
     });
 
-    await chooseMenuAction(
-      user,
-      "Add to Match any",
-      "Condition",
-      screen.getByRole("group", { name: "Match any of 1 condition" }),
+    await user.click(
+      within(
+        screen.getByRole("group", { name: "Match any of 1 condition" }),
+      ).getByRole("button", { name: "Add condition" }),
     );
 
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -398,7 +394,7 @@ describe("BaseFilterEditor", () => {
     });
   });
 
-  it("replaces a nested not child through its seed menu in one complete root change", async () => {
+  it("wraps a nested not child without replacing its predicate", async () => {
     const user = userEvent.setup();
     const { onChange } = renderEditor({
       all: [
@@ -412,12 +408,15 @@ describe("BaseFilterEditor", () => {
     await chooseMenuAction(
       user,
       "Excluded condition actions",
-      "Replace with Match any group",
+      "Wrap in Match any group",
     );
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenLastCalledWith({
-      all: [{ not: { any: [] } }, { field: "kind", op: "eq", value: "NOTE" }],
+      all: [
+        { not: { any: [{ field: "title", op: "eq", value: "Before" }] } },
+        { field: "kind", op: "eq", value: "NOTE" },
+      ],
     });
   });
 
@@ -467,17 +466,12 @@ describe("BaseFilterEditor", () => {
     expect(stationaryInput).toHaveValue("same");
     expect(onChange).not.toHaveBeenCalled();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Condition 2 actions" }),
-    );
     const callsBeforeRemove = onChange.mock.calls.length;
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Remove condition" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove condition 2" }));
 
     expect(onChange).toHaveBeenCalledTimes(callsBeforeRemove + 1);
     expect(onChange).toHaveBeenLastCalledWith({
-      all: [{ field: "title", op: "in", value: ["same", "drafting"] }],
+      all: [{ field: "title", op: "in", value: ["same"] }],
     });
     expect(screen.getByLabelText("Value for condition 1")).toBe(secondInput);
     expect(secondInput).toHaveValue("same, drafting");
@@ -503,12 +497,7 @@ describe("BaseFilterEditor", () => {
       /Value for condition/,
     ) as HTMLInputElement[];
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Condition 1 actions" }),
-    );
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Remove condition" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove condition 1" }));
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenLastCalledWith({ all: [duplicate] });
@@ -562,10 +551,11 @@ describe("BaseFilterEditor", () => {
     const { onChange } = renderEditor();
 
     expect(screen.getByText("All pages")).toBeInTheDocument();
-    await chooseMenuAction(user, "Add rule", "Condition");
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
     await chooseSelectOption(user, "Field for condition 1", "Kind");
     await chooseSelectOption(user, "Operator for condition 1", "is");
     await user.type(screen.getByLabelText("Value for condition 1"), "BOOK");
+    await user.click(await screen.findByRole("option", { name: "Book" }));
 
     expect(latest(onChange)).toEqual({
       field: "kind",
@@ -574,38 +564,129 @@ describe("BaseFilterEditor", () => {
     });
   });
 
-  it("creates all, any, and not nodes without an interim filter shape", async () => {
+  it("keeps Kind when adding a second and third condition, switching Any, and removing a sibling", async () => {
     const user = userEvent.setup();
     const { onChange } = renderEditor();
-
-    await chooseMenuAction(user, "Add rule", "Match all group");
-    expect(latest(onChange)).toEqual({ all: [] });
-    expect(
-      screen.getByRole("group", { name: "Match all conditions" }),
-    ).toBeInTheDocument();
-
-    await chooseMenuAction(
-      user,
-      "Membership actions",
-      "Replace with Match any group",
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
+    await user.type(
+      screen.getByRole("combobox", { name: "Value for condition 1" }),
+      "Book",
     );
-    expect(latest(onChange)).toEqual({ any: [] });
-
-    await chooseMenuAction(
-      user,
-      "Membership actions",
-      "Replace with Not condition",
+    await user.click(await screen.findByRole("option", { name: "Book" }));
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
+    await chooseSelectOption(user, "Field for condition 2", "Title");
+    await user.type(
+      screen.getByLabelText("Value for condition 2"),
+      "Keep this title",
+    );
+    const titleInput = screen.getByLabelText("Value for condition 2");
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
+    expect(latest(onChange)).toEqual({
+      all: [
+        { field: "kind", op: "eq", value: "BOOK" },
+        { field: "title", op: "eq", value: "Keep this title" },
+        { field: "kind", op: "eq", value: "" },
+      ],
+    });
+    await user.click(screen.getByRole("radio", { name: "Any" }));
+    await user.click(
+      screen.getByRole("button", { name: "Remove condition 1" }),
     );
     expect(latest(onChange)).toEqual({
-      not: { field: "kind", op: "eq", value: "" },
+      any: [
+        { field: "title", op: "eq", value: "Keep this title" },
+        { field: "kind", op: "eq", value: "" },
+      ],
     });
+    expect(screen.getByLabelText("Value for condition 1")).toBe(titleInput);
+    expect(titleInput).toHaveValue("Keep this title");
+  });
+
+  it.each<BaseFilter>([
+    { not: { field: "kind", op: "eq", value: "NOTE" } },
+    {
+      all: [
+        { field: "tags", op: "contains", value: "beer" },
+        { field: "tags", op: "contains", value: "tasting" },
+      ],
+    },
+    {
+      any: [
+        { field: "tags", op: "contains", value: "beer" },
+        { field: "tags", op: "contains", value: "tasting" },
+      ],
+    },
+  ])(
+    "preserves a compact or negated root when appending: %j",
+    async (original) => {
+      const user = userEvent.setup();
+      const { onChange } = renderEditor(original);
+      await user.click(screen.getByRole("button", { name: "Add condition" }));
+      expect(latest(onChange)).toEqual({
+        all: [original, { field: "kind", op: "eq", value: "" }],
+      });
+    },
+  );
+
+  it("removes a single root without opening a menu", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      field: "title",
+      op: "eq",
+      value: "One",
+    });
+    await user.click(
+      screen.getByRole("button", { name: "Remove condition 1" }),
+    );
+    expect(latest(onChange)).toBeUndefined();
+    expect(screen.getByRole("button", { name: "Add condition" })).toBeVisible();
+  });
+
+  it("shows incomplete group feedback and registers its add action at the diagnostic root", () => {
+    const liveTargets = new Map<string, HTMLElement>();
+    render(
+      <BaseFilterEditor
+        value={{ all: [] }}
+        properties={[]}
+        onChange={vi.fn()}
+        diagnosticRoot="views[0].filter"
+        registerFocus={(path, element) => {
+          if (element) liveTargets.set(path, element);
+          else liveTargets.delete(path);
+        }}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/add a condition/i);
+    liveTargets.get("views[0].filter")?.focus();
+    expect(screen.getByRole("button", { name: "Add condition" })).toHaveFocus();
+  });
+
+  it("wraps the root in advanced groups and negation without losing its value", async () => {
+    const user = userEvent.setup();
+    const original: BaseFilter = { field: "title", op: "eq", value: "Keep me" };
+    const { onChange } = renderEditor(original);
+
+    await chooseMenuAction(
+      user,
+      "Membership actions",
+      "Wrap in Match all group",
+    );
+    expect(latest(onChange)).toEqual({ all: [original] });
+    await chooseMenuAction(
+      user,
+      "Membership actions",
+      "Wrap in Match any group",
+    );
+    expect(latest(onChange)).toEqual({ any: [{ all: [original] }] });
+    await chooseMenuAction(user, "Membership actions", "Negate condition");
+    expect(latest(onChange)).toEqual({ not: { any: [{ all: [original] }] } });
   });
 
   it("turns a condition into a tag row when its field is a tag field", async () => {
     const user = userEvent.setup();
     const { onChange } = renderEditor();
 
-    await chooseMenuAction(user, "Add rule", "Condition");
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
     await chooseSelectOption(user, "Field for condition 1", "Tags");
 
     // The generic operator list gives way to the tag quantifiers.
@@ -657,28 +738,6 @@ describe("BaseFilterEditor", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("labels nested boolean structure and exposes positional controls", async () => {
-    renderEditor({
-      all: [{ field: "kind", op: "eq", value: "BOOK" }, { any: [] }],
-    });
-
-    const all = screen.getByRole("group", {
-      name: "Match all of 2 conditions",
-    });
-    expect(
-      within(all).getByRole("group", { name: "Match any conditions" }),
-    ).toBeInTheDocument();
-    await userEvent
-      .setup()
-      .click(within(all).getByRole("button", { name: "Condition 2 actions" }));
-    expect(
-      await screen.findByRole("menuitem", { name: "Negate condition" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("menuitem", { name: "Remove condition" }),
-    ).toBeInTheDocument();
-  });
-
   it("reorders sibling rules with keyboard-operable controls", async () => {
     const user = userEvent.setup();
     const original: BaseFilter = {
@@ -720,11 +779,10 @@ describe("BaseFilterEditor", () => {
     };
     const { onChange } = renderEditor(original);
 
-    await chooseMenuAction(
-      user,
-      "Condition 1 actions",
-      "Remove condition",
-      screen.getByRole("group", { name: "Match all of 2 conditions" }),
+    await user.click(
+      within(
+        screen.getByRole("group", { name: "Match all of 2 conditions" }),
+      ).getAllByRole("button", { name: "Remove condition 1" })[0],
     );
     expect(latest(onChange)).toEqual({
       all: [{ any: [{ field: "status", op: "eq", value: "reading" }] }],
@@ -736,11 +794,10 @@ describe("BaseFilterEditor", () => {
       ],
     });
 
-    await chooseMenuAction(
-      user,
-      "Condition 1 actions",
-      "Remove condition",
-      screen.getByRole("group", { name: "Match any of 1 condition" }),
+    await user.click(
+      within(
+        screen.getByRole("group", { name: "Match any of 1 condition" }),
+      ).getByRole("button", { name: "Remove condition 1" }),
     );
     expect(latest(onChange)).toBeUndefined();
     expect(screen.getByText("All pages")).toBeInTheDocument();
@@ -960,6 +1017,7 @@ describe("BaseFilterEditor", () => {
     const valueControls = screen.getAllByLabelText("Value for condition 1");
 
     expect([...liveTargets.keys()].sort()).toEqual([
+      "filter",
       "filter.all[0].field",
       "filter.all[0].op",
       "filter.all[0].value",
@@ -980,11 +1038,8 @@ describe("BaseFilterEditor", () => {
     const { onChange } = renderEditor();
 
     await user.tab();
-    expect(screen.getByRole("button", { name: "Add rule" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Add condition" })).toHaveFocus();
     await user.keyboard("{Enter}");
-    await user.click(
-      await screen.findByRole("menuitem", { name: "Condition" }),
-    );
     expect(latest(onChange)).toEqual({ field: "kind", op: "eq", value: "" });
     expect(screen.getByLabelText("Field for condition 1")).toBeInTheDocument();
   });
@@ -995,9 +1050,10 @@ describe("BaseFilterEditor", () => {
     render(<CreateBaseDialog isOpen onClose={vi.fn()} onCreate={onCreate} />);
 
     await user.type(screen.getByLabelText("Name"), "Books");
-    await chooseMenuAction(user, "Add rule", "Condition");
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
     await chooseSelectOption(user, "Field for condition 1", "Kind");
     await user.type(screen.getByLabelText("Value for condition 1"), "BOOK");
+    await user.click(await screen.findByRole("option", { name: "Book" }));
     await user.click(screen.getByRole("button", { name: "Create base" }));
 
     expect(onCreate).toHaveBeenCalledWith(

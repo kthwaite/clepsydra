@@ -48,16 +48,6 @@ async function chooseSelectOption(
   await user.click(await screen.findByRole("option", { name: option }));
 }
 
-/** Filter actions live behind menus: open the trigger, pick the item. */
-async function chooseMenuAction(
-  user: UserEvent,
-  trigger: string | RegExp,
-  item: string | RegExp,
-) {
-  await user.click(screen.getByRole("button", { name: trigger }));
-  await user.click(await screen.findByRole("menuitem", { name: item }));
-}
-
 function visibleOptionNames() {
   return screen
     .getAllByRole("option")
@@ -802,8 +792,7 @@ describe("ViewsEditor", () => {
     });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Add sort" }));
-    await chooseMenuAction(user, "Add rule", "Match all group");
-    await chooseMenuAction(user, "Add to Match all", "Condition");
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
     await user.click(screen.getByRole("button", { name: "Add aggregate" }));
     await chooseSelectOption(user, "Aggregate function 1", "sum");
 
@@ -965,18 +954,16 @@ describe("ViewsEditor", () => {
     expect(latest<DraftView[]>(onChange)[0].aggregates).toEqual([]);
   });
 
-  it("keeps the per-view filter exact and labels its AND semantics", async () => {
+  it("keeps the per-view filter exact", async () => {
     const onChange = renderViews();
     const user = userEvent.setup();
-    expect(
-      screen.getByText("Always combined with base membership."),
-    ).toBeInTheDocument();
-    await chooseMenuAction(user, "Add rule", "Match all group");
-    await chooseMenuAction(user, "Add to Match all", "Condition");
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
     await chooseSelectOption(user, "Field for condition 1", "status");
     await user.type(screen.getByLabelText("Value for condition 1"), "reading");
     expect(latest<DraftView[]>(onChange)[0].filter).toEqual({
-      all: [{ field: "status", op: "eq", value: "reading" }],
+      field: "status",
+      op: "eq",
+      value: "reading",
     });
   });
 

@@ -4,6 +4,7 @@ import { useTags } from "#/api/index";
 import { Button } from "#/components/ui/button";
 import { Select, SelectItem } from "#/components/ui/select";
 import { TagInput } from "#/components/ui/tag-input";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type { DraftProperty } from "./definition-model";
 import { FilterComparisonEditor } from "./FilterComparisonEditor";
 import type { FilterDiagnosticScope } from "./filter-diagnostics";
@@ -21,6 +22,7 @@ interface TagConditionEditorProps {
   properties: DraftProperty[];
   onChange(value: BaseFilter | undefined): void;
   diagnosticScope: FilterDiagnosticScope;
+  allowAttendees?: boolean;
 }
 
 const FIELD_LABELS: Record<TagConditionField, string> = {
@@ -44,6 +46,7 @@ export function TagConditionEditor({
   properties,
   onChange,
   diagnosticScope,
+  allowAttendees = true,
 }: TagConditionEditorProps) {
   const [advanced, setAdvanced] = useState(false);
   const [pendingQuantifier, setPendingQuantifier] = useState<TagQuantifier>();
@@ -60,6 +63,7 @@ export function TagConditionEditor({
           properties={properties}
           onChange={(next) => onChange(next)}
           diagnosticScope={diagnosticScope}
+          allowAttendees={allowAttendees}
         />
         {condition ? (
           <div>
@@ -108,7 +112,7 @@ export function TagConditionEditor({
   };
 
   return (
-    <div className="grid gap-3">
+    <div className="@container grid gap-3">
       <div className="grid grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-3">
         <div className="min-w-0">
           <Select
@@ -148,19 +152,20 @@ export function TagConditionEditor({
             )}
           </Select>
         </div>
+        <div className="col-span-full min-w-0 @min-[28rem]:col-span-1">
+          <TagInput
+            label="Values"
+            ariaLabel={valuesLabel}
+            ariaDescribedBy={rowDiagnostics.length > 0 ? errorId : undefined}
+            values={condition.values}
+            suggestions={suggestions}
+            valuePrefix={condition.field === "tags" ? "#" : ""}
+            placeholder="add a value…"
+            maxSuggestions={8}
+            onChange={(values) => commit({ values })}
+          />
+        </div>
       </div>
-
-      <TagInput
-        label="Values"
-        ariaLabel={valuesLabel}
-        ariaDescribedBy={rowDiagnostics.length > 0 ? errorId : undefined}
-        values={condition.values}
-        suggestions={suggestions}
-        valuePrefix={condition.field === "tags" ? "#" : ""}
-        placeholder="add a value…"
-        maxSuggestions={8}
-        onChange={(values) => commit({ values })}
-      />
 
       {rowDiagnostics.length > 0 ? (
         <div
@@ -191,11 +196,14 @@ export function TagConditionEditor({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
+      <details className="text-[12.5px] text-mute">
+        <summary className={`cursor-pointer rounded-sm ${FOCUS_RING_NATIVE}`}>
+          Tag options
+        </summary>
         <Button size="sm" variant="ghost" onPress={() => setAdvanced(true)}>
           Edit condition {position} as an advanced condition
         </Button>
-      </div>
+      </details>
     </div>
   );
 }

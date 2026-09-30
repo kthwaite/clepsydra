@@ -463,7 +463,7 @@ describe("BaseDefinitionWorkspace", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Filter" }));
-    await chooseMenuAction(user, "Add rule", "Condition");
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
     await chooseSelectOption(user, "Field for condition 1", "ID");
     await user.type(screen.getByLabelText("Value for condition 1"), "page-1");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -1053,7 +1053,7 @@ describe("BaseDefinitionWorkspace", () => {
             name: "Everything",
             layout: "table",
             filter: {
-              all: [{ field: "kind", op: "eq", value: "book" }],
+              all: [{ field: "kind", op: "eq", value: "BOOK" }],
             },
             columns: ["title"],
             sort: [],
@@ -1069,10 +1069,14 @@ describe("BaseDefinitionWorkspace", () => {
     const name = screen.getByLabelText("View name");
     await user.clear(name);
     await user.type(name, "Everything");
-    await chooseMenuAction(user, "Add rule", "Match all group");
-    await chooseMenuAction(user, "Add to Match all", "Condition");
-    await chooseSelectOption(user, "Field for condition 1", "Kind");
-    await user.type(screen.getByLabelText("Value for condition 1"), "book");
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
+    await user.click(screen.getByLabelText("Value for condition 1"));
+    await user.click(await screen.findByRole("option", { name: "Book" }));
+    await chooseMenuAction(
+      user,
+      "Membership actions",
+      "Wrap in Match all group",
+    );
     await waitFor(() =>
       expect(previewMock).toHaveBeenLastCalledWith({
         body: {
@@ -1081,7 +1085,7 @@ describe("BaseDefinitionWorkspace", () => {
               expect.objectContaining({
                 name: "Everything",
                 filter: {
-                  all: [{ field: "kind", op: "eq", value: "book" }],
+                  all: [{ field: "kind", op: "eq", value: "BOOK" }],
                 },
               }),
             ],
@@ -1102,7 +1106,7 @@ describe("BaseDefinitionWorkspace", () => {
             expect.objectContaining({
               name: "Everything",
               filter: {
-                all: [{ field: "kind", op: "eq", value: "book" }],
+                all: [{ field: "kind", op: "eq", value: "BOOK" }],
               },
             }),
           ],
