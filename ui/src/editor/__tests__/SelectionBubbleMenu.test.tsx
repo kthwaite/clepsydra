@@ -18,6 +18,7 @@ import {
 } from "slate";
 import {
   Editable,
+  ReactEditor,
   type RenderElementProps,
   Slate,
   withReact,
@@ -875,6 +876,9 @@ describe("SelectionBubbleMenu", () => {
 
       expect(customInput).toHaveAttribute("type", "color");
       await user.click(customInput);
+      // Slate can defer blur bookkeeping while synchronizing the DOM selection.
+      // Let it observe the picker focus before simulating a native colour choice.
+      await waitFor(() => expect(ReactEditor.isFocused(editor)).toBe(false));
       fireEvent.change(customInput, { target: { value: "#123456" } });
       await waitFor(() => expect(selectedLeaf(editor)[mark]).toBe("#123456"));
       expect(editor.selection).toEqual(PROSE_SELECTION);

@@ -27,6 +27,11 @@ a wikilink, or a recent-Folio action. `/workspace` shows the active page tab;
 with no active tab it shows quick actions for search, a new Folio, today’s
 journal, the graph, and up to eight recently opened Folios.
 
+Returning through **Folio** restores the selected page tab instead of the first
+tab. After visiting the graph, it restores the most recently active page tab
+that is still open. This uses the workspace state saved in this browser, so it
+also survives a reload; closed tabs are not reopened.
+
 Opening a page that already has a tab focuses that tab rather than duplicating
 it. For a page not already open, **Settings → Navigation** controls whether the
 new page is appended or replaces the active slot. A graph tab can also occupy
