@@ -140,6 +140,75 @@ Neither journal kind can be changed to another kind once assigned, and pages in
 either stream cannot join a Project — a journal page's date, not a Project,
 organizes it.
 
+### Browse the Calendar
+
+The Calendar places pages on days. A page of kind `JOURNAL` or `AI_JOURNAL`
+sits on its journal date, which comes from its `journals/` or `ai-journals/`
+filename. A journal page with no journal date falls back to `created_at`. Every
+other page sits on the date of its `created_at`, converted to your browser's
+local time zone. A page created at 23:30 UTC can therefore sit on the next day
+if you are east of UTC.
+
+The index gives `created_at` to a page that has none when it first indexes the
+page, and writes it back to the frontmatter. So an imported page without
+`created_at` sits on the day Clepsydra first indexed it, not on the day it was
+written. Set `created_at` in the frontmatter to move it. A page that still has
+no `created_at` in the index is not shown.
+
+**In Folio.** The right rail starts with a **Calendar** section. It shows one
+month and follows the open page: it opens on the page's date and marks that
+day. Days with pages carry a coloured dot for each kind, up to four. Today has
+a ring. Use the previous and next buttons or **Today** to change month.
+
+- The kind menu (the filter button) chooses which kinds the dots and lists
+  include. Clepsydra filters on this device only and remembers the choice in
+  browser storage. A kind added later is shown by default.
+- The collapse button hides the month grid. Clepsydra remembers this too.
+- Choose a day to open a popover. It lists that day's pages, grouped by kind,
+  with journals first. Choosing a page opens it in a Folio tab and closes the
+  popover.
+- The popover ends with **Open journal**. It reads **Open journal · written**
+  when that day's journal exists, and opens it. For today, it opens the draft
+  path, as **Today's journal** does. For any other day, it creates the journal
+  page through `POST /api/vault/journal/{date}` and then opens it. If that
+  request fails, Clepsydra shows an error and opens nothing. **Open journal**
+  always means your own journal, never the AI journal.
+- When a month matches more than 5000 pages, the section caption reads
+  **5000+** and some days are incomplete.
+
+**The Calendar screen.** Open `/calendar` from **Contents** (under Organise) or
+run **Open Calendar** from the command palette. The screen has three modes:
+
+- **Month** shows one month grid. Each day has kind dots and a page count.
+- **Months** shows 3, 6, or 12 month grids side by side.
+- **Weeks** shows 1, 2, or 4 ISO weeks as rows. Each day lists up to eight page
+  titles inline; the rest show as "N more" and open through the day panel.
+
+Changing the mode resets the span to its default: 3 for Months, 2 for Weeks.
+Choose a day to open the day panel. It holds the same list and **Open journal**
+button as the rail popover. On a desktop the panel sits beside the grid; on a
+phone it opens as a bottom sheet.
+
+The filter bar filters by kind (several allowed), one tag, and one project. The
+server applies these filters, so the page count and the 5000 cap apply to the
+filtered set. When more than 5000 pages match, the screen says it shows the
+first 5000; narrow the filters to see the rest.
+
+The screen keeps its state in the URL, so you can bookmark or share a view:
+
+| Parameter | Value |
+|---|---|
+| `mode` | `month` (default), `months`, or `weeks` |
+| `date` | `YYYY-MM-DD` anchor day; default is today |
+| `span` | `3`, `6`, or `12` for Months; `1`, `2`, or `4` for Weeks |
+| `day` | `YYYY-MM-DD` day whose panel is open |
+| `kind` | kind token, such as `NOTE`; several as a comma-separated list, such as `JOURNAL,NOTE` |
+| `tag` | exact tag |
+| `project` | exact project slug |
+
+An invalid value falls back to the default. Clepsydra drops unknown kinds and
+dates that do not exist. The default mode and span are left out of the URL.
+
 ### Plan on the Task Board
 
 Open `/tasking` and choose **New task**. Set the Project, status, priority,
