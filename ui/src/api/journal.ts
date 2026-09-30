@@ -5,7 +5,11 @@ import type { components } from "#/api/schema";
 import type { PageEditorOptions } from "#/editor/usePageEditor";
 import { todayAiJournalPath, todayJournalPath } from "#/lib/journal";
 import { fetchClient } from "./client";
-import { invalidatePageContent, queryKeys } from "./keys";
+import {
+  invalidatePageContent,
+  invalidatePageStructure,
+  queryKeys,
+} from "./keys";
 
 /** Shape returned by journal detail endpoints (same as PageDetail). */
 export type JournalDetail = components["schemas"]["PageDetailResponse"];
@@ -59,6 +63,27 @@ export function useEnsureJournalToday() {
       return { page: data, created: response.status === 201 };
     },
     onSuccess: ({ page }) => invalidatePageContent(qc, page.path),
+  });
+}
+
+/**
+ * POST /journal/{date} — get-or-create the human journal for any `YYYY-MM-DD`.
+ * A new file changes folder listings too, so this invalidates page structure.
+ */
+export function useEnsureJournalForDate() {
+  const qc = useQueryClient();
+  return useMutation<EnsureJournalResult, Error, string>({
+    mutationFn: async (date: string) => {
+      const { data, error, response } = await fetchClient.POST(
+        "/api/vault/journal/{date}",
+        { params: { path: { date } } },
+      );
+      if (error)
+        throw apiError(error, `Failed to open the journal for ${date}`);
+      if (!data) throw new Error("Journal creation response was empty");
+      return { page: data, created: response.status === 201 };
+    },
+    onSuccess: () => invalidatePageStructure(qc),
   });
 }
 
