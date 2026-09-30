@@ -74,7 +74,6 @@ export function FolioCalendarSection({
 }: FolioCalendarSectionProps) {
   const today = localDateKey(new Date());
   const pageDate = pageDateOf(path, createdAt);
-  const anchorKey = `${path}\u0000${pageDate ?? ""}`;
 
   const [visibleMonth, setVisibleMonth] = useState<DateKey>(pageDate ?? today);
   const [activeDay, setActiveDay] = useState<DateKey | null>(null);
@@ -84,11 +83,12 @@ export function FolioCalendarSection({
   const bodyId = useId();
   const openJournal = useOpenJournalForDate();
 
-  // Follow the page: a new page (or its created_at arriving) re-anchors the
-  // month and closes any open day.
-  const [anchoredTo, setAnchoredTo] = useState(anchorKey);
-  if (anchoredTo !== anchorKey) {
-    setAnchoredTo(anchorKey);
+  // Follow the page: a new page, or the first date for this page (a late
+  // created_at), re-anchors the month and closes any open day. Later date
+  // changes on the same page (a refetch) keep manual paging.
+  const [anchor, setAnchor] = useState({ path, pageDate });
+  if (anchor.path !== path || (anchor.pageDate === null && pageDate !== null)) {
+    setAnchor({ path, pageDate });
     setVisibleMonth(pageDate ?? today);
     setActiveDay(null);
   }
@@ -97,7 +97,7 @@ export function FolioCalendarSection({
     const [y, m] = ymOf(visibleMonth);
     return monthGridRange(y, m);
   }, [visibleMonth]);
-  const { data } = useCalendarEntries({ range });
+  const { data } = useCalendarEntries({ range }, { enabled: !collapsed });
   const byDay = useMemo(
     () => bucketEntries(data?.entries ?? [], rangeKeys(range), hiddenKinds),
     [data, range, hiddenKinds],

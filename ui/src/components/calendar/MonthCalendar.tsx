@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -181,6 +182,35 @@ function KindDots({
   );
 }
 
+const noteCountLabel = (n: number) => (n === 1 ? "1 note" : `${n} notes`);
+
+/** Screen-reader note count. RAC's cell button carries its own aria-label,
+ *  which wins over content, and CalendarCell forwards no aria props. So this
+ *  text points the enclosing cell button at itself via aria-describedby. RAC
+ *  leaves that attribute unset for a single-date calendar with no
+ *  validation, so React never overwrites it. */
+function NoteCount({ count }: { count: number }) {
+  const id = useId();
+  const describe = useCallback(
+    (el: HTMLSpanElement | null) => {
+      const button = el?.closest<HTMLElement>('[role="button"]');
+      if (!button) return;
+      button.setAttribute("aria-describedby", id);
+      return () => {
+        if (button.getAttribute("aria-describedby") === id) {
+          button.removeAttribute("aria-describedby");
+        }
+      };
+    },
+    [id],
+  );
+  return (
+    <span ref={describe} id={id} className="sr-only">
+      {noteCountLabel(count)}
+    </span>
+  );
+}
+
 interface DayFaceProps {
   dateKey: DateKey;
   label: string;
@@ -224,6 +254,7 @@ function DayFace({
         isActive && "ring-2 ring-accent ring-inset",
       )}
     >
+      {count > 0 && <NoteCount count={count} />}
       {variant === "rail" ? (
         <>
           <span
@@ -290,7 +321,7 @@ export function MonthCalendar({
   visibleMonthRef.current = visibleMonth;
   const onChangeRef = useRef(onVisibleMonthChange);
   onChangeRef.current = onVisibleMonthChange;
-  const cellRefs = useRef(new Map<DateKey, HTMLElement>());
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const handleStart = useCallback((key: DateKey) => {
     if (key === startRef.current) return;
@@ -309,9 +340,16 @@ export function MonthCalendar({
     setEpoch((n) => n + 1);
   }, [visibleMonth]);
 
+  // Resolve the live cell at activation. In Months mode a date can show in
+  // two grids; RAC disables the outside-month copy, so the in-month face is
+  // the one pressed.
   const handleChange = (date: DateValue) => {
     const key = date.toString();
-    const cell = cellRefs.current.get(key);
+    const face =
+      rootRef.current?.querySelector(
+        `[data-date="${key}"]:not([data-outside])`,
+      ) ?? rootRef.current?.querySelector(`[data-date="${key}"]`);
+    const cell = face?.closest<HTMLElement>("td");
     if (cell) onDayActivate(key, cell);
   };
 
@@ -320,6 +358,7 @@ export function MonthCalendar({
 
   return (
     <div
+      ref={rootRef}
       className={cn(
         "flex min-w-0 flex-col",
         variant === "rail" ? "gap-2" : "gap-4",
@@ -405,9 +444,6 @@ export function MonthCalendar({
                     return (
                       <CalendarCell
                         date={date}
-                        ref={(el) => {
-                          if (el) cellRefs.current.set(key, el);
-                        }}
                         className={cn(
                           "relative block w-full cursor-pointer rounded-[12px] data-[disabled]:cursor-default data-[hovered]:bg-sink/60",
                           rowClass,

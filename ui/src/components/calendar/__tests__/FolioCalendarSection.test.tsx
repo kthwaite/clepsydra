@@ -231,6 +231,68 @@ describe("FolioCalendarSection", () => {
     ).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("does not fetch while collapsed, and fetches once expanded", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(COLLAPSED_KEY, "1");
+    render(<FolioCalendarSection {...NOTE_PAGE} />);
+    expect(mockEntries.mock.calls.length).toBeGreaterThan(0);
+    for (const [, flags] of mockEntries.mock.calls) {
+      expect(flags).toEqual({ enabled: false });
+    }
+    await user.click(screen.getByRole("button", { name: "Expand calendar" }));
+    expect(mockEntries.mock.lastCall?.[1]).toEqual({ enabled: true });
+  });
+
+  it("keeps manual paging and the open day across same-page rerenders", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<FolioCalendarSection {...NOTE_PAGE} />);
+    await user.click(screen.getByRole("button", { name: "Previous month" }));
+    expect(monthHeading()).toHaveTextContent("August 2026");
+    await user.click(screen.getByRole("button", { name: "Next month" }));
+    await user.click(dayButton(15));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+
+    rerender(<FolioCalendarSection {...NOTE_PAGE} />);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+
+    // A refetch that moves created_at to another day is not a new page.
+    rerender(
+      <FolioCalendarSection {...NOTE_PAGE} createdAt="2026-07-02T09:00:00Z" />,
+    );
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    // The open popover hides the rail from the accessibility tree.
+    expect(
+      screen.getByRole("heading", { level: 3, hidden: true }),
+    ).toHaveTextContent("September 2026");
+  });
+
+  it("keeps a paged month when created_at changes on the same page", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<FolioCalendarSection {...NOTE_PAGE} />);
+    await user.click(screen.getByRole("button", { name: "Next month" }));
+    expect(monthHeading()).toHaveTextContent("October 2026");
+    rerender(
+      <FolioCalendarSection {...NOTE_PAGE} createdAt="2026-07-02T09:00:00Z" />,
+    );
+    expect(monthHeading()).toHaveTextContent("October 2026");
+  });
+
+  it("anchors to created_at when it arrives late for the same page", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 5, 12, 10));
+    const { rerender } = render(
+      <FolioCalendarSection {...NOTE_PAGE} createdAt={null} />,
+    );
+    expect(monthHeading()).toHaveTextContent("June 2026");
+    rerender(<FolioCalendarSection {...NOTE_PAGE} />);
+    expect(monthHeading()).toHaveTextContent("September 2026");
+    // Once anchored, later created_at changes leave the month alone.
+    rerender(
+      <FolioCalendarSection {...NOTE_PAGE} createdAt="2026-03-02T09:00:00Z" />,
+    );
+    expect(monthHeading()).toHaveTextContent("September 2026");
+  });
+
   it("shows 5000+ when the response is truncated", () => {
     respond(sept, true);
     render(<FolioCalendarSection {...NOTE_PAGE} />);

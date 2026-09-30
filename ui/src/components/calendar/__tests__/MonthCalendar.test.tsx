@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -252,6 +252,112 @@ describe("MonthCalendar", () => {
     expect(
       screen.getByRole("heading", { name: /^October\s–\sDecember 2026$/ }),
     ).toBeTruthy();
+    const firstWeeks = container
+      .querySelector("[data-week-column]")
+      ?.querySelectorAll("[data-week-number]");
+    expect(firstWeeks?.[0]?.textContent).toBe("40");
+  });
+
+  it("describes each day's note count to assistive tech", () => {
+    renderCalendar({
+      byDay: new Map<DateKey, readonly CalendarEntryLike[]>([
+        ["2026-09-15", busyDay],
+        ["2026-09-16", [entry("x", "NOTE")]],
+      ]),
+    });
+    expect(dayButton(15)).toHaveAccessibleDescription("6 notes");
+    expect(dayButton(16)).toHaveAccessibleDescription("1 note");
+    expect(dayButton(14)).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("page variant describes the note count too", () => {
+    renderCalendar({ variant: "page" });
+    expect(dayButton(15)).toHaveAccessibleDescription("6 notes");
+  });
+
+  it("drops the description when a day's notes go away", () => {
+    const { rerender } = renderCalendar();
+    expect(dayButton(15)).toHaveAccessibleDescription("6 notes");
+    rerender(
+      <MonthCalendar
+        visibleMonth="2026-09-01"
+        onVisibleMonthChange={() => {}}
+        byDay={new Map()}
+        today="2026-09-30"
+        onDayActivate={() => {}}
+        variant="rail"
+      />,
+    );
+    expect(dayButton(15)).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("months={3} passes the in-month cell of a date shown in two grids", async () => {
+    const user = userEvent.setup();
+    const { onDayActivate, rerender } = renderCalendar({
+      months: 3,
+      variant: "page",
+    });
+    // A re-render re-runs every cell's ref; the passed cell must still be
+    // October 1 in October's grid, not the disabled copy trailing September.
+    rerender(
+      <MonthCalendar
+        visibleMonth="2026-09-01"
+        onVisibleMonthChange={() => {}}
+        byDay={new Map(byDay)}
+        today="2026-09-30"
+        onDayActivate={onDayActivate}
+        variant="page"
+        months={3}
+      />,
+    );
+    const grids = screen.getAllByRole("grid");
+    const trailing = within(grids[0]).getByRole("button", {
+      name: /October 1, 2026/,
+    });
+    expect(trailing).toHaveAttribute("aria-disabled", "true");
+    const inOctGrid = within(grids[1]).getByRole("button", {
+      name: /October 1, 2026/,
+    });
+    await user.click(inOctGrid);
+    const [key, cell] = onDayActivate.mock.lastCall ?? [];
+    expect(key).toBe("2026-10-01");
+    expect(cell.isConnected).toBe(true);
+    expect(cell.contains(inOctGrid)).toBe(true);
+  });
+
+  it("months={3} passes a live cell after paging", async () => {
+    const user = userEvent.setup();
+    const onDayActivate = vi.fn();
+    render(
+      <Controlled months={3} variant="page" onDayActivate={onDayActivate} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Next month" }));
+    expect(
+      screen.getByRole("heading", { name: /^October\s–\sDecember 2026$/ }),
+    ).toBeTruthy();
+    const [first] = screen.getAllByRole("grid");
+    const oct1 = within(first).getByRole("button", { name: /October 1, 2026/ });
+    await user.click(oct1);
+    const [key, cell] = onDayActivate.mock.lastCall ?? [];
+    expect(key).toBe("2026-10-01");
+    expect(cell.isConnected).toBe(true);
+    expect(cell.contains(oct1)).toBe(true);
+  });
+
+  it("months={3} mounts with visibleMonth in the first grid", () => {
+    const { container } = renderCalendar({
+      months: 3,
+      variant: "page",
+      visibleMonth: "2026-10-01",
+    });
+    expect(
+      screen.getByRole("heading", { name: /^October\s–\sDecember 2026$/ }),
+    ).toBeTruthy();
+    const [first] = screen.getAllByRole("grid");
+    const oct15 = within(first).getByRole("button", {
+      name: /October 15, 2026/,
+    });
+    expect(oct15).toBeTruthy();
     const firstWeeks = container
       .querySelector("[data-week-column]")
       ?.querySelectorAll("[data-week-number]");
