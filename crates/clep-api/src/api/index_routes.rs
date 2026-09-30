@@ -572,6 +572,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/preview-mutation", post(preview_mutation))
         .route("/graph", get(graph))
         .route("/content-index", get(content_index))
+        .route("/calendar", get(super::calendar::calendar_entries))
         .route("/search", get(search))
 }
 

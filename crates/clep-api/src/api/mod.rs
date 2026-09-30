@@ -10,6 +10,7 @@ pub mod bases;
 pub mod bcl;
 pub mod blocks;
 pub mod board;
+pub mod calendar;
 pub mod conversations;
 pub mod deeplink;
 pub mod encryption;

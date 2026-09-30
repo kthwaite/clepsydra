@@ -14,6 +14,8 @@ const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/journal/range", "get"),
     ("/api/vault/journal/recent", "get"),
     ("/api/vault/journal/{date}", "get"),
+    ("/api/vault/journal/{date}", "post"),
+    ("/api/vault/index/calendar", "get"),
     ("/api/vault/ai-journal/today", "get"),
     ("/api/vault/ai-journal/today", "post"),
     ("/api/vault/ai-journal/today/capture", "post"),

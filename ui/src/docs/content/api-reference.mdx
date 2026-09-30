@@ -301,6 +301,8 @@ List folder tree. Responses: `200` All non-hidden folder paths; `500` Internal s
 List ambiguous canonical names. Responses: `200` Ambiguous canonical names; `500` Internal server error.
 ### `GET /api/vault/index/backlinks/{path}`
 Get backlinks. Responses: `200` Backlinks; `400` Invalid path; `500` Internal server error.
+### `GET /api/vault/index/calendar`
+Pages placed on calendar days in a window: journals by `journal_date`, everything else by `created_at`. `from`/`to` are RFC3339 with offset (`to` exclusive); `kind` is comma-separated. Capped at 5000 with `truncated`. Responses: `200` Calendar entries; `400` Invalid window or kind; `500` Internal server error.
 ### `GET /api/vault/index/content-index`
 Get content index. Responses: `200` Content index; `500` Internal server error.
 ### `POST /api/vault/index/create-from-link`
@@ -338,6 +340,8 @@ List warnings. Responses: `200` Index warnings; `500` Internal server error.
 
 ### `GET /api/vault/journal/{date}`
 Get journal by date. Responses: `200` Journal page; `400` Invalid date; `404` Journal not found; `500` Internal server error.
+### `POST /api/vault/journal/{date}`
+Ensure the journal for a date exists (get-or-create, any date). Responses: `200` Existing journal; `201` Created journal; `400` Invalid date; `500` Internal server error.
 ### `GET /api/vault/journal/range`
 Get date range. Responses: `200` Journals in date range; `400` Invalid date range; `500` Internal server error.
 ### `GET /api/vault/journal/recent`

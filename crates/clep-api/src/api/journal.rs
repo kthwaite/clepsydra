@@ -95,7 +95,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/today/capture", post(capture_today))
         .route("/range", get(get_range))
         .route("/recent", get(get_recent))
-        .route("/{date}", get(get_by_date))
+        .route("/{date}", get(get_by_date).post(ensure_by_date))
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +357,44 @@ pub async fn get_today(
 )]
 pub async fn ensure_today(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
     let date = state.clock.now().format("%Y-%m-%d").to_string();
+    let (vault_path, created) = ensure_journal(&state, HUMAN_JOURNAL, &date).await?;
+
+    let abs_path = state.vault.resolve(&vault_path);
+    let page = Page::from_file(&abs_path, vault_path)
+        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
+
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, Json(page_detail(page))).into_response())
+}
+
+/// POST /journal/:date — create the journal for any date if missing
+/// (get-or-create).
+///
+/// Returns 201 with the page when it was created, 200 when it already
+/// existed, 400 when the date is not `YYYY-MM-DD`.
+#[utoipa::path(
+    post,
+    path = "/journal/{date}",
+    context_path = "/api/vault",
+    tag = "Journal",
+    params(("date" = String, Path, description = "Journal date in YYYY-MM-DD format")),
+    responses(
+        (status = 200, description = "Existing journal", body = crate::api::pages::PageDetailResponse),
+        (status = 201, description = "Created journal", body = crate::api::pages::PageDetailResponse),
+        (status = 400, description = "Invalid date", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn ensure_by_date(
+    State(state): State<Arc<AppState>>,
+    Path(date): Path<String>,
+) -> Result<Response, ApiError> {
+    // Canonicalise so the title and filename are always zero-padded.
+    let date = parse_date(&date)?.format("%Y-%m-%d").to_string();
     let (vault_path, created) = ensure_journal(&state, HUMAN_JOURNAL, &date).await?;
 
     let abs_path = state.vault.resolve(&vault_path);

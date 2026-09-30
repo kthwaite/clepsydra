@@ -658,3 +658,69 @@ async fn carried_forward_excludes_ai_journal_todos() {
         "carried_forward must exclude ai-journal todos, got: {carried:?}"
     );
 }
+
+#[tokio::test]
+async fn ensure_by_date_creates_a_journal_for_a_past_date() {
+    let (server, _tmp) = setup_server();
+
+    let response = server.post("/api/vault/journal/2042-05-01").await;
+    response.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["meta"]["title"], "2042-05-01");
+    let path = body["path"].as_str().unwrap().to_string();
+    assert!(path.starts_with("journals/"), "path {path}");
+
+    let fetched = server.get("/api/vault/journal/2042-05-01").await;
+    fetched.assert_status_ok();
+    let fetched: serde_json::Value = fetched.json();
+    assert_eq!(fetched["path"], path.as_str());
+}
+
+#[tokio::test]
+async fn ensure_by_date_returns_existing_journal_with_200() {
+    let (server, _tmp) = setup_server_with_files(|root| {
+        std::fs::create_dir_all(root.join("journals")).unwrap();
+        std::fs::write(
+            root.join("journals/2042-05-02.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000201\ntitle: 2042-05-02\ntags:\n  - journal\n---\n",
+        )
+        .unwrap();
+    });
+
+    let response = server.post("/api/vault/journal/2042-05-02").await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["path"], "journals/2042-05-02.md");
+}
+
+#[tokio::test]
+async fn ensure_by_date_rejects_invalid_date() {
+    let (server, _tmp) = setup_server();
+    server
+        .post("/api/vault/journal/2042-13-40")
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn ensure_by_date_is_idempotent_under_concurrency() {
+    let (server, _tmp) = setup_server();
+
+    let (first, second) = tokio::join!(
+        server.post("/api/vault/journal/2042-05-03"),
+        server.post("/api/vault/journal/2042-05-03"),
+    );
+    let statuses = [first.status_code(), second.status_code()];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CREATED)
+            .count(),
+        1,
+        "statuses {statuses:?}"
+    );
+    assert!(statuses.contains(&StatusCode::OK), "statuses {statuses:?}");
+    let first: serde_json::Value = first.json();
+    let second: serde_json::Value = second.json();
+    assert_eq!(first["path"], second["path"]);
+}
