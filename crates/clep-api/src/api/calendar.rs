@@ -15,7 +15,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
-use crate::vault::index::{CalendarPage, CalendarQuery};
+use crate::vault::index::{BirthdayEntry, CalendarPage, CalendarQuery};
 use crate::vault::kind::Kind;
 
 /// Most entries one response carries; `truncated` flags the rest.
@@ -51,11 +51,40 @@ pub struct CalendarEntry {
     pub journal_date: Option<String>,
 }
 
+/// A PERSON page's birthday, recurring yearly on `month`/`day`. The client
+/// expands occurrences into its window.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CalendarBirthday {
+    pub path: String,
+    pub title: Option<String>,
+    /// Birth year; `null` when unknown.
+    pub year: Option<i32>,
+    /// 1-12.
+    pub month: u32,
+    /// 1-31. Feb 29 is possible; the client moves it to Feb 28 in non-leap years.
+    pub day: u32,
+}
+
+impl From<BirthdayEntry> for CalendarBirthday {
+    fn from(entry: BirthdayEntry) -> Self {
+        Self {
+            path: entry.path,
+            title: entry.title,
+            year: entry.year,
+            month: entry.month,
+            day: entry.day,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct CalendarResponse {
     pub entries: Vec<CalendarEntry>,
     /// True when more pages matched than `entries` carries.
     pub truncated: bool,
+    /// PERSON birthdays, not windowed and not counted against the entry cap.
+    /// Empty when the kind filter excludes PERSON; tag/project filters apply.
+    pub birthdays: Vec<CalendarBirthday>,
 }
 
 impl From<CalendarPage> for CalendarResponse {
@@ -73,6 +102,7 @@ impl From<CalendarPage> for CalendarResponse {
                 })
                 .collect(),
             truncated: page.truncated,
+            birthdays: Vec::new(),
         }
     }
 }
@@ -97,6 +127,12 @@ fn parse_kinds(kind: Option<&str>) -> Result<Vec<String>, ApiError> {
         }
     }
     Ok(kinds)
+}
+
+/// Birthdays belong to PERSON pages: shown for no kind filter or one that
+/// includes PERSON.
+fn includes_person(kinds: &[String]) -> bool {
+    kinds.is_empty() || kinds.iter().any(|kind| kind == Kind::Person.as_str())
 }
 
 fn non_blank(value: Option<String>) -> Option<String> {
@@ -136,6 +172,9 @@ impl CalendarQueryParams {
 /// returned when it lies in `[date(from), date(to)]` (each date in its own
 /// offset; padded on purpose, the client trims). Every other page is placed
 /// on `created_at` and is returned when `from <= created_at < to`.
+///
+/// `birthdays` lists PERSON pages with a valid frontmatter `birthday`,
+/// whatever the window, when `kind` is omitted or includes PERSON.
 #[utoipa::path(
     get,
     path = "/index/calendar",
@@ -153,12 +192,25 @@ pub async fn calendar_entries(
     Query(params): Query<CalendarQueryParams>,
 ) -> Result<Json<CalendarResponse>, ApiError> {
     let query = params.into_query()?;
+    let wants_birthdays = includes_person(&query.kinds);
+    let (tag, project) = (query.tag.clone(), query.project.clone());
     let page = state
         .index
         .calendar_entries(query)
         .await
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    Ok(Json(page.into()))
+    let mut response = CalendarResponse::from(page);
+    if wants_birthdays {
+        response.birthdays = state
+            .index
+            .calendar_birthdays(tag, project)
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?
+            .into_iter()
+            .map(CalendarBirthday::from)
+            .collect();
+    }
+    Ok(Json(response))
 }
 
 #[cfg(test)]
@@ -194,5 +246,12 @@ mod tests {
             vec!["NOTE".to_string(), "RECIPE".to_string()]
         );
         assert!(parse_kinds(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn birthdays_follow_person_in_kind_filter() {
+        assert!(includes_person(&[]));
+        assert!(includes_person(&parse_kinds(Some("note,person")).unwrap()));
+        assert!(!includes_person(&parse_kinds(Some("NOTE")).unwrap()));
     }
 }

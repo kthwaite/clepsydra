@@ -1,8 +1,8 @@
 use std::sync::mpsc;
 
 use crate::index::{
-    BacklinkWithContext, BuildStats, CalendarPage, CalendarQuery, IndexError, SearchResult,
-    SimilarRow, UnlinkedMention, VaultIndex,
+    BacklinkWithContext, BirthdayEntry, BuildStats, CalendarPage, CalendarQuery, IndexError,
+    SearchResult, SimilarRow, UnlinkedMention, VaultIndex,
 };
 use crate::index_policy::{self, IndexMutation, IndexPolicyError};
 use crate::sync::{ChangeEvent, SyncEngine, SyncStats};
@@ -175,6 +175,18 @@ impl IndexHandle {
     pub async fn calendar_entries(&self, q: CalendarQuery) -> Result<CalendarPage, IndexError> {
         self.with_index(move |index, _vault| index.calendar_entries(&q))
             .await?
+    }
+
+    /// PERSON birthdays; see [`VaultIndex::calendar_birthdays`].
+    pub async fn calendar_birthdays(
+        &self,
+        tag: Option<String>,
+        project: Option<String>,
+    ) -> Result<Vec<BirthdayEntry>, IndexError> {
+        self.with_index(move |index, _vault| {
+            index.calendar_birthdays(tag.as_deref(), project.as_deref())
+        })
+        .await?
     }
 
     /// Find pages similar to the target by tag overlap (Jaccard).

@@ -1073,6 +1073,9 @@ export interface paths {
      *     returned when it lies in `[date(from), date(to)]` (each date in its own
      *     offset; padded on purpose, the client trims). Every other page is placed
      *     on `created_at` and is returned when `from <= created_at < to`.
+     *
+     *     `birthdays` lists PERSON pages with a valid frontmatter `birthday`,
+     *     whatever the window, when `kind` is omitted or includes PERSON.
      */
     get: operations["calendar_entries"];
     put?: never;
@@ -2346,6 +2349,29 @@ export interface components {
       /** @description Paths assigned successfully without relocation. */
       unchanged: string[];
     };
+    /**
+     * @description A PERSON page's birthday, recurring yearly on `month`/`day`. The client
+     *     expands occurrences into its window.
+     */
+    CalendarBirthday: {
+      /**
+       * Format: int32
+       * @description 1-31. Feb 29 is possible; the client moves it to Feb 28 in non-leap years.
+       */
+      day: number;
+      /**
+       * Format: int32
+       * @description 1-12.
+       */
+      month: number;
+      path: string;
+      title?: string | null;
+      /**
+       * Format: int32
+       * @description Birth year; `null` when unknown.
+       */
+      year?: number | null;
+    };
     /** @description One page placed in the window. */
     CalendarEntry: {
       /** @description RFC3339 UTC creation time; the placement date for non-journal pages. */
@@ -2357,6 +2383,11 @@ export interface components {
       title?: string | null;
     };
     CalendarResponse: {
+      /**
+       * @description PERSON birthdays, not windowed and not counted against the entry cap.
+       *     Empty when the kind filter excludes PERSON; tag/project filters apply.
+       */
+      birthdays: components["schemas"]["CalendarBirthday"][];
       entries: components["schemas"]["CalendarEntry"][];
       /** @description True when more pages matched than `entries` carries. */
       truncated: boolean;

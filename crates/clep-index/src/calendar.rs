@@ -9,6 +9,7 @@ use rusqlite::params_from_iter;
 use rusqlite::types::Value;
 
 use crate::index::{IndexError, VaultIndex};
+use clep_vault::birthday;
 use clep_vault::kind::Kind;
 
 /// A calendar window and its filters.
@@ -46,7 +47,82 @@ pub struct CalendarPage {
     pub truncated: bool,
 }
 
+/// A PERSON page's birthday. `year` is `None` when the year is unknown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BirthdayEntry {
+    pub path: String,
+    pub title: Option<String>,
+    pub year: Option<i32>,
+    pub month: u32,
+    pub day: u32,
+}
+
 impl VaultIndex {
+    /// PERSON pages whose frontmatter `birthday` parses (see
+    /// [`clep_vault::birthday::parse`]); invalid values are skipped. Ordered
+    /// by month, day, then title (case-insensitive). Not windowed: the client
+    /// expands yearly occurrences.
+    pub fn calendar_birthdays(
+        &self,
+        tag: Option<&str>,
+        project: Option<&str>,
+    ) -> Result<Vec<BirthdayEntry>, IndexError> {
+        let mut conditions = vec![
+            "p.kind = ?".to_string(),
+            "json_type(p.meta_json, '$.birthday') = 'text'".to_string(),
+        ];
+        let mut values = vec![Value::Text(Kind::Person.as_str().to_string())];
+        if let Some(project) = project {
+            conditions.push("p.project = ?".to_string());
+            values.push(Value::Text(project.to_string()));
+        }
+        if let Some(tag) = tag {
+            conditions
+                .push("EXISTS (SELECT 1 FROM tags t WHERE t.page_id = p.id AND t.tag = ?)".into());
+            values.push(Value::Text(tag.to_string()));
+        }
+        let sql = format!(
+            "SELECT p.path, p.title, json_extract(p.meta_json, '$.birthday') \
+             FROM pages p WHERE {}",
+            conditions.join(" AND ")
+        );
+
+        let conn = self.connection();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_from_iter(values), |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut entries: Vec<BirthdayEntry> = rows
+            .into_iter()
+            .filter_map(|(path, title, raw)| {
+                let parsed = birthday::parse(&serde_json::Value::String(raw))?;
+                Some(BirthdayEntry {
+                    path,
+                    title,
+                    year: parsed.year,
+                    month: parsed.month,
+                    day: parsed.day,
+                })
+            })
+            .collect();
+        entries.sort_by_cached_key(|e| {
+            (
+                e.month,
+                e.day,
+                e.title.as_deref().unwrap_or_default().to_lowercase(),
+                e.path.to_lowercase(),
+            )
+        });
+        Ok(entries)
+    }
+
     /// Pages placed inside the window, at most `q.limit`.
     ///
     /// Placement rule: a `JOURNAL` or `AI_JOURNAL` page with a
