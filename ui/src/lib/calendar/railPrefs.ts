@@ -6,6 +6,7 @@ import { KINDS, type Kind } from "#/lib/kind";
 
 export const HIDDEN_KINDS_KEY = "clepsydra.calendar.rail.hiddenKinds";
 export const COLLAPSED_KEY = "clepsydra.calendar.rail.collapsed";
+export const HIDE_BIRTHDAYS_KEY = "clepsydra.calendar.rail.hideBirthdays";
 
 const KIND_SET: ReadonlySet<string> = new Set(KINDS);
 
@@ -45,6 +46,22 @@ export function readCollapsed(): boolean {
 export function writeCollapsed(collapsed: boolean): void {
   try {
     window.localStorage.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    // storage unavailable — the choice lasts for this visit only
+  }
+}
+
+export function readHideBirthdays(): boolean {
+  try {
+    return window.localStorage.getItem(HIDE_BIRTHDAYS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writeHideBirthdays(hide: boolean): void {
+  try {
+    window.localStorage.setItem(HIDE_BIRTHDAYS_KEY, hide ? "1" : "0");
   } catch {
     // storage unavailable — the choice lasts for this visit only
   }

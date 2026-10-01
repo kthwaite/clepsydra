@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   COLLAPSED_KEY,
   HIDDEN_KINDS_KEY,
+  HIDE_BIRTHDAYS_KEY,
   readCollapsed,
   readHiddenKinds,
+  readHideBirthdays,
   writeCollapsed,
   writeHiddenKinds,
+  writeHideBirthdays,
 } from "#/lib/calendar/railPrefs";
 
 describe("railPrefs", () => {
@@ -29,6 +32,16 @@ describe("railPrefs", () => {
     expect(readCollapsed()).toBe(true);
     writeCollapsed(false);
     expect(readCollapsed()).toBe(false);
+  });
+
+  it("shows birthdays by default and round-trips hiding them", () => {
+    expect(HIDE_BIRTHDAYS_KEY).toBe("clepsydra.calendar.rail.hideBirthdays");
+    expect(readHideBirthdays()).toBe(false);
+    writeHideBirthdays(true);
+    expect(window.localStorage.getItem(HIDE_BIRTHDAYS_KEY)).toBe("1");
+    expect(readHideBirthdays()).toBe(true);
+    writeHideBirthdays(false);
+    expect(readHideBirthdays()).toBe(false);
   });
 
   it("reads corrupt JSON as an empty set", () => {
@@ -55,6 +68,8 @@ describe("railPrefs", () => {
     });
     expect(readHiddenKinds()).toEqual(new Set());
     expect(readCollapsed()).toBe(false);
+    expect(readHideBirthdays()).toBe(false);
+    expect(() => writeHideBirthdays(true)).not.toThrow();
     expect(() => writeHiddenKinds(new Set(["NOTE"]))).not.toThrow();
     expect(() => writeCollapsed(true)).not.toThrow();
   });

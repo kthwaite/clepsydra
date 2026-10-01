@@ -6,6 +6,7 @@ import {
   MonthCalendar,
   type MonthCalendarProps,
 } from "#/components/calendar/MonthCalendar";
+import type { BirthdayOccurrence } from "#/lib/birthday";
 import type { CalendarEntryLike } from "#/lib/calendar/bucket";
 import type { DateKey } from "#/lib/calendar/dates";
 import type { Kind } from "#/lib/kind";
@@ -47,8 +48,11 @@ function renderCalendar(props: Partial<MonthCalendarProps> = {}) {
 }
 
 /** Parent that follows the component's month requests, like the rail does. */
-function Controlled(props: Partial<MonthCalendarProps>) {
-  const [month, setMonth] = useState<DateKey>("2026-09-01");
+function Controlled({
+  initialMonth = "2026-09-01",
+  ...props
+}: Partial<MonthCalendarProps> & { initialMonth?: DateKey }) {
+  const [month, setMonth] = useState<DateKey>(initialMonth);
   return (
     <MonthCalendar
       visibleMonth={month}
@@ -338,6 +342,71 @@ describe("MonthCalendar", () => {
     expect(dayButton(15)).not.toHaveAttribute("aria-describedby");
   });
 
+  describe("birthdays", () => {
+    const born = (path: string, date: DateKey): BirthdayOccurrence => ({
+      path,
+      title: path,
+      date,
+      age: 40,
+    });
+    const birthdaysByDay = new Map<DateKey, readonly BirthdayOccurrence[]>([
+      ["2026-09-15", [born("ada", "2026-09-15")]],
+      ["2026-09-20", [born("bob", "2026-09-20"), born("cy", "2026-09-20")]],
+      ["2026-10-02", [born("di", "2026-10-02")]],
+    ]);
+    const marker = (container: HTMLElement, key: DateKey) =>
+      day(container, key).querySelector("[data-birthday-marker]");
+
+    it.each(["rail", "compact", "page"] as const)(
+      "%s variant shows a hidden cake marker beside the kind dots",
+      (variant) => {
+        const { container } = renderCalendar({ variant, birthdaysByDay });
+        const cake = marker(container, "2026-09-15");
+        expect(cake).not.toBeNull();
+        expect(cake?.tagName.toLowerCase()).toBe("svg");
+        expect(cake?.closest("[aria-hidden='true']")).not.toBeNull();
+        // Beside the dots: same marker row.
+        expect(
+          cake?.parentElement?.querySelector("[data-kind-dot]"),
+        ).not.toBeNull();
+        expect(marker(container, "2026-09-14")).toBeNull();
+      },
+    );
+
+    it("shows one marker however many birthdays fall on a day", () => {
+      const { container } = renderCalendar({ birthdaysByDay });
+      expect(
+        day(container, "2026-09-20").querySelectorAll("[data-birthday-marker]"),
+      ).toHaveLength(1);
+    });
+
+    it("dims the marker on outside-month days", () => {
+      const { container } = renderCalendar({ birthdaysByDay });
+      const outside = marker(container, "2026-10-02");
+      expect(outside?.closest(".opacity-50")).not.toBeNull();
+      expect(
+        marker(container, "2026-09-20")?.closest(".opacity-50"),
+      ).toBeNull();
+    });
+
+    it("folds birthdays into the day's description", () => {
+      renderCalendar({ birthdaysByDay });
+      expect(dayButton(15)).toHaveAccessibleDescription("6 notes, 1 birthday");
+      expect(dayButton(20)).toHaveAccessibleDescription("2 birthdays");
+      expect(dayButton(14)).not.toHaveAttribute("aria-describedby");
+    });
+
+    it("page variant counts notes only", () => {
+      const { container } = renderCalendar({
+        variant: "page",
+        birthdaysByDay,
+      });
+      expect(
+        day(container, "2026-09-20").querySelector("[data-day-count]"),
+      ).toBeNull();
+    });
+  });
+
   it("months={3} passes the in-month cell of a date shown in two grids", async () => {
     const user = userEvent.setup();
     const { onDayActivate, rerender } = renderCalendar({
@@ -409,6 +478,159 @@ describe("MonthCalendar", () => {
       .querySelector("[data-week-column]")
       ?.querySelectorAll("[data-week-number]");
     expect(firstWeeks?.[0]?.textContent).toBe("40");
+  });
+
+  describe("overflow days", () => {
+    const mayProps = {
+      byDay,
+      today: "2026-09-30",
+      variant: "page" as const,
+    };
+
+    it("single month: clicking a leading day jumps to its month and focuses it", async () => {
+      const user = userEvent.setup();
+      const onVisibleMonthChange = vi.fn();
+      const onDayActivate = vi.fn();
+      const { container, rerender } = render(
+        <MonthCalendar
+          visibleMonth="2026-05-01"
+          onVisibleMonthChange={onVisibleMonthChange}
+          onDayActivate={onDayActivate}
+          {...mayProps}
+        />,
+      );
+      await user.click(day(container, "2026-04-27"));
+      expect(onVisibleMonthChange).toHaveBeenCalledTimes(1);
+      const [requested] = onVisibleMonthChange.mock.calls[0];
+      expect(requested.slice(0, 7)).toBe("2026-04");
+      rerender(
+        <MonthCalendar
+          visibleMonth={requested}
+          onVisibleMonthChange={onVisibleMonthChange}
+          onDayActivate={onDayActivate}
+          {...mayProps}
+        />,
+      );
+      expect(screen.getByRole("heading", { name: "April 2026" })).toBeTruthy();
+      expect(document.activeElement?.getAttribute("aria-label")).toMatch(
+        /April 27, 2026/,
+      );
+      expect(onDayActivate).not.toHaveBeenCalled();
+    });
+
+    it("single month: clicking a trailing day jumps to its month and focuses it", async () => {
+      const user = userEvent.setup();
+      const onDayActivate = vi.fn();
+      const { container } = render(
+        <Controlled onDayActivate={onDayActivate} {...mayProps} />,
+      );
+      // September 2026's grid trails into October 1-4.
+      await user.click(day(container, "2026-10-02"));
+      expect(
+        screen.getByRole("heading", { name: "October 2026" }),
+      ).toBeTruthy();
+      expect(document.activeElement?.getAttribute("aria-label")).toMatch(
+        /October 2, 2026/,
+      );
+      expect(onDayActivate).not.toHaveBeenCalled();
+    });
+
+    it("outside days that navigate show a pointer, not the disabled cursor", () => {
+      const { container } = renderCalendar({ visibleMonth: "2026-05-01" });
+      const cell = day(container, "2026-04-27").closest<HTMLElement>(
+        '[role="button"]',
+      );
+      expect(cell?.className).toMatch(/\bcursor-pointer\b/);
+      expect(cell?.className).not.toMatch(/data-\[disabled\]:cursor-default/);
+    });
+
+    it("prev/next remounts do not steal focus", async () => {
+      const user = userEvent.setup();
+      render(<Controlled />);
+      const next = screen.getByRole("button", { name: "Next month" });
+      await user.click(next);
+      expect(
+        screen.getByRole("heading", { name: "October 2026" }),
+      ).toBeTruthy();
+      expect(document.activeElement).toBe(next);
+    });
+
+    it("a parent month change after an overflow jump does not re-focus a day", async () => {
+      const user = userEvent.setup();
+      const { container } = render(<Controlled />);
+      await user.click(day(container, "2026-08-31"));
+      expect(screen.getByRole("heading", { name: "August 2026" })).toBeTruthy();
+      const next = screen.getByRole("button", { name: "Next month" });
+      await user.click(next);
+      expect(
+        screen.getByRole("heading", { name: "September 2026" }),
+      ).toBeTruthy();
+      expect(document.activeElement).toBe(next);
+    });
+
+    it("months={3}: an outside copy of a visible date activates the in-month cell", async () => {
+      const user = userEvent.setup();
+      const onDayActivate = vi.fn();
+      const onVisibleMonthChange = vi.fn();
+      render(
+        <MonthCalendar
+          visibleMonth="2026-09-01"
+          onVisibleMonthChange={onVisibleMonthChange}
+          onDayActivate={onDayActivate}
+          months={3}
+          {...mayProps}
+        />,
+      );
+      const grids = screen.getAllByRole("grid");
+      const trailing = within(grids[0]).getByRole("button", {
+        name: /October 1, 2026/,
+      });
+      await user.click(trailing);
+      expect(onVisibleMonthChange).not.toHaveBeenCalled();
+      const [key, cell] = onDayActivate.mock.lastCall ?? [];
+      expect(key).toBe("2026-10-01");
+      const inOctGrid = within(grids[1]).getByRole("button", {
+        name: /October 1, 2026/,
+      });
+      expect(cell.contains(inOctGrid)).toBe(true);
+    });
+
+    it("months={3}: a date past the last grid shifts the view by one month and focuses it", async () => {
+      const user = userEvent.setup();
+      const onDayActivate = vi.fn();
+      render(
+        <Controlled months={3} onDayActivate={onDayActivate} {...mayProps} />,
+      );
+      // September–November 2026; November's grid trails into December.
+      const grids = screen.getAllByRole("grid");
+      const dec1 = within(grids[2]).getByRole("button", {
+        name: /December 1, 2026/,
+      });
+      await user.click(dec1);
+      expect(
+        screen.getByRole("heading", { name: /^October\s–\sDecember 2026$/ }),
+      ).toBeTruthy();
+      const active = document.activeElement as HTMLElement | null;
+      expect(active?.getAttribute("aria-label")).toMatch(/December 1, 2026/);
+      expect(
+        within(screen.getAllByRole("grid")[2]).getByRole("button", {
+          name: /December 1, 2026/,
+        }),
+      ).toBe(active);
+      expect(onDayActivate).not.toHaveBeenCalled();
+    });
+
+    it("months={3}: a date before the first grid shifts the view back by one month", async () => {
+      const user = userEvent.setup();
+      const { container } = render(<Controlled months={3} {...mayProps} />);
+      await user.click(day(container, "2026-08-31"));
+      expect(
+        screen.getByRole("heading", { name: /^August\s–\sOctober 2026$/ }),
+      ).toBeTruthy();
+      expect(document.activeElement?.getAttribute("aria-label")).toMatch(
+        /August 31, 2026/,
+      );
+    });
   });
 
   it("renders headerExtra in the header", () => {

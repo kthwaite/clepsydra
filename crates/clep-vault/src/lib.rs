@@ -5,6 +5,7 @@
 pub mod atomic_file;
 pub mod attendance;
 pub mod bcl;
+pub mod birthday;
 pub mod block;
 pub mod block_id;
 pub mod board_vocab;

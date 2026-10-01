@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::fs;
 
 use chrono::NaiveDate;
-use clep_index::index::{CalendarPage, CalendarQuery, VaultIndex};
+use clep_index::index::{BirthdayEntry, CalendarPage, CalendarQuery, VaultIndex};
 use clep_index::index_handle::IndexHandle;
 use clep_vault::Vault;
 use clep_vault::init::init_vault;
@@ -361,4 +361,100 @@ async fn handle_wrapper_returns_entries() {
     let page = handle.calendar_entries(september()).await.unwrap();
 
     assert_eq!(titles(&page), set(&["Handled"]));
+}
+
+/// A TOML-fronted page carrying a raw `birthday` line.
+fn person(id: u32, title: &str, kind: &str, extra: &str) -> String {
+    format!(
+        "+++\nid = \"00000000-0000-0000-0000-{id:012}\"\ntitle = \"{title}\"\ntype = \"{kind}\"\n\
+         created_at = \"2020-01-01T00:00:00Z\"\n{extra}\n+++\nBody.\n"
+    )
+}
+
+fn birthday_rows(entries: &[BirthdayEntry]) -> Vec<(String, Option<i32>, u32, u32)> {
+    entries
+        .iter()
+        .map(|e| (e.title.clone().unwrap_or_default(), e.year, e.month, e.day))
+        .collect()
+}
+
+#[test]
+fn birthdays_come_from_person_pages_in_month_day_title_order() {
+    let ada = person(1, "Ada", "PERSON", "birthday = 1983-05-12");
+    let bob = person(2, "Bob", "PERSON", "birthday = \"05-12\"");
+    let cy = person(3, "Cy", "PERSON", "birthday = \"--02-29\"");
+    let bad = person(4, "Bad", "PERSON", "birthday = \"13-01\"");
+    let none = person(5, "Nobody", "PERSON", "");
+    let note = person(6, "Note", "NOTE", "birthday = 1990-01-01");
+    let (_tmp, index) = built(&[
+        ("ada.md", &ada),
+        ("bob.md", &bob),
+        ("cy.md", &cy),
+        ("bad.md", &bad),
+        ("nobody.md", &none),
+        ("note.md", &note),
+    ]);
+
+    let entries = index.calendar_birthdays(None, None).unwrap();
+
+    assert_eq!(
+        birthday_rows(&entries),
+        vec![
+            ("Cy".to_string(), None, 2, 29),
+            ("Ada".to_string(), Some(1983), 5, 12),
+            ("Bob".to_string(), None, 5, 12),
+        ]
+    );
+    assert!(entries[0].path.ends_with("cy.md"), "{}", entries[0].path);
+}
+
+#[test]
+fn birthdays_filter_by_tag_and_project() {
+    let ada = person(
+        1,
+        "Ada",
+        "PERSON",
+        "birthday = 1983-05-12\ntags = [\"family\"]\nproject = \"kin\"",
+    );
+    let bob = person(
+        2,
+        "Bob",
+        "PERSON",
+        "birthday = \"06-01\"\ntags = [\"work\"]",
+    );
+    let (_tmp, index) = built(&[("ada.md", &ada), ("bob.md", &bob)]);
+
+    let tagged = index.calendar_birthdays(Some("family"), None).unwrap();
+    assert_eq!(
+        birthday_rows(&tagged),
+        vec![("Ada".to_string(), Some(1983), 5, 12)]
+    );
+
+    let work = index.calendar_birthdays(Some("work"), None).unwrap();
+    assert_eq!(birthday_rows(&work), vec![("Bob".to_string(), None, 6, 1)]);
+
+    let project = index.calendar_birthdays(None, Some("kin")).unwrap();
+    assert_eq!(
+        birthday_rows(&project),
+        vec![("Ada".to_string(), Some(1983), 5, 12)]
+    );
+
+    let both = index.calendar_birthdays(Some("work"), Some("kin")).unwrap();
+    assert!(both.is_empty());
+}
+
+#[tokio::test]
+async fn handle_wrapper_returns_birthdays() {
+    let ada = person(1, "Ada", "PERSON", "birthday = 1983-05-12");
+    let (_tmp, vault) = setup_vault(&[("ada.md", &ada)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let handle = IndexHandle::spawn(VaultIndex::open(&db_path).unwrap(), vault);
+    handle.build().await.unwrap();
+
+    let entries = handle.calendar_birthdays(None, None).await.unwrap();
+
+    assert_eq!(
+        birthday_rows(&entries),
+        vec![("Ada".to_string(), Some(1983), 5, 12)]
+    );
 }

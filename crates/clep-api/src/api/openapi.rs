@@ -394,6 +394,7 @@ impl Modify for SchemaOverrides {
             crate::api::index_routes::PreviewMutationRequest,
             crate::api::index_routes::PreviewMutationOperation,
             crate::api::index_routes::ContentEntry,
+            crate::api::calendar::CalendarBirthday,
             crate::api::calendar::CalendarEntry,
             crate::api::calendar::CalendarResponse,
             crate::api::index_routes::ContentIndexSort,

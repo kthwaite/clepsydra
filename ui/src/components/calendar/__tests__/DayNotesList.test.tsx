@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DayNotesList } from "#/components/calendar/DayNotesList";
+import type { BirthdayOccurrence } from "#/lib/birthday";
 import type { CalendarEntryLike } from "#/lib/calendar/bucket";
 import { KIND_META } from "#/lib/kind";
 
@@ -120,6 +121,44 @@ describe("DayNotesList", () => {
       expect(dot.getAttribute("aria-hidden")).toBe("true");
     }
     expect(dots[0].style.background).toBe(KIND_META.JOURNAL.color);
+  });
+
+  describe("birthdays", () => {
+    const birthdays: BirthdayOccurrence[] = [
+      { path: "people/ada.md", title: "Ada", date: "2026-09-30", age: 43 },
+      { path: "people/bob.md", title: null, date: "2026-09-30", age: null },
+    ];
+
+    it("lists a Birthdays group before the kind groups", () => {
+      renderList({ birthdays });
+      const names = screen
+        .getAllByRole("list")
+        .map((l) => l.getAttribute("aria-label"));
+      expect(names).toEqual(["Birthdays", "Journal", "Note", "Recipe"]);
+      expect(screen.getByText("Birthdays")).toBeTruthy();
+    });
+
+    it("links each birthday to the person page with its label", () => {
+      renderList({ birthdays });
+      const group = screen.getByRole("list", { name: "Birthdays" });
+      const links = within(group).getAllByRole("link");
+      expect(links.map((l) => l.textContent)).toEqual([
+        "Ada — birthday, turns 43",
+        "people/bob.md — birthday",
+      ]);
+      expect(links[0].getAttribute("data-path")).toBe("people/ada.md");
+    });
+
+    it("a day with only birthdays is not empty", () => {
+      renderList({ entries: [], birthdays });
+      expect(screen.queryByText("Nothing created this day.")).toBeNull();
+      expect(screen.getAllByRole("list")).toHaveLength(1);
+    });
+
+    it("no birthdays, no group", () => {
+      renderList({ birthdays: [] });
+      expect(screen.queryByRole("list", { name: "Birthdays" })).toBeNull();
+    });
   });
 
   it("uses the requested heading level", () => {

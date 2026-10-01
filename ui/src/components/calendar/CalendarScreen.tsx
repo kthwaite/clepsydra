@@ -12,6 +12,11 @@ import { SegmentedControl } from "#/components/ui/segmented-control";
 import { BottomSheet } from "#/components/ui/sheet";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenJournalForDate } from "#/hooks/useOpenJournalForDate";
+import {
+  type BirthdayEntry,
+  type BirthdayOccurrence,
+  birthdayOccurrences,
+} from "#/lib/birthday";
 import { bucketEntries, type CalendarEntryLike } from "#/lib/calendar/bucket";
 import {
   type CalendarMode,
@@ -58,6 +63,8 @@ const SPAN_UNIT: Record<CalendarMode, [string, string]> = {
 
 const CAP = 5000;
 const NO_ENTRIES: readonly CalendarEntryLike[] = [];
+const NO_BIRTHDAYS: readonly BirthdayEntry[] = [];
+const NO_OCCURRENCES: readonly BirthdayOccurrence[] = [];
 const KIND_OPTIONS = sortKindsByLabel(KINDS).map((kind) => ({
   value: kind,
   label: kindDisplayLabel(kind),
@@ -125,7 +132,8 @@ function WeeksHeader({
   );
 }
 
-/** The `/calendar` screen: pages by the day they were made, in Month,
+/** The `/calendar` screen: pages by the day they were made, plus PERSON
+ *  birthdays, in Month,
  *  Months or Weeks mode, filtered on the server. Plain props, so it renders
  *  without the router. */
 export function CalendarScreen({
@@ -170,12 +178,21 @@ export function CalendarScreen({
     tag: facets.tag?.[0],
     project: facets.project?.[0],
   };
+  // The server empties birthdays when the Kind facet lacks PERSON. Checking
+  // here too keeps a previous filter's placeholder data from showing them.
+  const showBirthdays =
+    !filters.kinds?.length || filters.kinds.includes("PERSON");
   const query = useCalendarEntries({ range, ...filters });
   const entries = query.data?.entries;
+  const birthdays = showBirthdays ? query.data?.birthdays : undefined;
   const visibleKeys = useMemo(() => rangeKeys(range), [range]);
   const byDay = useMemo(
     () => bucketEntries(entries ?? [], visibleKeys),
     [entries, visibleKeys],
+  );
+  const birthdaysByDay = useMemo(
+    () => birthdayOccurrences(birthdays ?? NO_BIRTHDAYS, visibleKeys),
+    [birthdays, visibleKeys],
   );
 
   // A selected day outside the visible range (e.g. a shared link) gets its
@@ -189,12 +206,25 @@ export function CalendarScreen({
     { enabled: dayOutside },
   );
   const dayQueryEntries = dayQuery.data?.entries;
+  const dayQueryBirthdays = showBirthdays
+    ? dayQuery.data?.birthdays
+    : undefined;
   const outsideByDay = useMemo(
     () =>
       dayOutside
         ? bucketEntries(dayQueryEntries ?? [], rangeKeys(oneDay))
         : null,
     [dayOutside, dayQueryEntries, oneDay],
+  );
+  const outsideBirthdays = useMemo(
+    () =>
+      dayOutside
+        ? birthdayOccurrences(
+            dayQueryBirthdays ?? NO_BIRTHDAYS,
+            rangeKeys(oneDay),
+          )
+        : null,
+    [dayOutside, dayQueryBirthdays, oneDay],
   );
   const dayLoading =
     dayOutside && (dayQuery.isLoading || dayQuery.isPlaceholderData === true);
@@ -216,12 +246,17 @@ export function CalendarScreen({
     day && !dayLoading
       ? ((outsideByDay ?? byDay).get(day) ?? NO_ENTRIES)
       : NO_ENTRIES;
+  const dayBirthdays =
+    day && !dayLoading
+      ? ((outsideBirthdays ?? birthdaysByDay).get(day) ?? NO_OCCURRENCES)
+      : NO_OCCURRENCES;
   const journalPath = dayEntries.find((e) => e.kind === "JOURNAL")?.path;
   const dayList = day ? (
     <DayNotesList
       dateKey={day}
       today={today}
       entries={dayEntries}
+      birthdays={dayBirthdays}
       loading={dayLoading}
       journalPath={journalPath}
       onOpenJournal={() => void openJournal(day, journalPath)}
@@ -287,6 +322,7 @@ export function CalendarScreen({
               span={view.span}
               today={today}
               byDay={byDay}
+              birthdaysByDay={birthdaysByDay}
               activeDate={day ?? null}
               onAnchorChange={setAnchor}
               onDayActivate={activateDay}
@@ -297,6 +333,7 @@ export function CalendarScreen({
               onVisibleMonthChange={setAnchor}
               months={view.mode === "months" ? view.span : 1}
               byDay={byDay}
+              birthdaysByDay={birthdaysByDay}
               today={today}
               activeDate={day ?? null}
               onDayActivate={(key) => activateDay(key)}
@@ -338,6 +375,7 @@ function WeeksBody({
   span,
   today,
   byDay,
+  birthdaysByDay,
   activeDate,
   onAnchorChange,
   onDayActivate,
@@ -346,6 +384,7 @@ function WeeksBody({
   span: number;
   today: DateKey;
   byDay: ReadonlyMap<DateKey, readonly CalendarEntryLike[]>;
+  birthdaysByDay: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]>;
   activeDate: DateKey | null;
   onAnchorChange: (key: DateKey) => void;
   onDayActivate: (key: DateKey) => void;
@@ -362,6 +401,7 @@ function WeeksBody({
       <WeekRows
         rows={rows}
         byDay={byDay}
+        birthdaysByDay={birthdaysByDay}
         today={today}
         activeDate={activeDate}
         onDayActivate={onDayActivate}

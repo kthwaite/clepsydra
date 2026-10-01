@@ -1,12 +1,16 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useCalendarEntries } from "#/api/calendar";
+import { type CalendarBirthday, useCalendarEntries } from "#/api/calendar";
 import { FolioCalendarSection } from "#/components/calendar/FolioCalendarSection";
 import { useOpenJournalForDate } from "#/hooks/useOpenJournalForDate";
 import type { CalendarEntryLike } from "#/lib/calendar/bucket";
 import { monthGridRange } from "#/lib/calendar/dates";
-import { COLLAPSED_KEY, HIDDEN_KINDS_KEY } from "#/lib/calendar/railPrefs";
+import {
+  COLLAPSED_KEY,
+  HIDDEN_KINDS_KEY,
+  HIDE_BIRTHDAYS_KEY,
+} from "#/lib/calendar/railPrefs";
 
 vi.mock("#/api/calendar", () => ({ useCalendarEntries: vi.fn() }));
 vi.mock("#/hooks/useOpenJournalForDate", () => ({
@@ -54,9 +58,13 @@ const sept: CalendarEntryLike[] = [
   },
 ];
 
-function respond(entries: CalendarEntryLike[] = sept, truncated = false) {
+function respond(
+  entries: CalendarEntryLike[] = sept,
+  truncated = false,
+  birthdays: CalendarBirthday[] = [],
+) {
   mockEntries.mockReturnValue({
-    data: { entries, truncated },
+    data: { entries, birthdays, truncated },
   } as unknown as ReturnType<typeof useCalendarEntries>);
 }
 
@@ -304,5 +312,59 @@ describe("FolioCalendarSection", () => {
     render(<FolioCalendarSection {...NOTE_PAGE} />);
     expect(screen.getByRole("grid")).toBeTruthy();
     expect(screen.queryByText("5000+")).toBeNull();
+  });
+
+  describe("birthdays", () => {
+    const ADA: CalendarBirthday = {
+      path: "people/ada.md",
+      title: "Ada",
+      year: 1983,
+      month: 9,
+      day: 15,
+    };
+    const marker = (container: HTMLElement) =>
+      cell(container, "2026-09-15").querySelector("[data-birthday-marker]");
+
+    beforeEach(() => respond(sept, false, [ADA]));
+
+    it("marks a day with a birthday and lists it in the day popover", async () => {
+      const user = userEvent.setup();
+      const { container } = render(<FolioCalendarSection {...NOTE_PAGE} />);
+      expect(marker(container)).not.toBeNull();
+      await user.click(dayButton(15));
+      const dialog = screen.getByRole("dialog", {
+        name: longDate(2026, 8, 15),
+      });
+      const group = within(dialog).getByRole("list", { name: "Birthdays" });
+      expect(
+        within(group).getByRole("link", { name: "Ada — birthday, turns 43" }),
+      ).toBeTruthy();
+    });
+
+    it("the Birthdays toggle hides markers, persists, and leaves kinds alone", async () => {
+      const user = userEvent.setup();
+      const { container, unmount } = render(
+        <FolioCalendarSection {...NOTE_PAGE} />,
+      );
+      await user.click(screen.getByRole("button", { name: "Calendar kinds" }));
+      const toggle = screen.getByRole("menuitemcheckbox", {
+        name: /Birthdays/,
+      });
+      expect(toggle).toHaveAttribute("aria-checked", "true");
+      await user.click(toggle);
+
+      expect(marker(container)).toBeNull();
+      expect(
+        cell(container, "2026-09-15").querySelectorAll("[data-kind-dot]"),
+      ).toHaveLength(3);
+      expect(window.localStorage.getItem(HIDE_BIRTHDAYS_KEY)).toBe("1");
+      expect(window.localStorage.getItem(HIDDEN_KINDS_KEY)).toBe("[]");
+
+      unmount();
+      const again = render(<FolioCalendarSection {...NOTE_PAGE} />);
+      expect(marker(again.container)).toBeNull();
+      await user.click(dayButton(15));
+      expect(screen.queryByRole("list", { name: "Birthdays" })).toBeNull();
+    });
   });
 });

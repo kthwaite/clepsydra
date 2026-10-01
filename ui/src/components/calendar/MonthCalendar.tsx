@@ -1,5 +1,5 @@
 import { parseDate } from "@internationalized/date";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Cake, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   type ReactNode,
   useCallback,
@@ -21,6 +21,7 @@ import {
 } from "react-aria-components";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
+import type { BirthdayOccurrence } from "#/lib/birthday";
 import { type CalendarEntryLike, dayKinds } from "#/lib/calendar/bucket";
 import { addMonths, type DateKey, monthGrid } from "#/lib/calendar/dates";
 import { cn } from "#/lib/cn";
@@ -39,6 +40,8 @@ export interface MonthCalendarProps {
   /** Month grids shown side by side. Default 1. */
   months?: number;
   byDay: ReadonlyMap<DateKey, readonly CalendarEntryLike[]>;
+  /** Birthdays per day; a day with any shows a cake beside its dots. */
+  birthdaysByDay?: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]>;
   today: DateKey;
   /** Rail: the open page's date. */
   selectedDate?: DateKey | null;
@@ -54,6 +57,8 @@ export interface MonthCalendarProps {
 }
 
 const NO_ENTRIES: readonly CalendarEntryLike[] = [];
+const NO_BIRTHDAYS: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]> =
+  new Map();
 
 /** Header row, cell rows and week-number rows share these heights, so the
  *  aria-hidden week column lines up with RAC's grid rows. */
@@ -71,6 +76,13 @@ const ALIGN_START = { selectionAlignment: "start" } as object;
 
 const monthOf = (key: DateKey) => key.slice(0, 7);
 const firstOfMonth = (key: DateKey): DateKey => `${monthOf(key)}-01`;
+
+/** An overflow click waiting for the parent to show `month`; then `day`
+ *  takes keyboard focus. */
+interface PendingFocus {
+  month: string;
+  day: DateKey;
+}
 
 function ymOf(key: DateKey): [number, number] {
   const [y, m] = key.split("-").map(Number);
@@ -157,20 +169,36 @@ function WeekColumn({
   );
 }
 
-function KindDots({
+/** The day's markers: a cake when someone has a birthday, then kind dots. */
+function DayMarkers({
   entries,
+  birthdays,
+  variant,
   dim,
 }: {
   entries: readonly CalendarEntryLike[];
+  birthdays: number;
+  variant: MonthCalendarVariant;
   dim: boolean;
 }) {
   const kinds = dayKinds(entries);
-  if (kinds.length === 0) return null;
+  if (kinds.length === 0 && birthdays === 0) return null;
   return (
     <span
       aria-hidden="true"
       className={cn("flex items-center gap-[3px]", dim && "opacity-50")}
     >
+      {birthdays > 0 && (
+        <Cake
+          data-birthday-marker
+          aria-hidden="true"
+          strokeWidth={2.25}
+          className={cn(
+            "shrink-0 text-accent",
+            variant === "page" ? "size-3" : "size-2.5",
+          )}
+        />
+      )}
       {kinds.map((kind) => (
         <span
           key={kind}
@@ -184,14 +212,25 @@ function KindDots({
   );
 }
 
-const noteCountLabel = (n: number) => (n === 1 ? "1 note" : `${n} notes`);
+const plural = (n: number, one: string, many: string) =>
+  n === 1 ? `1 ${one}` : `${n} ${many}`;
 
-/** Screen-reader note count. RAC's cell button carries its own aria-label,
+/** "2 notes, 1 birthday", "1 birthday", "3 notes". */
+function dayDescription(notes: number, birthdays: number): string {
+  return [
+    notes > 0 && plural(notes, "note", "notes"),
+    birthdays > 0 && plural(birthdays, "birthday", "birthdays"),
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+/** Screen-reader note and birthday count. RAC's cell button carries its own aria-label,
  *  which wins over content, and CalendarCell forwards no aria props. So this
  *  text points the enclosing cell button at itself via aria-describedby. RAC
  *  leaves that attribute unset for a single-date calendar with no
  *  validation, so React never overwrites it. */
-function NoteCount({ count }: { count: number }) {
+function NoteCount({ text }: { text: string }) {
   const id = useId();
   const describe = useCallback(
     (el: HTMLSpanElement | null) => {
@@ -208,7 +247,7 @@ function NoteCount({ count }: { count: number }) {
   );
   return (
     <span ref={describe} id={id} className="sr-only">
-      {noteCountLabel(count)}
+      {text}
     </span>
   );
 }
@@ -217,6 +256,7 @@ interface DayFaceProps {
   dateKey: DateKey;
   label: string;
   entries: readonly CalendarEntryLike[];
+  birthdays: number;
   variant: MonthCalendarVariant;
   isToday: boolean;
   isSelected: boolean;
@@ -231,6 +271,7 @@ function DayFace({
   dateKey,
   label,
   entries,
+  birthdays,
   variant,
   isToday,
   isSelected,
@@ -238,6 +279,14 @@ function DayFace({
   isOutside,
 }: DayFaceProps) {
   const count = entries.length;
+  const markers = (
+    <DayMarkers
+      entries={entries}
+      birthdays={birthdays}
+      variant={variant}
+      dim={isOutside}
+    />
+  );
   return (
     <span
       data-date={dateKey}
@@ -255,15 +304,17 @@ function DayFace({
             : "inset-[2px] flex-col items-center justify-center gap-[3px] rounded-[10px]",
         variant !== "rail" &&
           (isOutside
-            ? "bg-sink/15 group-data-[hovered]:bg-sink/30"
-            : "bg-sink/40 group-data-[hovered]:bg-sink/70"),
+            ? "bg-sink/15 group-hover:bg-sink/30"
+            : "bg-sink/40 group-hover:bg-sink/70"),
         isOutside ? "text-faint" : "text-ink-2",
         isSelected && "bg-accent-tint text-ink",
         isToday && "text-accent ring-1 ring-accent/50 ring-inset",
         isActive && "ring-2 ring-accent ring-inset",
       )}
     >
-      {count > 0 && <NoteCount count={count} />}
+      {(count > 0 || birthdays > 0) && (
+        <NoteCount text={dayDescription(count, birthdays)} />
+      )}
       {variant === "page" ? (
         <>
           <span className="flex items-baseline gap-1.5">
@@ -285,7 +336,7 @@ function DayFace({
               </span>
             )}
           </span>
-          <KindDots entries={entries} dim={isOutside} />
+          {markers}
         </>
       ) : (
         <>
@@ -298,7 +349,7 @@ function DayFace({
           >
             {label}
           </span>
-          <KindDots entries={entries} dim={isOutside} />
+          {markers}
         </>
       )}
     </span>
@@ -306,12 +357,13 @@ function DayFace({
 }
 
 /** Obsidian-calendar-style month grid(s) over react-aria's Calendar: Monday
- *  first, ISO week numbers, kind dots, today ring, selected and active days. */
+ *  first, ISO week numbers, kind dots and birthday cakes, today ring, selected and active days. */
 export function MonthCalendar({
   visibleMonth,
   onVisibleMonthChange,
   months = 1,
   byDay,
+  birthdaysByDay = NO_BIRTHDAYS,
   today,
   selectedDate = null,
   activeDate = null,
@@ -325,6 +377,11 @@ export function MonthCalendar({
   // parent change RAC did not cause remounts the Calendar at the new month.
   const [focused, setFocused] = useState<DateKey>(visibleMonth);
   const [epoch, setEpoch] = useState(0);
+  // True only for a remount caused by an overflow click, so prev/next and
+  // other parent changes never move focus into the grid.
+  const [autoFocus, setAutoFocus] = useState(false);
+  const pendingRef = useRef<PendingFocus | null>(null);
+  const jumpDayRef = useRef<DateKey | null>(null);
   const [start, setStart] = useState<DateKey>(firstOfMonth(visibleMonth));
   const startRef = useRef<DateKey>(firstOfMonth(visibleMonth));
   const visibleMonthRef = useRef(visibleMonth);
@@ -344,11 +401,26 @@ export function MonthCalendar({
 
   useEffect(() => {
     if (monthOf(visibleMonth) === monthOf(startRef.current)) return;
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    const jump = pending?.month === monthOf(visibleMonth) ? pending : null;
     startRef.current = firstOfMonth(visibleMonth);
     setStart(startRef.current);
+    // Mount focused on visibleMonth, so RAC's start alignment keeps it
+    // first; the jump day (possibly in a later grid) takes focus after.
+    jumpDayRef.current = jump?.day ?? null;
     setFocused(visibleMonth);
+    setAutoFocus(jump !== null);
     setEpoch((n) => n + 1);
   }, [visibleMonth]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per remount
+  useEffect(() => {
+    const day = jumpDayRef.current;
+    if (!day) return;
+    jumpDayRef.current = null;
+    setFocused(day);
+  }, [epoch]);
 
   // Resolve the live cell at activation. In Months mode a date can show in
   // two grids; RAC disables the outside-month copy, so the in-month face is
@@ -365,6 +437,39 @@ export function MonthCalendar({
 
   const count = Math.max(1, months);
   const rowClass = ROW[variant];
+
+  // RAC disables outside-month cells, so their presses never reach
+  // onChange. A delegated click handles them: a date inside the visible
+  // range (Months mode) activates its in-month copy; a date before or after
+  // it shifts the view one month and focuses that date after the remount.
+  // Keyboard users cross month edges with the arrow keys instead.
+  const onOverflowRef = useRef<(key: DateKey) => void>(() => {});
+  onOverflowRef.current = (key: DateKey) => {
+    const last = addMonths(start, count);
+    if (key >= start && key < last) {
+      handleChange(parseDate(key));
+      return;
+    }
+    const target = addMonths(start, key < start ? -1 : 1);
+    pendingRef.current = { month: monthOf(target), day: key };
+    onVisibleMonthChange(target);
+  };
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const onClick = (e: MouseEvent) => {
+      // The face sits inset in its cell, so a click can land on either.
+      const cell = (e.target as Element | null)?.closest("td");
+      const face = cell?.querySelector<HTMLElement>(
+        "[data-date][data-outside]",
+      );
+      const key = face?.dataset.date;
+      if (!key || !root.contains(cell ?? null)) return;
+      onOverflowRef.current(key);
+    };
+    root.addEventListener("click", onClick);
+    return () => root.removeEventListener("click", onClick);
+  }, []);
 
   return (
     <div
@@ -411,6 +516,7 @@ export function MonthCalendar({
       <Calendar
         key={epoch}
         {...ALIGN_START}
+        autoFocus={autoFocus}
         aria-label="Calendar"
         firstDayOfWeek="mon"
         value={null}
@@ -460,8 +566,8 @@ export function MonthCalendar({
                       <CalendarCell
                         date={date}
                         className={cn(
-                          "group relative block w-full cursor-pointer rounded-[12px] data-[disabled]:cursor-default",
-                          variant === "rail" && "data-[hovered]:bg-sink/60",
+                          "group relative block w-full cursor-pointer rounded-[12px]",
+                          variant === "rail" && "hover:bg-sink/60",
                           rowClass,
                           FOCUS_RING,
                         )}
@@ -471,6 +577,7 @@ export function MonthCalendar({
                             dateKey={key}
                             label={formattedDate}
                             entries={byDay.get(key) ?? NO_ENTRIES}
+                            birthdays={birthdaysByDay.get(key)?.length ?? 0}
                             variant={variant}
                             isToday={key === today}
                             isSelected={key === selectedDate}

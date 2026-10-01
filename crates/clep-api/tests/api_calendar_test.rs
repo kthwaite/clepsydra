@@ -118,6 +118,20 @@ fn seed(root: &Path) {
         "journals/2026-09-15.md",
         "---\ncreated_at: 2026-10-20T00:00:00Z\n---\n\n# 2026-09-15\n",
     );
+    write(
+        root,
+        "ada.md",
+        "+++\nid = \"00000000-0000-0000-0000-000000000101\"\ntitle = \"Ada\"\n\
+         type = \"PERSON\"\ntags = [\"family\"]\ncreated_at = \"2020-01-01T00:00:00Z\"\n\
+         birthday = 1983-05-12\n+++\n\n# Ada\n",
+    );
+    write(
+        root,
+        "bob.md",
+        "+++\nid = \"00000000-0000-0000-0000-000000000102\"\ntitle = \"Bob\"\n\
+         type = \"PERSON\"\ncreated_at = \"2020-01-01T00:00:00Z\"\n\
+         birthday = \"02-29\"\n+++\n\n# Bob\n",
+    );
 }
 
 fn setup() -> (TestServer, TempDir) {
@@ -302,4 +316,85 @@ async fn rejects_bad_windows() {
             "params {params:?}"
         );
     }
+}
+
+fn birthday_titles(body: &Value) -> Vec<String> {
+    body["birthdays"]
+        .as_array()
+        .expect("birthdays array")
+        .iter()
+        .map(|b| b["title"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn birthdays_carry_month_day_and_optional_year() {
+    let (server, _tmp) = setup();
+    let body: Value = get_calendar(
+        &server,
+        &[("from", SEPT_FROM_LONDON), ("to", SEPT_TO_LONDON)],
+    )
+    .await
+    .json();
+    let birthdays = body["birthdays"].as_array().unwrap();
+    assert_eq!(birthday_titles(&body), vec!["Bob", "Ada"]);
+    let bob = &birthdays[0];
+    assert_eq!(bob["month"], 2);
+    assert_eq!(bob["day"], 29);
+    assert_eq!(bob["year"], Value::Null);
+    let ada = &birthdays[1];
+    assert_eq!(ada["year"], 1983);
+    assert_eq!(ada["month"], 5);
+    assert_eq!(ada["day"], 12);
+    let keys: BTreeSet<&str> = ada
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        ["path", "title", "year", "month", "day"]
+            .into_iter()
+            .collect()
+    );
+    assert!(ada["path"].as_str().unwrap().ends_with("ada.md"));
+}
+
+#[tokio::test]
+async fn birthdays_follow_the_kind_filter() {
+    let (server, _tmp) = setup();
+    let window = [("from", SEPT_FROM_LONDON), ("to", SEPT_TO_LONDON)];
+    let with = |extra: (&'static str, &'static str)| {
+        let mut params = window.to_vec();
+        params.push(extra);
+        params
+    };
+
+    let notes: Value = get_calendar(&server, &with(("kind", "NOTE"))).await.json();
+    assert!(birthday_titles(&notes).is_empty());
+
+    let people: Value = get_calendar(&server, &with(("kind", "NOTE,person")))
+        .await
+        .json();
+    assert_eq!(birthday_titles(&people), vec!["Bob", "Ada"]);
+}
+
+#[tokio::test]
+async fn birthdays_follow_tag_and_project_filters() {
+    let (server, _tmp) = setup();
+    let window = [("from", SEPT_FROM_LONDON), ("to", SEPT_TO_LONDON)];
+    let with = |extra: (&'static str, &'static str)| {
+        let mut params = window.to_vec();
+        params.push(extra);
+        params
+    };
+
+    let family: Value = get_calendar(&server, &with(("tag", "family"))).await.json();
+    assert_eq!(birthday_titles(&family), vec!["Ada"]);
+
+    let cellar: Value = get_calendar(&server, &with(("project", "Cellar")))
+        .await
+        .json();
+    assert!(birthday_titles(&cellar).is_empty());
 }

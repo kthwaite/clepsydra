@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CalendarEntry } from "#/api/calendar";
+import type { CalendarBirthday, CalendarEntry } from "#/api/calendar";
 import { CalendarScreen } from "#/components/calendar/CalendarScreen";
 import { monthGridRange } from "#/lib/calendar/dates";
 import type { CalendarViewSearch } from "#/lib/calendar/search";
@@ -64,14 +64,20 @@ const ENTRIES: CalendarEntry[] = [
 function queryState(
   overrides: Partial<{
     entries: CalendarEntry[];
+    birthdays: CalendarBirthday[];
     truncated: boolean;
     isLoading: boolean;
     isError: boolean;
   }> = {},
 ) {
-  const { entries = ENTRIES, truncated = false, ...rest } = overrides;
+  const {
+    entries = ENTRIES,
+    birthdays = [],
+    truncated = false,
+    ...rest
+  } = overrides;
   return {
-    data: { entries, truncated },
+    data: { entries, birthdays, truncated },
     isLoading: false,
     isError: false,
     ...rest,
@@ -373,5 +379,102 @@ describe("CalendarScreen", () => {
     await user.click(screen.getByTestId("filter-bar-chip-tag"));
     expect(screen.getByTestId("filter-bar-option-tag-wine")).toBeVisible();
     expect(screen.getByTestId("filter-bar-chip-project")).toBeInTheDocument();
+  });
+
+  describe("birthdays", () => {
+    const ADA: CalendarBirthday = {
+      path: "people/ada.md",
+      title: "Ada",
+      year: 1983,
+      month: 9,
+      day: 15,
+    };
+    const DI: CalendarBirthday = {
+      path: "people/di.md",
+      title: "Di",
+      year: null,
+      month: 10,
+      day: 2,
+    };
+    const marker = (container: HTMLElement, key: string) =>
+      container.querySelector(`[data-date="${key}"] [data-birthday-marker]`);
+
+    beforeEach(() => {
+      mocks.entries.mockReturnValue(queryState({ birthdays: [ADA, DI] }));
+    });
+
+    it("marks birthdays across the visible grid, overflow days included", () => {
+      const { container } = renderScreen();
+      expect(marker(container, "2026-09-15")).not.toBeNull();
+      expect(marker(container, "2026-10-02")).not.toBeNull();
+      expect(marker(container, "2026-09-16")).toBeNull();
+    });
+
+    it("lists the day's birthdays in the side panel", () => {
+      renderScreen({ day: "2026-09-15" });
+      const panel = screen.getByRole("complementary", { name: "Day" });
+      const group = within(panel).getByRole("list", { name: "Birthdays" });
+      expect(
+        within(group).getByRole("link", { name: "Ada — birthday, turns 43" }),
+      ).toHaveAttribute("data-path", "people/ada.md");
+    });
+
+    it("weeks mode lists birthdays inline", () => {
+      const { container } = renderScreen({
+        mode: "weeks",
+        span: 1,
+        date: "2026-09-15",
+      });
+      const day = container.querySelector<HTMLElement>(
+        '[data-date="2026-09-15"]',
+      );
+      expect(day).not.toBeNull();
+      expect(
+        within(day as HTMLElement).getByRole("link", {
+          name: "Ada — birthday, turns 43",
+        }),
+      ).toBeVisible();
+    });
+
+    it("hides birthdays when the Kind facet excludes PERSON", () => {
+      const { container } = renderScreen(
+        {},
+        { text: "", facets: { kind: ["NOTE"] } },
+      );
+      expect(marker(container, "2026-09-15")).toBeNull();
+    });
+
+    it("shows birthdays when the Kind facet includes PERSON", () => {
+      const { container } = renderScreen(
+        {},
+        { text: "", facets: { kind: ["NOTE", "PERSON"] } },
+      );
+      expect(marker(container, "2026-09-15")).not.toBeNull();
+    });
+
+    it("an out-of-range day takes its birthdays from its own window", () => {
+      const SEP7: CalendarBirthday = {
+        path: "people/sev.md",
+        title: "Sev",
+        year: 2000,
+        month: 9,
+        day: 7,
+      };
+      mocks.entries.mockImplementation((opts: { range: { from: Date } }) =>
+        opts.range.from.getTime() === new Date(2026, 8, 7).getTime()
+          ? queryState({ entries: [], birthdays: [SEP7] })
+          : queryState(),
+      );
+      renderScreen({
+        mode: "weeks",
+        span: 2,
+        date: "2026-09-15",
+        day: "2026-09-07",
+      });
+      const panel = screen.getByRole("complementary", { name: "Day" });
+      expect(
+        within(panel).getByRole("link", { name: "Sev — birthday, turns 26" }),
+      ).toBeVisible();
+    });
   });
 });
