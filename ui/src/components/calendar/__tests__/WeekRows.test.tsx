@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WeekRows } from "#/components/calendar/WeekRows";
+import type { BirthdayOccurrence } from "#/lib/birthday";
 import type { CalendarEntryLike } from "#/lib/calendar/bucket";
 import { type DateKey, weekRows } from "#/lib/calendar/dates";
 import { KIND_META } from "#/lib/kind";
@@ -102,5 +103,50 @@ describe("WeekRows", () => {
     expect(within(day).getAllByRole("link")).toHaveLength(8);
     await user.click(within(day).getByRole("button", { name: "3 more" }));
     expect(onDayActivate).toHaveBeenCalledWith("2026-10-01");
+  });
+
+  describe("birthdays", () => {
+    const birthdaysByDay = new Map<DateKey, readonly BirthdayOccurrence[]>([
+      [
+        "2026-09-29",
+        [{ path: "people/ada.md", title: "Ada", date: "2026-09-29", age: 43 }],
+      ],
+    ]);
+
+    it("lists a day's birthdays first, linking to the person", () => {
+      const { container } = renderRows({ birthdaysByDay });
+      const day = dayColumn(container, "2026-09-29");
+      const links = within(day).getAllByRole("link");
+      expect(links[0]).toHaveTextContent("Ada — birthday, turns 43");
+      expect(links[0]).toHaveAttribute("data-path", "people/ada.md");
+      expect(links[0].querySelector("[data-birthday-marker]")).toHaveAttribute(
+        "aria-hidden",
+        "true",
+      );
+      expect(links).toHaveLength(3);
+    });
+
+    it("names birthdays in the day button but counts only pages", () => {
+      renderRows({ birthdaysByDay });
+      const button = screen.getByRole("button", {
+        name: /29.*2 pages, 1 birthday$/,
+      });
+      expect(button).toHaveTextContent(/2$/);
+    });
+
+    it("birthdays do not use up the inline cap", () => {
+      const many: CalendarEntryLike[] = Array.from({ length: 8 }, (_, i) => ({
+        path: `notes/n${i}.md`,
+        title: `Note ${i}`,
+        kind: "NOTE",
+      }));
+      const { container } = renderRows({
+        byDay: new Map([["2026-09-29", many]]),
+        birthdaysByDay,
+      });
+      const day = dayColumn(container, "2026-09-29");
+      expect(within(day).getAllByRole("link")).toHaveLength(9);
+      expect(within(day).queryByRole("button", { name: /more/ })).toBeNull();
+    });
   });
 });

@@ -138,6 +138,37 @@ describe("useCalendarEntries", () => {
     );
   });
 
+  it("surfaces birthdays from the response", async () => {
+    const ada = {
+      path: "people/ada.md",
+      title: "Ada",
+      year: 1983,
+      month: 5,
+      day: 12,
+    };
+    fetchMock.mockImplementation(async () =>
+      json({ entries: [], birthdays: [ada], truncated: false }),
+    );
+    const { wrapper } = setup();
+    const range = monthGridRange(2026, 4);
+    const { result } = renderHook(() => useCalendarEntries({ range }), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.birthdays).toEqual([ada]);
+  });
+
+  it("reads a response without birthdays as none", async () => {
+    fetchMock.mockImplementation(async () => entries("a"));
+    const { wrapper } = setup();
+    const range = monthGridRange(2026, 4);
+    const { result } = renderHook(() => useCalendarEntries({ range }), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.birthdays).toEqual([]);
+  });
+
   it("is invalidated by the /api/vault/index prefix", async () => {
     fetchMock.mockImplementation(async () => entries("a"));
     const { qc, wrapper } = setup();

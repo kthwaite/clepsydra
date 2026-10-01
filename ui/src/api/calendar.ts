@@ -6,6 +6,12 @@ import { $api } from "./client";
 
 export type CalendarEntry = components["schemas"]["CalendarEntry"];
 export type CalendarResponse = components["schemas"]["CalendarResponse"];
+export type CalendarBirthday = components["schemas"]["CalendarBirthday"];
+
+/** An older server omits `birthdays`; read that as none. */
+function withBirthdays(data: CalendarResponse): CalendarResponse {
+  return data.birthdays ? data : { ...data, birthdays: [] };
+}
 
 export interface CalendarEntriesOptions {
   range: LocalRange;
@@ -18,7 +24,9 @@ export interface CalendarEntriesOptions {
  * Pages placed on calendar days in `range`. The bounds go out as local
  * midnights with their offsets; the server stays timezone-agnostic and the
  * client buckets. The key lives under `/api/vault/index`, so every page
- * mutation and SSE event already invalidates it.
+ * mutation and SSE event already invalidates it. `birthdays` lists PERSON
+ * birthdays (yearly, not windowed); the server empties it when `kinds`
+ * excludes PERSON.
  */
 export function useCalendarEntries(
   opts: CalendarEntriesOptions,
@@ -39,6 +47,6 @@ export function useCalendarEntries(
         },
       },
     },
-    { enabled, placeholderData: keepPreviousData },
+    { enabled, placeholderData: keepPreviousData, select: withBirthdays },
   );
 }

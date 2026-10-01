@@ -6,6 +6,7 @@ import {
   MonthCalendar,
   type MonthCalendarProps,
 } from "#/components/calendar/MonthCalendar";
+import type { BirthdayOccurrence } from "#/lib/birthday";
 import type { CalendarEntryLike } from "#/lib/calendar/bucket";
 import type { DateKey } from "#/lib/calendar/dates";
 import type { Kind } from "#/lib/kind";
@@ -339,6 +340,71 @@ describe("MonthCalendar", () => {
       />,
     );
     expect(dayButton(15)).not.toHaveAttribute("aria-describedby");
+  });
+
+  describe("birthdays", () => {
+    const born = (path: string, date: DateKey): BirthdayOccurrence => ({
+      path,
+      title: path,
+      date,
+      age: 40,
+    });
+    const birthdaysByDay = new Map<DateKey, readonly BirthdayOccurrence[]>([
+      ["2026-09-15", [born("ada", "2026-09-15")]],
+      ["2026-09-20", [born("bob", "2026-09-20"), born("cy", "2026-09-20")]],
+      ["2026-10-02", [born("di", "2026-10-02")]],
+    ]);
+    const marker = (container: HTMLElement, key: DateKey) =>
+      day(container, key).querySelector("[data-birthday-marker]");
+
+    it.each(["rail", "compact", "page"] as const)(
+      "%s variant shows a hidden cake marker beside the kind dots",
+      (variant) => {
+        const { container } = renderCalendar({ variant, birthdaysByDay });
+        const cake = marker(container, "2026-09-15");
+        expect(cake).not.toBeNull();
+        expect(cake?.tagName.toLowerCase()).toBe("svg");
+        expect(cake?.closest("[aria-hidden='true']")).not.toBeNull();
+        // Beside the dots: same marker row.
+        expect(
+          cake?.parentElement?.querySelector("[data-kind-dot]"),
+        ).not.toBeNull();
+        expect(marker(container, "2026-09-14")).toBeNull();
+      },
+    );
+
+    it("shows one marker however many birthdays fall on a day", () => {
+      const { container } = renderCalendar({ birthdaysByDay });
+      expect(
+        day(container, "2026-09-20").querySelectorAll("[data-birthday-marker]"),
+      ).toHaveLength(1);
+    });
+
+    it("dims the marker on outside-month days", () => {
+      const { container } = renderCalendar({ birthdaysByDay });
+      const outside = marker(container, "2026-10-02");
+      expect(outside?.closest(".opacity-50")).not.toBeNull();
+      expect(
+        marker(container, "2026-09-20")?.closest(".opacity-50"),
+      ).toBeNull();
+    });
+
+    it("folds birthdays into the day's description", () => {
+      renderCalendar({ birthdaysByDay });
+      expect(dayButton(15)).toHaveAccessibleDescription("6 notes, 1 birthday");
+      expect(dayButton(20)).toHaveAccessibleDescription("2 birthdays");
+      expect(dayButton(14)).not.toHaveAttribute("aria-describedby");
+    });
+
+    it("page variant counts notes only", () => {
+      const { container } = renderCalendar({
+        variant: "page",
+        birthdaysByDay,
+      });
+      expect(
+        day(container, "2026-09-20").querySelector("[data-day-count]"),
+      ).toBeNull();
+    });
   });
 
   it("months={3} passes the in-month cell of a date shown in two grids", async () => {

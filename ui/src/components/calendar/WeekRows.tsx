@@ -1,5 +1,7 @@
+import { Cake } from "lucide-react";
 import { CLink } from "#/components/codex/CLink";
 import { Button } from "#/components/ui/button";
+import { type BirthdayOccurrence, birthdayLabel } from "#/lib/birthday";
 import type { CalendarEntryLike } from "#/lib/calendar/bucket";
 import type { DateKey, WeekRow } from "#/lib/calendar/dates";
 import { cn } from "#/lib/cn";
@@ -10,31 +12,47 @@ import { parseLocalDate } from "#/lib/time";
 export interface WeekRowsProps {
   rows: readonly WeekRow[];
   byDay: ReadonlyMap<DateKey, readonly CalendarEntryLike[]>;
+  /** Birthdays per day, listed before the day's pages. */
+  birthdaysByDay?: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]>;
   today: DateKey;
   /** The day whose side panel is open. */
   activeDate?: DateKey | null;
   onDayActivate: (key: DateKey) => void;
 }
 
-/** Titles listed inline per day; the rest open through the day panel. */
+/** Page titles listed inline per day; the rest open through the day panel.
+ *  Birthdays are few and always listed. */
 const MAX_INLINE = 8;
 
 const NO_ENTRIES: readonly CalendarEntryLike[] = [];
+const NO_BIRTHDAYS: readonly BirthdayOccurrence[] = [];
+const NO_BIRTHDAY_DAYS: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]> =
+  new Map();
 
-function dayLabel(key: DateKey, count: number): string {
+const ROW_LINK = cn(
+  "cl-link-plain flex min-w-0 items-center gap-1.5 rounded text-[13px] text-ink-2 hover:text-ink",
+  FOCUS_RING_NATIVE,
+);
+
+function dayLabel(key: DateKey, count: number, birthdays: number): string {
   const date = parseLocalDate(key).toLocaleDateString(undefined, {
     weekday: "long",
     day: "numeric",
     month: "long",
     year: "numeric",
   });
-  if (count === 0) return date;
-  return `${date}, ${count} ${count === 1 ? "page" : "pages"}`;
+  const parts = [date];
+  if (count > 0) parts.push(`${count} ${count === 1 ? "page" : "pages"}`);
+  if (birthdays > 0) {
+    parts.push(`${birthdays} ${birthdays === 1 ? "birthday" : "birthdays"}`);
+  }
+  return parts.join(", ");
 }
 
 function DayColumn({
   dateKey,
   entries,
+  birthdays,
   isToday,
   isActive,
   showMonth,
@@ -42,6 +60,7 @@ function DayColumn({
 }: {
   dateKey: DateKey;
   entries: readonly CalendarEntryLike[];
+  birthdays: readonly BirthdayOccurrence[];
   isToday: boolean;
   isActive: boolean;
   showMonth: boolean;
@@ -63,7 +82,7 @@ function DayColumn({
     >
       <button
         type="button"
-        aria-label={dayLabel(dateKey, entries.length)}
+        aria-label={dayLabel(dateKey, entries.length, birthdays.length)}
         onClick={() => onDayActivate(dateKey)}
         className={cn(
           "flex items-baseline justify-between gap-2 rounded-[8px] px-1 py-0.5 text-left hover:bg-sink",
@@ -94,17 +113,25 @@ function DayColumn({
           </span>
         )}
       </button>
-      {shown.length > 0 && (
+      {shown.length + birthdays.length > 0 && (
         <ul className="m-0 flex list-none flex-col gap-1 p-0">
+          {birthdays.map((b) => (
+            <li key={`birthday:${b.path}`} className="min-w-0">
+              <CLink path={b.path} className={ROW_LINK}>
+                <Cake
+                  data-birthday-marker
+                  aria-hidden="true"
+                  className="size-2.5 flex-shrink-0 text-accent"
+                />
+                <span className="truncate" title={b.path}>
+                  {`${b.title || b.path} — ${birthdayLabel(b)}`}
+                </span>
+              </CLink>
+            </li>
+          ))}
           {shown.map((e) => (
             <li key={e.path} className="min-w-0">
-              <CLink
-                path={e.path}
-                className={cn(
-                  "cl-link-plain flex min-w-0 items-center gap-1.5 rounded text-[13px] text-ink-2 hover:text-ink",
-                  FOCUS_RING_NATIVE,
-                )}
-              >
+              <CLink path={e.path} className={ROW_LINK}>
                 <span
                   data-kind-dot
                   aria-hidden="true"
@@ -133,10 +160,12 @@ function DayColumn({
   );
 }
 
-/** Weeks mode: one row per ISO week, each day listing its pages inline. */
+/** Weeks mode: one row per ISO week, each day listing its birthdays and
+ *  pages inline. */
 export function WeekRows({
   rows,
   byDay,
+  birthdaysByDay = NO_BIRTHDAY_DAYS,
   today,
   activeDate = null,
   onDayActivate,
@@ -158,6 +187,7 @@ export function WeekRows({
                 key={key}
                 dateKey={key}
                 entries={byDay.get(key) ?? NO_ENTRIES}
+                birthdays={birthdaysByDay.get(key) ?? NO_BIRTHDAYS}
                 isToday={key === today}
                 isActive={key === activeDate}
                 showMonth={i === 0 || key.endsWith("-01")}

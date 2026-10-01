@@ -1,5 +1,5 @@
 import { parseDate } from "@internationalized/date";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Cake, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   type ReactNode,
   useCallback,
@@ -21,6 +21,7 @@ import {
 } from "react-aria-components";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
+import type { BirthdayOccurrence } from "#/lib/birthday";
 import { type CalendarEntryLike, dayKinds } from "#/lib/calendar/bucket";
 import { addMonths, type DateKey, monthGrid } from "#/lib/calendar/dates";
 import { cn } from "#/lib/cn";
@@ -39,6 +40,8 @@ export interface MonthCalendarProps {
   /** Month grids shown side by side. Default 1. */
   months?: number;
   byDay: ReadonlyMap<DateKey, readonly CalendarEntryLike[]>;
+  /** Birthdays per day; a day with any shows a cake beside its dots. */
+  birthdaysByDay?: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]>;
   today: DateKey;
   /** Rail: the open page's date. */
   selectedDate?: DateKey | null;
@@ -54,6 +57,8 @@ export interface MonthCalendarProps {
 }
 
 const NO_ENTRIES: readonly CalendarEntryLike[] = [];
+const NO_BIRTHDAYS: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]> =
+  new Map();
 
 /** Header row, cell rows and week-number rows share these heights, so the
  *  aria-hidden week column lines up with RAC's grid rows. */
@@ -164,20 +169,36 @@ function WeekColumn({
   );
 }
 
-function KindDots({
+/** The day's markers: a cake when someone has a birthday, then kind dots. */
+function DayMarkers({
   entries,
+  birthdays,
+  variant,
   dim,
 }: {
   entries: readonly CalendarEntryLike[];
+  birthdays: number;
+  variant: MonthCalendarVariant;
   dim: boolean;
 }) {
   const kinds = dayKinds(entries);
-  if (kinds.length === 0) return null;
+  if (kinds.length === 0 && birthdays === 0) return null;
   return (
     <span
       aria-hidden="true"
       className={cn("flex items-center gap-[3px]", dim && "opacity-50")}
     >
+      {birthdays > 0 && (
+        <Cake
+          data-birthday-marker
+          aria-hidden="true"
+          strokeWidth={2.25}
+          className={cn(
+            "shrink-0 text-accent",
+            variant === "page" ? "size-3" : "size-2.5",
+          )}
+        />
+      )}
       {kinds.map((kind) => (
         <span
           key={kind}
@@ -191,14 +212,25 @@ function KindDots({
   );
 }
 
-const noteCountLabel = (n: number) => (n === 1 ? "1 note" : `${n} notes`);
+const plural = (n: number, one: string, many: string) =>
+  n === 1 ? `1 ${one}` : `${n} ${many}`;
 
-/** Screen-reader note count. RAC's cell button carries its own aria-label,
+/** "2 notes, 1 birthday", "1 birthday", "3 notes". */
+function dayDescription(notes: number, birthdays: number): string {
+  return [
+    notes > 0 && plural(notes, "note", "notes"),
+    birthdays > 0 && plural(birthdays, "birthday", "birthdays"),
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+/** Screen-reader note and birthday count. RAC's cell button carries its own aria-label,
  *  which wins over content, and CalendarCell forwards no aria props. So this
  *  text points the enclosing cell button at itself via aria-describedby. RAC
  *  leaves that attribute unset for a single-date calendar with no
  *  validation, so React never overwrites it. */
-function NoteCount({ count }: { count: number }) {
+function NoteCount({ text }: { text: string }) {
   const id = useId();
   const describe = useCallback(
     (el: HTMLSpanElement | null) => {
@@ -215,7 +247,7 @@ function NoteCount({ count }: { count: number }) {
   );
   return (
     <span ref={describe} id={id} className="sr-only">
-      {noteCountLabel(count)}
+      {text}
     </span>
   );
 }
@@ -224,6 +256,7 @@ interface DayFaceProps {
   dateKey: DateKey;
   label: string;
   entries: readonly CalendarEntryLike[];
+  birthdays: number;
   variant: MonthCalendarVariant;
   isToday: boolean;
   isSelected: boolean;
@@ -238,6 +271,7 @@ function DayFace({
   dateKey,
   label,
   entries,
+  birthdays,
   variant,
   isToday,
   isSelected,
@@ -245,6 +279,14 @@ function DayFace({
   isOutside,
 }: DayFaceProps) {
   const count = entries.length;
+  const markers = (
+    <DayMarkers
+      entries={entries}
+      birthdays={birthdays}
+      variant={variant}
+      dim={isOutside}
+    />
+  );
   return (
     <span
       data-date={dateKey}
@@ -270,7 +312,9 @@ function DayFace({
         isActive && "ring-2 ring-accent ring-inset",
       )}
     >
-      {count > 0 && <NoteCount count={count} />}
+      {(count > 0 || birthdays > 0) && (
+        <NoteCount text={dayDescription(count, birthdays)} />
+      )}
       {variant === "page" ? (
         <>
           <span className="flex items-baseline gap-1.5">
@@ -292,7 +336,7 @@ function DayFace({
               </span>
             )}
           </span>
-          <KindDots entries={entries} dim={isOutside} />
+          {markers}
         </>
       ) : (
         <>
@@ -305,7 +349,7 @@ function DayFace({
           >
             {label}
           </span>
-          <KindDots entries={entries} dim={isOutside} />
+          {markers}
         </>
       )}
     </span>
@@ -313,12 +357,13 @@ function DayFace({
 }
 
 /** Obsidian-calendar-style month grid(s) over react-aria's Calendar: Monday
- *  first, ISO week numbers, kind dots, today ring, selected and active days. */
+ *  first, ISO week numbers, kind dots and birthday cakes, today ring, selected and active days. */
 export function MonthCalendar({
   visibleMonth,
   onVisibleMonthChange,
   months = 1,
   byDay,
+  birthdaysByDay = NO_BIRTHDAYS,
   today,
   selectedDate = null,
   activeDate = null,
@@ -532,6 +577,7 @@ export function MonthCalendar({
                             dateKey={key}
                             label={formattedDate}
                             entries={byDay.get(key) ?? NO_ENTRIES}
+                            birthdays={birthdaysByDay.get(key)?.length ?? 0}
                             variant={variant}
                             isToday={key === today}
                             isSelected={key === selectedDate}

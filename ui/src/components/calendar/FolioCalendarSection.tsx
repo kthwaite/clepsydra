@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, ListFilter } from "lucide-react";
+import { Cake, ChevronDown, ChevronUp, ListFilter } from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
   useId,
@@ -12,16 +12,28 @@ import { DayNotesList } from "#/components/calendar/DayNotesList";
 import { MonthCalendar } from "#/components/calendar/MonthCalendar";
 import { Section } from "#/components/codex/Section";
 import { IconButton } from "#/components/ui/icon-button";
-import { Menu, MenuItem, MenuTrigger } from "#/components/ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "#/components/ui/menu";
 import { Popover } from "#/components/ui/popover";
 import { useOpenJournalForDate } from "#/hooks/useOpenJournalForDate";
+import {
+  type BirthdayEntry,
+  type BirthdayOccurrence,
+  birthdayOccurrences,
+} from "#/lib/birthday";
 import { bucketEntries, type CalendarEntryLike } from "#/lib/calendar/bucket";
 import { type DateKey, monthGridRange, rangeKeys } from "#/lib/calendar/dates";
 import {
   readCollapsed,
   readHiddenKinds,
+  readHideBirthdays,
   writeCollapsed,
   writeHiddenKinds,
+  writeHideBirthdays,
 } from "#/lib/calendar/railPrefs";
 import { aiJournalDateFromPath, journalDateFromPath } from "#/lib/journal";
 import {
@@ -41,6 +53,12 @@ export interface FolioCalendarSectionProps {
 
 const MENU_KINDS = sortKindsByLabel(KINDS);
 const NO_ENTRIES: readonly CalendarEntryLike[] = [];
+const NO_BIRTHDAYS: readonly BirthdayEntry[] = [];
+const NO_OCCURRENCES: readonly BirthdayOccurrence[] = [];
+const NO_BIRTHDAY_DAYS: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]> =
+  new Map();
+/** The Birthdays toggle's menu key; kinds are upper case, so no clash. */
+const BIRTHDAYS_KEY = "birthdays";
 
 /** The open page's calendar day: a journal's date from its path, else the
  *  local date of created_at. */
@@ -66,8 +84,9 @@ function ymOf(key: DateKey): [number, number] {
   return [y, m - 1];
 }
 
-/** Folio right-rail month calendar: follows the open page, filters kinds on
- *  the client, and lists a day's notes in a popover. Desktop only. */
+/** Folio right-rail month calendar: follows the open page, filters kinds and
+ *  birthdays on the client, and lists a day's notes in a popover. Desktop
+ *  only. */
 export function FolioCalendarSection({
   path,
   createdAt,
@@ -78,6 +97,8 @@ export function FolioCalendarSection({
   const [visibleMonth, setVisibleMonth] = useState<DateKey>(pageDate ?? today);
   const [activeDay, setActiveDay] = useState<DateKey | null>(null);
   const [hiddenKinds, setHiddenKinds] = useState<Set<Kind>>(readHiddenKinds);
+  const [hideBirthdays, setHideBirthdays] =
+    useState<boolean>(readHideBirthdays);
   const [collapsed, setCollapsed] = useState<boolean>(readCollapsed);
   const anchorRef = useRef<HTMLElement | null>(null);
   const bodyId = useId();
@@ -102,18 +123,32 @@ export function FolioCalendarSection({
     () => bucketEntries(data?.entries ?? [], rangeKeys(range), hiddenKinds),
     [data, range, hiddenKinds],
   );
-
-  const visibleKinds = useMemo(
-    () => new Set(MENU_KINDS.filter((k) => !hiddenKinds.has(k))),
-    [hiddenKinds],
+  const birthdaysByDay = useMemo(
+    () =>
+      hideBirthdays
+        ? NO_BIRTHDAY_DAYS
+        : birthdayOccurrences(
+            data?.birthdays ?? NO_BIRTHDAYS,
+            rangeKeys(range),
+          ),
+    [data, range, hideBirthdays],
   );
 
-  const changeKinds = (keys: Selection) => {
+  const visibleKeys = useMemo(() => {
+    const keys = new Set<string>(MENU_KINDS.filter((k) => !hiddenKinds.has(k)));
+    if (!hideBirthdays) keys.add(BIRTHDAYS_KEY);
+    return keys;
+  }, [hiddenKinds, hideBirthdays]);
+
+  const changeVisible = (keys: Selection) => {
     const next = new Set(
       keys === "all" ? [] : MENU_KINDS.filter((k) => !keys.has(k)),
     );
     setHiddenKinds(next);
     writeHiddenKinds(next);
+    const hide = keys !== "all" && !keys.has(BIRTHDAYS_KEY);
+    setHideBirthdays(hide);
+    writeHideBirthdays(hide);
   };
 
   const toggleCollapsed = () => {
@@ -126,6 +161,9 @@ export function FolioCalendarSection({
   const activeEntries = activeDay
     ? (byDay.get(activeDay) ?? NO_ENTRIES)
     : NO_ENTRIES;
+  const activeBirthdays = activeDay
+    ? (birthdaysByDay.get(activeDay) ?? NO_OCCURRENCES)
+    : NO_OCCURRENCES;
   const journalPath = activeEntries.find((e) => e.kind === "JOURNAL")?.path;
 
   // CLink opens the tab itself; any link click inside the day list also
@@ -143,10 +181,14 @@ export function FolioCalendarSection({
         <Menu
           aria-label="Calendar kinds"
           selectionMode="multiple"
-          selectedKeys={visibleKinds}
-          onSelectionChange={changeKinds}
+          selectedKeys={visibleKeys}
+          onSelectionChange={changeVisible}
           className="max-h-[min(420px,70vh)]"
         >
+          <MenuItem id={BIRTHDAYS_KEY} icon={<Cake className="text-accent" />}>
+            Birthdays
+          </MenuItem>
+          <MenuSeparator />
           {MENU_KINDS.map((k) => (
             <MenuItem key={k} id={k} swatch={KIND_META[k].color}>
               {kindDisplayLabel(k)}
@@ -186,6 +228,7 @@ export function FolioCalendarSection({
             visibleMonth={visibleMonth}
             onVisibleMonthChange={setVisibleMonth}
             byDay={byDay}
+            birthdaysByDay={birthdaysByDay}
             today={today}
             selectedDate={pageDate}
             activeDate={activeDay}
@@ -211,6 +254,7 @@ export function FolioCalendarSection({
               <DayNotesList
                 dateKey={activeDay}
                 entries={activeEntries}
+                birthdays={activeBirthdays}
                 journalPath={journalPath ?? null}
                 headingLevel={4}
                 onOpenJournal={() => {
