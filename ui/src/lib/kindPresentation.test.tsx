@@ -44,6 +44,13 @@ describe("presentationFor", () => {
     expect(presentation.headerExtras).not.toBeNull();
   });
 
+  it("gives people the bespoke birthday header block", () => {
+    const presentation = presentationFor("PERSON");
+    expect(presentation.bodyPresentation).toBe("editor");
+    expect(presentation.metaExtras).toBeNull();
+    expect(presentation.headerExtras).not.toBeNull();
+  });
+
   it("keeps Journal's day navigation in the rail", () => {
     for (const kind of ["JOURNAL", "AI_JOURNAL"] as const) {
       const presentation = presentationFor(kind);

@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import { AiJournalMeta, JournalMeta } from "#/components/codex/JournalMeta";
 import { MeetingMeta } from "#/components/codex/MeetingMeta";
+import { PersonMeta } from "#/components/codex/PersonMeta";
 import { aiJournalDayLabel, journalDayLabel } from "#/lib/journal";
 import type { Kind } from "#/lib/kind";
 
@@ -26,7 +27,7 @@ export type KindPresentation = {
   /** Label for FOLIO's wrapping Block around metaExtras (default "Details"). */
   metaExtrasLabel?: string;
   /** Kind-specific facts rendered in the document column directly under the
-   *  title/tags header (MEETING: occurred + attendees), or null. */
+   *  title/tags header (MEETING: occurred + attendees; PERSON: birthday), or null. */
   headerExtras: ComponentType<KindMetaExtrasProps> | null;
   /** When set, FOLIO renders this string as a static title in place of the
    *  editable title input. */
@@ -71,6 +72,11 @@ const REGISTRY: Partial<Record<Kind, KindPresentation>> = {
     bodyPresentation: "editor",
     metaExtras: null,
     headerExtras: MeetingMeta,
+  },
+  PERSON: {
+    bodyPresentation: "editor",
+    metaExtras: null,
+    headerExtras: PersonMeta,
   },
 };
 
