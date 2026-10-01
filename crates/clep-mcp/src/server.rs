@@ -1517,8 +1517,8 @@ impl VaultMcpServer {
 
 #[tool_handler]
 impl ServerHandler for VaultMcpServer {
-    fn get_info(&self) -> rmcp::model::ServerInfo {
-        let mut info = rmcp::model::ServerInfo::new(
+    fn get_info(&self) -> rmcp::model::ServerConfig {
+        let mut info = rmcp::model::ServerConfig::new(
             rmcp::model::ServerCapabilities::builder()
                 .enable_tools()
                 .build(),
