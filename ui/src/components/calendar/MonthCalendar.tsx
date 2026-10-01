@@ -72,6 +72,13 @@ const ALIGN_START = { selectionAlignment: "start" } as object;
 const monthOf = (key: DateKey) => key.slice(0, 7);
 const firstOfMonth = (key: DateKey): DateKey => `${monthOf(key)}-01`;
 
+/** An overflow click waiting for the parent to show `month`; then `day`
+ *  takes keyboard focus. */
+interface PendingFocus {
+  month: string;
+  day: DateKey;
+}
+
 function ymOf(key: DateKey): [number, number] {
   const [y, m] = key.split("-").map(Number);
   return [y, m - 1];
@@ -255,8 +262,8 @@ function DayFace({
             : "inset-[2px] flex-col items-center justify-center gap-[3px] rounded-[10px]",
         variant !== "rail" &&
           (isOutside
-            ? "bg-sink/15 group-data-[hovered]:bg-sink/30"
-            : "bg-sink/40 group-data-[hovered]:bg-sink/70"),
+            ? "bg-sink/15 group-hover:bg-sink/30"
+            : "bg-sink/40 group-hover:bg-sink/70"),
         isOutside ? "text-faint" : "text-ink-2",
         isSelected && "bg-accent-tint text-ink",
         isToday && "text-accent ring-1 ring-accent/50 ring-inset",
@@ -325,6 +332,11 @@ export function MonthCalendar({
   // parent change RAC did not cause remounts the Calendar at the new month.
   const [focused, setFocused] = useState<DateKey>(visibleMonth);
   const [epoch, setEpoch] = useState(0);
+  // True only for a remount caused by an overflow click, so prev/next and
+  // other parent changes never move focus into the grid.
+  const [autoFocus, setAutoFocus] = useState(false);
+  const pendingRef = useRef<PendingFocus | null>(null);
+  const jumpDayRef = useRef<DateKey | null>(null);
   const [start, setStart] = useState<DateKey>(firstOfMonth(visibleMonth));
   const startRef = useRef<DateKey>(firstOfMonth(visibleMonth));
   const visibleMonthRef = useRef(visibleMonth);
@@ -344,11 +356,26 @@ export function MonthCalendar({
 
   useEffect(() => {
     if (monthOf(visibleMonth) === monthOf(startRef.current)) return;
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    const jump = pending?.month === monthOf(visibleMonth) ? pending : null;
     startRef.current = firstOfMonth(visibleMonth);
     setStart(startRef.current);
+    // Mount focused on visibleMonth, so RAC's start alignment keeps it
+    // first; the jump day (possibly in a later grid) takes focus after.
+    jumpDayRef.current = jump?.day ?? null;
     setFocused(visibleMonth);
+    setAutoFocus(jump !== null);
     setEpoch((n) => n + 1);
   }, [visibleMonth]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per remount
+  useEffect(() => {
+    const day = jumpDayRef.current;
+    if (!day) return;
+    jumpDayRef.current = null;
+    setFocused(day);
+  }, [epoch]);
 
   // Resolve the live cell at activation. In Months mode a date can show in
   // two grids; RAC disables the outside-month copy, so the in-month face is
@@ -365,6 +392,39 @@ export function MonthCalendar({
 
   const count = Math.max(1, months);
   const rowClass = ROW[variant];
+
+  // RAC disables outside-month cells, so their presses never reach
+  // onChange. A delegated click handles them: a date inside the visible
+  // range (Months mode) activates its in-month copy; a date before or after
+  // it shifts the view one month and focuses that date after the remount.
+  // Keyboard users cross month edges with the arrow keys instead.
+  const onOverflowRef = useRef<(key: DateKey) => void>(() => {});
+  onOverflowRef.current = (key: DateKey) => {
+    const last = addMonths(start, count);
+    if (key >= start && key < last) {
+      handleChange(parseDate(key));
+      return;
+    }
+    const target = addMonths(start, key < start ? -1 : 1);
+    pendingRef.current = { month: monthOf(target), day: key };
+    onVisibleMonthChange(target);
+  };
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const onClick = (e: MouseEvent) => {
+      // The face sits inset in its cell, so a click can land on either.
+      const cell = (e.target as Element | null)?.closest("td");
+      const face = cell?.querySelector<HTMLElement>(
+        "[data-date][data-outside]",
+      );
+      const key = face?.dataset.date;
+      if (!key || !root.contains(cell ?? null)) return;
+      onOverflowRef.current(key);
+    };
+    root.addEventListener("click", onClick);
+    return () => root.removeEventListener("click", onClick);
+  }, []);
 
   return (
     <div
@@ -411,6 +471,7 @@ export function MonthCalendar({
       <Calendar
         key={epoch}
         {...ALIGN_START}
+        autoFocus={autoFocus}
         aria-label="Calendar"
         firstDayOfWeek="mon"
         value={null}
@@ -460,8 +521,8 @@ export function MonthCalendar({
                       <CalendarCell
                         date={date}
                         className={cn(
-                          "group relative block w-full cursor-pointer rounded-[12px] data-[disabled]:cursor-default",
-                          variant === "rail" && "data-[hovered]:bg-sink/60",
+                          "group relative block w-full cursor-pointer rounded-[12px]",
+                          variant === "rail" && "hover:bg-sink/60",
                           rowClass,
                           FOCUS_RING,
                         )}
