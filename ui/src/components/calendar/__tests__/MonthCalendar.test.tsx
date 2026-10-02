@@ -272,6 +272,35 @@ describe("MonthCalendar", () => {
     }
   });
 
+  it("fill stretches page rows to the grid's height, with a floor", () => {
+    const { container } = renderCalendar({ variant: "page", fill: true });
+    const grid = container.querySelector<HTMLElement>(
+      "[class*='container-type:size']",
+    );
+    // September 2026 spans five ISO weeks (36–40).
+    expect(grid?.style.getPropertyValue("--cal-row")).toBe(
+      "max(6rem, calc((100cqh - 1.75rem) / 5))",
+    );
+    // jsdom folds the calc: 1.75rem header + 5 × 6rem rows.
+    expect(grid?.style.minHeight).toBe("calc(31.75rem)");
+    expect(dayButton(15).className).toMatch(/h-\[var\(--cal-row\)\]/);
+    for (const n of container.querySelectorAll("[data-week-number]")) {
+      expect(n.className).toMatch(/h-\[var\(--cal-row\)\]/);
+    }
+  });
+
+  it("fill does nothing with several months", () => {
+    const { container } = renderCalendar({
+      variant: "compact",
+      months: 3,
+      fill: true,
+    });
+    expect(
+      container.querySelector("[class*='container-type:size']"),
+    ).toBeNull();
+    expect(dayButton(15).className).toMatch(/\bh-10\b/);
+  });
+
   it("rail variant shows no count", () => {
     const { container } = renderCalendar();
     expect(container.querySelector("[data-day-count]")).toBeNull();
