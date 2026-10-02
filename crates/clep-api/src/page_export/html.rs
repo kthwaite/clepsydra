@@ -170,7 +170,6 @@ fn presentable<'a>(
                 escape(&tex)
             )))),
             // Display math sits inside a paragraph, so it must stay a phrasing element.
-            // Display math sits inside a paragraph, so it must stay a phrasing element.
             Event::DisplayMath(tex) => events.push(Event::InlineHtml(CowStr::from(format!(
                 "<code class=\"math math-display\">{}</code>",
                 escape(&tex)
