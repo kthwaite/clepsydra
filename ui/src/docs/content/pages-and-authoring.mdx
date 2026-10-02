@@ -140,18 +140,18 @@ booked in), and the attendees as chips you add to with
 the person combobox and remove from in place, with the **1:1** toggle beside
 the attendee label.
 
-### Export a page to Word
+### Export a page to Word or HTML
 
-Open **Organization → Page actions → Export to Word (.docx)** in the Folio
-rail. In reading mode, the export action is shown directly under Organization.
-Export is available for saved plaintext pages of every Kind, including
-read-only pages.
+Open **Organization → Page actions** in the Folio rail and choose **Export to
+Word (.docx)** or **Export to HTML (.html)**. In reading mode, the export
+actions are shown directly under Organization. Export is available for saved
+plaintext pages of every Kind, including read-only pages.
 
-The download contains the **saved title and body**, not unsaved editor changes.
-It does not modify the page. Frontmatter is omitted; wikilinks retain their
-visible labels without private vault destinations. Ordinary web links remain
-clickable. The document uses editable Word headings, lists, tables, callouts,
-code styling, embedded images, and page numbers.
+Both formats export the same content. The download contains the **saved title
+and body**, not unsaved editor changes. It does not modify the page.
+Frontmatter is omitted; wikilinks become plain text showing their visible
+labels, without private vault destinations. Ordinary web links remain
+clickable.
 
 Page, heading, and block embeds are expanded. Live Base views and templates
 become a static snapshot; previously generated regions retain their saved
@@ -161,13 +161,25 @@ in full beneath the table. Exports exceeding 1,000 Base rows, 32 embed levels,
 16 MiB of page input, 4 MiB of expanded Markdown, or 32 MiB of image input fail
 rather than silently truncate.
 
-Local PNG, JPEG, GIF, WebP, BMP, and TIFF images and archived CAS images are
-embedded; animations become static images. Remote images are not fetched:
-save them as vault attachments first. Encrypted pages cannot be exported
-because their decryption keys remain in the browser. Missing or inaccessible
-embeds, unsupported images, raw HTML, mathematical notation, and images or
-tables inside footnotes produce an error instead of an incomplete download.
-Export requires a server connection and is not stored in the offline cache.
+Local images and archived CAS images are embedded; animations become static
+images. Remote images are not fetched: save them as vault attachments first.
+Encrypted pages cannot be exported because their decryption keys remain in the
+browser. HTML comments are dropped and `<br>` line breaks are kept. Missing or
+inaccessible embeds, unsupported images, and any other raw HTML produce an
+error instead of an incomplete download. Export requires a server
+connection and is not stored in the offline cache.
+
+**Word.** The document uses editable Word headings, lists, tables, callouts,
+code styling, embedded images, and page numbers. Local PNG, JPEG, GIF, WebP,
+BMP, and TIFF images are supported. Mathematical notation, and images or
+tables inside footnotes, produce an error.
+
+**HTML.** The download is a single self-contained file. It opens in any
+browser without a network connection. Images are inlined, re-encoded as PNG
+without their original metadata. The app fonts (Instrument Serif, Geist, and
+JetBrains Mono) are embedded. The page uses the light Stone & Lamp styling in
+a reading column and prints cleanly. Mathematical notation is kept as its TeX
+source in code styling rather than rendered.
 
 ### Move or rename a page
 

@@ -11,26 +11,37 @@ import type { components } from "./schema";
 
 export type ArchivedPage = components["schemas"]["RubbishItemSummary"];
 
+export type PageExportFormat = "word" | "html";
+
+const PAGE_EXPORTS = {
+  word: {
+    route: "/api/vault/pages-export/word/{path}",
+    filename: "page.docx",
+    failure: "Could not export this page to Word.",
+  },
+  html: {
+    route: "/api/vault/pages-export/html/{path}",
+    filename: "page.html",
+    failure: "Could not export this page to HTML.",
+  },
+} as const;
+
 /** Download a fresh snapshot of the saved page, never the editor's draft. */
-export async function fetchWordExport(path: string) {
-  const { data, error, response } = await fetchClient.GET(
-    "/api/vault/pages-export/word/{path}",
-    {
-      params: { path: { path } },
-      parseAs: "blob",
-      cache: "no-store",
-    },
-  );
+export async function fetchPageExport(path: string, format: PageExportFormat) {
+  const spec = PAGE_EXPORTS[format];
+  const { data, error, response } = await fetchClient.GET(spec.route, {
+    params: { path: { path } },
+    parseAs: "blob",
+    cache: "no-store",
+  });
   if (error || !data) {
-    throw new Error(
-      formatApiError(error, "Could not export this page to Word."),
-    );
+    throw new Error(formatApiError(error, spec.failure));
   }
   const disposition = response.headers.get("content-disposition") ?? "";
   const encodedFilename = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
   const filename = encodedFilename
     ? decodeURIComponent(encodedFilename)
-    : (/filename="([^"]+)"/i.exec(disposition)?.[1] ?? "page.docx");
+    : (/filename="([^"]+)"/i.exec(disposition)?.[1] ?? spec.filename);
   return { blob: data, filename };
 }
 

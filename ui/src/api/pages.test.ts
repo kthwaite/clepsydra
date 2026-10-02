@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchClient } from "#/api/client";
 import { queryKeys } from "#/api/keys";
 import {
+  fetchPageExport,
   useAssignBulk,
   useAssignPage,
   usePages,
@@ -68,6 +69,76 @@ function propertyProjectionKey(uuid: string) {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+describe("fetchPageExport", () => {
+  function exportResponse(
+    data: Blob | undefined,
+    disposition: string | null,
+    error?: unknown,
+  ) {
+    const headers = new Headers();
+    if (disposition) headers.set("content-disposition", disposition);
+    return {
+      data,
+      error,
+      response: new Response(null, { headers }),
+    } as unknown as Awaited<ReturnType<typeof fetchClient.GET>>;
+  }
+
+  it.each([
+    ["word", "/api/vault/pages-export/word/{path}"],
+    ["html", "/api/vault/pages-export/html/{path}"],
+  ] as const)(
+    "requests a fresh %s snapshot from its endpoint",
+    async (format, route) => {
+      const blob = new Blob(["x"]);
+      const get = vi
+        .spyOn(fetchClient, "GET")
+        .mockResolvedValue(
+          exportResponse(blob, "attachment; filename*=UTF-8''Caf%C3%A9.out"),
+        );
+
+      const result = await fetchPageExport("notes/café.md", format);
+
+      expect(get).toHaveBeenCalledWith(route, {
+        params: { path: { path: "notes/café.md" } },
+        parseAs: "blob",
+        cache: "no-store",
+      });
+      expect(result).toEqual({ blob, filename: "Café.out" });
+    },
+  );
+
+  it.each([
+    ["word", "page.docx"],
+    ["html", "page.html"],
+  ] as const)(
+    "falls back to a %s default filename",
+    async (format, filename) => {
+      vi.spyOn(fetchClient, "GET").mockResolvedValue(
+        exportResponse(new Blob(["x"]), null),
+      );
+
+      await expect(fetchPageExport("a.md", format)).resolves.toMatchObject({
+        filename,
+      });
+    },
+  );
+
+  it.each([
+    ["word", "Could not export this page to Word."],
+    ["html", "Could not export this page to HTML."],
+  ] as const)(
+    "names the %s format when the export fails",
+    async (format, message) => {
+      vi.spyOn(fetchClient, "GET").mockResolvedValue(
+        exportResponse(undefined, null, {}),
+      );
+
+      await expect(fetchPageExport("a.md", format)).rejects.toThrow(message);
+    },
+  );
+});
 
 describe("assign hooks", () => {
   it("are exported", () => {
