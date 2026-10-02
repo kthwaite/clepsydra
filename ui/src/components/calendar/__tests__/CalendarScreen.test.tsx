@@ -1,7 +1,11 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CalendarBirthday, CalendarEntry } from "#/api/calendar";
+import type {
+  CalendarBirthday,
+  CalendarEntry,
+  CalendarTodoItem,
+} from "#/api/calendar";
 import { CalendarScreen } from "#/components/calendar/CalendarScreen";
 import { monthGridRange } from "#/lib/calendar/dates";
 import type { CalendarViewSearch } from "#/lib/calendar/search";
@@ -10,6 +14,7 @@ import { EMPTY_FILTER_STATE, type FilterState } from "#/lib/filters/model";
 const mocks = vi.hoisted(() => ({
   entries: vi.fn(),
   openJournal: vi.fn(),
+  toggleTodo: vi.fn(),
 }));
 
 vi.mock("#/api/calendar", () => ({ useCalendarEntries: mocks.entries }));
@@ -19,6 +24,13 @@ vi.mock("#/api/index", () => ({
 vi.mock("#/lib/useProjects", () => ({
   useProjectValues: () => ["clepsydra"],
 }));
+vi.mock("#/api/tasks", () => ({
+  useToggleTaskStatus: () => ({ mutate: mocks.toggleTodo, isPending: false }),
+}));
+vi.mock("#/api/board", () => ({
+  usePatchTask: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
 vi.mock("#/hooks/useOpenJournalForDate", () => ({
   useOpenJournalForDate: () => mocks.openJournal,
 }));
@@ -65,6 +77,7 @@ function queryState(
   overrides: Partial<{
     entries: CalendarEntry[];
     birthdays: CalendarBirthday[];
+    todos: CalendarTodoItem[];
     truncated: boolean;
     isLoading: boolean;
     isError: boolean;
@@ -73,11 +86,12 @@ function queryState(
   const {
     entries = ENTRIES,
     birthdays = [],
+    todos = [],
     truncated = false,
     ...rest
   } = overrides;
   return {
-    data: { entries, birthdays, truncated },
+    data: { entries, birthdays, todos, truncated },
     isLoading: false,
     isError: false,
     ...rest,
@@ -489,6 +503,95 @@ describe("CalendarScreen", () => {
       expect(
         within(panel).getByRole("link", { name: "Sev — birthday, turns 26" }),
       ).toBeVisible();
+    });
+  });
+  describe("todos", () => {
+    const todo = (due: string, content: string): CalendarTodoItem => ({
+      kind: "todo",
+      content,
+      status: "todo",
+      due,
+      page_path: "notes/brew.md",
+      span_start: 0,
+    });
+    const marker = (container: HTMLElement, key: string) =>
+      container.querySelector(`[data-date="${key}"] [data-todo-marker]`);
+
+    beforeEach(() => {
+      mocks.entries.mockReturnValue(
+        queryState({
+          todos: [
+            todo("2026-09-15", "Buy hops"),
+            todo("2026-10-02", "Bottle"),
+            todo("2026-12-01", "Far away"),
+          ],
+        }),
+      );
+    });
+
+    it("marks todos across the visible grid, overflow days included", () => {
+      const { container } = renderScreen();
+      expect(marker(container, "2026-09-15")).not.toBeNull();
+      expect(marker(container, "2026-10-02")).not.toBeNull();
+      expect(marker(container, "2026-09-16")).toBeNull();
+    });
+
+    it("lists the day's todos in the side panel", async () => {
+      const user = userEvent.setup();
+      renderScreen({ day: "2026-09-15" });
+      const panel = screen.getByRole("complementary", { name: "Day" });
+      const group = within(panel).getByRole("list", { name: "Todos" });
+      expect(within(group).getByText("Buy hops")).toBeVisible();
+      await user.click(
+        within(group).getByRole("button", { name: /Mark Todo done/ }),
+      );
+      expect(mocks.toggleTodo).toHaveBeenCalledWith({
+        pagePath: "notes/brew.md",
+        spanStart: 0,
+        status: "done",
+      });
+    });
+
+    it("weeks mode lists todos inline", () => {
+      const { container } = renderScreen({
+        mode: "weeks",
+        span: 1,
+        date: "2026-09-15",
+      });
+      const day = container.querySelector<HTMLElement>(
+        '[data-date="2026-09-15"]',
+      );
+      expect(
+        within(day as HTMLElement).getByRole("link", { name: "Buy hops" }),
+      ).toBeVisible();
+    });
+
+    it("an out-of-range day takes its todos from its own window", () => {
+      mocks.entries.mockImplementation((opts: { range: { from: Date } }) =>
+        opts.range.from.getTime() === new Date(2026, 8, 7).getTime()
+          ? queryState({ entries: [], todos: [todo("2026-09-07", "Seventh")] })
+          : queryState(),
+      );
+      renderScreen({
+        mode: "weeks",
+        span: 2,
+        date: "2026-09-15",
+        day: "2026-09-07",
+      });
+      const panel = screen.getByRole("complementary", { name: "Day" });
+      const group = within(panel).getByRole("list", { name: "Todos" });
+      expect(within(group).getByText("Seventh")).toBeVisible();
+    });
+
+    it("reads a response without todos as none", () => {
+      mocks.entries.mockReturnValue({
+        data: { entries: ENTRIES, birthdays: [], truncated: false },
+        isLoading: false,
+        isError: false,
+      });
+      renderScreen({ day: "2026-09-15" });
+      const panel = screen.getByRole("complementary", { name: "Day" });
+      expect(within(panel).queryByRole("list", { name: "Todos" })).toBeNull();
     });
   });
 });

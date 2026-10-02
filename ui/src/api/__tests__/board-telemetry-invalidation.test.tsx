@@ -73,4 +73,36 @@ describe("board telemetry invalidation", () => {
       expect(client.getQueryState(burndownKey)?.isInvalidated).toBe(true);
     }
   });
+  it("refreshes the calendar after a task patch", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(BOARD_FIXTURE.tasks[0]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      ),
+    );
+    const client = new QueryClient({
+      defaultOptions: { mutations: { retry: false } },
+    });
+    const calendarKey = [
+      "get",
+      "/api/vault/index/calendar",
+      { params: { query: { from: "a", to: "b" } } },
+    ];
+    client.setQueryData(calendarKey, { entries: [], todos: [] });
+    const { result } = renderHook(() => usePatchTask(), {
+      wrapper: wrapper(client),
+    });
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: BOARD_FIXTURE.tasks[0].id,
+        patch: { status: "SEALED" },
+      });
+    });
+    expect(client.getQueryState(calendarKey)?.isInvalidated).toBe(true);
+  });
 });

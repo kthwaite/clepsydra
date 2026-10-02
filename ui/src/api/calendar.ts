@@ -7,10 +7,14 @@ import { $api } from "./client";
 export type CalendarEntry = components["schemas"]["CalendarEntry"];
 export type CalendarResponse = components["schemas"]["CalendarResponse"];
 export type CalendarBirthday = components["schemas"]["CalendarBirthday"];
+export type CalendarTodoItem = components["schemas"]["CalendarTodoItem"];
+export type CalendarTodo = components["schemas"]["CalendarTodo"];
+export type CalendarTask = components["schemas"]["CalendarTask"];
 
-/** An older server omits `birthdays`; read that as none. */
-function withBirthdays(data: CalendarResponse): CalendarResponse {
-  return data.birthdays ? data : { ...data, birthdays: [] };
+/** An older server omits `birthdays` or `todos`; read either as none. */
+function withDefaults(data: CalendarResponse): CalendarResponse {
+  if (data.birthdays && data.todos) return data;
+  return { ...data, birthdays: data.birthdays ?? [], todos: data.todos ?? [] };
 }
 
 export interface CalendarEntriesOptions {
@@ -26,7 +30,8 @@ export interface CalendarEntriesOptions {
  * client buckets. The key lives under `/api/vault/index`, so every page
  * mutation and SSE event already invalidates it. `birthdays` lists PERSON
  * birthdays (yearly, not windowed); the server empties it when `kinds`
- * excludes PERSON.
+ * excludes PERSON. `todos` lists checkbox todos and TASK pages by due date;
+ * the filters apply to their host pages.
  */
 export function useCalendarEntries(
   opts: CalendarEntriesOptions,
@@ -47,6 +52,6 @@ export function useCalendarEntries(
         },
       },
     },
-    { enabled, placeholderData: keepPreviousData, select: withBirthdays },
+    { enabled, placeholderData: keepPreviousData, select: withDefaults },
   );
 }

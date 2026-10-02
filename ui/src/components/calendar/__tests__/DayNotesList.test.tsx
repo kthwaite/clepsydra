@@ -1,10 +1,27 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CalendarTodoItem } from "#/api/calendar";
 import { DayNotesList } from "#/components/calendar/DayNotesList";
 import type { BirthdayOccurrence } from "#/lib/birthday";
 import type { CalendarEntryLike } from "#/lib/calendar/bucket";
 import { KIND_META } from "#/lib/kind";
+
+const mocks = vi.hoisted(() => ({
+  openTab: vi.fn(),
+  patchTask: vi.fn(),
+  toggleTodo: vi.fn(),
+}));
+
+vi.mock("#/api/tasks", () => ({
+  useToggleTaskStatus: () => ({ mutate: mocks.toggleTodo, isPending: false }),
+}));
+vi.mock("#/api/board", () => ({
+  usePatchTask: () => ({ mutate: mocks.patchTask, isPending: false }),
+}));
+vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => mocks.openTab }));
+
+beforeEach(() => vi.clearAllMocks());
 
 vi.mock("#/components/codex/CLink", () => ({
   CLink: ({ path, children }: { path?: string; children: React.ReactNode }) => (
@@ -164,5 +181,133 @@ describe("DayNotesList", () => {
   it("uses the requested heading level", () => {
     renderList({ headingLevel: 4 });
     expect(screen.getByRole("heading", { level: 4 })).toBeTruthy();
+  });
+  describe("todos", () => {
+    const todos: CalendarTodoItem[] = [
+      {
+        kind: "todo",
+        content: "Buy hops",
+        status: "todo",
+        due: "2026-09-30",
+        priority: "A",
+        page_path: "notes/brew.md",
+        page_title: "Brew Day",
+        span_start: 4,
+      },
+      {
+        kind: "todo",
+        content: "Clean the fermenter",
+        status: "done",
+        due: "2026-09-30",
+        page_path: "notes/brew.md",
+        page_title: "Brew Day",
+        span_start: 40,
+      },
+      {
+        kind: "task",
+        id: "01900000-0000-7000-8000-000000000001",
+        code: "TSK-brave-finch",
+        title: "Bottle the stout",
+        status: "FIELD",
+        priority: "P1",
+        project: "brewing",
+        due: "2026-09-30",
+        path: "tasks/TSK-brave-finch.md",
+      },
+    ];
+    const birthdays: BirthdayOccurrence[] = [
+      { path: "people/ada.md", title: "Ada", date: "2026-09-30", age: 43 },
+    ];
+
+    it("lists a Todos group after birthdays and before the kind groups", () => {
+      renderList({ birthdays, todos });
+      const names = screen
+        .getAllByRole("list")
+        .map((l) => l.getAttribute("aria-label"));
+      expect(names).toEqual([
+        "Birthdays",
+        "Todos",
+        "Journal",
+        "Note",
+        "Recipe",
+      ]);
+      const group = screen.getByRole("list", { name: "Todos" });
+      expect(within(group).getAllByRole("listitem")).toHaveLength(3);
+    });
+
+    it("toggles a checkbox todo to its next status", async () => {
+      const user = userEvent.setup();
+      renderList({ todos });
+      await user.click(
+        screen.getByRole("button", {
+          name: "Mark Todo done: Buy hops (Brew Day)",
+        }),
+      );
+      expect(mocks.toggleTodo).toHaveBeenCalledWith({
+        pagePath: "notes/brew.md",
+        spanStart: 4,
+        status: "done",
+      });
+    });
+
+    it("patches a TASK's status through its select", async () => {
+      const user = userEvent.setup();
+      renderList({ todos });
+      const status = screen.getByRole("button", {
+        name: /Status for TSK-brave-finch: Bottle the stout/,
+      });
+      expect(status).toHaveTextContent("In Progress");
+      await user.click(status);
+      await user.click(screen.getByRole("option", { name: "Done" }));
+      expect(mocks.patchTask).toHaveBeenCalledWith({
+        id: "01900000-0000-7000-8000-000000000001",
+        patch: { status: "SEALED" },
+      });
+    });
+
+    it("shows the priority and code badges, and opens each source page", async () => {
+      const user = userEvent.setup();
+      renderList({ todos });
+      const group = screen.getByRole("list", { name: "Todos" });
+      expect(within(group).getByText("A")).toBeInTheDocument();
+      expect(within(group).getByText("TSK-brave-finch")).toBeInTheDocument();
+      await user.click(
+        within(group).getAllByRole("button", { name: "Brew Day" })[0],
+      );
+      await user.click(
+        within(group).getByRole("button", {
+          name: "tasks/TSK-brave-finch.md",
+        }),
+      );
+      expect(mocks.openTab).toHaveBeenNthCalledWith(1, "page", "notes/brew.md");
+      expect(mocks.openTab).toHaveBeenNthCalledWith(
+        2,
+        "page",
+        "tasks/TSK-brave-finch.md",
+      );
+    });
+
+    it("strikes through and dims done rows only", () => {
+      renderList({ todos });
+      const done = screen.getByText("Clean the fermenter");
+      expect(done).toHaveClass("line-through");
+      expect(done).toHaveClass("text-mute");
+      expect(screen.getByText("Buy hops")).not.toHaveClass("line-through");
+      expect(screen.getByText("Bottle the stout")).not.toHaveClass(
+        "line-through",
+      );
+    });
+
+    it("does not repeat the day as each row's due date", () => {
+      renderList({ todos });
+      const group = screen.getByRole("list", { name: "Todos" });
+      expect(within(group).queryByText("2026-09-30")).toBeNull();
+    });
+
+    it("a day with only todos is not empty", () => {
+      renderList({ entries: [], todos });
+      expect(screen.queryByText("Nothing created this day.")).toBeNull();
+      expect(screen.getAllByRole("list")).toHaveLength(1);
+    });
   });
 });

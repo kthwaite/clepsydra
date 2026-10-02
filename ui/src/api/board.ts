@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { components } from "#/api/schema";
-import { invalidatePageStructure, invalidateRubbish, queryKeys } from "./keys";
+import {
+  invalidateByPath,
+  invalidatePageStructure,
+  invalidateRubbish,
+  queryKeys,
+} from "./keys";
 import type { ArchivedPage } from "./pages";
 
 export type BoardTask = components["schemas"]["BoardTask"];
@@ -15,6 +20,7 @@ export type CreateCycleRequest = components["schemas"]["CreateCycleRequest"];
 export type PatchCycleRequest = components["schemas"]["PatchCycleRequest"];
 
 const API_BASE = "/api/vault/board";
+const CALENDAR_PATH = `${queryKeys.index.pathPrefix}/calendar`;
 
 function invalidateTaskingTelemetry(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: queryKeys.board.all });
@@ -161,7 +167,11 @@ export function usePatchTask() {
       }
       toast.error("TASK EDIT FAILED — REVERTED");
     },
-    onSettled: () => invalidateTaskingTelemetry(qc),
+    onSettled: () => {
+      invalidateTaskingTelemetry(qc);
+      // A patched status or due moves the task on the calendar.
+      invalidateByPath(qc, CALENDAR_PATH);
+    },
   });
 }
 

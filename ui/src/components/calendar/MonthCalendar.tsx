@@ -1,5 +1,5 @@
 import { parseDate } from "@internationalized/date";
-import { Cake, ChevronLeft, ChevronRight } from "lucide-react";
+import { Cake, ChevronLeft, ChevronRight, ListTodo } from "lucide-react";
 import {
   type CSSProperties,
   type ReactNode,
@@ -20,11 +20,13 @@ import {
   CalendarStateContext,
   type DateValue,
 } from "react-aria-components";
+import type { CalendarTodoItem } from "#/api/calendar";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
 import type { BirthdayOccurrence } from "#/lib/birthday";
 import { type CalendarEntryLike, dayKinds } from "#/lib/calendar/bucket";
 import { addMonths, type DateKey, monthGrid } from "#/lib/calendar/dates";
+import { isTodoOpen } from "#/lib/calendar/todos";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING } from "#/lib/focusRing";
 import { KIND_META } from "#/lib/kind";
@@ -43,6 +45,9 @@ export interface MonthCalendarProps {
   byDay: ReadonlyMap<DateKey, readonly CalendarEntryLike[]>;
   /** Birthdays per day; a day with any shows a cake beside its dots. */
   birthdaysByDay?: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]>;
+  /** Dated todos per day; a day with any shows a todo marker (plus the open
+   *  count in the page variant). */
+  todosByDay?: ReadonlyMap<DateKey, readonly CalendarTodoItem[]>;
   today: DateKey;
   /** Rail: the open page's date. */
   selectedDate?: DateKey | null;
@@ -63,6 +68,19 @@ export interface MonthCalendarProps {
 const NO_ENTRIES: readonly CalendarEntryLike[] = [];
 const NO_BIRTHDAYS: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]> =
   new Map();
+const NO_TODO_DAYS: ReadonlyMap<DateKey, readonly CalendarTodoItem[]> =
+  new Map();
+const NO_TODOS: readonly CalendarTodoItem[] = [];
+
+/** A day's todo tally: all of them, and those still open. */
+interface TodoTally {
+  total: number;
+  open: number;
+}
+
+function tallyTodos(todos: readonly CalendarTodoItem[]): TodoTally {
+  return { total: todos.length, open: todos.filter(isTodoOpen).length };
+}
 
 /** Header row, cell rows and week-number rows share these heights, so the
  *  aria-hidden week column lines up with RAC's grid rows. */
@@ -178,20 +196,52 @@ function WeekColumn({
   );
 }
 
-/** The day's markers: a cake when someone has a birthday, then kind dots. */
+/** A checklist glyph when the day has todos; the page variant adds the open
+ *  count. Faint once every todo is done. */
+function TodoMarker({
+  todos,
+  variant,
+}: {
+  todos: TodoTally;
+  variant: MonthCalendarVariant;
+}) {
+  const allDone = todos.open === 0;
+  return (
+    <span
+      data-todo-marker
+      data-all-done={allDone || undefined}
+      className={cn(
+        "flex shrink-0 items-center gap-0.5 text-[12px] leading-none tabular-nums",
+        allDone ? "text-faint" : "text-ink-2",
+      )}
+    >
+      <ListTodo
+        aria-hidden="true"
+        strokeWidth={2.25}
+        className={variant === "page" ? "size-3" : "size-2.5"}
+      />
+      {variant === "page" && !allDone && todos.open}
+    </span>
+  );
+}
+
+/** The day's markers: a cake when someone has a birthday, a todo glyph when
+ *  something is due, then kind dots. */
 function DayMarkers({
   entries,
   birthdays,
+  todos,
   variant,
   dim,
 }: {
   entries: readonly CalendarEntryLike[];
   birthdays: number;
+  todos: TodoTally;
   variant: MonthCalendarVariant;
   dim: boolean;
 }) {
   const kinds = dayKinds(entries);
-  if (kinds.length === 0 && birthdays === 0) return null;
+  if (kinds.length === 0 && birthdays === 0 && todos.total === 0) return null;
   return (
     <span
       aria-hidden="true"
@@ -208,6 +258,7 @@ function DayMarkers({
           )}
         />
       )}
+      {todos.total > 0 && <TodoMarker todos={todos} variant={variant} />}
       {kinds.map((kind) => (
         <span
           key={kind}
@@ -224,17 +275,29 @@ function DayMarkers({
 const plural = (n: number, one: string, many: string) =>
   n === 1 ? `1 ${one}` : `${n} ${many}`;
 
-/** "2 notes, 1 birthday", "1 birthday", "3 notes". */
-function dayDescription(notes: number, birthdays: number): string {
+/** "2 open todos", "3 todos, 1 open", "2 todos, all done". */
+function todoDescription({ total, open }: TodoTally): string {
+  if (open === total) return `${total} open ${total === 1 ? "todo" : "todos"}`;
+  const all = plural(total, "todo", "todos");
+  return open === 0 ? `${all}, all done` : `${all}, ${open} open`;
+}
+
+/** "2 notes, 1 birthday", "1 birthday", "3 notes, 2 open todos". */
+function dayDescription(
+  notes: number,
+  birthdays: number,
+  todos: TodoTally,
+): string {
   return [
     notes > 0 && plural(notes, "note", "notes"),
     birthdays > 0 && plural(birthdays, "birthday", "birthdays"),
+    todos.total > 0 && todoDescription(todos),
   ]
     .filter(Boolean)
     .join(", ");
 }
 
-/** Screen-reader note and birthday count. RAC's cell button carries its own aria-label,
+/** Screen-reader note, birthday and todo counts. RAC's cell button carries its own aria-label,
  *  which wins over content, and CalendarCell forwards no aria props. So this
  *  text points the enclosing cell button at itself via aria-describedby. RAC
  *  leaves that attribute unset for a single-date calendar with no
@@ -266,6 +329,7 @@ interface DayFaceProps {
   label: string;
   entries: readonly CalendarEntryLike[];
   birthdays: number;
+  todos: readonly CalendarTodoItem[];
   variant: MonthCalendarVariant;
   isToday: boolean;
   isSelected: boolean;
@@ -281,6 +345,7 @@ function DayFace({
   label,
   entries,
   birthdays,
+  todos,
   variant,
   isToday,
   isSelected,
@@ -288,10 +353,12 @@ function DayFace({
   isOutside,
 }: DayFaceProps) {
   const count = entries.length;
+  const tally = tallyTodos(todos);
   const markers = (
     <DayMarkers
       entries={entries}
       birthdays={birthdays}
+      todos={tally}
       variant={variant}
       dim={isOutside}
     />
@@ -321,8 +388,8 @@ function DayFace({
         isActive && "ring-2 ring-accent ring-inset",
       )}
     >
-      {(count > 0 || birthdays > 0) && (
-        <NoteCount text={dayDescription(count, birthdays)} />
+      {(count > 0 || birthdays > 0 || tally.total > 0) && (
+        <NoteCount text={dayDescription(count, birthdays, tally)} />
       )}
       {variant === "page" ? (
         <>
@@ -366,13 +433,14 @@ function DayFace({
 }
 
 /** Obsidian-calendar-style month grid(s) over react-aria's Calendar: Monday
- *  first, ISO week numbers, kind dots and birthday cakes, today ring, selected and active days. */
+ *  first, ISO week numbers, kind dots, birthday cakes and todo glyphs, today ring, selected and active days. */
 export function MonthCalendar({
   visibleMonth,
   onVisibleMonthChange,
   months = 1,
   byDay,
   birthdaysByDay = NO_BIRTHDAYS,
+  todosByDay = NO_TODO_DAYS,
   today,
   selectedDate = null,
   activeDate = null,
@@ -605,6 +673,7 @@ export function MonthCalendar({
                             label={formattedDate}
                             entries={byDay.get(key) ?? NO_ENTRIES}
                             birthdays={birthdaysByDay.get(key)?.length ?? 0}
+                            todos={todosByDay.get(key) ?? NO_TODOS}
                             variant={variant}
                             isToday={key === today}
                             isSelected={key === selectedDate}
