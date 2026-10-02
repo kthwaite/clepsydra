@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 use std::fs;
 
 use chrono::NaiveDate;
-use clep_index::index::{BirthdayEntry, CalendarPage, CalendarQuery, VaultIndex};
+use clep_index::index::{
+    BirthdayEntry, CalendarDueItem, CalendarPage, CalendarQuery, CalendarTodoPage, VaultIndex,
+};
 use clep_index::index_handle::IndexHandle;
 use clep_vault::Vault;
 use clep_vault::init::init_vault;
@@ -457,4 +459,306 @@ async fn handle_wrapper_returns_birthdays() {
         birthday_rows(&entries),
         vec![("Ada".to_string(), Some(1983), 5, 12)]
     );
+}
+
+// ---------------------------------------------------------------------------
+// Calendar todos: checkbox todos and TASK pages placed by due date.
+// ---------------------------------------------------------------------------
+
+/// A YAML-fronted host page with a body of checkbox lines.
+fn host(id: u32, title: &str, extra: &str, body: &str) -> String {
+    format!(
+        "---\nid: 00000000-0000-0000-0000-{id:012}\ntitle: {title}\n{extra}\
+         created_at: \"2020-01-01T00:00:00Z\"\n---\n{body}"
+    )
+}
+
+/// A TASK page with frontmatter `extra` (status, due, priority, ...).
+fn task(id: u32, title: &str, extra: &str) -> String {
+    format!(
+        "---\nid: 00000000-0000-0000-0000-{id:012}\ntitle: {title}\ntype: TASK\n{extra}\
+         created_at: \"2020-01-01T00:00:00Z\"\n---\nBody.\n"
+    )
+}
+
+/// `(label, status, due)` per item: content for todos, title for tasks.
+fn due_rows(page: &CalendarTodoPage) -> Vec<(String, String, String)> {
+    page.items
+        .iter()
+        .map(|item| match item {
+            CalendarDueItem::Todo(todo) => {
+                (todo.content.clone(), todo.status.clone(), todo.due.clone())
+            }
+            CalendarDueItem::Task(task) => (
+                task.title.clone().unwrap_or_default(),
+                task.status.clone(),
+                task.due.clone(),
+            ),
+        })
+        .collect()
+}
+
+fn due_labels(page: &CalendarTodoPage) -> BTreeSet<String> {
+    due_rows(page)
+        .into_iter()
+        .map(|(label, _, _)| label)
+        .collect()
+}
+
+fn content_of(item: &CalendarDueItem) -> &str {
+    match item {
+        CalendarDueItem::Todo(todo) => todo.content.as_str(),
+        CalendarDueItem::Task(task) => task.title.as_deref().unwrap_or_default(),
+    }
+}
+
+#[test]
+fn todos_window_is_inclusive_of_both_padded_dates() {
+    let body = "- [ ] Before [due:: 2026-08-31]\n\
+                - [ ] First [due:: 2026-09-01]\n\
+                - [ ] Last [due:: 2026-10-01]\n\
+                - [ ] After [due:: 2026-10-02]\n";
+    let (_tmp, index) = built(&[("host.md", &host(1, "Host", "", body))]);
+
+    let page = index.calendar_todos(&september()).unwrap();
+
+    let labels: Vec<&str> = page.items.iter().map(content_of).collect();
+    assert_eq!(labels.len(), 2, "{labels:?}");
+    assert!(labels[0].starts_with("First"), "{labels:?}");
+    assert!(labels[1].starts_with("Last"), "{labels:?}");
+    assert!(!page.truncated);
+}
+
+#[test]
+fn todos_include_every_status_and_carry_host_details() {
+    let body = "- [ ] Open [due:: 2026-09-10] [priority:: P1]\n\
+                - [x] Done [due:: 2026-09-10]\n\
+                - [-] Dropped [due:: 2026-09-10]\n";
+    let (_tmp, index) = built(&[("notes/host.md", &host(1, "Host", "type: NOTE\n", body))]);
+
+    let page = index.calendar_todos(&september()).unwrap();
+
+    let statuses: BTreeSet<String> = due_rows(&page).into_iter().map(|(_, s, _)| s).collect();
+    assert_eq!(statuses, set(&["todo", "done", "cancelled"]));
+    let CalendarDueItem::Todo(open) = &page.items[0] else {
+        panic!("expected a todo: {:?}", page.items[0]);
+    };
+    assert!(open.content.starts_with("Open"), "{open:?}");
+    assert_eq!(open.due, "2026-09-10");
+    assert_eq!(open.priority.as_deref(), Some("P1"));
+    assert_eq!(open.page_title.as_deref(), Some("Host"));
+    assert_eq!(open.page_kind, "NOTE");
+    assert!(open.page_path.ends_with("host.md"), "{}", open.page_path);
+    let CalendarDueItem::Todo(done) = &page.items[1] else {
+        panic!("expected a todo");
+    };
+    assert_eq!(done.priority, None);
+    assert!(done.span_start > open.span_start);
+}
+
+#[test]
+fn todos_without_or_with_malformed_due_are_excluded() {
+    let body = "- [ ] Undated\n\
+                - [ ] Short [due:: 2026-9-10]\n\
+                - [ ] Impossible [due:: 2026-09-31]\n\
+                - [ ] Timestamped [due:: 2026-09-10T10:00]\n\
+                - [ ] Good [due:: 2026-09-10]\n\
+                - Plain bullet [due:: 2026-09-10]\n";
+    let (_tmp, index) = built(&[("host.md", &host(1, "Host", "", body))]);
+
+    let page = index.calendar_todos(&september()).unwrap();
+
+    assert_eq!(page.items.len(), 1, "{:?}", page.items);
+    assert!(content_of(&page.items[0]).starts_with("Good"));
+}
+
+#[test]
+fn todos_filter_on_the_host_page() {
+    let body = |label: &str| format!("- [ ] {label} [due:: 2026-09-10]\n");
+    let (_tmp, index) = built(&[
+        (
+            "wine.md",
+            &host(
+                1,
+                "Wine",
+                "type: RECIPE\nproject: Cellar\ntags: [wine]\n",
+                &body("WineTodo"),
+            ),
+        ),
+        (
+            "bread.md",
+            &host(2, "Bread", "type: RECIPE\n", &body("BreadTodo")),
+        ),
+        (
+            "note.md",
+            &host(3, "Note", "tags: [wine]\n", &body("NoteTodo")),
+        ),
+        (
+            "tasks/TSK-a.md",
+            &task(4, "Cellar Task", "project: Cellar\ndue: 2026-09-11\n"),
+        ),
+    ]);
+    let starts = |page: &CalendarTodoPage| -> BTreeSet<String> {
+        page.items
+            .iter()
+            .map(|item| content_of(item).split(' ').next().unwrap().to_string())
+            .collect()
+    };
+
+    let mut q = september();
+    q.kinds = vec!["RECIPE".to_string()];
+    assert_eq!(
+        starts(&index.calendar_todos(&q).unwrap()),
+        set(&["WineTodo", "BreadTodo"])
+    );
+
+    let mut q = september();
+    q.kinds = vec!["TASK".to_string()];
+    assert_eq!(starts(&index.calendar_todos(&q).unwrap()), set(&["Cellar"]));
+
+    let mut q = september();
+    q.tag = Some("wine".to_string());
+    assert_eq!(
+        starts(&index.calendar_todos(&q).unwrap()),
+        set(&["WineTodo", "NoteTodo"])
+    );
+
+    let mut q = september();
+    q.project = Some("Cellar".to_string());
+    assert_eq!(
+        starts(&index.calendar_todos(&q).unwrap()),
+        set(&["WineTodo", "Cellar"])
+    );
+}
+
+#[test]
+fn todos_skip_ai_journal_hosts() {
+    let ai = host(1, "Agent Log", "", "- [ ] Agent todo [due:: 2026-09-10]\n");
+    let mine = host(2, "Mine", "", "- [ ] My todo [due:: 2026-09-10]\n");
+    let (_tmp, index) = built(&[("ai-journals/2026-09-03.md", &ai), ("mine.md", &mine)]);
+
+    let page = index.calendar_todos(&september()).unwrap();
+
+    assert_eq!(page.items.len(), 1, "{:?}", page.items);
+    assert!(content_of(&page.items[0]).starts_with("My todo"));
+}
+
+#[test]
+fn tasks_are_placed_by_frontmatter_due_with_defaults() {
+    let (_tmp, index) = built(&[
+        (
+            "tasks/TSK-sealed.md",
+            &task(
+                1,
+                "Sealed",
+                "status: SEALED\npriority: P0\ndue: 2026-09-05\n",
+            ),
+        ),
+        (
+            "tasks/TSK-plain.md",
+            &task(2, "Plain", "due: \"2026-09-06\"\n"),
+        ),
+        (
+            "tasks/TSK-undated.md",
+            &task(3, "Undated", "status: FIELD\n"),
+        ),
+        ("tasks/TSK-late.md", &task(4, "Late", "due: 2026-10-02\n")),
+        ("tasks/TSK-bad.md", &task(5, "Bad", "due: soon\n")),
+        (
+            "tasks/TSK-odd.md",
+            &task(6, "Odd", "status: PARKED\ndue: 2026-09-07\n"),
+        ),
+        (
+            "tasks/TSK-pri.md",
+            &task(7, "Pri", "priority: P9\ndue: 2026-09-07\n"),
+        ),
+    ]);
+
+    let page = index.calendar_todos(&september()).unwrap();
+
+    assert_eq!(
+        due_rows(&page),
+        vec![
+            (
+                "Sealed".to_string(),
+                "SEALED".to_string(),
+                "2026-09-05".to_string()
+            ),
+            (
+                "Plain".to_string(),
+                "INTAKE".to_string(),
+                "2026-09-06".to_string()
+            ),
+        ]
+    );
+    let CalendarDueItem::Task(sealed) = &page.items[0] else {
+        panic!("expected a task");
+    };
+    assert_eq!(sealed.priority, "P0");
+    assert_eq!(sealed.id, "00000000-0000-0000-0000-000000000001");
+    assert!(sealed.path.ends_with("TSK-sealed.md"), "{}", sealed.path);
+    let CalendarDueItem::Task(plain) = &page.items[1] else {
+        panic!("expected a task");
+    };
+    assert_eq!(plain.priority, "P2");
+}
+
+#[test]
+fn todos_order_by_due_then_host_path_then_span() {
+    let b = host(
+        1,
+        "B",
+        "",
+        "- [ ] B2 [due:: 2026-09-10]\n- [ ] B1 [due:: 2026-09-09]\n- [ ] B3 [due:: 2026-09-10]\n",
+    );
+    let a = host(2, "A", "", "- [ ] A1 [due:: 2026-09-10]\n");
+    let (_tmp, index) = built(&[
+        ("b.md", &b),
+        ("a.md", &a),
+        ("tasks/TSK-c.md", &task(3, "C1", "due: 2026-09-10\n")),
+    ]);
+
+    let page = index.calendar_todos(&september()).unwrap();
+
+    let order: Vec<&str> = page
+        .items
+        .iter()
+        .map(|item| content_of(item).split(' ').next().unwrap())
+        .collect();
+    assert_eq!(order, vec!["B1", "A1", "B2", "B3", "C1"]);
+}
+
+#[test]
+fn todos_truncate_at_limit_and_flag_it() {
+    let body = "- [ ] One [due:: 2026-09-10]\n- [ ] Two [due:: 2026-09-11]\n";
+    let (_tmp, index) = built(&[
+        ("host.md", &host(1, "Host", "", body)),
+        ("tasks/TSK-t.md", &task(2, "Three", "due: 2026-09-12\n")),
+    ]);
+
+    let mut q = september();
+    q.limit = 2;
+    let page = index.calendar_todos(&q).unwrap();
+    assert_eq!(due_labels(&page).len(), 2);
+    assert!(page.truncated);
+
+    q.limit = 3;
+    let page = index.calendar_todos(&q).unwrap();
+    assert_eq!(page.items.len(), 3);
+    assert!(!page.truncated);
+}
+
+#[tokio::test]
+async fn handle_wrapper_returns_todos() {
+    let (_tmp, vault) = setup_vault(&[(
+        "host.md",
+        &host(1, "Host", "", "- [ ] Handled [due:: 2026-09-10]\n"),
+    )]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let handle = IndexHandle::spawn(VaultIndex::open(&db_path).unwrap(), vault);
+    handle.build().await.unwrap();
+
+    let page = handle.calendar_todos(september()).await.unwrap();
+
+    assert_eq!(page.items.len(), 1);
 }
