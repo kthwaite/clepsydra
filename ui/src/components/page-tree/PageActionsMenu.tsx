@@ -6,7 +6,8 @@ import {
 } from "#/api/index";
 import {
   type ArchivedPage,
-  fetchWordExport,
+  fetchPageExport,
+  type PageExportFormat,
   useArchivePage,
   useMovePage,
 } from "#/api/pages";
@@ -59,7 +60,8 @@ export function PageActionsMenu({
 }) {
   return (
     <div className="grid gap-1">
-      <ExportWordAction key={path} path={path} />
+      <ExportAction key={`word:${path}`} path={path} format="word" />
+      <ExportAction key={`html:${path}`} path={path} format="html" />
       {archiveOnly ? null : (
         <MovePageAction
           path={path}
@@ -76,7 +78,21 @@ export function PageActionsMenu({
   );
 }
 
-function ExportWordAction({ path }: { path: string }) {
+const EXPORT_LABELS: Record<
+  PageExportFormat,
+  { idle: string; pending: string }
+> = {
+  word: { idle: "Export to Word (.docx)", pending: "Exporting to Word…" },
+  html: { idle: "Export to HTML (.html)", pending: "Exporting to HTML…" },
+};
+
+function ExportAction({
+  path,
+  format,
+}: {
+  path: string;
+  format: PageExportFormat;
+}) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,7 +100,7 @@ function ExportWordAction({ path }: { path: string }) {
     setPending(true);
     setError(null);
     try {
-      const { blob, filename } = await fetchWordExport(path);
+      const { blob, filename } = await fetchPageExport(path, format);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       try {
@@ -115,7 +131,7 @@ function ExportWordAction({ path }: { path: string }) {
         disabled={pending}
         onClick={() => void download()}
       >
-        {pending ? "Exporting to Word…" : "Export to Word (.docx)"}
+        {pending ? EXPORT_LABELS[format].pending : EXPORT_LABELS[format].idle}
       </button>
       {error ? (
         <p className="m-0 text-[13px] text-hot" role="alert">

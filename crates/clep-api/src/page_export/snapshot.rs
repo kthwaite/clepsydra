@@ -30,7 +30,7 @@ const MAX_DEPTH: usize = 32;
 pub(super) fn unsupported(message: impl Into<String>) -> ApiError {
     ApiError::unprocessable_with_detail(
         message,
-        serde_json::json!({"code": "word_export_unavailable"}),
+        serde_json::json!({"code": "page_export_unavailable"}),
     )
 }
 
@@ -120,7 +120,7 @@ fn open_file(root: &Path, path: &VaultPath) -> Result<std::fs::File, ApiError> {
 #[cfg(not(any(unix, windows)))]
 fn open_file(_root: &Path, _path: &VaultPath) -> Result<std::fs::File, ApiError> {
     Err(unsupported(
-        "secure Word export file access is unavailable on this platform",
+        "secure export file access is unavailable on this platform",
     ))
 }
 
@@ -158,7 +158,7 @@ pub(super) fn read_image(
         .any(|allowed| extension.eq_ignore_ascii_case(allowed))
     {
         return Err(unsupported(
-            "Word export requires a supported local raster image",
+            "export requires a supported local raster image",
         ));
     }
     // The attachment folder is intentionally excluded from page indexing.
@@ -247,7 +247,7 @@ impl<'a> Snapshot<'a> {
         };
         if page.is_encrypted() {
             return Err(ApiError::forbidden(
-                "encrypted pages cannot be exported to Word: decryption keys are available only in the browser",
+                "encrypted pages cannot be exported: decryption keys are available only in the browser",
             ));
         }
         Ok(page)
@@ -391,7 +391,7 @@ impl<'a> Snapshot<'a> {
             format!("{}/{relative}", self.vault.config().vault.attachment_folder)
         } else if decoded.contains(':') || decoded.starts_with("//") {
             return Err(unsupported(
-                "remote images are not fetched during Word export; save the image in the vault first",
+                "remote images are not fetched during export; save the image in the vault first",
             ));
         } else if let Some(relative) = decoded.strip_prefix('/') {
             relative.to_string()
@@ -671,7 +671,7 @@ impl<'a> Snapshot<'a> {
 fn append(output: &mut String, text: &str) -> Result<(), ApiError> {
     if output.len().saturating_add(text.len()) > MAX_MARKDOWN_BYTES {
         return Err(unsupported(
-            "Word snapshot exceeds the 4 MiB Markdown limit",
+            "export snapshot exceeds the 4 MiB Markdown limit",
         ));
     }
     output.push_str(text);

@@ -2,9 +2,9 @@ pub mod api;
 pub mod backup;
 pub mod deeplink;
 pub use clep_feeds as feeds;
+mod page_export;
 pub mod sync_runtime;
 pub mod vault;
-mod word_export;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
