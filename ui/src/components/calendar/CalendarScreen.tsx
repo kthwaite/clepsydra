@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { type ReactNode, useCallback, useMemo } from "react";
 import { useCalendarEntries } from "#/api/calendar";
 import { useTags } from "#/api/index";
 import { DayNotesList } from "#/components/calendar/DayNotesList";
@@ -94,11 +94,13 @@ function WeeksHeader({
   rows,
   anchor,
   today,
+  controls,
   onAnchorChange,
 }: {
   rows: readonly WeekRow[];
   anchor: DateKey;
   today: DateKey;
+  controls?: ReactNode;
   onAnchorChange: (key: DateKey) => void;
 }) {
   return (
@@ -106,6 +108,7 @@ function WeeksHeader({
       <h3 className="m-0 mr-auto truncate font-serif text-[24px] italic leading-none text-ink">
         {weeksTitle(rows)}
       </h3>
+      {controls}
       <div className="flex items-center gap-0.5">
         <IconButton
           aria-label="Previous week"
@@ -263,8 +266,15 @@ export function CalendarScreen({
     />
   ) : null;
 
-  const modeControls = (
+  const controls = (
     <div className="flex flex-wrap items-center gap-3">
+      <FilterBar
+        fields={filterFields}
+        primaryFieldIds={["kind", "tag", "project"]}
+        state={filterState}
+        onChange={onFilterChange}
+        showText={false}
+      />
       <SegmentedControl
         label="Mode"
         value={view.mode}
@@ -287,18 +297,10 @@ export function CalendarScreen({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-col gap-4 px-4 pt-8 md:px-10 md:pt-10">
-        <h1 className="m-0 font-serif text-[40px] font-normal leading-none text-ink md:text-[56px]">
-          Calendar
-        </h1>
-        <FilterBar
-          fields={filterFields}
-          primaryFieldIds={["kind", "tag", "project"]}
-          state={filterState}
-          onChange={onFilterChange}
-          showText={false}
-        />
-        {modeControls}
+      {/* The month or week title row is the visible header; it carries the
+          filters and view controls so the grid gets the height. */}
+      <h1 className="sr-only">Calendar</h1>
+      <div className="px-4 pt-3 empty:hidden md:px-10">
         {query.isLoading ? (
           <p role="status" className="m-0 text-[14px] text-mute">
             Loading Calendar…
@@ -312,15 +314,16 @@ export function CalendarScreen({
             Showing the first {CAP} pages. Narrow the filters to see the rest.
           </p>
         ) : null}
-      </header>
+      </div>
 
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1 overflow-y-auto px-4 py-6 md:px-10">
+        <div className="min-w-0 flex-1 overflow-y-auto px-4 py-3 md:px-10">
           {view.mode === "weeks" ? (
             <WeeksBody
               anchor={anchor}
               span={view.span}
               today={today}
+              controls={controls}
               byDay={byDay}
               birthdaysByDay={birthdaysByDay}
               activeDate={day ?? null}
@@ -338,6 +341,8 @@ export function CalendarScreen({
               activeDate={day ?? null}
               onDayActivate={(key) => activateDay(key)}
               variant={view.mode === "months" ? "compact" : "page"}
+              headerExtra={controls}
+              fill={view.mode === "month"}
             />
           )}
         </div>
@@ -374,6 +379,7 @@ function WeeksBody({
   anchor,
   span,
   today,
+  controls,
   byDay,
   birthdaysByDay,
   activeDate,
@@ -383,6 +389,7 @@ function WeeksBody({
   anchor: DateKey;
   span: number;
   today: DateKey;
+  controls: ReactNode;
   byDay: ReadonlyMap<DateKey, readonly CalendarEntryLike[]>;
   birthdaysByDay: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]>;
   activeDate: DateKey | null;
@@ -396,6 +403,7 @@ function WeeksBody({
         rows={rows}
         anchor={anchor}
         today={today}
+        controls={controls}
         onAnchorChange={onAnchorChange}
       />
       <WeekRows

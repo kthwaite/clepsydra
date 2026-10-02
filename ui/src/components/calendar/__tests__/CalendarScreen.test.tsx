@@ -121,6 +121,20 @@ describe("CalendarScreen", () => {
     ).toBeInTheDocument();
   });
 
+  it("puts filters and view controls on the month title row", () => {
+    renderScreen();
+    const title = screen.getByRole("heading", {
+      level: 3,
+      name: "September 2026",
+    });
+    const row = title.parentElement as HTMLElement;
+    expect(within(row).getByRole("button", { name: "Kind" })).toBeVisible();
+    expect(within(row).getByRole("radiogroup", { name: "Mode" })).toBeVisible();
+    expect(
+      within(row).getByRole("button", { name: "Previous month" }),
+    ).toBeVisible();
+  });
+
   it("month mode queries the anchor month's grid range with server-side filters", () => {
     renderScreen({}, { text: "", facets: { kind: ["NOTE"], tag: ["wine"] } });
     expect(mocks.entries).toHaveBeenCalledWith({

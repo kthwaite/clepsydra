@@ -1,6 +1,7 @@
 import { parseDate } from "@internationalized/date";
 import { Cake, ChevronLeft, ChevronRight } from "lucide-react";
 import {
+  type CSSProperties,
   type ReactNode,
   useCallback,
   useContext,
@@ -51,8 +52,11 @@ export interface MonthCalendarProps {
   /** rail = dots, 32px rows; compact = dots in slightly roomier tiles (the
    *  Months planner); page = tall tiles with dots + count. */
   variant: MonthCalendarVariant;
-  /** The screen puts its mode switch here. */
+  /** The screen puts its filters and mode switch here. */
   headerExtra?: ReactNode;
+  /** Single month only: rows stretch to fill the parent's height, never
+   *  shorter than the variant's row height. */
+  fill?: boolean;
   className?: string;
 }
 
@@ -68,6 +72,9 @@ const ROW: Record<MonthCalendarVariant, string> = {
   compact: "h-10",
   page: "h-24",
 };
+/** Fill mode's row height; `--cal-row` is set on the grid's size container. */
+const FILL_ROW = "h-[var(--cal-row)]";
+const FILL_MIN_ROW = "6rem";
 
 // RAC forwards every Calendar prop to useCalendarState, but its public types
 // omit `selectionAlignment`. "start" puts the focused month first, so a
@@ -138,9 +145,11 @@ function MonthCaption({ offset }: { offset: number }) {
 function WeekColumn({
   offset,
   variant,
+  rowClass,
 }: {
   offset: number;
   variant: MonthCalendarVariant;
+  rowClass: string;
 }) {
   const first = useVisibleStart(offset);
   if (!first) return null;
@@ -157,7 +166,7 @@ function WeekColumn({
           key={row.days[0]}
           data-week-number
           className={cn(
-            ROW[variant],
+            rowClass,
             "flex justify-center",
             variant === "page" ? "items-start pt-3" : "items-center",
           )}
@@ -370,6 +379,7 @@ export function MonthCalendar({
   onDayActivate,
   variant,
   headerExtra,
+  fill = false,
   className,
 }: MonthCalendarProps) {
   // RAC owns the focused day; the parent owns the first visible month. RAC
@@ -436,7 +446,16 @@ export function MonthCalendar({
   };
 
   const count = Math.max(1, months);
-  const rowClass = ROW[variant];
+  const filling = fill && count === 1;
+  const rowClass = filling ? FILL_ROW : ROW[variant];
+  const weeks = monthGrid(...ymOf(start)).length;
+  // HEAD_ROW is h-7 (1.75rem); the rows share what is left.
+  const fillStyle = filling
+    ? ({
+        "--cal-row": `max(${FILL_MIN_ROW}, calc((100cqh - 1.75rem) / ${weeks}))`,
+        minHeight: `calc(1.75rem + ${FILL_MIN_ROW} * ${weeks})`,
+      } as CSSProperties)
+    : undefined;
 
   // RAC disables outside-month cells, so their presses never reach
   // onChange. A delegated click handles them: a date inside the visible
@@ -477,6 +496,7 @@ export function MonthCalendar({
       className={cn(
         "flex min-w-0 flex-col",
         variant === "rail" ? "gap-2" : "gap-4",
+        filling && "h-full",
         className,
       )}
     >
@@ -526,6 +546,7 @@ export function MonthCalendar({
         visibleDuration={{ months: count }}
         className={cn(
           "grid gap-x-8 gap-y-6",
+          filling && "min-h-0 flex-1",
           count > 1 &&
             (variant === "compact"
               ? "grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))]"
@@ -537,8 +558,14 @@ export function MonthCalendar({
           // biome-ignore lint/suspicious/noArrayIndexKey: offsets are stable positions
           <div key={i} className="flex min-w-0 flex-col gap-2">
             {count > 1 && <MonthCaption offset={i} />}
-            <div className="grid grid-cols-[auto_1fr]">
-              <WeekColumn offset={i} variant={variant} />
+            <div
+              className={cn(
+                "grid grid-cols-[auto_1fr]",
+                filling && "min-h-0 flex-1 [container-type:size]",
+              )}
+              style={fillStyle}
+            >
+              <WeekColumn offset={i} variant={variant} rowClass={rowClass} />
               <CalendarGrid
                 offset={{ months: i }}
                 weekdayStyle="short"
