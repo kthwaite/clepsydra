@@ -1,8 +1,11 @@
+mod html;
 mod snapshot;
 mod word;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use pulldown_cmark::{Event, TagEnd};
 
 use crate::api::{AppState, error::ApiError};
 use crate::vault::{Vault, path::VaultPath};
@@ -92,4 +95,53 @@ pub(crate) async fn export_word(
         word::render(title, markdown, load_image)
     })
     .await
+}
+
+pub(crate) async fn export_html(
+    state: Arc<AppState>,
+    path: VaultPath,
+) -> Result<(String, String), ApiError> {
+    let source = snapshot(state, path).await?;
+    render(source, |title, markdown, load_image| {
+        html::render(title, markdown, load_image)
+    })
+    .await
+}
+
+// Presentation rules shared by every format.
+
+fn skip_until_end<'a>(events: &mut impl Iterator<Item = Event<'a>>, end: TagEnd) {
+    let mut nesting = 0;
+    for event in events {
+        match event {
+            Event::Start(_) => nesting += 1,
+            Event::End(tag) if nesting == 0 && tag == end => break,
+            Event::End(_) => nesting -= 1,
+            _ => {}
+        }
+    }
+}
+
+fn comments_only(mut html: &str) -> bool {
+    loop {
+        html = html.trim();
+        if html.is_empty() {
+            return true;
+        }
+        let Some(comment) = html.strip_prefix("<!--") else {
+            return false;
+        };
+        let Some(end) = comment.find("-->") else {
+            return false;
+        };
+        html = &comment[end + 3..];
+    }
+}
+
+fn safe_external_url(target: &str) -> bool {
+    url::Url::parse(target).is_ok_and(|url| {
+        matches!(url.scheme(), "https" | "http" | "mailto")
+            && url.username().is_empty()
+            && url.password().is_none()
+    })
 }

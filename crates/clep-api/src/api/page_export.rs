@@ -40,6 +40,31 @@ pub async fn export_word(
     )
 }
 
+/// Export one saved plaintext page as a self-contained, read-only HTML snapshot.
+#[utoipa::path(
+    get,
+    path = "/pages-export/html/{path}",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(("path" = String, Path, description = "Vault-relative saved Markdown page path")),
+    responses(
+        (status = 200, description = "Self-contained HTML document download", body = String, content_type = "text/html; charset=utf-8"),
+        (status = 400, description = "Invalid page path", body = ApiError),
+        (status = 403, description = "Encrypted, excluded, private, or unsafe source", body = ApiError),
+        (status = 404, description = "Page or attachment not found", body = ApiError),
+        (status = 422, description = "Unavailable embed, remote or unsupported image, raw HTML, recursive content, or export resource limit", body = ApiError),
+        (status = 500, description = "Export worker failed", body = ApiError)
+    )
+)]
+pub async fn export_html(
+    State(state): State<Arc<AppState>>,
+    Path(path): Path<String>,
+) -> Result<Response, ApiError> {
+    let path = parse_request_path(&path, "invalid export page path")?;
+    let (title, html) = crate::page_export::export_html(state, path).await?;
+    download(&title, "html", "text/html; charset=utf-8", Body::from(html))
+}
+
 /// An attachment response named after the page title, never cached or sniffed.
 fn download(
     title: &str,

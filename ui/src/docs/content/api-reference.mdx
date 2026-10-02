@@ -376,6 +376,17 @@ document; `400` Invalid path; `403` Encrypted, excluded, or unsafe page; `404`
 Page not found; `422` Unavailable content, unsupported media, or export limit;
 `500` Export worker failed. See [Word export](/docs/pages-and-authoring#export-a-page-to-word)
 for supported content and limits.
+### `GET /api/vault/pages-export/html/{path}`
+Download a single self-contained `.html` snapshot of the same saved page
+content as the Word export: images inlined as `data:` URIs, Stone & Lamp
+light-theme styles and fonts embedded, no scripts or external requests.
+Wikilinks export as their labels and math as literal TeX; raw HTML other than
+comments and `<br>` is rejected. Success returns `text/html; charset=utf-8`,
+an attachment filename, `Cache-Control: no-store`, and
+`X-Content-Type-Options: nosniff`. Responses: `200` HTML document; `400`
+Invalid path; `403` Encrypted, excluded, or unsafe page; `404` Page not found;
+`422` Unavailable content, raw HTML, unsupported media, or export limit; `500`
+Export worker failed.
 
 ### `POST /api/vault/pages`
 Create a page in the default folder. Responses: `201` Page created; `400` Invalid input; `409` Page already exists; `500` Internal server error.

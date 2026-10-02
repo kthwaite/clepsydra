@@ -1,0 +1,337 @@
+/* Stone & Lamp, light ("bone") theme only. Tokens mirror ui/src/main.css. */
+:root {
+  --ground: #f4efe4;
+  --raise: #fbf8f2;
+  --sink: #eae3d3;
+  --ink: #0e1a3a;
+  --ink-2: #343b50;
+  --mute: #5f6372;
+  --faint: #a9a89f;
+  --accent: #1747e6;
+  --warn: #b3401f;
+  --rule: #ddd5c3;
+  --accent-tint: rgba(23, 71, 230, 0.09);
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--ground);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.65;
+  font-feature-settings: "kern", "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 64px 32px 96px;
+}
+
+.title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 2.75rem;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  margin: 0 0 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--ink);
+  line-height: 1.25;
+  margin: 2em 0 0.6em;
+  break-after: avoid;
+}
+
+h1,
+h2 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+}
+
+h1 {
+  font-size: 2rem;
+}
+
+h2 {
+  font-size: 1.6rem;
+}
+
+h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+h4,
+h5,
+h6 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+h6 {
+  color: var(--mute);
+}
+
+p,
+ul,
+ol,
+dl,
+table,
+blockquote,
+pre,
+figure {
+  margin: 0 0 1em;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+strong {
+  font-weight: 600;
+}
+
+del {
+  color: var(--mute);
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: 2em 0;
+}
+
+ul,
+ol {
+  padding-left: 1.5em;
+}
+
+li > ul,
+li > ol {
+  margin-bottom: 0;
+}
+
+li > p {
+  margin-bottom: 0.4em;
+}
+
+li:has(> input[type="checkbox"]) {
+  list-style: none;
+}
+
+input[type="checkbox"] {
+  margin: 0 0.4em 0 -1.3em;
+  accent-color: var(--accent);
+  vertical-align: -0.1em;
+}
+
+dt {
+  font-weight: 600;
+}
+
+dd {
+  margin: 0 0 0.6em 1.5em;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+code {
+  background: var(--sink);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+pre {
+  background: var(--raise);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  line-height: 1.5;
+  tab-size: 4;
+}
+
+pre code {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: inherit;
+  white-space: pre;
+}
+
+code.math,
+pre.math {
+  color: var(--ink-2);
+}
+
+blockquote {
+  border-left: 3px solid var(--rule);
+  padding: 0.1em 0 0.1em 1em;
+  color: var(--ink-2);
+}
+
+blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.callout {
+  border-left-color: var(--accent);
+  background: var(--accent-tint);
+  border-radius: 0 8px 8px 0;
+  padding: 0.75em 1em;
+  color: var(--ink);
+}
+
+.callout-warning,
+.callout-caution {
+  border-left-color: var(--warn);
+  background: rgba(179, 64, 31, 0.07);
+}
+
+.callout-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.4em;
+}
+
+.callout-warning .callout-label,
+.callout-caution .callout-label {
+  color: var(--warn);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.94em;
+  display: block;
+  overflow-x: auto;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--rule);
+  padding: 0.45em 0.75em;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  font-weight: 600;
+  color: var(--mute);
+  border-bottom-color: var(--faint);
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.footnote-reference {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.footnote-definition {
+  font-size: 0.88em;
+  color: var(--ink-2);
+  border-top: 1px solid var(--rule);
+  padding-top: 0.6em;
+  margin-top: 1em;
+}
+
+.footnote-definition + .footnote-definition {
+  border-top: 0;
+  margin-top: 0;
+}
+
+.footnote-definition p {
+  display: inline;
+}
+
+.footnote-definition-label {
+  margin-right: 0.4em;
+  color: var(--mute);
+}
+
+@media (max-width: 600px) {
+  main {
+    padding: 32px 16px 64px;
+  }
+
+  .title {
+    font-size: 2.1rem;
+  }
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+
+  main {
+    max-width: none;
+    padding: 0;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  pre,
+  blockquote,
+  table,
+  img,
+  .footnote-definition {
+    break-inside: avoid;
+  }
+
+  pre {
+    white-space: pre-wrap;
+  }
+
+  pre code {
+    white-space: inherit;
+  }
+
+  table {
+    display: table;
+  }
+}

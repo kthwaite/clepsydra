@@ -228,6 +228,10 @@ pub fn api_router_with_archive_limit(
             "/pages-export/word/{*path}",
             axum::routing::get(page_export::export_word),
         )
+        .route(
+            "/pages-export/html/{*path}",
+            axum::routing::get(page_export::export_html),
+        )
         .nest("/rubbish", rubbish::router())
         .nest("/sync", sync::router())
         .route(

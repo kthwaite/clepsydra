@@ -5,6 +5,8 @@ use std::{collections::HashMap, io::Cursor, iter::Peekable};
 use docx_rs::*;
 use pulldown_cmark::{Alignment, Event, LinkType, Options, Parser, Tag, TagEnd};
 
+use super::{comments_only, safe_external_url, skip_until_end};
+
 const TEXT_WIDTH: usize = 9360; // Letter, with one-inch side margins (twips).
 const ACCENT: &str = "264F96";
 
@@ -776,42 +778,6 @@ fn skip_element<'a>(events: &mut impl Iterator<Item = Event<'a>>) {
     if let Some(Event::Start(tag)) = events.next() {
         skip_until_end(events, tag.to_end());
     }
-}
-
-fn skip_until_end<'a>(events: &mut impl Iterator<Item = Event<'a>>, end: TagEnd) {
-    let mut nesting = 0;
-    for event in events {
-        match event {
-            Event::Start(_) => nesting += 1,
-            Event::End(tag) if nesting == 0 && tag == end => break,
-            Event::End(_) => nesting -= 1,
-            _ => {}
-        }
-    }
-}
-
-fn comments_only(mut html: &str) -> bool {
-    loop {
-        html = html.trim();
-        if html.is_empty() {
-            return true;
-        }
-        let Some(comment) = html.strip_prefix("<!--") else {
-            return false;
-        };
-        let Some(end) = comment.find("-->") else {
-            return false;
-        };
-        html = &comment[end + 3..];
-    }
-}
-
-fn safe_external_url(target: &str) -> bool {
-    url::Url::parse(target).is_ok_and(|url| {
-        matches!(url.scheme(), "https" | "http" | "mailto")
-            && url.username().is_empty()
-            && url.password().is_none()
-    })
 }
 
 fn literal_run(text: &str) -> Run {
