@@ -31,7 +31,22 @@ pub async fn export_word(
     Path(path): Path<String>,
 ) -> Result<Response, ApiError> {
     let path = parse_request_path(&path, "invalid export page path")?;
-    let (title, bytes) = crate::word_export::export(state, path).await?;
+    let (title, bytes) = crate::page_export::export_word(state, path).await?;
+    download(
+        &title,
+        "docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        Body::from(bytes),
+    )
+}
+
+/// An attachment response named after the page title, never cached or sniffed.
+fn download(
+    title: &str,
+    extension: &str,
+    content_type: &'static str,
+    body: Body,
+) -> Result<Response, ApiError> {
     let mut filename: String = title
         .chars()
         .filter(|ch| !ch.is_control())
@@ -48,7 +63,8 @@ pub async fn export_word(
     if filename.is_empty() {
         filename.push_str("page");
     }
-    filename.push_str(".docx");
+    filename.push('.');
+    filename.push_str(extension);
     let ascii: String = filename
         .chars()
         .map(|ch| if ch.is_ascii() { ch } else { '_' })
@@ -61,12 +77,7 @@ pub async fn export_word(
     .map_err(|_| ApiError::internal("download filename could not be encoded"))?;
     Ok((
         [
-            (
-                header::CONTENT_TYPE,
-                HeaderValue::from_static(
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                ),
-            ),
+            (header::CONTENT_TYPE, HeaderValue::from_static(content_type)),
             (header::CONTENT_DISPOSITION, disposition),
             (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
             (
@@ -74,7 +85,7 @@ pub async fn export_word(
                 HeaderValue::from_static("nosniff"),
             ),
         ],
-        Body::from(bytes),
+        body,
     )
         .into_response())
 }
