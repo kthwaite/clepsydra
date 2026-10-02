@@ -5,7 +5,7 @@ use std::{collections::HashMap, io::Cursor, iter::Peekable};
 use docx_rs::*;
 use pulldown_cmark::{Alignment, Event, LinkType, Options, Parser, Tag, TagEnd};
 
-use super::{comments_only, safe_external_url, skip_until_end};
+use super::{comments_only, raster_png, safe_external_url, skip_until_end};
 
 const TEXT_WIDTH: usize = 9360; // Letter, with one-inch side margins (twips).
 const ACCENT: &str = "264F96";
@@ -797,27 +797,8 @@ fn literal_run(text: &str) -> Run {
 }
 
 fn image_picture(bytes: Vec<u8>, width_twips: usize) -> Result<Pic, String> {
-    // Pic::new panics on decoding errors. Decode fallibly instead, and strip
-    // image metadata by encoding only the decoded pixels into the package.
-    let mut reader = image::ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|error| format!("Could not identify image: {error}"))?;
-    let mut limits = image::Limits::default();
-    limits.max_image_width = Some(16384);
-    limits.max_image_height = Some(16384);
-    limits.max_alloc = Some(128 * 1024 * 1024);
-    reader.limits(limits);
-    let decoded = reader
-        .decode()
-        .map_err(|error| format!("Could not decode image for Word export: {error}"))?;
-    let (width, height) = (decoded.width(), decoded.height());
-    if width == 0 || height == 0 {
-        return Err("An image has no displayable pixels".into());
-    }
-    let mut png = Cursor::new(Vec::new());
-    decoded
-        .write_to(&mut png, image::ImageFormat::Png)
-        .map_err(|error| format!("Could not encode image for Word export: {error}"))?;
+    // Pic::new panics on decoding errors; the shared decoder fails cleanly instead.
+    let (png, width, height) = raster_png(bytes)?;
     let max_width = width_twips as f64 * 635.0;
     let max_height = 7.5 * 914400.0;
     let scale = (max_width / (width as f64 * 9525.0))
@@ -825,8 +806,7 @@ fn image_picture(bytes: Vec<u8>, width_twips: usize) -> Result<Pic, String> {
         .min(1.0);
     let display_width = (width as f64 * 9525.0 * scale).round().max(1.0) as u32;
     let display_height = (height as f64 * 9525.0 * scale).round().max(1.0) as u32;
-    Ok(Pic::new_with_dimensions(png.into_inner(), width, height)
-        .size(display_width, display_height))
+    Ok(Pic::new_with_dimensions(png, width, height).size(display_width, display_height))
 }
 
 #[cfg(test)]

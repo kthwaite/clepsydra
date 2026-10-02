@@ -192,9 +192,18 @@ pre code {
   white-space: pre;
 }
 
-code.math,
-pre.math {
+code.math {
   color: var(--ink-2);
+}
+
+code.math-display {
+  display: block;
+  white-space: pre;
+  overflow-x: auto;
+  margin: 0.6em 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  line-height: 1.5;
 }
 
 blockquote {
@@ -329,6 +338,10 @@ img {
 
   pre code {
     white-space: inherit;
+  }
+
+  code.math-display {
+    white-space: pre-wrap;
   }
 
   table {

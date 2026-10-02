@@ -1,11 +1,9 @@
 //! Markdown-to-HTML rendering. All asset access belongs to the snapshot's loader.
 
-use std::io::Cursor;
-
 use base64::{Engine, engine::general_purpose::STANDARD};
 use pulldown_cmark::{BlockQuoteKind, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
 
-use super::{comments_only, safe_external_url, skip_until_end};
+use super::{comments_only, raster_png, safe_external_url, skip_until_end};
 
 const STYLE: &str = include_str!("html.css");
 
@@ -171,8 +169,10 @@ fn presentable<'a>(
                 "<code class=\"math\">{}</code>",
                 escape(&tex)
             )))),
+            // Display math sits inside a paragraph, so it must stay a phrasing element.
+            // Display math sits inside a paragraph, so it must stay a phrasing element.
             Event::DisplayMath(tex) => events.push(Event::InlineHtml(CowStr::from(format!(
-                "<pre class=\"math\"><code>{}</code></pre>",
+                "<code class=\"math math-display\">{}</code>",
                 escape(&tex)
             )))),
             Event::Start(Tag::BlockQuote(Some(kind))) => {
@@ -205,28 +205,11 @@ fn is_line_break(html: &str) -> bool {
     matches!(html.trim(), "<br>" | "<br/>" | "<br />")
 }
 
-/// Accept only images the `image` crate decodes as raster, so a page cannot
-/// smuggle SVG script or an undecodable payload into the document.
+/// Inline an image as freshly encoded PNG pixels: undecodable or non-raster
+/// payloads are rejected, and source metadata (EXIF, GPS) never reaches the file.
 fn image_data_uri(bytes: Vec<u8>) -> Result<String, String> {
-    let format = image::guess_format(&bytes)
-        .map_err(|error| format!("Could not identify image: {error}"))?;
-    let mut reader = image::ImageReader::with_format(Cursor::new(&bytes), format);
-    let mut limits = image::Limits::default();
-    limits.max_image_width = Some(16384);
-    limits.max_image_height = Some(16384);
-    limits.max_alloc = Some(128 * 1024 * 1024);
-    reader.limits(limits);
-    let decoded = reader
-        .decode()
-        .map_err(|error| format!("Could not decode image for HTML export: {error}"))?;
-    if decoded.width() == 0 || decoded.height() == 0 {
-        return Err("An image has no displayable pixels".into());
-    }
-    Ok(format!(
-        "data:{};base64,{}",
-        format.to_mime_type(),
-        STANDARD.encode(&bytes)
-    ))
+    let (png, _, _) = raster_png(bytes)?;
+    Ok(format!("data:image/png;base64,{}", STANDARD.encode(png)))
 }
 
 fn escape(text: &str) -> String {
@@ -247,6 +230,7 @@ fn escape(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     /// The rendered body, without the embedded stylesheet.
     fn html(markdown: &str) -> String {
@@ -349,10 +333,43 @@ mod tests {
             },
         )
         .unwrap();
-        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
-        assert!(output.contains(&format!("src=\"data:image/png;base64,{encoded}\"")));
+        let decoded = image::load_from_memory(&embedded_png(&output)).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (4, 2));
         assert!(output.contains("alt=\"Chart &amp; key\""));
         assert!(!output.contains("attachments/chart.png"));
+    }
+
+    /// The bytes of the single image data URI, which must be PNG.
+    fn embedded_png(output: &str) -> Vec<u8> {
+        let (_, rest) = output.split_once("src=\"data:image/png;base64,").unwrap();
+        let (encoded, _) = rest.split_once('"').unwrap();
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded).unwrap()
+    }
+
+    #[test]
+    fn reencodes_images_without_their_metadata() {
+        let mut jpeg = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(3, 3)
+            .write_to(&mut jpeg, image::ImageFormat::Jpeg)
+            .unwrap();
+        let jpeg = jpeg.into_inner();
+        // Insert an APP1 Exif segment carrying a recognisable marker after SOI.
+        let payload = b"Exif\0\0GPS-SECRET-MARKER";
+        let mut tagged = jpeg[..2].to_vec();
+        tagged.extend_from_slice(&[0xFF, 0xE1]);
+        tagged.extend_from_slice(&((payload.len() + 2) as u16).to_be_bytes());
+        tagged.extend_from_slice(payload);
+        tagged.extend_from_slice(&jpeg[2..]);
+        let output = render("Photo", "![Photo](photo.jpg)", |_| Ok(tagged.clone())).unwrap();
+        assert!(!output.contains("data:image/jpeg"));
+        let embedded = embedded_png(&output);
+        assert!(
+            !embedded
+                .windows(b"GPS-SECRET-MARKER".len())
+                .any(|window| window == b"GPS-SECRET-MARKER")
+        );
+        let decoded = image::load_from_memory(&embedded).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (3, 3));
     }
 
     #[test]
@@ -404,7 +421,8 @@ mod tests {
     fn renders_math_as_literal_tex() {
         let output = html("Inline $a < b$ math.\n\n$$\n\\frac{1}{2} & x\n$$\n");
         assert!(output.contains("<code class=\"math\">a &lt; b</code>"));
-        assert!(output.contains("<pre class=\"math\"><code>"));
+        assert!(output.contains("<code class=\"math math-display\">"));
+        assert!(!output.contains("<pre"));
         assert!(output.contains("\\frac{1}{2} &amp; x"));
     }
 

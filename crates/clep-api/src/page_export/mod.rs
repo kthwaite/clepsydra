@@ -145,3 +145,28 @@ fn safe_external_url(target: &str) -> bool {
             && url.password().is_none()
     })
 }
+
+/// Decode a raster image within fixed resource limits and re-encode only its
+/// pixels as PNG, dropping any metadata. Returns the PNG with its dimensions.
+fn raster_png(bytes: Vec<u8>) -> Result<(Vec<u8>, u32, u32), String> {
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| format!("Could not identify image: {error}"))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16384);
+    limits.max_image_height = Some(16384);
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    reader.limits(limits);
+    let decoded = reader
+        .decode()
+        .map_err(|error| format!("Could not decode image for export: {error}"))?;
+    let (width, height) = (decoded.width(), decoded.height());
+    if width == 0 || height == 0 {
+        return Err("An image has no displayable pixels".into());
+    }
+    let mut png = std::io::Cursor::new(Vec::new());
+    decoded
+        .write_to(&mut png, image::ImageFormat::Png)
+        .map_err(|error| format!("Could not encode image for export: {error}"))?;
+    Ok((png.into_inner(), width, height))
+}

@@ -152,11 +152,16 @@ async fn inlines_local_and_cas_images_as_data_uris() {
         .await;
     response.assert_status_ok();
     let html = response.text();
-    let uri = format!(
-        "src=\"data:image/png;base64,{}\"",
-        base64::engine::general_purpose::STANDARD.encode(&png)
-    );
-    assert_eq!(html.matches(&uri).count(), 2);
+    let images: Vec<_> = html.split("src=\"data:image/png;base64,").skip(1).collect();
+    assert_eq!(images.len(), 2);
+    for image in images {
+        let encoded = image.split_once('"').unwrap().0;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (2, 2));
+    }
     assert!(!html.contains("/api/vault/"));
 }
 
