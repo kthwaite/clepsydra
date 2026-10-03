@@ -68,6 +68,30 @@ describe("SkyCard", () => {
     expect(onOpenMoon).toHaveBeenCalledOnce();
   });
 
+  it("keeps the moon reachable above the Set location overlay", async () => {
+    const onOpenMoon = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <SkyCard
+        sky={SKY}
+        hasLocation={false}
+        onEdit={() => {}}
+        onOpenMoon={onOpenMoon}
+      />,
+    );
+    const moon = screen.getByRole("button", { name: "Moon details" });
+    // The moon needs no location: it is neither dimmed nor inert, and it
+    // stacks above the overlay that covers the sun facts.
+    expect(moon.closest(".pointer-events-none")).toBeNull();
+    expect(moon.closest(".opacity-40")).toBeNull();
+    expect(moon.closest(".z-10")).not.toBeNull();
+    await user.click(moon);
+    expect(onOpenMoon).toHaveBeenCalledOnce();
+    expect(
+      screen.getByText("Sunrise").closest(".pointer-events-none"),
+    ).not.toBeNull();
+  });
+
   it("edits the location from a round icon button", async () => {
     const onEdit = vi.fn();
     const user = userEvent.setup();

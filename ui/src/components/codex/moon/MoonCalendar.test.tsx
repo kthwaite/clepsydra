@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { formatEventDate } from "./calendar";
 import { MoonCalendar } from "./MoonCalendar";
 
 const OCT = { year: 2026, monthIndex0: 9 };
@@ -60,8 +61,13 @@ describe("MoonCalendar", () => {
       "First quarter",
       "Full moon",
     ]);
-    expect(screen.getByText("Sat 10 Oct")).toBeInTheDocument();
-    expect(screen.getByText("Mon 26 Oct")).toBeInTheDocument();
+    // Event dates are local, so derive the labels from the UTC instants
+    // (new 10 Oct 15:50Z, full 26 Oct 04:12Z) in the runner's zone.
+    for (const instant of ["2026-10-10T15:50:00Z", "2026-10-26T04:12:16Z"]) {
+      expect(
+        screen.getByText(formatEventDate(new Date(instant))),
+      ).toBeInTheDocument();
+    }
   });
 
   it("selects a day on click", async () => {

@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 interface BclFixture {
@@ -123,9 +124,26 @@ vi.mock("#/components/codex/ReadingContinues", () => ({
 }));
 
 vi.mock("#/components/codex/SkyCard", () => ({
-  SkyCard: ({ className }: { className?: string }) => (
-    <section aria-label="Sky" className={className} />
+  SkyCard: ({
+    className,
+    onOpenMoon,
+  }: {
+    className?: string;
+    onOpenMoon?: () => void;
+  }) => (
+    <section aria-label="Sky" className={className}>
+      {onOpenMoon && (
+        <button type="button" onClick={onOpenMoon}>
+          Moon details
+        </button>
+      )}
+    </section>
   ),
+}));
+
+// three.js stays out of jsdom: the lazy globe shows its fallback.
+vi.mock("#/components/codex/moon/LazyMoonGlobe", () => ({
+  LazyMoonGlobe: ({ fallback }: { fallback: ReactNode }) => fallback,
 }));
 
 import { Atrium } from "#/components/codex/Atrium";
@@ -245,6 +263,21 @@ describe("Atrium composition", () => {
       name: "Reading Continues",
     });
     expectBefore(activity, reading);
+  });
+
+  it("opens the Moon dialog from the Sky card, without a location", async () => {
+    const user = userEvent.setup();
+    render(<Atrium />);
+    expect(screen.queryByRole("dialog", { name: "Moon" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Moon details" }));
+    const dialog = screen.getByRole("dialog", { name: "Moon" });
+    expect(
+      within(dialog).getByText("Sunday 9 August at 12:00"),
+    ).toBeInTheDocument();
+    await user.click(
+      within(dialog).getByRole("button", { name: "Close dialog" }),
+    );
+    expect(screen.queryByRole("dialog", { name: "Moon" })).toBeNull();
   });
 
   it("offers Stats from Activity", async () => {
