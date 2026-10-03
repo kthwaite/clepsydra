@@ -66,6 +66,13 @@ describe("classifyRequest", () => {
     );
   });
 
+  it("routes moon textures to the moon texture cache", () => {
+    expect(classify("/moon/moon-color-4k.webp")).toBe("moon-texture");
+    expect(classify("/moon/moon-relief-2k.webp")).toBe("moon-texture");
+    expect(classify("/moon/moon-color-1k.webp", "HEAD")).toBe("network-only");
+    expect(classify("/moonlight.png")).toBe("asset");
+  });
+
   it("treats other same-origin GETs as assets", () => {
     expect(classify("/assets/index-abc.js")).toBe("asset");
     expect(classify("/favicon.svg")).toBe("asset");
