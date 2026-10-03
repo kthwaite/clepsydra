@@ -398,3 +398,84 @@ async fn birthdays_follow_tag_and_project_filters() {
         .json();
     assert!(birthday_titles(&cellar).is_empty());
 }
+
+fn seed_todos(root: &Path) {
+    write(
+        root,
+        "groceries.md",
+        "---\nid: 00000000-0000-0000-0000-000000000201\ntitle: Groceries\n\
+         created_at: 2020-01-01T00:00:00Z\n---\n\n\
+         - [ ] Buy milk [due:: 2026-09-10] [priority:: P1]\n\
+         - [x] Buy bread [due:: 2026-09-11]\n\
+         - [ ] Someday\n",
+    );
+    write(
+        root,
+        "tasks/TSK-brave-finch-7q3zd.md",
+        "---\nid: 00000000-0000-0000-0000-000000000202\ntitle: File taxes\ntype: TASK\n\
+         project: home\nstatus: SEALED\npriority: P1\ndue: 2026-09-20\n\
+         created_at: 2020-01-01T00:00:00Z\n---\n\n# File taxes\n",
+    );
+}
+
+#[tokio::test]
+async fn todos_carry_checkbox_todos_and_tasks_by_due_date() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_todos)
+        .build()
+        .into_server_and_temp();
+
+    let response = get_calendar(
+        &server,
+        &[("from", SEPT_FROM_LONDON), ("to", SEPT_TO_LONDON)],
+    )
+    .await;
+    response.assert_status_ok();
+    let body: Value = response.json();
+    assert_eq!(body["truncated"], Value::Bool(false));
+    let todos = body["todos"].as_array().unwrap();
+    assert_eq!(todos.len(), 3, "{todos:?}");
+
+    let milk = &todos[0];
+    assert_eq!(milk["kind"], "todo");
+    assert!(milk["content"].as_str().unwrap().starts_with("Buy milk"));
+    assert_eq!(milk["status"], "todo");
+    assert_eq!(milk["due"], "2026-09-10");
+    assert_eq!(milk["priority"], "P1");
+    assert_eq!(milk["page_path"], "groceries.md");
+    assert_eq!(milk["page_title"], "Groceries");
+    assert!(milk["span_start"].is_i64());
+
+    let bread = &todos[1];
+    assert_eq!(bread["status"], "done");
+    assert_eq!(bread["priority"], Value::Null);
+
+    let task = &todos[2];
+    assert_eq!(task["kind"], "task");
+    assert_eq!(task["id"], "00000000-0000-0000-0000-000000000202");
+    assert_eq!(task["code"], "TSK-brave-finch-7q3zd");
+    assert_eq!(task["title"], "File taxes");
+    assert_eq!(task["status"], "SEALED");
+    assert_eq!(task["priority"], "P1");
+    assert_eq!(task["project"], "home");
+    assert_eq!(task["due"], "2026-09-20");
+    assert_eq!(task["path"], "tasks/TSK-brave-finch-7q3zd.md");
+
+    let tasks_only = get_calendar(
+        &server,
+        &[
+            ("from", SEPT_FROM_LONDON),
+            ("to", SEPT_TO_LONDON),
+            ("kind", "TASK"),
+        ],
+    )
+    .await
+    .json::<Value>();
+    let kinds: Vec<&str> = tasks_only["todos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|todo| todo["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, vec!["task"]);
+}

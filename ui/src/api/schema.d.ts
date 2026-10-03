@@ -1076,6 +1076,13 @@ export interface paths {
      *
      *     `birthdays` lists PERSON pages with a valid frontmatter `birthday`,
      *     whatever the window, when `kind` is omitted or includes PERSON.
+     *
+     *     `todos` lists checkbox todos (by their `[due:: YYYY-MM-DD]` property) and
+     *     TASK pages (by frontmatter `due`) due in `[date(from), date(to)]`, done
+     *     and cancelled ones included; undated or malformed dues are left out.
+     *     `kind`, `tag` and `project` match the host page (a TASK page is its own
+     *     host); AI_JOURNAL hosts are skipped. Todos have their own cap of 5000
+     *     items; `truncated` is also set when it is hit.
      */
     get: operations["calendar_entries"];
     put?: never;
@@ -2406,9 +2413,67 @@ export interface components {
        */
       birthdays: components["schemas"]["CalendarBirthday"][];
       entries: components["schemas"]["CalendarEntry"][];
-      /** @description True when more pages matched than `entries` carries. */
+      /**
+       * @description Checkbox todos and TASK pages due in the window, done ones included.
+       *     Ordered by due, host path, then position.
+       */
+      todos: components["schemas"]["CalendarTodoItem"][];
+      /**
+       * @description True when more pages matched than `entries` carries, or more todos
+       *     than `todos` carries.
+       */
       truncated: boolean;
     };
+    /** @description A TASK page placed on its frontmatter `due` date. */
+    CalendarTask: {
+      /** @description The task code: the path stem. */
+      code: string;
+      /** @description `YYYY-MM-DD`, a local date. */
+      due: string;
+      /** Format: uuid */
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "task";
+      path: string;
+      priority: components["schemas"]["CalendarTaskPriority"];
+      project?: string | null;
+      status: components["schemas"]["CalendarTaskStatus"];
+      title: string;
+    };
+    /** @enum {string} */
+    CalendarTaskKind: "task";
+    /** @enum {string} */
+    CalendarTaskPriority: "P0" | "P1" | "P2" | "P3";
+    /** @enum {string} */
+    CalendarTaskStatus: "INTAKE" | "TRIAGE" | "FIELD" | "REVIEW" | "SEALED";
+    /** @description A checkbox todo placed on its `due` date. */
+    CalendarTodo: {
+      content: string;
+      /** @description `YYYY-MM-DD`, a local date. */
+      due: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "todo";
+      page_path: string;
+      page_title?: string | null;
+      priority?: string | null;
+      /** Format: int64 */
+      span_start: number;
+      status: components["schemas"]["CalendarTodoStatus"];
+    };
+    /** @description A dated todo: a checkbox block or a TASK page, told apart by `kind`. */
+    CalendarTodoItem:
+      | components["schemas"]["CalendarTodo"]
+      | components["schemas"]["CalendarTask"];
+    /** @enum {string} */
+    CalendarTodoKind: "todo";
+    /** @enum {string} */
+    CalendarTodoStatus: "todo" | "doing" | "done" | "cancelled";
     CandidateEntry: {
       page_id: string;
       path: string;
@@ -7559,7 +7624,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Calendar entries */
+      /** @description Calendar entries and todos */
       200: {
         headers: {
           [name: string]: unknown;

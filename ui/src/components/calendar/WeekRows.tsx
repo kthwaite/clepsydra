@@ -1,9 +1,11 @@
-import { Cake } from "lucide-react";
+import { Cake, Square, SquareCheck } from "lucide-react";
+import type { CalendarTodoItem } from "#/api/calendar";
 import { CLink } from "#/components/codex/CLink";
 import { Button } from "#/components/ui/button";
 import { type BirthdayOccurrence, birthdayLabel } from "#/lib/birthday";
 import type { CalendarEntryLike } from "#/lib/calendar/bucket";
 import type { DateKey, WeekRow } from "#/lib/calendar/dates";
+import { isTodoOpen } from "#/lib/calendar/todos";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { KIND_META } from "#/lib/kind";
@@ -14,19 +16,24 @@ export interface WeekRowsProps {
   byDay: ReadonlyMap<DateKey, readonly CalendarEntryLike[]>;
   /** Birthdays per day, listed before the day's pages. */
   birthdaysByDay?: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]>;
+  /** Todos due per day, listed after birthdays and before pages. */
+  todosByDay?: ReadonlyMap<DateKey, readonly CalendarTodoItem[]>;
   today: DateKey;
   /** The day whose side panel is open. */
   activeDate?: DateKey | null;
   onDayActivate: (key: DateKey) => void;
 }
 
-/** Page titles listed inline per day; the rest open through the day panel.
- *  Birthdays are few and always listed. */
+/** Todos and page titles listed inline per day; the rest open through the
+ *  day panel. Birthdays are few and always listed. */
 const MAX_INLINE = 8;
 
 const NO_ENTRIES: readonly CalendarEntryLike[] = [];
 const NO_BIRTHDAYS: readonly BirthdayOccurrence[] = [];
 const NO_BIRTHDAY_DAYS: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]> =
+  new Map();
+const NO_TODOS: readonly CalendarTodoItem[] = [];
+const NO_TODO_DAYS: ReadonlyMap<DateKey, readonly CalendarTodoItem[]> =
   new Map();
 
 const ROW_LINK = cn(
@@ -34,7 +41,12 @@ const ROW_LINK = cn(
   FOCUS_RING_NATIVE,
 );
 
-function dayLabel(key: DateKey, count: number, birthdays: number): string {
+function dayLabel(
+  key: DateKey,
+  count: number,
+  birthdays: number,
+  todos: number,
+): string {
   const date = parseLocalDate(key).toLocaleDateString(undefined, {
     weekday: "long",
     day: "numeric",
@@ -46,13 +58,44 @@ function dayLabel(key: DateKey, count: number, birthdays: number): string {
   if (birthdays > 0) {
     parts.push(`${birthdays} ${birthdays === 1 ? "birthday" : "birthdays"}`);
   }
+  if (todos > 0) parts.push(`${todos} ${todos === 1 ? "todo" : "todos"}`);
   return parts.join(", ");
 }
+
+/** A todo's line: an open or checked box, then its text; done ones are
+ *  struck through and faint. */
+function TodoLine({ item }: { item: CalendarTodoItem }) {
+  const open = isTodoOpen(item);
+  const Glyph = open ? Square : SquareCheck;
+  const path = item.kind === "todo" ? item.page_path : item.path;
+  const text = item.kind === "todo" ? item.content : item.title;
+  return (
+    <CLink path={path} className={ROW_LINK}>
+      <Glyph
+        data-todo-glyph
+        aria-hidden="true"
+        className="size-3 flex-shrink-0 text-mute"
+      />
+      <span
+        className={cn("truncate", !open && "text-mute line-through")}
+        title={path}
+      >
+        {text}
+      </span>
+    </CLink>
+  );
+}
+
+const todoKey = (item: CalendarTodoItem) =>
+  item.kind === "todo"
+    ? `todo:${item.page_path}:${item.span_start}`
+    : `task:${item.id}`;
 
 function DayColumn({
   dateKey,
   entries,
   birthdays,
+  todos,
   isToday,
   isActive,
   showMonth,
@@ -61,14 +104,17 @@ function DayColumn({
   dateKey: DateKey;
   entries: readonly CalendarEntryLike[];
   birthdays: readonly BirthdayOccurrence[];
+  todos: readonly CalendarTodoItem[];
   isToday: boolean;
   isActive: boolean;
   showMonth: boolean;
   onDayActivate: (key: DateKey) => void;
 }) {
   const date = parseLocalDate(dateKey);
-  const shown = entries.slice(0, MAX_INLINE);
-  const hidden = entries.length - shown.length;
+  const shownTodos = todos.slice(0, MAX_INLINE);
+  const shown = entries.slice(0, MAX_INLINE - shownTodos.length);
+  const hidden =
+    todos.length + entries.length - shownTodos.length - shown.length;
   return (
     <div
       data-date={dateKey}
@@ -82,7 +128,12 @@ function DayColumn({
     >
       <button
         type="button"
-        aria-label={dayLabel(dateKey, entries.length, birthdays.length)}
+        aria-label={dayLabel(
+          dateKey,
+          entries.length,
+          birthdays.length,
+          todos.length,
+        )}
         onClick={() => onDayActivate(dateKey)}
         className={cn(
           "flex items-baseline justify-between gap-2 rounded-[8px] px-1 py-0.5 text-left hover:bg-sink",
@@ -113,7 +164,7 @@ function DayColumn({
           </span>
         )}
       </button>
-      {shown.length + birthdays.length > 0 && (
+      {shown.length + shownTodos.length + birthdays.length > 0 && (
         <ul className="m-0 flex list-none flex-col gap-1 p-0">
           {birthdays.map((b) => (
             <li key={`birthday:${b.path}`} className="min-w-0">
@@ -127,6 +178,11 @@ function DayColumn({
                   {`${b.title || b.path} — ${birthdayLabel(b)}`}
                 </span>
               </CLink>
+            </li>
+          ))}
+          {shownTodos.map((item) => (
+            <li key={todoKey(item)} className="min-w-0">
+              <TodoLine item={item} />
             </li>
           ))}
           {shown.map((e) => (
@@ -160,12 +216,13 @@ function DayColumn({
   );
 }
 
-/** Weeks mode: one row per ISO week, each day listing its birthdays and
- *  pages inline. */
+/** Weeks mode: one row per ISO week, each day listing its birthdays, todos
+ *  and pages inline. */
 export function WeekRows({
   rows,
   byDay,
   birthdaysByDay = NO_BIRTHDAY_DAYS,
+  todosByDay = NO_TODO_DAYS,
   today,
   activeDate = null,
   onDayActivate,
@@ -188,6 +245,7 @@ export function WeekRows({
                 dateKey={key}
                 entries={byDay.get(key) ?? NO_ENTRIES}
                 birthdays={birthdaysByDay.get(key) ?? NO_BIRTHDAYS}
+                todos={todosByDay.get(key) ?? NO_TODOS}
                 isToday={key === today}
                 isActive={key === activeDate}
                 showMonth={i === 0 || key.endsWith("-01")}

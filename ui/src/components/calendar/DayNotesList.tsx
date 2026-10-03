@@ -1,5 +1,7 @@
-import { Cake, CalendarDays } from "lucide-react";
+import { Cake, CalendarDays, ListTodo } from "lucide-react";
 import type { ReactNode } from "react";
+import type { CalendarTodoItem } from "#/api/calendar";
+import { TaskRow, TodoRow } from "#/components/agenda/TodoRows";
 import { CLink } from "#/components/codex/CLink";
 import { KindIcon } from "#/components/KindIcon";
 import { Button } from "#/components/ui/button";
@@ -16,6 +18,9 @@ export interface DayNotesListProps {
   entries: readonly CalendarEntryLike[];
   /** Birthdays falling on the day, listed first. */
   birthdays?: readonly BirthdayOccurrence[];
+  /** Todos due on the day, listed after birthdays. Their rows toggle status
+   *  in place. */
+  todos?: readonly CalendarTodoItem[];
   /** The day's journal, when one is written. */
   journalPath?: string | null;
   /** Today's key; defaults to the local clock. A past or future day with no
@@ -29,6 +34,7 @@ export interface DayNotesListProps {
 }
 
 const NO_BIRTHDAYS: readonly BirthdayOccurrence[] = [];
+const NO_TODOS: readonly CalendarTodoItem[] = [];
 
 const ROW_LINK = cn(
   "cl-link-plain flex min-w-0 items-center gap-2 rounded text-[14px] text-ink-2 hover:text-ink",
@@ -89,6 +95,40 @@ function BirthdayGroup({
   );
 }
 
+function TodoGroup({ todos }: { todos: readonly CalendarTodoItem[] }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <GroupHeader
+        marker={
+          <ListTodo
+            aria-hidden="true"
+            className="size-3 flex-shrink-0 text-ink-2"
+          />
+        }
+        label="Todos"
+        count={todos.length}
+      />
+      <ul aria-label="Todos" className="m-0 flex list-none flex-col gap-3 p-0">
+        {/* The list is one day, so rows leave out the due date. */}
+        {todos.map((item) =>
+          item.kind === "todo" ? (
+            <TodoRow
+              key={`todo:${item.page_path}:${item.span_start}`}
+              todo={{ ...item, due: null }}
+            />
+          ) : (
+            <TaskRow
+              key={`task:${item.id}`}
+              task={{ ...item, due: null }}
+              stacked
+            />
+          ),
+        )}
+      </ul>
+    </div>
+  );
+}
+
 function longDate(key: DateKey): string {
   return parseLocalDate(key).toLocaleDateString(undefined, {
     weekday: "long",
@@ -98,12 +138,13 @@ function longDate(key: DateKey): string {
   });
 }
 
-/** One day's birthdays and pages, grouped by kind, plus the day's journal
- *  action. */
+/** One day's birthdays, todos and pages (grouped by kind), plus the day's
+ *  journal action. */
 export function DayNotesList({
   dateKey,
   entries,
   birthdays = NO_BIRTHDAYS,
+  todos = NO_TODOS,
   journalPath,
   today,
   loading = false,
@@ -125,11 +166,14 @@ export function DayNotesList({
         <p role="status" className="m-0 text-[13px] text-mute">
           Loading…
         </p>
-      ) : groups.length === 0 && birthdays.length === 0 ? (
+      ) : groups.length === 0 &&
+        birthdays.length === 0 &&
+        todos.length === 0 ? (
         <p className="m-0 text-[13px] text-mute">Nothing created this day.</p>
       ) : (
         <div className="flex flex-col gap-4">
           {birthdays.length > 0 && <BirthdayGroup birthdays={birthdays} />}
+          {todos.length > 0 && <TodoGroup todos={todos} />}
           {groups.map(({ kind, entries: group }) => {
             const label = kindDisplayLabel(kind);
             return (

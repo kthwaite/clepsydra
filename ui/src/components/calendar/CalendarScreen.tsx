@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { type ReactNode, useCallback, useMemo } from "react";
-import { useCalendarEntries } from "#/api/calendar";
+import { type CalendarTodoItem, useCalendarEntries } from "#/api/calendar";
 import { useTags } from "#/api/index";
 import { DayNotesList } from "#/components/calendar/DayNotesList";
 import { MonthCalendar } from "#/components/calendar/MonthCalendar";
@@ -32,6 +32,7 @@ import {
   DEFAULT_SPAN,
   SPANS,
 } from "#/lib/calendar/search";
+import { bucketTodos } from "#/lib/calendar/todos";
 import type { FilterField, FilterState } from "#/lib/filters/model";
 import {
   KINDS,
@@ -65,6 +66,7 @@ const CAP = 5000;
 const NO_ENTRIES: readonly CalendarEntryLike[] = [];
 const NO_BIRTHDAYS: readonly BirthdayEntry[] = [];
 const NO_OCCURRENCES: readonly BirthdayOccurrence[] = [];
+const NO_TODOS: readonly CalendarTodoItem[] = [];
 const KIND_OPTIONS = sortKindsByLabel(KINDS).map((kind) => ({
   value: kind,
   label: kindDisplayLabel(kind),
@@ -136,7 +138,7 @@ function WeeksHeader({
 }
 
 /** The `/calendar` screen: pages by the day they were made, plus PERSON
- *  birthdays, in Month,
+ *  birthdays and todos by due date, in Month,
  *  Months or Weeks mode, filtered on the server. Plain props, so it renders
  *  without the router. */
 export function CalendarScreen({
@@ -188,6 +190,7 @@ export function CalendarScreen({
   const query = useCalendarEntries({ range, ...filters });
   const entries = query.data?.entries;
   const birthdays = showBirthdays ? query.data?.birthdays : undefined;
+  const todos = query.data?.todos;
   const visibleKeys = useMemo(() => rangeKeys(range), [range]);
   const byDay = useMemo(
     () => bucketEntries(entries ?? [], visibleKeys),
@@ -196,6 +199,10 @@ export function CalendarScreen({
   const birthdaysByDay = useMemo(
     () => birthdayOccurrences(birthdays ?? NO_BIRTHDAYS, visibleKeys),
     [birthdays, visibleKeys],
+  );
+  const todosByDay = useMemo(
+    () => bucketTodos(todos ?? NO_TODOS, visibleKeys),
+    [todos, visibleKeys],
   );
 
   // A selected day outside the visible range (e.g. a shared link) gets its
@@ -229,6 +236,14 @@ export function CalendarScreen({
         : null,
     [dayOutside, dayQueryBirthdays, oneDay],
   );
+  const dayQueryTodos = dayQuery.data?.todos;
+  const outsideTodos = useMemo(
+    () =>
+      dayOutside
+        ? bucketTodos(dayQueryTodos ?? NO_TODOS, rangeKeys(oneDay))
+        : null,
+    [dayOutside, dayQueryTodos, oneDay],
+  );
   const dayLoading =
     dayOutside && (dayQuery.isLoading || dayQuery.isPlaceholderData === true);
 
@@ -253,6 +268,10 @@ export function CalendarScreen({
     day && !dayLoading
       ? ((outsideBirthdays ?? birthdaysByDay).get(day) ?? NO_OCCURRENCES)
       : NO_OCCURRENCES;
+  const dayTodos =
+    day && !dayLoading
+      ? ((outsideTodos ?? todosByDay).get(day) ?? NO_TODOS)
+      : NO_TODOS;
   const journalPath = dayEntries.find((e) => e.kind === "JOURNAL")?.path;
   const dayList = day ? (
     <DayNotesList
@@ -260,6 +279,7 @@ export function CalendarScreen({
       today={today}
       entries={dayEntries}
       birthdays={dayBirthdays}
+      todos={dayTodos}
       loading={dayLoading}
       journalPath={journalPath}
       onOpenJournal={() => void openJournal(day, journalPath)}
@@ -311,7 +331,7 @@ export function CalendarScreen({
           </p>
         ) : query.data?.truncated ? (
           <p className="m-0 text-[14px] text-warn">
-            Showing the first {CAP} pages. Narrow the filters to see the rest.
+            Showing the first {CAP} pages and {CAP} todos. Narrow the filters to see the rest.
           </p>
         ) : null}
       </div>
@@ -326,6 +346,7 @@ export function CalendarScreen({
               controls={controls}
               byDay={byDay}
               birthdaysByDay={birthdaysByDay}
+              todosByDay={todosByDay}
               activeDate={day ?? null}
               onAnchorChange={setAnchor}
               onDayActivate={activateDay}
@@ -337,6 +358,7 @@ export function CalendarScreen({
               months={view.mode === "months" ? view.span : 1}
               byDay={byDay}
               birthdaysByDay={birthdaysByDay}
+              todosByDay={todosByDay}
               today={today}
               activeDate={day ?? null}
               onDayActivate={(key) => activateDay(key)}
@@ -382,6 +404,7 @@ function WeeksBody({
   controls,
   byDay,
   birthdaysByDay,
+  todosByDay,
   activeDate,
   onAnchorChange,
   onDayActivate,
@@ -392,6 +415,7 @@ function WeeksBody({
   controls: ReactNode;
   byDay: ReadonlyMap<DateKey, readonly CalendarEntryLike[]>;
   birthdaysByDay: ReadonlyMap<DateKey, readonly BirthdayOccurrence[]>;
+  todosByDay: ReadonlyMap<DateKey, readonly CalendarTodoItem[]>;
   activeDate: DateKey | null;
   onAnchorChange: (key: DateKey) => void;
   onDayActivate: (key: DateKey) => void;
@@ -410,6 +434,7 @@ function WeeksBody({
         rows={rows}
         byDay={byDay}
         birthdaysByDay={birthdaysByDay}
+        todosByDay={todosByDay}
         today={today}
         activeDate={activeDate}
         onDayActivate={onDayActivate}

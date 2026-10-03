@@ -8,7 +8,10 @@ use thiserror::Error;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
-pub use crate::calendar::{BirthdayEntry, CalendarEntry, CalendarPage, CalendarQuery};
+pub use crate::calendar::{
+    BirthdayEntry, CalendarDueItem, CalendarEntry, CalendarPage, CalendarQuery, CalendarTaskEntry,
+    CalendarTodoEntry, CalendarTodoPage,
+};
 use crate::derivation::{Deriver, IndexedPage};
 use crate::derivers::blocks::BlockDeriver;
 use crate::derivers::canonical_names::CanonicalNameDeriver;

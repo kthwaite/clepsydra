@@ -1,31 +1,5 @@
-import { usePatchTask } from "#/api/board";
-import type { AgendaItem, AgendaTask, AgendaTodo } from "#/api/tasks";
-import { useToggleTaskStatus } from "#/api/tasks";
-import {
-  COL_ORDER,
-  PRI_LABEL,
-  taskStatusLabel,
-} from "#/components/tasking/board-constants";
-import { Badge } from "#/components/ui/badge";
-import { Select, SelectItem } from "#/components/ui/select";
-import {
-  nextStatus,
-  TaskStatusButton,
-} from "#/components/ui/task-status-button";
-import { useOpenTab } from "#/hooks/useOpenTab";
-import { cn } from "#/lib/cn";
-import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
-
-/** The source link under each row: mute, underlined in faint, cobalt on
- *  hover — the Atrium AgendaTile's idiom. */
-const SOURCE_LINK = cn(
-  "min-w-0 cursor-pointer truncate rounded-sm text-left text-mute underline decoration-faint underline-offset-2 hover:text-accent",
-  FOCUS_RING_NATIVE,
-);
-const ROW = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3";
-const TITLE = "block text-[15.5px] leading-[1.4] text-ink";
-const META =
-  "mt-1 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[12.5px] text-mute";
+import type { AgendaItem, AgendaTodo } from "#/api/tasks";
+import { TaskRow, TodoRow } from "#/components/agenda/TodoRows";
 
 export function priorityLabel(priority: string): string {
   switch (priority.toUpperCase()) {
@@ -40,97 +14,16 @@ export function priorityLabel(priority: string): string {
   }
 }
 
+/** Agenda todos carry due and priority among their block properties. */
 function AgendaTodoRow({ todo }: { todo: AgendaTodo }) {
-  const toggle = useToggleTaskStatus();
-  const openTab = useOpenTab();
-  const due = todo.properties.due;
-  const priority = todo.properties.priority;
-  const next = nextStatus(todo.status);
-  const source = todo.page_title ?? todo.page_path;
-
   return (
-    <li className={ROW}>
-      <TaskStatusButton
-        status={todo.status}
-        onToggle={() =>
-          toggle.mutate({
-            pagePath: todo.page_path,
-            spanStart: todo.span_start,
-            status: next,
-          })
-        }
-        isDisabled={toggle.isPending}
-        accessibleLabel={`Mark Todo ${next}: ${todo.content} (${source})`}
-      />
-
-      <div className="min-w-0 flex-1">
-        <span className={TITLE}>{todo.content}</span>
-
-        <div className={META}>
-          {due && <span className="tabular-nums">{due}</span>}
-          {priority && <Badge size="sm">{priority.toUpperCase()}</Badge>}
-          <button
-            type="button"
-            onClick={() => openTab("page", todo.page_path)}
-            className={SOURCE_LINK}
-          >
-            {source}
-          </button>
-        </div>
-      </div>
-    </li>
-  );
-}
-
-function AgendaTaskRow({ task }: { task: AgendaTask }) {
-  const patch = usePatchTask();
-  const openTab = useOpenTab();
-  const taskPriorityLabel = PRI_LABEL[task.priority];
-
-  return (
-    <li className={ROW}>
-      <Select
-        aria-label={`Status for ${task.code}: ${task.title}`}
-        selectedKey={task.status}
-        onSelectionChange={(status) => {
-          if (status === null) return;
-          patch.mutate({
-            id: task.id,
-            patch: { status: String(status) },
-          });
-        }}
-        isDisabled={patch.isPending}
-        className="w-36 shrink-0"
-      >
-        {COL_ORDER.map((status) => (
-          <SelectItem key={status} id={status}>
-            {taskStatusLabel(status)}
-          </SelectItem>
-        ))}
-      </Select>
-
-      <div className="min-w-0 flex-1">
-        <span className={TITLE}>{task.title}</span>
-
-        <div className={META}>
-          <Badge size="sm">{task.code}</Badge>
-          {task.due && <span className="tabular-nums">{task.due}</span>}
-          <Badge size="sm">
-            {task.priority}
-            {taskPriorityLabel ? ` ${taskPriorityLabel}` : ""}
-          </Badge>
-          {task.project && <Badge size="sm">{task.project}</Badge>}
-          {task.hold?.trim() && <Badge size="sm">Blocked</Badge>}
-          <button
-            type="button"
-            onClick={() => openTab("page", task.path)}
-            className={SOURCE_LINK}
-          >
-            {task.path}
-          </button>
-        </div>
-      </div>
-    </li>
+    <TodoRow
+      todo={{
+        ...todo,
+        due: todo.properties.due,
+        priority: todo.properties.priority,
+      }}
+    />
   );
 }
 
@@ -154,7 +47,7 @@ export function AgendaItemList({
             todo={item}
           />
         ) : (
-          <AgendaTaskRow key={item.id} task={item} />
+          <TaskRow key={item.id} task={item} />
         ),
       )}
     </ul>

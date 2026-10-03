@@ -1,8 +1,8 @@
 use std::sync::mpsc;
 
 use crate::index::{
-    BacklinkWithContext, BirthdayEntry, BuildStats, CalendarPage, CalendarQuery, IndexError,
-    SearchResult, SimilarRow, UnlinkedMention, VaultIndex,
+    BacklinkWithContext, BirthdayEntry, BuildStats, CalendarPage, CalendarQuery, CalendarTodoPage,
+    IndexError, SearchResult, SimilarRow, UnlinkedMention, VaultIndex,
 };
 use crate::index_policy::{self, IndexMutation, IndexPolicyError};
 use crate::sync::{ChangeEvent, SyncEngine, SyncStats};
@@ -174,6 +174,12 @@ impl IndexHandle {
     /// Pages placed inside a calendar window; see [`VaultIndex::calendar_entries`].
     pub async fn calendar_entries(&self, q: CalendarQuery) -> Result<CalendarPage, IndexError> {
         self.with_index(move |index, _vault| index.calendar_entries(&q))
+            .await?
+    }
+
+    /// Dated todos in a calendar window; see [`VaultIndex::calendar_todos`].
+    pub async fn calendar_todos(&self, q: CalendarQuery) -> Result<CalendarTodoPage, IndexError> {
+        self.with_index(move |index, _vault| index.calendar_todos(&q))
             .await?
     }
 

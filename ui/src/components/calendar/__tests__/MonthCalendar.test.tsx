@@ -2,6 +2,7 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import type { CalendarTodoItem } from "#/api/calendar";
 import {
   MonthCalendar,
   type MonthCalendarProps,
@@ -432,6 +433,86 @@ describe("MonthCalendar", () => {
       });
       expect(
         day(container, "2026-09-20").querySelector("[data-day-count]"),
+      ).toBeNull();
+    });
+  });
+
+  describe("todos", () => {
+    const todo = (
+      due: DateKey,
+      status: "todo" | "done" = "todo",
+      span_start = 0,
+    ): CalendarTodoItem => ({
+      kind: "todo",
+      content: "Do it",
+      status,
+      due,
+      page_path: "notes/a.md",
+      span_start,
+    });
+    const sealed = (due: DateKey): CalendarTodoItem => ({
+      kind: "task",
+      id: "01900000-0000-7000-8000-000000000001",
+      code: "TSK-a",
+      title: "Task",
+      status: "SEALED",
+      priority: "P2",
+      due,
+      path: "tasks/TSK-a.md",
+    });
+    const todosByDay = new Map<DateKey, readonly CalendarTodoItem[]>([
+      ["2026-09-15", [todo("2026-09-15"), todo("2026-09-15", "done", 1)]],
+      ["2026-09-21", [todo("2026-09-21"), todo("2026-09-21", "todo", 1)]],
+      ["2026-09-22", [todo("2026-09-22", "done"), sealed("2026-09-22")]],
+    ]);
+    const marker = (container: HTMLElement, key: DateKey) =>
+      day(container, key).querySelector<HTMLElement>("[data-todo-marker]");
+
+    it.each(["rail", "compact", "page"] as const)(
+      "%s variant shows a hidden todo marker in the marker row",
+      (variant) => {
+        const { container } = renderCalendar({ variant, todosByDay });
+        const m = marker(container, "2026-09-21");
+        expect(m).not.toBeNull();
+        expect(m?.querySelector("svg")).not.toBeNull();
+        expect(m?.closest("[aria-hidden='true']")).not.toBeNull();
+        expect(marker(container, "2026-09-14")).toBeNull();
+      },
+    );
+
+    it("page variant shows the open count beside the marker", () => {
+      const { container } = renderCalendar({ variant: "page", todosByDay });
+      expect(marker(container, "2026-09-15")?.textContent).toBe("1");
+      expect(marker(container, "2026-09-21")?.textContent).toBe("2");
+      expect(marker(container, "2026-09-22")?.textContent).toBe("");
+    });
+
+    it("rail variant shows the marker without a count", () => {
+      const { container } = renderCalendar({ todosByDay });
+      expect(marker(container, "2026-09-21")?.textContent).toBe("");
+    });
+
+    it("marks a day whose todos are all done", () => {
+      const { container } = renderCalendar({ variant: "page", todosByDay });
+      expect(marker(container, "2026-09-22")).toHaveAttribute("data-all-done");
+      expect(marker(container, "2026-09-15")).not.toHaveAttribute(
+        "data-all-done",
+      );
+    });
+
+    it("folds todos into the day's description", () => {
+      renderCalendar({ todosByDay });
+      expect(dayButton(15)).toHaveAccessibleDescription(
+        "6 notes, 2 todos, 1 open",
+      );
+      expect(dayButton(21)).toHaveAccessibleDescription("2 open todos");
+      expect(dayButton(22)).toHaveAccessibleDescription("2 todos, all done");
+    });
+
+    it("page variant counts notes only", () => {
+      const { container } = renderCalendar({ variant: "page", todosByDay });
+      expect(
+        day(container, "2026-09-21").querySelector("[data-day-count]"),
       ).toBeNull();
     });
   });

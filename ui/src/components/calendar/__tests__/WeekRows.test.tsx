@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { CalendarTodoItem } from "#/api/calendar";
 import { WeekRows } from "#/components/calendar/WeekRows";
 import type { BirthdayOccurrence } from "#/lib/birthday";
 import type { CalendarEntryLike } from "#/lib/calendar/bucket";
@@ -147,6 +148,84 @@ describe("WeekRows", () => {
       const day = dayColumn(container, "2026-09-29");
       expect(within(day).getAllByRole("link")).toHaveLength(9);
       expect(within(day).queryByRole("button", { name: /more/ })).toBeNull();
+    });
+  });
+  describe("todos", () => {
+    const todosByDay = new Map<DateKey, readonly CalendarTodoItem[]>([
+      [
+        "2026-09-29",
+        [
+          {
+            kind: "todo",
+            content: "Buy hops",
+            status: "todo",
+            due: "2026-09-29",
+            page_path: "notes/brew.md",
+            span_start: 4,
+          },
+          {
+            kind: "task",
+            id: "01900000-0000-7000-8000-000000000001",
+            code: "TSK-a",
+            title: "Bottle the stout",
+            status: "SEALED",
+            priority: "P2",
+            due: "2026-09-29",
+            path: "tasks/TSK-a.md",
+          },
+        ],
+      ],
+    ]);
+
+    it("lists a day's todos ahead of its pages, linking to the source", () => {
+      const { container } = renderRows({ todosByDay });
+      const day = dayColumn(container, "2026-09-29");
+      const links = within(day).getAllByRole("link");
+      expect(links.map((l) => l.textContent)).toEqual([
+        "Buy hops",
+        "Bottle the stout",
+        "29 Sep",
+        "Tasting Beer",
+      ]);
+      expect(links[0]).toHaveAttribute("data-path", "notes/brew.md");
+      expect(links[1]).toHaveAttribute("data-path", "tasks/TSK-a.md");
+      expect(links[0].querySelector("[data-todo-glyph]")).toHaveAttribute(
+        "aria-hidden",
+        "true",
+      );
+    });
+
+    it("strikes through done todos only", () => {
+      const { container } = renderRows({ todosByDay });
+      const day = dayColumn(container, "2026-09-29");
+      expect(within(day).getByText("Bottle the stout")).toHaveClass(
+        "line-through",
+      );
+      expect(within(day).getByText("Buy hops")).not.toHaveClass("line-through");
+    });
+
+    it("names todos in the day button", () => {
+      renderRows({ todosByDay });
+      expect(
+        screen.getByRole("button", { name: /29.*2 pages, 2 todos$/ }),
+      ).toBeInTheDocument();
+    });
+
+    it("todos share the inline cap with pages", () => {
+      const many: CalendarEntryLike[] = Array.from({ length: 7 }, (_, i) => ({
+        path: `notes/n${i}.md`,
+        title: `Note ${i}`,
+        kind: "NOTE",
+      }));
+      const { container } = renderRows({
+        byDay: new Map([["2026-09-29", many]]),
+        todosByDay,
+      });
+      const day = dayColumn(container, "2026-09-29");
+      expect(within(day).getAllByRole("link")).toHaveLength(8);
+      expect(
+        within(day).getByRole("button", { name: "1 more" }),
+      ).toBeInTheDocument();
     });
   });
 });
