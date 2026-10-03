@@ -27,6 +27,7 @@ import {
 } from "./atrium-data";
 import { useAtriumCalendar } from "./atrium-time";
 import { FeedRiverPanel } from "./FeedRiverPanel";
+import { MoonDialog } from "./moon/MoonDialog";
 import { ReadingContinuesPanel } from "./ReadingContinues";
 import { Section } from "./Section";
 import { SkyCard } from "./SkyCard";
@@ -101,6 +102,14 @@ export function Atrium() {
   const skyNow = useMemo(() => new Date(skyMinute * 60_000), [skyMinute]);
   const sky = useMemo(() => deriveSky(skyNow, location), [location, skyNow]);
   const located = hasCoords(location);
+  const [moonOpen, setMoonOpen] = useState(false);
+  const latitude = location?.latitude ?? null;
+  const longitude = location?.longitude ?? null;
+  const moonLocation = useMemo(
+    () =>
+      latitude !== null && longitude !== null ? { latitude, longitude } : null,
+    [latitude, longitude],
+  );
 
   return (
     <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-x-6 gap-y-16 md:gap-x-12 md:gap-y-24 2xl:gap-x-24 2xl:gap-y-[112px] px-6 pt-12 pb-24 md:px-10 xl:px-[120px] xl:pt-[88px] xl:pb-[120px]">
@@ -288,6 +297,13 @@ export function Atrium() {
           sky={sky}
           hasLocation={located}
           onEdit={openLocation}
+          onOpenMoon={() => setMoonOpen(true)}
+        />
+        <MoonDialog
+          isOpen={moonOpen}
+          onOpenChange={setMoonOpen}
+          now={skyNow}
+          location={moonLocation}
         />
       </div>
 

@@ -1,27 +1,31 @@
 import { useId } from "react";
 import { Button, Tooltip, TooltipTrigger } from "react-aria-components";
 import { cn } from "#/lib/cn";
+import { FOCUS_RING } from "#/lib/focusRing";
+import { MoonFace } from "./moon/MoonFace";
 import { MOON_GLYPHS, MOON_NAMES, type MoonInfo } from "./sky";
 
-// Engraved lit face: a warm paper duotone with a halftone stipple, gentle
-// upper-right luminosity, and limb darkening — layered as a single background.
-const SURFACE_BG = [
-  "radial-gradient(circle at 66% 36%, rgba(255,252,244,0.45), rgba(255,252,244,0) 58%)",
-  "radial-gradient(rgba(46,43,35,0.42) 0.5px, transparent 0.95px) 0 0 / 3px 3px",
-  "radial-gradient(circle at 52% 48%, #ded7c5 58%, #b0a995 100%)",
-].join(", ");
+const FACE_PX = 64;
 
 /**
- * CSS-drawn moon-phase disc with an "engraved instrument" treatment: a stippled,
- * softly-lit face; a faint halo; and a phase gauge of vertical ticks along the
- * top and bottom edges (one per named phase, current in accent) where each tick
- * names its phase on hover/focus. Phase geometry is driven by {@link MoonInfo}:
- * the disc flips for waning, and the night side is a horizontally-shifted shadow
- * sized by illumination.
+ * The card's moon with an "engraved instrument" treatment: the real moon face
+ * ({@link MoonFace}, lit and oriented as seen now) on a sink tile, and a phase
+ * gauge of vertical ticks along the top and bottom edges (one per named phase,
+ * current in accent) where each tick names its phase on hover/focus. With
+ * `onOpen`, the disc itself is a button that opens the moon details.
  */
-export function MoonDisc({ info }: { info: MoonInfo }) {
+export function MoonDisc({
+  info,
+  date,
+  onOpen,
+}: {
+  info: MoonInfo;
+  date: Date;
+  onOpen?: () => void;
+}) {
   const currentIdx = MOON_NAMES.indexOf(info.phaseName);
   const labelId = useId();
+  const face = <MoonFace date={date} size={FACE_PX} />;
   return (
     <figure
       aria-labelledby={labelId}
@@ -32,29 +36,20 @@ export function MoonDisc({ info }: { info: MoonInfo }) {
       </figcaption>
       <PhaseGauge edge="top" currentIdx={currentIdx} />
       <PhaseGauge edge="bottom" currentIdx={currentIdx} />
-
-      <div
-        className="relative h-16 w-16 overflow-hidden rounded-full"
-        style={{
-          boxShadow: "inset 0 0 0 1px var(--faint)",
-          transform: info.waxing ? "none" : "scaleX(-1)",
-        }}
-      >
-        {/* lit surface */}
-        <span
-          className="absolute inset-0 rounded-full"
-          style={{ background: SURFACE_BG }}
-        />
-        {/* night side: shadow disc shifted by illumination, softly terminated */}
-        <span
-          className="absolute inset-0 rounded-full"
-          style={{
-            background: "#141310",
-            filter: "blur(0.5px)",
-            transform: `translateX(-${info.illumPct}%)`,
-          }}
-        />
-      </div>
+      {onOpen ? (
+        <Button
+          aria-label="Moon details"
+          onPress={onOpen}
+          className={cn(
+            "flex cursor-pointer rounded-full bg-transparent p-0",
+            FOCUS_RING,
+          )}
+        >
+          {face}
+        </Button>
+      ) : (
+        face
+      )}
     </figure>
   );
 }

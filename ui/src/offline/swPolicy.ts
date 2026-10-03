@@ -4,9 +4,15 @@
  */
 
 export const API_CACHE_NAME = "clep-api-v1";
+export const MOON_TEXTURE_CACHE_NAME = "moon-textures";
 const OFFLINE_UNCACHED_CODE = "offline_uncached";
 
-type RequestClass = "network-only" | "api" | "navigation" | "asset";
+type RequestClass =
+  | "network-only"
+  | "api"
+  | "moon-texture"
+  | "navigation"
+  | "asset";
 
 const NETWORK_ONLY_PREFIXES = [
   "/api/vault/events",
@@ -42,6 +48,8 @@ export function classifyRequest(input: {
     return "network-only";
   }
   if (mode === "navigate") return "navigation";
+  // Large NASA textures under public/moon/: not precached, cached on first use.
+  if (path.startsWith("/moon/")) return "moon-texture";
   return "asset";
 }
 

@@ -7,10 +7,11 @@ import {
   precacheAndRoute,
 } from "workbox-precaching";
 import { NavigationRoute, registerRoute } from "workbox-routing";
-import { NetworkFirst, NetworkOnly } from "workbox-strategies";
+import { CacheFirst, NetworkFirst, NetworkOnly } from "workbox-strategies";
 import {
   API_CACHE_NAME,
   classifyRequest,
+  MOON_TEXTURE_CACHE_NAME,
   offlineUncachedResponse,
 } from "./offline/swPolicy";
 
@@ -66,4 +67,13 @@ registerRoute(
       return offlineUncachedResponse(options.request.url);
     }
   },
+);
+
+// Moon textures never change between deploys; fetch once, then serve from cache.
+registerRoute(
+  ({ url, request }) => classOf(url, request) === "moon-texture",
+  new CacheFirst({
+    cacheName: MOON_TEXTURE_CACHE_NAME,
+    plugins: [new CacheableResponsePlugin({ statuses: [200] })],
+  }),
 );

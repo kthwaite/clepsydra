@@ -1,17 +1,8 @@
 import SunCalc from "suncalc";
 import { formatDurationHM, formatTimeHM } from "#/lib/time";
+import { MOON_GLYPHS, MOON_NAMES, moonAt } from "./moon/moon";
 
-export const MOON_NAMES = [
-  "New",
-  "Waxing crescent",
-  "First quarter",
-  "Waxing gibbous",
-  "Full",
-  "Waning gibbous",
-  "Last quarter",
-  "Waning crescent",
-];
-export const MOON_GLYPHS = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
+export { MOON_GLYPHS, MOON_NAMES };
 
 export interface MoonInfo {
   phaseName: string;
@@ -39,8 +30,48 @@ export function describeMoon(illum: {
   };
 }
 
-function moonPhase(now: Date): MoonInfo {
-  return describeMoon(SunCalc.getMoonIllumination(now));
+/** The card's moon: phase display plus the Moon rows, preformatted. */
+export interface SkyMoon extends MoonInfo {
+  /** Moonrise "HH:MM", or "—" without a location or event today. */
+  rise: string;
+  /** Moonset "HH:MM", or "—" without a location or event today. */
+  set: string;
+  /** "tonight", "tomorrow", or "in N days". */
+  nextFull: string;
+  /** Earth–Moon distance, e.g. "384,400 km". */
+  distance: string;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** When the next full moon falls, relative to `now`. */
+export function formatNextFull(now: Date, nextFull: Date): string {
+  const days = (nextFull.getTime() - now.getTime()) / DAY_MS;
+  if (days < 1) return "tonight";
+  if (days < 2) return "tomorrow";
+  return `in ${Math.round(days)} days`;
+}
+
+export function formatDistanceKm(km: number): string {
+  return `${Math.round(km).toLocaleString("en-GB")} km`;
+}
+
+export function formatMoonTime(date: Date | null): string {
+  return date ? formatTimeHM(date) : "—";
+}
+
+function skyMoon(now: Date, lat: number | null, lon: number | null): SkyMoon {
+  const m = moonAt(
+    now,
+    lat !== null && lon !== null ? { latitude: lat, longitude: lon } : null,
+  );
+  return {
+    ...describeMoon({ fraction: m.illumFraction, phase: m.phase }),
+    rise: formatMoonTime(m.rise),
+    set: formatMoonTime(m.set),
+    nextFull: formatNextFull(now, m.nextFull),
+    distance: formatDistanceKm(m.distanceKm),
+  };
 }
 
 export function nextLocalDate(date: Date): Date {
@@ -91,7 +122,9 @@ export function sunArcPosition(now: Date, sunrise: Date, sunset: Date): SunArc {
 
 /** The derived sky telemetry rendered by the Atrium Sky card. */
 export interface SkyData {
-  moon: MoonInfo;
+  /** The instant the telemetry describes. */
+  instant: Date;
+  moon: SkyMoon;
   sunrise: string;
   sunriseIsTomorrow: boolean;
   sunset: string;
@@ -145,7 +178,8 @@ export function deriveSky(
     Math.floor((times.sunset.getTime() - now.getTime()) / 1000),
   );
   return {
-    moon: moonPhase(now),
+    instant: now,
+    moon: skyMoon(now, lat, lon),
     sunrise: formatTimeHM(displayedSunrise.time),
     sunriseIsTomorrow: displayedSunrise.isTomorrow,
     sunset: formatTimeHM(times.sunset),
