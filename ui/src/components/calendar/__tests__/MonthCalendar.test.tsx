@@ -307,6 +307,23 @@ describe("MonthCalendar", () => {
     expect(container.querySelector("[data-day-count]")).toBeNull();
   });
 
+  it.each(["rail", "compact"] as const)(
+    "%s variant reserves the marker row on every day, so numbers align",
+    (variant) => {
+      const { container } = renderCalendar({ variant });
+      for (const key of ["2026-09-14", "2026-09-15"] as const) {
+        const slot = day(container, key).querySelector("[data-marker-slot]");
+        expect(slot).not.toBeNull();
+        expect(slot?.className).toMatch(/\bh-2\.5\b/);
+      }
+      expect(
+        day(container, "2026-09-15").querySelector(
+          "[data-marker-slot] [data-kind-dot]",
+        ),
+      ).not.toBeNull();
+    },
+  );
+
   it("months={3} renders three grids with their own week-number columns", () => {
     const { container } = renderCalendar({ months: 3, variant: "page" });
     expect(screen.getAllByRole("grid")).toHaveLength(3);

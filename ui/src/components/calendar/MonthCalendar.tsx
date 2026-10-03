@@ -425,7 +425,9 @@ function DayFace({
           >
             {label}
           </span>
-          {markers}
+          <span data-marker-slot className="flex h-2.5 items-center">
+            {markers}
+          </span>
         </>
       )}
     </span>
