@@ -10,7 +10,18 @@ import {
   SearchMoonQuarter,
   SearchRiseSet,
 } from "astronomy-engine";
-import { MOON_GLYPHS, MOON_NAMES } from "#/components/codex/sky";
+
+export const MOON_NAMES = [
+  "New",
+  "Waxing crescent",
+  "First quarter",
+  "Waxing gibbous",
+  "Full",
+  "Waning gibbous",
+  "Last quarter",
+  "Waning crescent",
+];
+export const MOON_GLYPHS = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
 
 export interface MoonLocation {
   latitude: number;

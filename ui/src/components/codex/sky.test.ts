@@ -4,6 +4,9 @@ import {
   deriveSky,
   describeMoon,
   fallbackSunTimes,
+  formatDistanceKm,
+  formatMoonTime,
+  formatNextFull,
   hasCoords,
   nextLocalDate,
   selectDisplayedSunrise,
@@ -134,6 +137,54 @@ describe("deriveSky (fallback, no location)", () => {
     expect(sunrise.getHours()).toBe(6);
     expect(sunset.getHours()).toBe(20);
     expect(sunrise.getDate()).toBe(7);
+  });
+});
+
+describe("moon card formatters", () => {
+  const now = new Date("2026-10-03T12:00:00Z");
+  const later = (days: number) =>
+    new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
+  it("says tonight within a day, tomorrow within two, else in N days", () => {
+    expect(formatNextFull(now, later(0.4))).toBe("tonight");
+    expect(formatNextFull(now, later(1.5))).toBe("tomorrow");
+    expect(formatNextFull(now, later(2.2))).toBe("in 2 days");
+    expect(formatNextFull(now, later(22.7))).toBe("in 23 days");
+  });
+
+  it("groups whole kilometres en-GB style", () => {
+    expect(formatDistanceKm(384_400.4)).toBe("384,400 km");
+    expect(formatDistanceKm(363_104.6)).toBe("363,105 km");
+  });
+
+  it("formats rise/set times, with a dash when there is no event", () => {
+    expect(formatMoonTime(new Date(2026, 9, 3, 7, 5))).toBe("07:05");
+    expect(formatMoonTime(null)).toBe("—");
+  });
+});
+
+describe("deriveSky moon rows", () => {
+  const now = new Date("2026-10-03T12:00:00Z");
+
+  it("adds next full and distance from the astronomy core", () => {
+    const sky = deriveSky(now, undefined);
+    expect(sky.instant).toEqual(now);
+    // Full moon 2026-10-26 ≈ 23 days on.
+    expect(sky.moon.nextFull).toBe("in 23 days");
+    expect(sky.moon.distance).toMatch(/^3[5-9]\d,\d{3} km$/);
+    expect(sky.moon.phaseName).toBe("Last quarter");
+  });
+
+  it("dashes moonrise/moonset without a location", () => {
+    const sky = deriveSky(now, undefined);
+    expect(sky.moon.rise).toBe("—");
+    expect(sky.moon.set).toBe("—");
+  });
+
+  it("gives moonrise/moonset times with a location", () => {
+    const sky = deriveSky(now, { latitude: 51.5, longitude: -0.12 });
+    expect(sky.moon.rise).toMatch(/^\d{2}:\d{2}$/);
+    expect(sky.moon.set).toMatch(/^\d{2}:\d{2}$/);
   });
 });
 

@@ -11,17 +11,21 @@ import type { SkyData } from "./sky";
  * The Atrium "Sky" card. The moon phase is accurate regardless of location, but
  * sunrise/sunset/light-left are only meaningful once a vault location is set —
  * so when `hasLocation` is false the body is greyed and a "set location" CTA
- * overlays it. A cog in the card header re-opens the location picker.
+ * overlays it. Moonrise/moonset are location-dependent too. The moon rows sit
+ * in their own list below the sun rows, set apart by space. A cog in the card header re-opens the location picker.
  */
 export function SkyCard({
   sky,
   hasLocation,
   onEdit,
+  onOpenMoon,
   className,
 }: {
   sky: SkyData;
   hasLocation: boolean;
   onEdit: () => void;
+  /** Opens the moon details; the disc is a button only when this is set. */
+  onOpenMoon?: () => void;
   className?: string;
 }) {
   return (
@@ -37,13 +41,13 @@ export function SkyCard({
       <div className="relative">
         <div className={cn(!hasLocation && "pointer-events-none opacity-40")}>
           <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-7">
-            <MoonDisc info={sky.moon} />
+            <MoonDisc info={sky.moon} date={sky.instant} onOpen={onOpenMoon} />
             <div className="flex min-w-0 flex-col gap-2">
               <span className="font-serif text-[26px] leading-tight text-ink">
                 {sky.moon.phaseName}{" "}
                 <span className="italic text-mute">{sky.moon.illumPct}%</span>
               </span>
-              <dl className="m-0 grid grid-cols-[84px_minmax(0,1fr)] gap-y-1.5 text-[14px]">
+              <dl className={KV_LIST}>
                 <KVLine
                   k="Sunrise"
                   v={`${sky.sunrise}${sky.sunriseIsTomorrow ? " (tomorrow)" : ""}`}
@@ -51,6 +55,12 @@ export function SkyCard({
                 <KVLine k="Sunset" v={sky.sunset} />
                 <KVLine k="Light left" v={sky.lightLeft} />
                 {sky.place && <KVLine k="At" v={sky.place} />}
+              </dl>
+              <dl className={cn(KV_LIST, "mt-2")}>
+                <KVLine k="Moonrise" v={sky.moon.rise} />
+                <KVLine k="Moonset" v={sky.moon.set} />
+                <KVLine k="Next full" v={sky.moon.nextFull} />
+                <KVLine k="Distance" v={sky.moon.distance} />
               </dl>
             </div>
           </div>
@@ -77,6 +87,8 @@ export function SkyCard({
     </Section>
   );
 }
+
+const KV_LIST = "m-0 grid grid-cols-[84px_minmax(0,1fr)] gap-y-1.5 text-[14px]";
 
 function KVLine({ k, v }: { k: string; v: string }) {
   return (

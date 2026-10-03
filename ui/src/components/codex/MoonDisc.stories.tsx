@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { MoonDisc } from "./MoonDisc";
+import { moonAt } from "./moon/moon";
 import { describeMoon } from "./sky";
 
 const meta: Meta<typeof MoonDisc> = {
@@ -10,29 +11,42 @@ const meta: Meta<typeof MoonDisc> = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-const PHASES: { fraction: number; phase: number }[] = [
-  { fraction: 0, phase: 0 },
-  { fraction: 0.24, phase: 0.125 },
-  { fraction: 0.5, phase: 0.25 },
-  { fraction: 0.72, phase: 0.375 },
-  { fraction: 1, phase: 0.5 },
-  { fraction: 0.72, phase: 0.625 },
-  { fraction: 0.5, phase: 0.75 },
-  { fraction: 0.24, phase: 0.875 },
-];
+function infoAt(date: Date) {
+  const m = moonAt(date);
+  return describeMoon({ fraction: m.illumFraction, phase: m.phase });
+}
+
+// One lunation, October 2026: new on the 10th, full on the 26th.
+const DATES = [
+  "2026-10-10T12:00:00Z",
+  "2026-10-14T12:00:00Z",
+  "2026-10-18T16:00:00Z",
+  "2026-10-22T12:00:00Z",
+  "2026-10-26T04:00:00Z",
+  "2026-10-29T12:00:00Z",
+  "2026-11-01T20:00:00Z",
+  "2026-11-05T12:00:00Z",
+].map((iso) => new Date(iso));
+
+const GIBBOUS = new Date("2026-10-22T12:00:00Z");
 
 export const Gibbous: Story = {
-  args: { info: describeMoon({ fraction: 0.72, phase: 0.375 }) },
+  args: { info: infoAt(GIBBOUS), date: GIBBOUS },
+};
+
+/** The disc is a button that opens the moon details. */
+export const Pressable: Story = {
+  args: { info: infoAt(GIBBOUS), date: GIBBOUS, onOpen: () => {} },
 };
 
 export const AllPhases: Story = {
   render: () => (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 20 }}>
-      {PHASES.map((p) => {
-        const info = describeMoon(p);
+      {DATES.map((date) => {
+        const info = infoAt(date);
         return (
-          <div key={info.phaseName} style={{ textAlign: "center" }}>
-            <MoonDisc info={info} />
+          <div key={date.toISOString()} style={{ textAlign: "center" }}>
+            <MoonDisc info={info} date={date} />
             <div className="mt-2 text-[12.5px] text-mute">
               {info.phaseName} · {info.illumPct}%
             </div>

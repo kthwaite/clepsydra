@@ -6,12 +6,17 @@ import type { SkyData } from "#/components/codex/sky";
 
 function makeSky(overrides: Partial<SkyData> = {}): SkyData {
   return {
+    instant: new Date("2026-10-22T12:00:00Z"),
     moon: {
       phaseName: "Waxing Gibbous",
       glyph: "🌔",
       illumPct: 72,
       waxing: true,
       terminatorScaleX: 0.44,
+      rise: "14:21",
+      set: "01:07",
+      nextFull: "in 23 days",
+      distance: "384,400 km",
     },
     sunrise: "06:12",
     sunriseIsTomorrow: false,
