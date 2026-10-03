@@ -117,7 +117,11 @@ function TodoGroup({ todos }: { todos: readonly CalendarTodoItem[] }) {
               todo={{ ...item, due: null }}
             />
           ) : (
-            <TaskRow key={`task:${item.id}`} task={{ ...item, due: null }} />
+            <TaskRow
+              key={`task:${item.id}`}
+              task={{ ...item, due: null }}
+              stacked
+            />
           ),
         )}
       </ul>

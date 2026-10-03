@@ -265,6 +265,18 @@ describe("DayNotesList", () => {
       });
     });
 
+    it("stacks a TASK row: title first, status select below", () => {
+      renderList({ todos });
+      const title = screen.getByText("Bottle the stout");
+      const status = screen.getByRole("button", {
+        name: /Status for TSK-brave-finch: Bottle the stout/,
+      });
+      expect(
+        title.compareDocumentPosition(status) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
     it("shows the priority and code badges, and opens each source page", async () => {
       const user = userEvent.setup();
       renderList({ todos });

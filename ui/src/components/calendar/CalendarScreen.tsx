@@ -331,7 +331,7 @@ export function CalendarScreen({
           </p>
         ) : query.data?.truncated ? (
           <p className="m-0 text-[14px] text-warn">
-            Showing the first {CAP} pages. Narrow the filters to see the rest.
+            Showing the first {CAP} pages and {CAP} todos. Narrow the filters to see the rest.
           </p>
         ) : null}
       </div>

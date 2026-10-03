@@ -107,32 +107,44 @@ export function TodoRow({ todo }: { todo: TodoRowItem }) {
 
 /** A TASK page: status select, title, code, due, priority, project, hold,
  *  source link. */
-export function TaskRow({ task }: { task: TaskRowItem }) {
+/** `stacked` puts the title first and the status select under it, for
+ *  narrow columns such as the Calendar's day panel. */
+export function TaskRow({
+  task,
+  stacked = false,
+}: {
+  task: TaskRowItem;
+  stacked?: boolean;
+}) {
   const patch = usePatchTask();
   const openTab = useOpenTab();
   const taskPriorityLabel = PRI_LABEL[task.priority];
 
+  const status = (
+    <Select
+      aria-label={`Status for ${task.code}: ${task.title}`}
+      selectedKey={task.status}
+      onSelectionChange={(status) => {
+        if (status === null) return;
+        patch.mutate({
+          id: task.id,
+          patch: { status: String(status) },
+        });
+      }}
+      isDisabled={patch.isPending}
+      className="w-36 shrink-0"
+    >
+      {COL_ORDER.map((status) => (
+        <SelectItem key={status} id={status}>
+          {taskStatusLabel(status)}
+        </SelectItem>
+      ))}
+    </Select>
+  );
+
   return (
-    <li className={ROW}>
-      <Select
-        aria-label={`Status for ${task.code}: ${task.title}`}
-        selectedKey={task.status}
-        onSelectionChange={(status) => {
-          if (status === null) return;
-          patch.mutate({
-            id: task.id,
-            patch: { status: String(status) },
-          });
-        }}
-        isDisabled={patch.isPending}
-        className="w-36 shrink-0"
-      >
-        {COL_ORDER.map((status) => (
-          <SelectItem key={status} id={status}>
-            {taskStatusLabel(status)}
-          </SelectItem>
-        ))}
-      </Select>
+    <li className={stacked ? "flex min-w-0 flex-col items-start gap-2" : ROW}>
+      {!stacked && status}
 
       <div className="min-w-0 flex-1">
         <span className={titleClass(task.status === "SEALED")}>
@@ -157,6 +169,7 @@ export function TaskRow({ task }: { task: TaskRowItem }) {
           </button>
         </div>
       </div>
+      {stacked && status}
     </li>
   );
 }
