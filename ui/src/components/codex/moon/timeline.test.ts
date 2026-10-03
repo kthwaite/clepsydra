@@ -96,6 +96,13 @@ describe("keyStep", () => {
     expect(keyStep("a", false, VALUE, NOW)).toBeNull();
   });
 
+  it("reaches days the calendar can page to, years out", () => {
+    const yearOut = new Date(v + 2 * 365 * DAY_MS);
+    expect(keyStep("ArrowRight", false, yearOut, NOW)?.getTime()).toBe(
+      yearOut.getTime() + HOUR_MS,
+    );
+  });
+
   it("clamps to the scrub range", () => {
     const edge = new Date(v + SCRUB_RANGE_DAYS * DAY_MS);
     expect(keyStep("ArrowRight", false, edge, NOW)?.getTime()).toBe(

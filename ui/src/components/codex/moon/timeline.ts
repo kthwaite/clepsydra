@@ -4,8 +4,11 @@ export const HOUR_MS = 3_600_000;
 export const DAY_MS = 24 * HOUR_MS;
 /** The strip shows this many hours either side of the scrubbed instant. */
 export const TIMELINE_SPAN_HOURS = 72;
-/** The slider's reachable range either side of now. */
-export const SCRUB_RANGE_DAYS = 45;
+/**
+ * The slider's reachable range either side of now. Wide, so any day the
+ * calendar pages to stays inside the slider's bounds.
+ */
+export const SCRUB_RANGE_DAYS = 100 * 366;
 
 export interface TimelineTick {
   time: Date;
