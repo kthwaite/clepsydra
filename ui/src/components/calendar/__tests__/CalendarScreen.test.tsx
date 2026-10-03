@@ -360,12 +360,16 @@ describe("CalendarScreen", () => {
   it("shows the truncation notice when truncated", () => {
     mocks.entries.mockReturnValue(queryState({ truncated: true }));
     renderScreen();
-    expect(screen.getByText(/Showing the first 5000 pages and 5000 todos/)).toBeVisible();
+    expect(
+      screen.getByText(/Showing the first 5000 pages and 5000 todos/),
+    ).toBeVisible();
   });
 
   it("hides the truncation notice otherwise", () => {
     renderScreen();
-    expect(screen.queryByText(/Showing the first 5000 pages and 5000 todos/)).toBeNull();
+    expect(
+      screen.queryByText(/Showing the first 5000 pages and 5000 todos/),
+    ).toBeNull();
   });
 
   it("renders loading and error states", () => {
