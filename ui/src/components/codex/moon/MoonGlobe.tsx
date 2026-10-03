@@ -300,21 +300,28 @@ export default function MoonGlobe({
   const [supported, setSupported] = useState(hasWebGL);
   const [ready, setReady] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Stage | null>(null);
   const pointer = useRef<{ id: number; x: number; y: number } | null>(null);
   const time = date.getTime();
   const timeRef = useRef(time);
   timeRef.current = time;
 
+  // Each effect run owns a fresh canvas. dispose() forces context loss, so a
+  // canvas can never host a second renderer — StrictMode's mount → cleanup →
+  // mount would otherwise hand the new renderer a dead context.
   useEffect(() => {
-    const canvas = canvasRef.current;
+    const host = hostRef.current;
     const wrap = wrapRef.current;
-    if (!supported || !canvas || !wrap) return;
+    if (!supported || !host || !wrap) return;
+    const canvas = document.createElement("canvas");
+    canvas.className = "absolute inset-0 block h-full w-full";
+    host.append(canvas);
     let stage: Stage;
     try {
       stage = createStage(canvas, () => setReady(true));
     } catch {
+      canvas.remove();
       setSupported(false);
       return;
     }
@@ -334,6 +341,7 @@ export default function MoonGlobe({
     return () => {
       ro.disconnect();
       stage.dispose();
+      canvas.remove();
       stageRef.current = null;
     };
   }, [supported]);
@@ -344,7 +352,7 @@ export default function MoonGlobe({
 
   if (!supported) return <>{fallback}</>;
 
-  const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     const stage = stageRef.current;
     if (!stage || pointer.current) return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -352,7 +360,7 @@ export default function MoonGlobe({
     stage.drag.held = true;
     stage.drag.vYaw = stage.drag.vPitch = 0;
   };
-  const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const stage = stageRef.current;
     const p = pointer.current;
     if (!stage || !p || p.id !== e.pointerId) return;
@@ -367,7 +375,7 @@ export default function MoonGlobe({
     p.y = e.clientY;
     stage.invalidate();
   };
-  const onPointerEnd = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+  const onPointerEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (pointer.current?.id !== e.pointerId) return;
     pointer.current = null;
     stageRef.current?.release();
@@ -376,25 +384,25 @@ export default function MoonGlobe({
   return (
     <div
       ref={wrapRef}
+      role="img"
+      aria-label="The Moon as lit by the Sun at this moment; drag to turn it"
       className={clsx(
-        "relative",
+        "relative cursor-grab touch-none active:cursor-grabbing",
         size === undefined && "aspect-square w-full",
         className,
       )}
       style={size === undefined ? undefined : { width: size, height: size }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
     >
-      <canvas
-        ref={canvasRef}
-        role="img"
-        aria-label="The Moon as lit by the Sun at this moment; drag to turn it"
+      <div
+        ref={hostRef}
         className={clsx(
-          "absolute inset-0 block h-full w-full cursor-grab touch-none transition-opacity duration-500 active:cursor-grabbing",
+          "absolute inset-0 transition-opacity duration-500",
           ready ? "opacity-100" : "opacity-0",
         )}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerEnd}
-        onPointerCancel={onPointerEnd}
       />
     </div>
   );

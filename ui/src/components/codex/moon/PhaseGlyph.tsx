@@ -9,6 +9,11 @@ export interface PhaseGlyphProps {
   className?: string;
 }
 
+// Fixed moon tones, not theme tokens: the glyph depicts the Moon, so the lit
+// side stays lighter than the night side on bone and charcoal alike.
+const MOON_NIGHT = "#3b3934";
+const MOON_LIT = "#cdc8bb";
+
 /** A small flat moon: dark disc with the lit portion drawn over it. */
 export function PhaseGlyph({
   illumFraction,
@@ -27,8 +32,8 @@ export function PhaseGlyph({
       viewBox="0 0 20 20"
       className={cn("shrink-0", className)}
     >
-      <circle cx={r} cy={r} r={r} className="fill-sink" />
-      {lit && <path d={lit} className="fill-ink-2" />}
+      <circle cx={r} cy={r} r={r} fill={MOON_NIGHT} />
+      {lit && <path d={lit} fill={MOON_LIT} />}
     </svg>
   );
 }
