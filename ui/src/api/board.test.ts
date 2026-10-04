@@ -42,6 +42,9 @@ function freshQueryClient(): QueryClient {
 
 function makeTask(overrides: Partial<BoardTask> = {}): BoardTask {
   return {
+    blocked_by: [],
+    blocks: [],
+    blocked: false,
     id: "task-1",
     code: "T-1",
     title: "Test task",

@@ -18,6 +18,7 @@ use crate::vault::kind::Kind;
 use crate::vault::path::VaultPath;
 use crate::vault::query::body_excerpt;
 
+use super::blockers::{blocks_index, is_blocked, load_task_nodes, task_nodes_from};
 use super::{
     BoardColumn, BoardCycle, BoardOperation, BoardResponse, BoardTask, COLUMNS, extra_str,
     path_stem,
@@ -351,6 +352,14 @@ pub(super) async fn build_board_task_dto(
             let checks = count_checks(conn, &id_str)?;
             let updated_at_str = updated_at.unwrap_or_default();
 
+            let nodes = load_task_nodes(conn)?;
+            let blocked = is_blocked(&nodes, &code_str, hold.as_deref());
+            let blocked_by = nodes
+                .get(&code_str)
+                .map(|node| node.blocked_by.clone())
+                .unwrap_or_default();
+            let blocks = blocks_index(&nodes).remove(&code_str).unwrap_or_default();
+
             Ok::<_, rusqlite::Error>(BoardTask {
                 id,
                 path: vp_str,
@@ -370,6 +379,9 @@ pub(super) async fn build_board_task_dto(
                 tags,
                 checks,
                 link,
+                blocked_by,
+                blocks,
+                blocked,
                 updated_at: updated_at_str,
             })
         })
@@ -468,17 +480,28 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
 
     let checks_by_page = count_checks_by_page(conn)?;
 
-    let mut tasks: Vec<(BoardTask, Option<String>)> = Vec::new();
-    for (id_str, path, title, meta_json, project, updated_at, tags_raw, body, created_at) in
+    // Parse every meta once: the Blocker graph needs all of them before any
+    // one Task's `blocks` and `blocked` can be derived.
+    let metas: Vec<serde_json::Value> = task_rows
+        .iter()
+        .map(|row| serde_json::from_str(&row.3).unwrap_or(serde_json::Value::Null))
+        .collect();
+    let nodes = task_nodes_from(
         task_rows
+            .iter()
+            .zip(&metas)
+            .map(|(row, meta)| (path_stem(&row.1).to_string(), meta)),
+    );
+    let mut blocks_by_code = blocks_index(&nodes);
+
+    let mut tasks: Vec<(BoardTask, Option<String>)> = Vec::new();
+    for ((id_str, path, title, _, project, updated_at, tags_raw, body, created_at), meta) in
+        task_rows.into_iter().zip(metas)
     {
         let id = match Uuid::parse_str(&id_str) {
             Ok(u) => u,
             Err(_) => continue,
         };
-
-        let meta: serde_json::Value =
-            serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
 
         let stem = path_stem(&path);
         let code = stem.to_string();
@@ -508,6 +531,13 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
         let checks = checks_by_page.get(&id_str).copied().unwrap_or([0, 0]);
         let updated_at_str = updated_at.unwrap_or_default();
 
+        let blocked = is_blocked(&nodes, &code, hold.as_deref());
+        let blocked_by = nodes
+            .get(&code)
+            .map(|node| node.blocked_by.clone())
+            .unwrap_or_default();
+        let blocks = blocks_by_code.remove(&code).unwrap_or_default();
+
         tasks.push((
             BoardTask {
                 id,
@@ -528,6 +558,9 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
                 tags,
                 checks,
                 link,
+                blocked_by,
+                blocks,
+                blocked,
                 updated_at: updated_at_str,
             },
             created_at,

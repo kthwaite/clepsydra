@@ -40,6 +40,9 @@ const FILTER_FIXTURE: BoardResponse = {
   ...BOARD_FIXTURE,
   tasks: [
     {
+      blocked_by: [],
+      blocks: [],
+      blocked: false,
       id: "f1",
       code: "TSK-F1",
       title: "Alpha task",
@@ -54,6 +57,9 @@ const FILTER_FIXTURE: BoardResponse = {
       updated_at: "2026-06-01T00:00:00Z",
     },
     {
+      blocked_by: [],
+      blocks: [],
+      blocked: false,
       id: "f2",
       code: "TSK-F2",
       title: "Beta task",
@@ -68,6 +74,9 @@ const FILTER_FIXTURE: BoardResponse = {
       updated_at: "2026-06-01T00:00:00Z",
     },
     {
+      blocked_by: [],
+      blocks: [],
+      blocked: false,
       id: "f3",
       code: "TSK-F3",
       title: "Gamma task",

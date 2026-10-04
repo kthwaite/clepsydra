@@ -2338,6 +2338,22 @@ export interface components {
     };
     BoardTask: {
       assignee?: string | null;
+      /**
+       * @description Derived: `hold` is set, or any Blocker is an existing Task that is not
+       *     Done (`SEALED`).
+       */
+      blocked: boolean;
+      /**
+       * @description Codes of the Tasks this Task is blocked by (its Blockers), from the
+       *     `blocked_by` frontmatter list, in stored order. A Blocker that no
+       *     longer exists is still listed.
+       */
+      blocked_by: string[];
+      /**
+       * @description Codes of the Tasks blocked by this Task: the inverse of `blocked_by`,
+       *     derived, never stored.
+       */
+      blocks: string[];
       body_excerpt: string | null;
       checks: number[];
       code: string;
@@ -2691,6 +2707,11 @@ export interface components {
      */
     CreateTaskRequest: {
       assignee?: string | null;
+      /**
+       * @description Blockers: Task codes, unique code prefixes, or `[[CODE]]` wikilinks.
+       *     Stored as `[[CODE]]` wikilinks, de-duplicated, order kept.
+       */
+      blocked_by?: string[] | null;
       /**
        * @description Prose brief. Becomes the opening paragraphs of the page body, above any
        *     checklist. Whitespace-only input is treated as absent.
@@ -3268,6 +3289,13 @@ export interface components {
     PatchTaskRequest: {
       /** @description Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set. */
       assignee?: string | null;
+      /**
+       * @description Replaces the whole Blocker list: absent = keep, `null` or `[]` = clear,
+       *     a list = set. Entries are Task codes, unique code prefixes, or
+       *     `[[CODE]]` wikilinks; unknown or ambiguous codes, the Task itself, and
+       *     a list that would close a cycle are refused.
+       */
+      blocked_by?: string[] | null;
       /** @description Tri-state: absent = keep, null or an empty or whitespace-only string = clear (→ backlog), value = set. */
       cycle?: string | null;
       /** @description Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set. */

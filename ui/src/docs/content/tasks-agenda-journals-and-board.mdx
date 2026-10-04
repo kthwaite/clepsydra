@@ -312,8 +312,20 @@ Cycle Markdown, or calling the API, use these persisted values:
   (`cycle`, `assignee`, `estimate`, `task_type`, `due`, `start`, `hold`,
   `link`) clears it, the same as `null`; on create (which has no `hold`) it
   means the field is not set.
-- Blocked is represented by a non-empty `hold` value; clearing `hold` removes
-  the Blocked condition.
+- Task `blocked_by` (optional): the Task's Blockers, as a list of wikilinks
+  to their codes, for example `blocked_by = ["[[TSK-brave-finch-7q3zd]]"]`.
+  Only the waiting Task stores the list. Each entry is a backlink on the
+  Blocker's page, and moving or recoding a Blocker rewrites it. Over the API,
+  `blocked_by` replaces the whole list: absent keeps it, `null` or `[]` clears
+  it, and each entry may be a code, a unique prefix, or `[[CODE]]`. The API
+  rejects an unknown or ambiguous code, the Task itself, and a list that would
+  close a cycle.
+- A Task is Blocked when any Blocker is not Done (`SEALED`) or `hold` is
+  non-empty. `hold` stays the free-text blocker reason. A Blocker that reaches
+  Done stops blocking, and a Blocker page that no longer exists does not
+  block. The board API returns `blocked_by`, the derived `blocks` (the Tasks
+  waiting on this one), and the derived `blocked` flag; none of the derived
+  values are stored.
 - When closing a Cycle through the API, `carry_to: "BACKLOG"` moves unfinished
   Tasks to Backlog, a Cycle code reassigns them, and omitting `carry_to` leaves
   them in place. Tasks whose status is `SEALED` are never carried.

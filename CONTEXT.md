@@ -29,8 +29,12 @@ The collection of tasks that are not assigned to a cycle.
 _Avoid_: No cycle, unscheduled
 
 **Blocked**:
-A task that cannot proceed until its blocker is resolved.
+A task that cannot proceed: at least one of its Blockers is not Done, or it carries a manual blocker reason (`hold`). A Blocker that reaches Done stops blocking on its own.
 _Avoid_: Hold, on hold
+
+**Blocker**:
+A task another task waits on; recorded on the waiting task as `blocked_by`. The inverse ("blocks") is derived, never stored.
+_Avoid_: dependency, prerequisite, parent
 
 **Inbox**:
 The workflow stage for tasks that have not yet been assessed.
@@ -73,7 +77,7 @@ The stable identifier of a Task or Cycle: two short words and a five-character t
 _Avoid_: TSK number, sequential code, ticket number
 
 **Task Fields**:
-The structured attributes a Task carries beyond its title and body: status, priority, task type, cycle, assignee, estimate, due, start, hold, link, and project. Task type is optional and closed: `FEATURE`, `FIX`, `TASK`, `STORY`, or `SPIKE` (frontmatter `task_type`).
+The structured attributes a Task carries beyond its title and body: status, priority, task type, cycle, assignee, estimate, due, start, hold, blocked_by, link, and project. Task type is optional and closed: `FEATURE`, `FIX`, `TASK`, `STORY`, or `SPIKE` (frontmatter `task_type`). `blocked_by` lists the task's Blockers as wikilinks to their codes.
 _Avoid_: task properties, task metadata
 
 **Task Patch**:

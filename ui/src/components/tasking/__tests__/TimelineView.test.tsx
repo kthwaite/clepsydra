@@ -79,6 +79,9 @@ const TL_SCOPES = deriveProjectScopes(TL_OPS, []);
 
 /** Scheduled task for alpha operation */
 const TL_TASK_ALPHA: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "t-alpha-1",
   code: "TSK-0010",
   title: "Alpha Scheduled",
@@ -97,6 +100,9 @@ const TL_TASK_ALPHA: BoardTask = {
 
 /** Scheduled task for beta operation */
 const TL_TASK_BETA: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "t-beta-1",
   code: "TSK-0011",
   title: "Beta Scheduled",
@@ -115,6 +121,9 @@ const TL_TASK_BETA: BoardTask = {
 
 /** Unscheduled task (no due) */
 const TL_TASK_UNSCHEDULED: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "t-unsched",
   code: "TSK-0012",
   title: "Unscheduled Task",
@@ -132,6 +141,9 @@ const TL_TASK_UNSCHEDULED: BoardTask = {
 
 /** UNFILED scheduled task (no project) */
 const TL_TASK_UNFILED: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "t-unfiled",
   code: "TSK-0013",
   title: "Unfiled Scheduled",
@@ -1001,6 +1013,9 @@ describe("TaskingScreen integration — timeline mode", () => {
     // TL_BOARD has t1 (alpha, due) and t3 (beta, due); t4 is null-project/undated.
     // Add a dated unfiled task to TL_BOARD so the timeline is non-empty.
     const unfiledDated: BoardTask = {
+      blocked_by: [],
+      blocks: [],
+      blocked: false,
       id: "t-unfiled-dated",
       code: "TSK-9999",
       title: "Unfiled Dated",

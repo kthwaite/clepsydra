@@ -54,6 +54,9 @@ const NEUTRAL_COL_LABEL: ColLabelFn = (id) => COL_LABEL[id] ?? id;
 
 // A task with all optional fields populated for richer render tests
 const FULL_TASK: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "t-full",
   code: "TSK-0042",
   title: "FULL TASK",

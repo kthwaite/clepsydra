@@ -59,6 +59,9 @@ const { tasks } = BOARD_FIXTURE;
 
 /** P0 task with a due date */
 const T_P0_DUE: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "bk-p0-due",
   code: "TSK-1000",
   title: "Critical with due",
@@ -76,6 +79,9 @@ const T_P0_DUE: BoardTask = {
 
 /** P0 task without a due date (should sort after T_P0_DUE) */
 const T_P0_NODUE: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "bk-p0-nodue",
   code: "TSK-1001",
   title: "Critical no due",
@@ -93,6 +99,9 @@ const T_P0_NODUE: BoardTask = {
 
 /** P1 task with a hold */
 const T_P1_HOLD: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: true,
   id: "bk-p1-hold",
   code: "TSK-1002",
   title: "High priority on hold",
@@ -111,6 +120,9 @@ const T_P1_HOLD: BoardTask = {
 
 /** P2 task with checklist checks=[2,5] */
 const T_P2_CHECKS: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "bk-p2-checks",
   code: "TSK-1003",
   title: "Normal with checklist",
@@ -128,6 +140,9 @@ const T_P2_CHECKS: BoardTask = {
 
 /** P2 task with fully-done checklist checks=[3,3] */
 const T_P2_DONE: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "bk-p2-done",
   code: "TSK-1004",
   title: "Normal fully done",
@@ -145,6 +160,9 @@ const T_P2_DONE: BoardTask = {
 
 // P2 task at INTAKE (earlier COL_ORDER index than FIELD) for within-group sort test
 const T_P2_INTAKE: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "bk-p2-intake",
   code: "TSK-1005",
   title: "Normal in intake",

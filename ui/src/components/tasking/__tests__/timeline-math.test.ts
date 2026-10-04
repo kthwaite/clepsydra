@@ -37,6 +37,9 @@ function cycle(
 
 function task(due: string | null, start?: string | null): BoardTask {
   return {
+    blocked_by: [],
+    blocks: [],
+    blocked: false,
     id: "t-test",
     code: "TSK-0001",
     title: "Test Task",

@@ -44,6 +44,9 @@ const C01_TASKS = tasks.filter((t) => t.cycle === "C-01");
 
 /** A cycle with hold tasks and checks for stats testing */
 const T_HOLD: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: true,
   id: "th1",
   code: "TSK-9001",
   title: "Held task",
@@ -60,6 +63,9 @@ const T_HOLD: BoardTask = {
 };
 
 const T_SEALED: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "ts1",
   code: "TSK-9002",
   title: "Sealed task",
@@ -75,6 +81,9 @@ const T_SEALED: BoardTask = {
 };
 
 const T_FIELD: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "tf1",
   code: "TSK-9003",
   title: "Field task",

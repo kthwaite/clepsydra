@@ -19,6 +19,9 @@ import { InlineEditPopover } from "../InlineEditPopover";
 import { FIXTURE_COL_LABEL } from "./fixtures";
 
 const TASK: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "t-inline",
   code: "TSK-0100",
   title: "Inline Task",

@@ -3,6 +3,9 @@ import type { BoardTask } from "#/api/board";
 import { checklistProgress, cycleStats, sealStats } from "../board-stats";
 
 const task = (patch: Partial<BoardTask> = {}): BoardTask => ({
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "t-1",
   code: "T-001",
   title: "Test",

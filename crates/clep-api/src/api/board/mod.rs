@@ -8,6 +8,7 @@
 //! This file owns the router, the (de)serialization DTOs, and the helpers
 //! shared across submodules (validation, code allocation, cycle-code scans).
 
+pub(crate) mod blockers;
 pub(crate) mod cycles;
 pub(crate) mod read;
 pub(crate) mod task_patch;
@@ -133,6 +134,16 @@ pub struct BoardTask {
     pub tags: Vec<String>,
     pub checks: [u32; 2],
     pub link: Option<String>,
+    /// Codes of the Tasks this Task is blocked by (its Blockers), from the
+    /// `blocked_by` frontmatter list, in stored order. A Blocker that no
+    /// longer exists is still listed.
+    pub blocked_by: Vec<String>,
+    /// Codes of the Tasks blocked by this Task: the inverse of `blocked_by`,
+    /// derived, never stored.
+    pub blocks: Vec<String>,
+    /// Derived: `hold` is set, or any Blocker is an existing Task that is not
+    /// Done (`SEALED`).
+    pub blocked: bool,
     pub updated_at: String,
 }
 
@@ -241,6 +252,9 @@ pub struct CreateTaskRequest {
     pub body: Option<String>,
     /// Checklist items. Each becomes a `- [ ] item` line in the page body.
     pub checklist: Option<Vec<String>>,
+    /// Blockers: Task codes, unique code prefixes, or `[[CODE]]` wikilinks.
+    /// Stored as `[[CODE]]` wikilinks, de-duplicated, order kept.
+    pub blocked_by: Option<Vec<String>>,
 }
 
 /// PATCH request for updating a task. All fields are optional.
@@ -288,6 +302,12 @@ pub struct PatchTaskRequest {
     pub link: Option<Option<String>>,
     /// Leave absent to keep current tags.
     pub tags: Option<Vec<String>>,
+    /// Replaces the whole Blocker list: absent = keep, `null` or `[]` = clear,
+    /// a list = set. Entries are Task codes, unique code prefixes, or
+    /// `[[CODE]]` wikilinks; unknown or ambiguous codes, the Task itself, and
+    /// a list that would close a cycle are refused.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub blocked_by: Option<Option<Vec<String>>>,
 }
 
 // ---------------------------------------------------------------------------

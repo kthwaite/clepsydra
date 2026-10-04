@@ -16,12 +16,13 @@ use rusqlite::params;
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
-use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
+use crate::vault::board_vocab::{BLOCKED_BY_KEY, DEFAULT_PRIORITY, DEFAULT_STATUS};
 use crate::vault::code::{self, CodeLookup};
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{ProjectAssignment, UpdatePageCommand};
 use crate::vault::page::{Page, PageMeta};
 
+use super::blockers::{TaskNodes, blocker_target, find_cycle, load_task_nodes};
 use super::{COLUMNS, CreateTaskRequest, PRIORITIES, PatchTaskRequest, TASK_TYPES, code_stems};
 
 /// The Cycle sentinel that means "no Cycle" (Backlog) on any write.
@@ -60,6 +61,7 @@ impl FieldChange {
 
 /// A Task Patch: every clearable Task Field is kept, cleared, or set. Title,
 /// tags, status and priority cannot be cleared, so they are plain options.
+/// `blocked_by` replaces the whole list like `tags`; an empty list clears it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct TaskPatch {
     pub title: Option<String>,
@@ -75,6 +77,8 @@ pub(crate) struct TaskPatch {
     pub start: FieldChange,
     pub hold: FieldChange,
     pub link: FieldChange,
+    /// Blocker references (codes, unique prefixes, or `[[CODE]]`).
+    pub blocked_by: Option<Vec<String>>,
 }
 
 impl From<PatchTaskRequest> for TaskPatch {
@@ -98,6 +102,8 @@ impl From<PatchTaskRequest> for TaskPatch {
             start: FieldChange::from_tri_state(body.start),
             hold: FieldChange::from_tri_state(body.hold),
             link: FieldChange::from_tri_state(body.link),
+            // `null` clears, the same as `[]`.
+            blocked_by: body.blocked_by.map(Option::unwrap_or_default),
         }
     }
 }
@@ -123,6 +129,7 @@ impl From<&CreateTaskRequest> for TaskPatch {
             start: FieldChange::from_create(body.start.clone()),
             hold: FieldChange::Keep,
             link: FieldChange::from_create(body.link.clone()),
+            blocked_by: body.blocked_by.clone(),
         }
     }
 }
@@ -134,6 +141,9 @@ pub(crate) struct BoardLookups {
     pub cycle_stems: BTreeSet<String>,
     /// Every Project slug some PROJECT page declares.
     pub project_slugs: BTreeSet<String>,
+    /// Every Task by code, with its status and current `blocked_by`. The
+    /// keys are the Task Codes Blocker references resolve against.
+    pub tasks: TaskNodes,
 }
 
 impl BoardLookups {
@@ -152,9 +162,11 @@ impl BoardLookups {
                         row.get::<_, String>(0)
                     })?
                     .collect::<Result<BTreeSet<String>, _>>()?;
+                let tasks = load_task_nodes(conn)?;
                 Ok::<_, rusqlite::Error>(BoardLookups {
                     cycle_stems,
                     project_slugs,
+                    tasks,
                 })
             })
             .await
@@ -181,6 +193,14 @@ pub(crate) enum TaskPatchError {
         reason: String,
     },
     UnknownProject(String),
+    UnknownBlocker(String),
+    AmbiguousBlocker {
+        input: String,
+        candidates: Vec<String>,
+    },
+    SelfBlocker(String),
+    /// The path the cycle would take; each Task is blocked by the next.
+    BlockerCycle(Vec<String>),
 }
 
 impl From<TaskPatchError> for ApiError {
@@ -211,6 +231,22 @@ impl From<TaskPatchError> for ApiError {
             )),
             TaskPatchError::InvalidProjectSlug { reason, .. } => ApiError::bad_request(reason),
             TaskPatchError::UnknownProject(slug) => crate::api::projects::unknown_project(&slug),
+            TaskPatchError::UnknownBlocker(input) => ApiError::bad_request(format!(
+                "unknown blocked_by task '{input}'; must match an existing task code or a unique prefix of one"
+            )),
+            TaskPatchError::AmbiguousBlocker { input, candidates } => {
+                ApiError::bad_request(format!(
+                    "ambiguous blocked_by prefix '{input}': candidates {}",
+                    candidates.join(", ")
+                ))
+            }
+            TaskPatchError::SelfBlocker(code) => {
+                ApiError::bad_request(format!("a task cannot be blocked by itself: '{code}'"))
+            }
+            TaskPatchError::BlockerCycle(path) => ApiError::bad_request(format!(
+                "blocked_by would create a cycle: {} (each task is blocked by the next)",
+                path.join(" → ")
+            )),
         }
     }
 }
@@ -227,10 +263,14 @@ pub(crate) struct Applied {
 /// priority and a set task type must be board vocabulary (the task type is
 /// matched case-insensitively and stored uppercase); a set Cycle is `BACKLOG` (clears) or
 /// resolves to exactly one Code; a set Project is a valid slug some PROJECT
-/// page declares. `meta` is untouched when any rule fails. `updated_at`
-/// becomes `now`.
+/// page declares; each `blocked_by` entry resolves to exactly one Task Code,
+/// is not the Task itself, and the list closes no cycle. `code` is the
+/// Task's own Code, or `None` for a Task not yet created (which nothing can
+/// be blocked by yet, so it can close no cycle). `meta` is untouched when
+/// any rule fails. `updated_at` becomes `now`.
 pub(crate) fn apply_task_patch(
     meta: &mut PageMeta,
+    code: Option<&str>,
     patch: &TaskPatch,
     lookups: &BoardLookups,
     now: DateTime<Utc>,
@@ -296,6 +336,10 @@ pub(crate) fn apply_task_patch(
             }
         }
     };
+    let blocked_by = match &patch.blocked_by {
+        Some(inputs) => Some(resolve_blockers(inputs, code, &lookups.tasks)?),
+        None => None,
+    };
 
     // Every rule passed: now change the meta.
     if let Some(title) = &patch.title {
@@ -318,6 +362,20 @@ pub(crate) fn apply_task_patch(
     apply_field(meta, "start", &patch.start);
     apply_field(meta, "hold", &patch.hold);
     apply_field(meta, "link", &patch.link);
+    match blocked_by {
+        None => {}
+        Some(codes) if codes.is_empty() => {
+            meta.extra.remove(BLOCKED_BY_KEY);
+        }
+        Some(codes) => {
+            let links = codes
+                .into_iter()
+                .map(|code| toml::Value::String(format!("[[{code}]]")))
+                .collect();
+            meta.extra
+                .insert(BLOCKED_BY_KEY.to_string(), toml::Value::Array(links));
+        }
+    }
     match &applied.project {
         ProjectAssignment::Unchanged => {}
         ProjectAssignment::Clear => meta.project = None,
@@ -341,7 +399,7 @@ pub(crate) fn plan_task_patch(
         body,
         raw_content,
     } = page;
-    let applied = apply_task_patch(&mut meta, patch, lookups, now)?;
+    let applied = apply_task_patch(&mut meta, Some(path.stem()), patch, lookups, now)?;
     Ok(UpdatePageCommand {
         path,
         expected_content: raw_content,
@@ -365,8 +423,47 @@ pub(crate) fn new_task_meta(
     meta.created_at = Some(now);
     set_field(&mut meta, "status", DEFAULT_STATUS);
     set_field(&mut meta, "priority", DEFAULT_PRIORITY);
-    apply_task_patch(&mut meta, patch, lookups, now)?;
+    apply_task_patch(&mut meta, None, patch, lookups, now)?;
     Ok(meta)
+}
+
+/// Resolve Blocker references to Task Codes: each entry is a code, a unique
+/// code prefix, or `[[CODE]]`; blank entries are skipped; duplicates collapse
+/// with the first occurrence's order kept. Refuses an unknown or ambiguous
+/// reference, the Task itself, and a list that would close a cycle.
+fn resolve_blockers(
+    inputs: &[String],
+    code: Option<&str>,
+    tasks: &TaskNodes,
+) -> Result<Vec<String>, TaskPatchError> {
+    let mut resolved: Vec<String> = Vec::new();
+    for input in inputs {
+        let Some(target) = blocker_target(input) else {
+            continue;
+        };
+        let canonical = match code::resolve_prefix(tasks.keys().map(String::as_str), target) {
+            CodeLookup::Found(canonical) => canonical,
+            CodeLookup::NotFound => return Err(TaskPatchError::UnknownBlocker(input.clone())),
+            CodeLookup::Ambiguous(candidates) => {
+                return Err(TaskPatchError::AmbiguousBlocker {
+                    input: input.clone(),
+                    candidates,
+                });
+            }
+        };
+        if code == Some(canonical.as_str()) {
+            return Err(TaskPatchError::SelfBlocker(canonical));
+        }
+        if !resolved.contains(&canonical) {
+            resolved.push(canonical);
+        }
+    }
+    if let Some(code) = code
+        && let Some(path) = find_cycle(tasks, code, &resolved)
+    {
+        return Err(TaskPatchError::BlockerCycle(path));
+    }
+    Ok(resolved)
 }
 
 fn set_field(meta: &mut PageMeta, key: &str, value: &str) {
@@ -387,6 +484,7 @@ fn apply_field(meta: &mut PageMeta, key: &str, change: &FieldChange) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::board::blockers::TaskNode;
     use chrono::TimeZone;
     use serde_json::json;
 
@@ -401,6 +499,23 @@ mod tests {
                 .map(String::from)
                 .collect(),
             project_slugs: ["falls", "ops"].into_iter().map(String::from).collect(),
+            tasks: [
+                ("TSK-brave-finch-7q3zd", &[][..]),
+                ("TSK-brave-otter-2kd9a", &[]),
+                ("TSK-calm-heron-4mx8p", &["TSK-brave-finch-7q3zd"]),
+                ("TSK-quiet-wren-9ab1c", &[]),
+            ]
+            .into_iter()
+            .map(|(code, blocked_by)| {
+                (
+                    code.to_string(),
+                    TaskNode {
+                        status: "FIELD".into(),
+                        blocked_by: blocked_by.iter().map(|s| s.to_string()).collect(),
+                    },
+                )
+            })
+            .collect(),
         }
     }
 
@@ -522,7 +637,7 @@ mod tests {
             ..TaskPatch::default()
         };
         assert_eq!(
-            apply_task_patch(&mut meta, &patch, &lookups(), now()),
+            apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
             Err(TaskPatchError::UnknownStatus("BOGUS".into()))
         );
         let patch = TaskPatch {
@@ -530,7 +645,7 @@ mod tests {
             ..TaskPatch::default()
         };
         assert_eq!(
-            apply_task_patch(&mut meta, &patch, &lookups(), now()),
+            apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
             Err(TaskPatchError::UnknownPriority("P9".into()))
         );
     }
@@ -543,7 +658,7 @@ mod tests {
             priority: Some("P3".into()),
             ..TaskPatch::default()
         };
-        apply_task_patch(&mut meta, &patch, &lookups(), now()).unwrap();
+        apply_task_patch(&mut meta, None, &patch, &lookups(), now()).unwrap();
         assert_eq!(extra(&meta, "status").as_deref(), Some("SEALED"));
         assert_eq!(extra(&meta, "priority").as_deref(), Some("P3"));
     }
@@ -585,7 +700,7 @@ mod tests {
             ..TaskPatch::default()
         };
         assert_eq!(
-            apply_task_patch(&mut meta, &patch, &lookups(), now()),
+            apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
             Err(TaskPatchError::UnknownTaskType("BOGUS".into()))
         );
         assert_eq!(meta.title, before.title);
@@ -601,8 +716,185 @@ mod tests {
             task_type: FieldChange::Clear,
             ..TaskPatch::default()
         };
-        apply_task_patch(&mut meta, &patch, &lookups(), now()).unwrap();
+        apply_task_patch(&mut meta, None, &patch, &lookups(), now()).unwrap();
         assert_eq!(extra(&meta, "task_type"), None);
+    }
+
+    // -- apply_task_patch: blocked_by -----------------------------------------
+
+    fn blocked_by(meta: &PageMeta) -> Option<Vec<String>> {
+        meta.extra.get(BLOCKED_BY_KEY).map(|value| {
+            value
+                .as_array()
+                .expect("blocked_by is a list")
+                .iter()
+                .map(|item| item.as_str().unwrap().to_string())
+                .collect()
+        })
+    }
+
+    fn blockers(inputs: &[&str]) -> TaskPatch {
+        TaskPatch {
+            blocked_by: Some(inputs.iter().map(|s| s.to_string()).collect()),
+            ..TaskPatch::default()
+        }
+    }
+
+    #[test]
+    fn blocked_by_follows_list_semantics_on_patch_and_create() {
+        let patch = TaskPatch::from(patch_request(json!({})));
+        assert_eq!(patch.blocked_by, None, "absent keeps");
+        let patch = TaskPatch::from(patch_request(json!({ "blocked_by": null })));
+        assert_eq!(patch.blocked_by, Some(vec![]), "null clears");
+        let patch = TaskPatch::from(patch_request(json!({ "blocked_by": [] })));
+        assert_eq!(patch.blocked_by, Some(vec![]), "[] clears");
+        let patch = TaskPatch::from(patch_request(json!({ "blocked_by": ["TSK-a"] })));
+        assert_eq!(patch.blocked_by, Some(vec!["TSK-a".to_string()]));
+        let patch = TaskPatch::from(&create_request(json!({
+            "title": "x", "blocked_by": ["TSK-a"]
+        })));
+        assert_eq!(patch.blocked_by, Some(vec!["TSK-a".to_string()]));
+    }
+
+    #[test]
+    fn apply_resolves_blockers_to_canonical_wikilinks_deduped_in_order() {
+        let mut meta = task_meta();
+        let patch = blockers(&[
+            "tsk-quiet",
+            "[[TSK-brave-finch-7q3zd]]",
+            "TSK-QUIET-WREN-9AB1C",
+            "  ",
+            "[[TSK-brave-otter|the otter]]",
+        ]);
+        apply_task_patch(
+            &mut meta,
+            Some("TSK-calm-heron-4mx8p"),
+            &patch,
+            &lookups(),
+            now(),
+        )
+        .unwrap();
+        assert_eq!(
+            blocked_by(&meta),
+            Some(vec![
+                "[[TSK-quiet-wren-9ab1c]]".to_string(),
+                "[[TSK-brave-finch-7q3zd]]".to_string(),
+                "[[TSK-brave-otter-2kd9a]]".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn apply_empty_blocker_list_clears_and_absent_keeps() {
+        let mut meta = task_meta();
+        apply_task_patch(
+            &mut meta,
+            None,
+            &blockers(&["TSK-quiet"]),
+            &lookups(),
+            now(),
+        )
+        .unwrap();
+        apply_task_patch(&mut meta, None, &TaskPatch::default(), &lookups(), now()).unwrap();
+        assert_eq!(
+            blocked_by(&meta),
+            Some(vec!["[[TSK-quiet-wren-9ab1c]]".to_string()]),
+            "absent keeps"
+        );
+        apply_task_patch(&mut meta, None, &blockers(&[]), &lookups(), now()).unwrap();
+        assert_eq!(blocked_by(&meta), None, "[] removes the key");
+    }
+
+    #[test]
+    fn apply_rejects_unknown_ambiguous_and_self_blockers() {
+        let mut meta = task_meta();
+        assert_eq!(
+            apply_task_patch(&mut meta, None, &blockers(&["TSK-nope"]), &lookups(), now()),
+            Err(TaskPatchError::UnknownBlocker("TSK-nope".into()))
+        );
+        assert_eq!(
+            apply_task_patch(
+                &mut meta,
+                None,
+                &blockers(&["TSK-brave"]),
+                &lookups(),
+                now()
+            ),
+            Err(TaskPatchError::AmbiguousBlocker {
+                input: "TSK-brave".into(),
+                candidates: vec![
+                    "TSK-brave-finch-7q3zd".into(),
+                    "TSK-brave-otter-2kd9a".into()
+                ],
+            })
+        );
+        assert_eq!(
+            apply_task_patch(
+                &mut meta,
+                Some("TSK-quiet-wren-9ab1c"),
+                &blockers(&["[[tsk-quiet-wren]]"]),
+                &lookups(),
+                now()
+            ),
+            Err(TaskPatchError::SelfBlocker("TSK-quiet-wren-9ab1c".into()))
+        );
+    }
+
+    #[test]
+    fn apply_rejects_a_blocker_cycle_and_changes_nothing() {
+        // TSK-calm-heron is blocked by TSK-brave-finch; the reverse edge
+        // would close a cycle.
+        let mut meta = task_meta();
+        let before = meta.clone();
+        let patch = TaskPatch {
+            title: Some("Renamed".into()),
+            ..blockers(&["TSK-calm-heron"])
+        };
+        assert_eq!(
+            apply_task_patch(
+                &mut meta,
+                Some("TSK-brave-finch-7q3zd"),
+                &patch,
+                &lookups(),
+                now()
+            ),
+            Err(TaskPatchError::BlockerCycle(vec![
+                "TSK-brave-finch-7q3zd".into(),
+                "TSK-calm-heron-4mx8p".into(),
+                "TSK-brave-finch-7q3zd".into(),
+            ]))
+        );
+        assert_eq!(meta.title, before.title);
+        assert_eq!(meta.extra, before.extra);
+        assert_eq!(meta.updated_at, before.updated_at);
+    }
+
+    #[test]
+    fn create_cannot_close_a_cycle() {
+        // A Task not yet created has no code, so nothing can be blocked by it.
+        let patch = TaskPatch {
+            title: Some("New".into()),
+            ..blockers(&["TSK-calm-heron"])
+        };
+        let meta = new_task_meta(&patch, &lookups(), now()).unwrap();
+        assert_eq!(
+            blocked_by(&meta),
+            Some(vec!["[[TSK-calm-heron-4mx8p]]".to_string()])
+        );
+    }
+
+    #[test]
+    fn plan_task_patch_uses_the_path_stem_as_the_tasks_own_code() {
+        let page = Page {
+            path: crate::vault::path::VaultPath::new("tasks/TSK-brave-finch-7q3zd.md").unwrap(),
+            meta: task_meta(),
+            body: String::new(),
+            raw_content: String::new(),
+        };
+        assert_eq!(
+            plan_task_patch(page, &blockers(&["TSK-brave-finch"]), &lookups(), now()).err(),
+            Some(TaskPatchError::SelfBlocker("TSK-brave-finch-7q3zd".into()))
+        );
     }
 
     // -- apply_task_patch: Cycle ----------------------------------------------
@@ -614,7 +906,7 @@ mod tests {
             cycle: FieldChange::Set(BACKLOG.into()),
             ..TaskPatch::default()
         };
-        apply_task_patch(&mut meta, &patch, &lookups(), now()).unwrap();
+        apply_task_patch(&mut meta, None, &patch, &lookups(), now()).unwrap();
         assert_eq!(extra(&meta, "cycle"), None);
     }
 
@@ -625,7 +917,7 @@ mod tests {
             cycle: FieldChange::Set("s-calm-h".into()),
             ..TaskPatch::default()
         };
-        apply_task_patch(&mut meta, &patch, &lookups(), now()).unwrap();
+        apply_task_patch(&mut meta, None, &patch, &lookups(), now()).unwrap();
         assert_eq!(extra(&meta, "cycle").as_deref(), Some("S-calm-heron-2xm9p"));
     }
 
@@ -637,7 +929,7 @@ mod tests {
             ..TaskPatch::default()
         };
         assert_eq!(
-            apply_task_patch(&mut meta, &patch, &lookups(), now()),
+            apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
             Err(TaskPatchError::UnknownCycle("S-99".into()))
         );
         let patch = TaskPatch {
@@ -645,7 +937,7 @@ mod tests {
             ..TaskPatch::default()
         };
         assert_eq!(
-            apply_task_patch(&mut meta, &patch, &lookups(), now()),
+            apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
             Err(TaskPatchError::AmbiguousCycle {
                 input: "S-calm".into(),
                 candidates: vec!["S-calm-heron-2xm9p".into(), "S-calm-otter-9k2ma".into()],
@@ -662,7 +954,7 @@ mod tests {
             assignee: FieldChange::Clear,
             ..TaskPatch::default()
         };
-        apply_task_patch(&mut meta, &patch, &lookups(), now()).unwrap();
+        apply_task_patch(&mut meta, None, &patch, &lookups(), now()).unwrap();
         assert_eq!(extra(&meta, "assignee"), None);
         assert_eq!(
             extra(&meta, "cycle").as_deref(),
@@ -671,7 +963,7 @@ mod tests {
         );
 
         let mut meta = task_meta();
-        apply_task_patch(&mut meta, &TaskPatch::default(), &lookups(), now()).unwrap();
+        apply_task_patch(&mut meta, None, &TaskPatch::default(), &lookups(), now()).unwrap();
         assert_eq!(extra(&meta, "assignee").as_deref(), Some("kit"));
     }
 
@@ -686,7 +978,7 @@ mod tests {
             link: FieldChange::Set("[[Spec]]".into()),
             ..TaskPatch::default()
         };
-        apply_task_patch(&mut meta, &patch, &lookups(), now()).unwrap();
+        apply_task_patch(&mut meta, None, &patch, &lookups(), now()).unwrap();
         assert_eq!(extra(&meta, "estimate").as_deref(), Some("3d"));
         assert_eq!(extra(&meta, "due").as_deref(), Some("2026-09-30"));
         assert_eq!(extra(&meta, "start").as_deref(), Some("2026-09-10"));
@@ -704,7 +996,7 @@ mod tests {
             ..TaskPatch::default()
         };
         assert_eq!(
-            apply_task_patch(&mut meta, &patch, &lookups(), now()),
+            apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
             Err(TaskPatchError::UnknownProject("ghost".into()))
         );
         let patch = TaskPatch {
@@ -712,7 +1004,7 @@ mod tests {
             ..TaskPatch::default()
         };
         assert!(matches!(
-            apply_task_patch(&mut meta, &patch, &lookups(), now()),
+            apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
             Err(TaskPatchError::InvalidProjectSlug { ref slug, .. }) if slug == "../x"
         ));
     }
@@ -724,7 +1016,7 @@ mod tests {
             project: FieldChange::Set("ops".into()),
             ..TaskPatch::default()
         };
-        let applied = apply_task_patch(&mut meta, &patch, &lookups(), now()).unwrap();
+        let applied = apply_task_patch(&mut meta, None, &patch, &lookups(), now()).unwrap();
         assert_eq!(
             applied,
             Applied {
@@ -738,7 +1030,7 @@ mod tests {
             project: FieldChange::Clear,
             ..TaskPatch::default()
         };
-        let applied = apply_task_patch(&mut meta, &patch, &lookups(), now()).unwrap();
+        let applied = apply_task_patch(&mut meta, None, &patch, &lookups(), now()).unwrap();
         assert_eq!(
             applied,
             Applied {
@@ -749,7 +1041,7 @@ mod tests {
         assert_eq!(meta.project, None);
 
         let applied =
-            apply_task_patch(&mut meta, &TaskPatch::default(), &lookups(), now()).unwrap();
+            apply_task_patch(&mut meta, None, &TaskPatch::default(), &lookups(), now()).unwrap();
         assert_eq!(
             applied,
             Applied {
@@ -769,7 +1061,7 @@ mod tests {
             tags: Some(vec!["x".into(), "y".into()]),
             ..TaskPatch::default()
         };
-        apply_task_patch(&mut meta, &patch, &lookups(), now()).unwrap();
+        apply_task_patch(&mut meta, None, &patch, &lookups(), now()).unwrap();
         assert_eq!(meta.title.as_deref(), Some("Renamed"));
         assert_eq!(meta.tags, vec!["x".to_string(), "y".to_string()]);
         assert_eq!(meta.updated_at, Some(now()));
@@ -785,7 +1077,7 @@ mod tests {
             project: FieldChange::Set("ghost".into()),
             ..TaskPatch::default()
         };
-        assert!(apply_task_patch(&mut meta, &patch, &lookups(), now()).is_err());
+        assert!(apply_task_patch(&mut meta, None, &patch, &lookups(), now()).is_err());
         // PageMeta derives Clone but not PartialEq: compare the parts a patch touches.
         assert_eq!(meta.title, before.title);
         assert_eq!(meta.tags, before.tags);
@@ -806,7 +1098,7 @@ mod tests {
             ..TaskPatch::default()
         };
         assert_eq!(
-            apply_task_patch(&mut meta, &patch, &lookups(), now()),
+            apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
             Err(TaskPatchError::UnknownStatus("BOGUS".into()))
         );
     }
@@ -822,7 +1114,7 @@ mod tests {
             ..TaskPatch::default()
         };
         assert_eq!(
-            apply_task_patch(&mut meta, &patch, &lookups(), now()),
+            apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
             Err(TaskPatchError::UnknownCycle("S-99".into()))
         );
     }
@@ -925,5 +1217,30 @@ mod tests {
         .into();
         assert_eq!(error.status, 400);
         assert_eq!(error.error, "bad slug");
+        let error: ApiError = TaskPatchError::UnknownBlocker("TSK-x".into()).into();
+        assert_eq!(error.status, 400);
+        assert_eq!(
+            error.error,
+            "unknown blocked_by task 'TSK-x'; must match an existing task code or a unique prefix of one"
+        );
+        let error: ApiError = TaskPatchError::AmbiguousBlocker {
+            input: "TSK-b".into(),
+            candidates: vec!["TSK-b1".into(), "TSK-b2".into()],
+        }
+        .into();
+        assert_eq!(
+            error.error,
+            "ambiguous blocked_by prefix 'TSK-b': candidates TSK-b1, TSK-b2"
+        );
+        let error: ApiError = TaskPatchError::SelfBlocker("TSK-a".into()).into();
+        assert_eq!(error.error, "a task cannot be blocked by itself: 'TSK-a'");
+        let error: ApiError =
+            TaskPatchError::BlockerCycle(vec!["TSK-a".into(), "TSK-b".into(), "TSK-a".into()])
+                .into();
+        assert_eq!(error.status, 400);
+        assert_eq!(
+            error.error,
+            "blocked_by would create a cycle: TSK-a → TSK-b → TSK-a (each task is blocked by the next)"
+        );
     }
 }
