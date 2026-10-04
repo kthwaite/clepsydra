@@ -6,7 +6,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   afterEach,
@@ -386,6 +386,21 @@ describe("BacklogView — row rendering", () => {
     expect(blockedTag).toHaveTextContent("Blocked");
     // Title text also present
     expect(screen.getByText("High priority on hold")).toBeInTheDocument();
+  });
+
+  it("renders the task type chip in the row, none for untyped", () => {
+    wrap(
+      <BacklogView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[{ ...T_P0_DUE, task_type: "STORY" }, T_P1_HOLD]}
+      />,
+    );
+    expect(
+      within(screen.getByTestId("bk-row-bk-p0-due")).getByText("STORY"),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("bk-row-bk-p1-hold")).queryByText("STORY"),
+    ).not.toBeInTheDocument();
   });
 
   it("does not render Blocked tag when task has no hold", () => {

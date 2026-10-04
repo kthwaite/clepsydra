@@ -71,6 +71,22 @@ export const PRI_LABEL: Record<string, string> = {
   P3: "Low",
 };
 
+// ── task type ────────────────────────────────────────────────────────────────
+
+/** The closed task type vocabulary, in picker order. */
+export const TYPE_ORDER = ["FEATURE", "FIX", "TASK", "STORY", "SPIKE"] as const;
+
+export const TYPE_LABEL: Record<string, string> = {
+  FEATURE: "Feature",
+  FIX: "Fix",
+  TASK: "Task",
+  STORY: "Story",
+  SPIKE: "Spike",
+};
+
+/** Type-filter sentinel for tasks with no `task_type`. */
+export const TYPE_NONE = "UNTYPED";
+
 export const CYCLE_STATE_LABEL: Record<string, string> = {
   PLANNED: "Planned",
   ACTIVE: "Active",

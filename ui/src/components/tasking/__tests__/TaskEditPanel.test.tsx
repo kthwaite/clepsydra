@@ -458,6 +458,43 @@ describe("TaskEditPanel — immediate patches", () => {
     });
   });
 
+  it("choosing a task type PATCHes it immediately; None PATCHes null", async () => {
+    const stub = makeStub();
+    wrap({
+      task: { ...FULL_TASK, task_type: "FEATURE" },
+      fetchStub: stub,
+      seedBoard: true,
+    });
+    const typeGroup = screen.getByRole("radiogroup", { name: "Type" });
+    expect(
+      within(typeGroup).getByRole("radio", { name: "Feature" }),
+    ).toBeChecked();
+
+    const patchBodies = () =>
+      stub.mock.calls
+        .filter(([, opts]) => opts?.method === "PATCH")
+        .map(([, opts]) => {
+          const raw = opts?.body;
+          assert(typeof raw === "string");
+          const body: unknown = JSON.parse(raw);
+          return body;
+        });
+
+    await userEvent.click(
+      within(typeGroup).getByRole("radio", { name: "Fix" }),
+    );
+    await waitFor(() => {
+      expect(patchBodies()).toContainEqual({ task_type: "FIX" });
+    });
+
+    await userEvent.click(
+      within(typeGroup).getByRole("radio", { name: "None" }),
+    );
+    await waitFor(() => {
+      expect(patchBodies()).toContainEqual({ task_type: null });
+    });
+  });
+
   it("cycle select BACKLOG fires PATCH {cycle: null}", async () => {
     const stub = makeStub();
     // Task has cycle C-01 so selecting BACKLOG is a change

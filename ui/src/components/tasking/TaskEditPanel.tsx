@@ -7,8 +7,8 @@
  * initial focus and restores focus on close without trapping Tab.
  *
  * All edits are sent as optimistic PATCHes:
- *   - Immediate: disposition (status), priority, project select, cycle select,
- *     hold toggle.
+ *   - Immediate: disposition (status), priority, task type, project select,
+ *     cycle select, hold toggle.
  *   - Debounced 300ms: title, assignee, estimate, start, due, hold reason,
  *     link, tags.
  *     Pending debounces are flushed on unmount (close/task-switch) so edits
@@ -45,7 +45,13 @@ import {
 import { ChecklistBar } from "./board-presentation";
 import { type ProjectScope, scopeLabel } from "./board-projects";
 import { checklistProgress } from "./board-stats";
-import { DispositionRow, EdField, INPUT_CLS, PriorityRow } from "./fields";
+import {
+  DispositionRow,
+  EdField,
+  INPUT_CLS,
+  PriorityRow,
+  TypeRow,
+} from "./fields";
 
 /** How long the armed "Confirm archive" state persists before auto-disarm. */
 const ARCHIVE_DISARM_MS = 3000;
@@ -64,6 +70,7 @@ type PatchIntentLane =
   | "tags"
   | "status"
   | "priority"
+  | "taskType"
   | "project"
   | "cycle"
   | "holdToggle";
@@ -529,6 +536,14 @@ export function TaskEditPanel({
               <PriorityRow
                 value={task.priority}
                 onChange={(p) => patchNow("priority", { priority: p })}
+                testIdPrefix="edit-panel"
+              />
+            </EdField>
+
+            <EdField label="Type">
+              <TypeRow
+                value={task.task_type}
+                onChange={(t) => patchNow("taskType", { task_type: t })}
                 testIdPrefix="edit-panel"
               />
             </EdField>

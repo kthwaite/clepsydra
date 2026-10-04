@@ -595,6 +595,29 @@ describe("TaskCard — card anatomy", () => {
     expect(screen.getByTestId("hold-line-t2")).toHaveTextContent("blocker");
   });
 
+  it("shows the task type chip after the priority, none for untyped", () => {
+    const typed: BoardTask = { ...tasks[0], task_type: "FIX" };
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={[typed, tasks[1]]}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const card = screen.getByTestId("task-card-t1");
+    expect(within(card).getByText("FIX")).toBeInTheDocument();
+    expect(card.textContent?.indexOf("P1")).toBeLessThan(
+      card.textContent?.indexOf("FIX") ?? -1,
+    );
+    expect(
+      within(screen.getByTestId("task-card-t2")).queryByText(
+        /^(FEATURE|FIX|TASK|STORY|SPIKE)$/,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("does not render Blocked stamp for tasks without hold", () => {
     renderWithHold();
     expect(screen.queryByTestId("hold-stamp-t1")).not.toBeInTheDocument();

@@ -11,7 +11,7 @@ import type { BoardTask } from "#/api/board";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { type ColLabelFn, priColor, StatePip } from "./board-constants";
-import { ChecklistBar } from "./board-presentation";
+import { ChecklistBar, TypeChip } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
 import { InlineEditPopover } from "./InlineEditPopover";
 
@@ -95,7 +95,7 @@ export function TaskCard({
         data-testid={`task-action-${t.id}`}
       />
 
-      {/* Top row: code · priority · status · project */}
+      {/* Top row: code · priority · type · status · project */}
       <div className="mb-2 flex items-center gap-2 text-[12.5px] text-mute">
         <span className="max-w-full truncate tabular-nums">{t.code}</span>
         <InlineEditPopover
@@ -108,6 +108,7 @@ export function TaskCard({
             {t.priority}
           </span>
         </InlineEditPopover>
+        <TypeChip type={t.task_type} />
         <InlineEditPopover
           task={t}
           field="status"

@@ -39,7 +39,13 @@ import {
 } from "./BoardModalFrame";
 import { type ColLabelFn, cycleStateLabel } from "./board-constants";
 import { type ProjectScope, scopeLabel } from "./board-projects";
-import { DispositionRow, EdField, INPUT_CLS, PriorityRow } from "./fields";
+import {
+  DispositionRow,
+  EdField,
+  INPUT_CLS,
+  PriorityRow,
+  TypeRow,
+} from "./fields";
 
 // ── NewTaskModal ──────────────────────────────────────────────────────────────
 
@@ -68,6 +74,7 @@ export function NewTaskModal({
   const [cycle, setCycle] = useState<string>("BACKLOG");
   const [status, setStatus] = useState<string>("INTAKE");
   const [priority, setPriority] = useState<string>("P2");
+  const [taskType, setTaskType] = useState<string | null>(null);
   const [assignee, setAssignee] = useState("");
   const [estimate, setEstimate] = useState("");
   const [start, setStart] = useState("");
@@ -89,6 +96,7 @@ export function NewTaskModal({
     setCycle(taskModal.cycle ?? "BACKLOG");
     setStatus(taskModal.status ?? "INTAKE");
     setPriority("P2");
+    setTaskType(null);
     setAssignee("");
     setEstimate("");
     setStart("");
@@ -146,6 +154,7 @@ export function NewTaskModal({
         project: project || null,
         status: status || null,
         priority: priority || null,
+        task_type: taskType,
         cycle: cycle === "BACKLOG" ? null : cycle || null,
         assignee: assignee.trim() || null,
         estimate: estimate.trim() || null,
@@ -282,6 +291,15 @@ export function NewTaskModal({
           <PriorityRow
             value={priority}
             onChange={setPriority}
+            testIdPrefix="new-task"
+          />
+        </EdField>
+
+        {/* Type */}
+        <EdField label="Type">
+          <TypeRow
+            value={taskType}
+            onChange={setTaskType}
             testIdPrefix="new-task"
           />
         </EdField>

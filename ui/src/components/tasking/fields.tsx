@@ -16,6 +16,8 @@ import {
   PRI_LABEL,
   PRI_ORDER,
   priColor,
+  TYPE_LABEL,
+  TYPE_ORDER,
 } from "./board-constants";
 
 // ── EdField ───────────────────────────────────────────────────────────────────
@@ -181,6 +183,52 @@ export function PriorityRow({
               visible label is the plain word, per the mockup. */}
           <span className="sr-only">{p}</span>
           {` ${PRI_LABEL[p]}`}
+        </TaskRadio>
+      ))}
+    </RadioGroup>
+  );
+}
+
+/** Radio value standing in for "no task type" (RadioGroup needs a string). */
+const TYPE_NONE_VALUE = "NONE";
+
+/**
+ * 6-option task type row: None, then the five types.
+ * onChange receives the type id, or null for None.
+ * data-testid: `${testIdPrefix}-type-${type}` / `${testIdPrefix}-type-none`.
+ */
+export function TypeRow({
+  value,
+  onChange,
+  testIdPrefix,
+}: {
+  value: string | null | undefined;
+  onChange: (type: string | null) => void;
+  testIdPrefix: string;
+}) {
+  return (
+    <RadioGroup
+      aria-label="Type"
+      value={value || TYPE_NONE_VALUE}
+      onChange={(v) => onChange(v === TYPE_NONE_VALUE ? null : v)}
+      segmented
+      optionsClassName={CHOICE_TRACK_CLS}
+    >
+      <TaskRadio
+        value={TYPE_NONE_VALUE}
+        className={RADIO_CLS_BASE}
+        data-testid={`${testIdPrefix}-type-none`}
+      >
+        None
+      </TaskRadio>
+      {TYPE_ORDER.map((t) => (
+        <TaskRadio
+          key={t}
+          value={t}
+          className={RADIO_CLS_BASE}
+          data-testid={`${testIdPrefix}-type-${t}`}
+        >
+          {TYPE_LABEL[t]}
         </TaskRadio>
       ))}
     </RadioGroup>

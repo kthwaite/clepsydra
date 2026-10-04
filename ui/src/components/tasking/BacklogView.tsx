@@ -32,6 +32,7 @@ import {
   PriChip,
   StatePip,
 } from "./board-constants";
+import { TypeChip } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
 import { InlineEditPopover } from "./InlineEditPopover";
 import { QuickAddRow } from "./QuickAddRow";
@@ -210,7 +211,7 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                     {t.code}
                   </span>
 
-                  {/* Task — priority chip · Blocked pill · title */}
+                  {/* Task — priority chip · type chip · Blocked pill · title */}
                   <span className="flex min-w-0 items-center gap-2.5">
                     <InlineEditPopover
                       task={t}
@@ -220,6 +221,7 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                     >
                       <PriChip pri={t.priority} />
                     </InlineEditPopover>
+                    <TypeChip type={t.task_type} />
                     {t.hold && (
                       <span
                         data-testid={`bk-hold-tag-${t.id}`}

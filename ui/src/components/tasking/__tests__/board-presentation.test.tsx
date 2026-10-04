@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ChecklistBar } from "../board-presentation";
+import { ChecklistBar, TypeChip } from "../board-presentation";
 
 describe("ChecklistBar", () => {
   it("renders percentage width and the incomplete color on its indicator", () => {
@@ -28,5 +28,28 @@ describe("ChecklistBar", () => {
       width: "100%",
       background: "var(--accent)",
     });
+  });
+});
+
+describe("TypeChip", () => {
+  it("renders the task type text", () => {
+    render(<TypeChip type="FEATURE" />);
+    expect(screen.getByText("FEATURE")).toBeInTheDocument();
+  });
+
+  it("draws FIX in hot and other types in mute", () => {
+    render(
+      <>
+        <TypeChip type="FIX" />
+        <TypeChip type="SPIKE" />
+      </>,
+    );
+    expect(screen.getByText("FIX")).toHaveStyle({ color: "var(--hot)" });
+    expect(screen.getByText("SPIKE")).toHaveStyle({ color: "var(--mute)" });
+  });
+
+  it("renders nothing for an untyped task", () => {
+    const { container } = render(<TypeChip type={null} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });
