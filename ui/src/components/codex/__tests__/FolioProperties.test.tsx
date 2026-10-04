@@ -120,7 +120,9 @@ describe("FolioProperties", () => {
     const view = renderPanel();
 
     expect(view.container).toBeEmptyDOMElement();
-    expect(screen.queryByRole("heading", { name: "Base properties" })).toBeNull();
+    expect(
+      screen.queryByRole("heading", { name: "Base properties" }),
+    ).toBeNull();
   });
 
   it("shows loading before the authoritative projection is available", () => {
@@ -128,7 +130,9 @@ describe("FolioProperties", () => {
 
     renderPanel();
 
-    expect(screen.getByRole("heading", { name: "Base properties" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Base properties" }),
+    ).toBeVisible();
     expect(screen.getByText("Loading properties…")).toBeVisible();
   });
 
@@ -495,6 +499,60 @@ describe("FolioProperties", () => {
         screen.getByRole("button", { name: "Edit status property" }),
       ).toHaveFocus();
     });
+  });
+
+  it("saves a changed draft on blur and leaves focus where the user moved it", async () => {
+    const user = userEvent.setup();
+    projectionState.data = projection([
+      property("status", "text", { value: "reading" }),
+      property("author", "text", { value: "Herbert" }),
+    ]);
+
+    renderPanel();
+    await user.click(
+      screen.getByRole("button", { name: "Edit status property" }),
+    );
+    const input = screen.getByRole("textbox", { name: "status property" });
+    await user.clear(input);
+    await user.type(input, "finished");
+    const author = screen.getByRole("button", { name: "Edit author property" });
+    await user.tab();
+    expect(author).toHaveFocus();
+
+    await waitFor(() => {
+      expect(commitMock).toHaveBeenCalledWith(
+        PAGE,
+        "status",
+        "finished",
+        undefined,
+        "projection-rev-1",
+      );
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("textbox", { name: "status property" }),
+      ).toBeNull();
+    });
+    expect(author).toHaveFocus();
+  });
+
+  it("closes an unchanged draft on blur without saving", async () => {
+    const user = userEvent.setup();
+    projectionState.data = projection([
+      property("status", "text", { value: "reading" }),
+    ]);
+
+    renderPanel();
+    await user.click(
+      screen.getByRole("button", { name: "Edit status property" }),
+    );
+    screen.getByRole("textbox", { name: "status property" });
+    await user.click(document.body);
+
+    expect(
+      screen.queryByRole("textbox", { name: "status property" }),
+    ).toBeNull();
+    expect(commitMock).not.toHaveBeenCalled();
   });
 
   it("clears a present property as key removal and forwards date hints", async () => {

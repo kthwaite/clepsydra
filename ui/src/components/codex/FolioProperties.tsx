@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import {
   type PageBasePropertiesResponse,
   type PageBaseProperty,
@@ -127,6 +127,10 @@ function propertyCellValue(property: PageBaseProperty): CellValue {
   return property.value as CellValue;
 }
 
+function sameCellValue(a: CellValue, b: CellValue): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function displayPropertyValue(property: PageBaseProperty): string {
   if (property.blockers.includes("reserved_key")) return "Not exposed";
   if (!property.present) return "Not set";
@@ -157,6 +161,10 @@ export function FolioProperties({
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [failedSave, setFailedSave] = useState<FailedSave | null>(null);
   const [focusReturnKey, setFocusReturnKey] = useState<string | null>(null);
+  // Mirrors `editingKey` synchronously. Closing an editor unmounts its input,
+  // and some browsers fire blur on that removal; the stale blur must not save
+  // again after Enter or turn an Escape into a save.
+  const openKeyRef = useRef<string | null>(null);
 
   if (!pageId) return null;
 
@@ -164,7 +172,15 @@ export function FolioProperties({
     void projection.refetch();
   };
 
+  const openEditor = (key: string) => {
+    openKeyRef.current = key;
+    setEditingKey(key);
+    setFocusReturnKey(null);
+    setFailedSave(null);
+  };
+
   const discardDraft = (key: string) => {
+    openKeyRef.current = null;
     setFailedSave(null);
     setEditingKey(null);
     setFocusReturnKey(key);
@@ -177,6 +193,11 @@ export function FolioProperties({
   ) => {
     const current = projection.data;
     if (!current || savingKey !== null) return;
+    if (openKeyRef.current !== property.key) return;
+    if (sameCellValue(value, propertyCellValue(property))) {
+      discardDraft(property.key);
+      return;
+    }
 
     setSavingKey(property.key);
     setFailedSave(null);
@@ -189,6 +210,7 @@ export function FolioProperties({
         current.revision,
       );
       await projection.refetch();
+      openKeyRef.current = null;
       setEditingKey(null);
       setFocusReturnKey(property.key);
     } catch (error) {
@@ -346,11 +368,8 @@ export function FolioProperties({
                               preserveEditingOnBlur={propertyFailure !== null}
                               ariaLabel={`${property.key} property`}
                               ariaDescribedBy={describedBy}
-                              onEdit={() => {
-                                setEditingKey(property.key);
-                                setFocusReturnKey(null);
-                                setFailedSave(null);
-                              }}
+                              commitOnBlur
+                              onEdit={() => openEditor(property.key)}
                               onCancel={() => discardDraft(property.key)}
                               onCommit={(value, hint) => {
                                 void saveProperty(property, value, hint);
