@@ -21,7 +21,12 @@ import {
 import type { BoardResponse } from "#/api/board";
 import { EMPTY_FILTER_STATE, type FilterState } from "#/lib/filters/model";
 import { useBoardStore } from "#/store/board";
-import { filterTasks, TaskingScreen } from "../TaskingScreen";
+import {
+  BOARD_FILTER_CONFIG,
+  filterTasks,
+  TaskingScreen,
+  TYPE_FILTER_OPTIONS,
+} from "../TaskingScreen";
 import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_NO_SLUG_OP,
@@ -967,5 +972,29 @@ describe("TaskingScreen — list view completed toggle", () => {
     expect(
       screen.queryByTestId("board-show-completed"),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("Type filter facet", () => {
+  const [task] = BOARD_FIXTURE.tasks;
+  assert(task);
+
+  it("maps a typed task to its type and an untyped task to UNTYPED", () => {
+    const typeOf = BOARD_FILTER_CONFIG.accessors.type;
+    assert(typeOf);
+    expect(typeOf({ ...task, task_type: "FIX" })).toEqual(["FIX"]);
+    expect(typeOf({ ...task, task_type: null })).toEqual(["UNTYPED"]);
+    expect(typeOf({ ...task })).toEqual(["UNTYPED"]);
+  });
+
+  it("offers the five types plus Untyped", () => {
+    expect(TYPE_FILTER_OPTIONS).toEqual([
+      { value: "FEATURE", label: "Feature" },
+      { value: "FIX", label: "Fix" },
+      { value: "TASK", label: "Task" },
+      { value: "STORY", label: "Story" },
+      { value: "SPIKE", label: "Spike" },
+      { value: "UNTYPED", label: "Untyped" },
+    ]);
   });
 });

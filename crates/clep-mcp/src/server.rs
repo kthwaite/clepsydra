@@ -424,6 +424,9 @@ pub struct TaskCreateParams {
     pub assignee: Option<String>,
     /// Effort estimate (free-form, e.g. "3d").
     pub estimate: Option<String>,
+    /// Task type: FEATURE, FIX, TASK, STORY, or SPIKE (case-insensitive,
+    /// stored uppercase). Absent = untyped.
+    pub task_type: Option<String>,
     /// Due date (YYYY-MM-DD).
     pub due: Option<String>,
     /// Related Page (`link` wire field; URL or wikilink target).
@@ -469,6 +472,11 @@ pub struct TaskUpdateParams {
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     #[schemars(with = "Option<String>")]
     pub estimate: Option<Option<String>>,
+    /// Task type: FEATURE, FIX, TASK, STORY, or SPIKE (case-insensitive).
+    /// Tri-state: absent = keep, null or "" = clear (untyped), value = set.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    #[schemars(with = "Option<String>")]
+    pub task_type: Option<Option<String>>,
     /// Due date (YYYY-MM-DD). Tri-state: absent = keep, null or "" = clear,
     /// value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
@@ -1304,7 +1312,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_create",
-        description = "Create a Task on the Task Board — preferred over vault_create_page because it mints a TSK-<adjective>-<noun>-<tail> code (the server assigns it; never invent one) and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); a Cycle must match an existing code or unique prefix of one (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
+        description = "Create a Task on the Task Board — preferred over vault_create_page because it mints a TSK-<adjective>-<noun>-<tail> code (the server assigns it; never invent one) and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); `task_type` is optional and one of FEATURE, FIX, TASK, STORY, SPIKE; a Cycle must match an existing code or unique prefix of one (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1327,6 +1335,7 @@ impl VaultMcpServer {
             "cycle": params.cycle,
             "assignee": params.assignee,
             "estimate": params.estimate,
+            "task_type": params.task_type,
             "due": params.due,
             "link": params.link,
             "tags": params.tags,
@@ -1343,7 +1352,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_update",
-        description = "Update a Task on the Task Board, addressed by TSK code (or any unique prefix of one, matched case-insensitively), vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle. A non-empty `hold` wire value means Blocked; `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED). `project` must name an existing Project (a PROJECT page declaring that slug); unknown slugs are refused.",
+        description = "Update a Task on the Task Board, addressed by TSK code (or any unique prefix of one, matched case-insensitively), vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, `task_type`, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle; `task_type` is one of FEATURE, FIX, TASK, STORY, SPIKE. A non-empty `hold` wire value means Blocked; `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED). `project` must name an existing Project (a PROJECT page declaring that slug); unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1375,6 +1384,7 @@ impl VaultMcpServer {
         insert_tri_state(&mut patch_body, "cycle", params.cycle);
         insert_tri_state(&mut patch_body, "assignee", params.assignee);
         insert_tri_state(&mut patch_body, "estimate", params.estimate);
+        insert_tri_state(&mut patch_body, "task_type", params.task_type);
         insert_tri_state(&mut patch_body, "due", params.due);
         insert_tri_state(&mut patch_body, "hold", params.hold);
         insert_tri_state(&mut patch_body, "link", params.link);
@@ -3378,6 +3388,7 @@ mod tests {
         assert_eq!(params.cycle, Some(None), "null clears");
         assert_eq!(params.assignee, Some(Some("kit".to_string())), "value sets");
         assert_eq!(params.estimate, None, "absent keeps");
+        assert_eq!(params.task_type, None, "absent keeps");
         assert_eq!(params.due, None, "absent keeps");
         assert_eq!(params.hold, None, "absent keeps");
         assert_eq!(params.link, None, "absent keeps");
@@ -3391,7 +3402,15 @@ mod tests {
             .find(|tool| tool.name == "vault_task_update")
             .expect("task update tool should be registered");
         let schema = &*tool.input_schema;
-        for field in ["cycle", "assignee", "estimate", "due", "hold", "link"] {
+        for field in [
+            "cycle",
+            "assignee",
+            "estimate",
+            "task_type",
+            "due",
+            "hold",
+            "link",
+        ] {
             assert_eq!(
                 schema["properties"][field]["type"],
                 json!(["string", "null"]),
@@ -3557,6 +3576,7 @@ mod tests {
             cycle: None,
             assignee: None,
             estimate: None,
+            task_type: None,
             due: None,
             link: None,
             tags: None,
@@ -3577,6 +3597,7 @@ mod tests {
             cycle: None,
             assignee: None,
             estimate: None,
+            task_type: None,
             due: None,
             hold: None,
             link: None,
@@ -3713,6 +3734,41 @@ mod tests {
         assert_eq!(value["status"], "TRIAGE");
         assert_eq!(value["cycle"], Value::Null);
         assert_eq!(value["assignee"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn task_create_and_update_carry_the_task_type() {
+        let (server, _tmp) = serve_board_vault().await;
+        let created = parse(
+            server
+                .vault_task_create(Parameters(TaskCreateParams {
+                    task_type: Some("feature".to_string()),
+                    ..task_create_params("Typed")
+                }))
+                .await,
+        );
+        assert_eq!(created["task_type"], "FEATURE", "{created}");
+        let code = created["code"].as_str().unwrap().to_string();
+
+        let value = parse(
+            server
+                .vault_task_update(Parameters(TaskUpdateParams {
+                    task_type: Some(Some("FIX".to_string())),
+                    ..task_update_params(&code)
+                }))
+                .await,
+        );
+        assert_eq!(value["task_type"], "FIX", "{value}");
+
+        let value = parse(
+            server
+                .vault_task_update(Parameters(TaskUpdateParams {
+                    task_type: Some(None),
+                    ..task_update_params(&code)
+                }))
+                .await,
+        );
+        assert_eq!(value["task_type"], Value::Null, "{value}");
     }
 
     #[tokio::test]

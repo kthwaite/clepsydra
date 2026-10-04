@@ -528,6 +528,47 @@ describe("NewTaskModal — submit payload", () => {
     });
   });
 
+  it("defaults Type to None and leaves task_type off the wire", async () => {
+    const stub = makeCreateStub();
+    wrap(stub);
+    const typeGroup = screen.getByRole("radiogroup", { name: "Type" });
+    expect(
+      within(typeGroup).getByRole("radio", { name: "None" }),
+    ).toBeChecked();
+
+    await userEvent.type(screen.getByTestId("new-task-title"), "Untyped");
+    await userEvent.click(screen.getByTestId("new-task-commit"));
+
+    await waitFor(() => {
+      const postCalls = stub.mock.calls.filter(
+        ([, opts]) => opts?.method === "POST",
+      );
+      const requestBody = postCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: Record<string, unknown> = JSON.parse(requestBody);
+      expect(body.task_type ?? null).toBeNull();
+    });
+  });
+
+  it("sends the chosen task type in the create body", async () => {
+    const stub = makeCreateStub();
+    wrap(stub);
+
+    await userEvent.type(screen.getByTestId("new-task-title"), "Typed");
+    await userEvent.click(screen.getByRole("radio", { name: "Fix" }));
+    await userEvent.click(screen.getByTestId("new-task-commit"));
+
+    await waitFor(() => {
+      const postCalls = stub.mock.calls.filter(
+        ([, opts]) => opts?.method === "POST",
+      );
+      const requestBody = postCalls[0]?.[1]?.body;
+      assert(typeof requestBody === "string");
+      const body: unknown = JSON.parse(requestBody);
+      expect(body).toMatchObject({ task_type: "FIX" });
+    });
+  });
+
   it("sends null for empty optional fields (no noise on the wire)", async () => {
     const stub = makeCreateStub();
     wrap(stub);

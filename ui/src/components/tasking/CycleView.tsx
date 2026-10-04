@@ -29,6 +29,7 @@ import {
   PriChip,
   StatePip,
 } from "./board-constants";
+import { TypeChip } from "./board-presentation";
 import { checklistProgress, cycleStats } from "./board-stats";
 import { CycleStrip } from "./CycleStrip";
 import { InlineEditPopover } from "./InlineEditPopover";
@@ -373,6 +374,7 @@ export function CycleView({
                         <PriChip pri={t.priority} />
                       </InlineEditPopover>
                     </span>
+                    <TypeChip type={t.task_type} />
 
                     <span className="w-[168px] min-w-[72px] shrink truncate text-[13px] tabular-nums text-ink-2">
                       {t.code}

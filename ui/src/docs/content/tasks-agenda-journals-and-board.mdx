@@ -215,7 +215,8 @@ dates that do not exist. The default mode and span are left out of the URL.
 ### Plan on the Task Board
 
 Open `/tasking` and choose **New task**. Set the Project, status, priority,
-Cycle, dates, and optional Description and Checklist. The Description becomes
+Type, Cycle, dates, and optional Description and Checklist. Type defaults to
+**None**; pick Feature, Fix, Task, Story, or Spike to classify the Task. The Description becomes
 the opening prose in the Task page, above the Checklist, and appears beneath
 the title on Board cards. Mark a Task **Blocked** and add a blocker reason when
 it cannot proceed.
@@ -227,7 +228,9 @@ The Task Board has four views:
   ticks are faint. A card's priority code is toned by rank: Critical in the
   warm hot colour, High in ink, Medium and Low muted. A small dot shows its
   status: cobalt for In Progress, hot for Review, faint for Inbox and Done.
-  Done cards have no fill. A blocked Task shows a **Blocked** pill and its
+  A typed Task shows its type (`FIX`, `FEATURE`, …) in a small chip after the
+  priority; `FIX` is hot, the rest muted. List and Cycles rows show the same
+  chip. Done cards have no fill. A blocked Task shows a **Blocked** pill and its
   reason.
 - **List** groups Tasks by **Critical**, **High**, **Medium**, and **Low**
   priority. List hides Done (`SEALED`) Tasks by default; the **Show N
@@ -239,11 +242,13 @@ The Task Board has four views:
 - **Timeline** lays out scheduled Tasks across Projects and Cycles.
 
 The compact toolbar keeps search and view switching above the cards. Open
-**Filters** for Project, status, priority, Tags, and Blocked facets; its badge
+**Filters** for Project, Tags, priority, Type, status, and Blocked facets.
+The Type facet's **Untyped** option matches Tasks with no type. Its badge
 counts active facets. **Details** holds Project metadata, active Cycle progress,
 and the 14-day completion history without reducing the board's working height.
 
-Open a card in the full-height right-hand editor. On wide workspaces it sits
+Open a card in the full-height right-hand editor. The editor's Type row saves at once;
+choose **None** to clear the type. On wide workspaces it sits
 beside the board, so you can select another card without closing the editor.
 On narrower workspaces it overlays the right edge. Its fields scroll separately
 from the cards; **Close** or Escape closes it. Pending edits are saved when
@@ -297,13 +302,16 @@ Cycle Markdown, or calling the API, use these persisted values:
 - Task `status`: Inbox (`INTAKE`), Ready (`TRIAGE`), In Progress (`FIELD`),
   Review (`REVIEW`), and Done (`SEALED`).
 - Task `priority`: Critical (`P0`), High (`P1`), Medium (`P2`), and Low (`P3`).
+- Task `task_type` (optional): `FEATURE`, `FIX`, `TASK`, `STORY`, or `SPIKE`.
+  The API matches it case-insensitively, stores it in capitals, and rejects any
+  other value. An absent `task_type` means the Task is untyped.
 - Cycle `state`: Planned (`PLANNED`), Active (`ACTIVE`), and Closed (`CLOSED`).
 - Backlog is represented in Markdown by an absent `cycle` value. APIs that
   accept a Cycle target use `BACKLOG` to clear the Cycle.
 - Over the API an empty or whitespace-only string on a clearable Task Field
-  (`cycle`, `assignee`, `estimate`, `due`, `start`, `hold`, `link`) clears it,
-  the same as `null`; on create (which has no `hold`) it means the field is
-  not set.
+  (`cycle`, `assignee`, `estimate`, `task_type`, `due`, `start`, `hold`,
+  `link`) clears it, the same as `null`; on create (which has no `hold`) it
+  means the field is not set.
 - Blocked is represented by a non-empty `hold` value; clearing `hold` removes
   the Blocked condition.
 - When closing a Cycle through the API, `carry_to: "BACKLOG"` moves unfinished

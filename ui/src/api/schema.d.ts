@@ -2354,6 +2354,11 @@ export interface components {
       start?: string | null;
       status: string;
       tags: string[];
+      /**
+       * @description The `task_type` frontmatter value, passed through as written; `null`
+       *     when the Task is untyped.
+       */
+      task_type?: string | null;
       title: string;
       updated_at: string;
     };
@@ -2681,8 +2686,8 @@ export interface components {
       title?: string | null;
     };
     /**
-     * @description An empty or whitespace-only `cycle`, `assignee`, `estimate`, `due`,
-     *     `start`, or `link` is treated as absent.
+     * @description An empty or whitespace-only `cycle`, `assignee`, `estimate`, `task_type`,
+     *     `due`, `start`, or `link` is treated as absent.
      */
     CreateTaskRequest: {
       assignee?: string | null;
@@ -2702,6 +2707,8 @@ export interface components {
       start?: string | null;
       status?: string | null;
       tags?: string[] | null;
+      /** @description One of FEATURE, FIX, TASK, STORY, SPIKE (case-insensitive). */
+      task_type?: string | null;
       title: string;
     };
     CreateTemplateRequest: {
@@ -3252,8 +3259,8 @@ export interface components {
     /**
      * @description PATCH request for updating a task. All fields are optional.
      *
-     *     For tri-state fields (`cycle`, `assignee`, `estimate`, `due`, `start`,
-     *     `hold`, `link`): absent = leave unchanged; `null` or an empty or whitespace-only string = clear the field; any other string =
+     *     For tri-state fields (`cycle`, `assignee`, `estimate`, `task_type`, `due`,
+     *     `start`, `hold`, `link`): absent = leave unchanged; `null` or an empty or whitespace-only string = clear the field; any other string =
      *     set to that value. Implemented via `#[serde(default, deserialize_with)]`
      *     which maps the outer `Option` to "present or absent" and the inner `Option`
      *     to "null or value".
@@ -3284,6 +3291,11 @@ export interface components {
       status?: string | null;
       /** @description Leave absent to keep current tags. */
       tags?: string[] | null;
+      /**
+       * @description Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
+       *     A value must be FEATURE, FIX, TASK, STORY, or SPIKE (case-insensitive).
+       */
+      task_type?: string | null;
       /** @description Leave absent to keep current title. */
       title?: string | null;
     };

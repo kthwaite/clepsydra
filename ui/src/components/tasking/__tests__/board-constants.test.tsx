@@ -11,9 +11,12 @@ import {
   PRI_LABEL,
   PRI_ORDER,
   priColor,
+  TYPE_LABEL,
+  TYPE_NONE,
+  TYPE_ORDER,
   taskStatusLabel,
 } from "../board-constants";
-import { DispositionRow, PRI_ON_STYLE, PriorityRow } from "../fields";
+import { DispositionRow, PRI_ON_STYLE, PriorityRow, TypeRow } from "../fields";
 
 describe("Task Board display vocabulary", () => {
   it("uses neutral priority descriptions without changing priority ids", () => {
@@ -138,5 +141,42 @@ describe("healthColor", () => {
     expect(healthColor("AMBER")).toBe("var(--warn)");
     expect(healthColor("RED")).toBe("var(--hot)");
     expect(healthColor("")).toBe("var(--mute)");
+  });
+});
+
+describe("task type vocabulary", () => {
+  it("orders the five types with sentence-case labels", () => {
+    expect(TYPE_ORDER.map((id) => [id, TYPE_LABEL[id]])).toEqual([
+      ["FEATURE", "Feature"],
+      ["FIX", "Fix"],
+      ["TASK", "Task"],
+      ["STORY", "Story"],
+      ["SPIKE", "Spike"],
+    ]);
+    expect(TYPE_NONE).toBe("UNTYPED");
+  });
+});
+
+describe("TypeRow", () => {
+  it("offers None first, then the five types", () => {
+    render(<TypeRow value={null} onChange={vi.fn()} testIdPrefix="t" />);
+    const group = screen.getByRole("radiogroup", { name: "Type" });
+    const names = Array.from(group.querySelectorAll("label")).map((l) =>
+      l.textContent?.trim(),
+    );
+    expect(names).toEqual(["None", "Feature", "Fix", "Task", "Story", "Spike"]);
+    expect(screen.getByRole("radio", { name: "None" })).toBeChecked();
+  });
+
+  it("calls onChange with the type id, and null for None", async () => {
+    const onChange = vi.fn();
+    render(<TypeRow value="FIX" onChange={onChange} testIdPrefix="t" />);
+    expect(screen.getByRole("radio", { name: "Fix" })).toBeChecked();
+
+    await userEvent.click(screen.getByRole("radio", { name: "Spike" }));
+    expect(onChange).toHaveBeenLastCalledWith("SPIKE");
+
+    await userEvent.click(screen.getByRole("radio", { name: "None" }));
+    expect(onChange).toHaveBeenLastCalledWith(null);
   });
 });

@@ -290,6 +290,21 @@ describe("CycleView — contrast", () => {
   });
 });
 
+describe("CycleView — task type chip", () => {
+  it("renders the type chip in a typed row, none in an untyped row", () => {
+    const [first, ...rest] = C01_TASKS;
+    renderCycleView(ACTIVE_CYCLE, [{ ...first, task_type: "SPIKE" }, ...rest]);
+    expect(
+      within(screen.getByTestId(`cv-row-${first.id}`)).getByText("SPIKE"),
+    ).toBeInTheDocument();
+    for (const t of rest) {
+      expect(
+        within(screen.getByTestId(`cv-row-${t.id}`)).queryByText("SPIKE"),
+      ).not.toBeInTheDocument();
+    }
+  });
+});
+
 // ── action buttons per cycle state ────────────────────────────────────────────
 
 describe("CycleView — lifecycle entry points", () => {

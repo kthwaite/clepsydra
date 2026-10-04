@@ -22,7 +22,7 @@ use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{ProjectAssignment, UpdatePageCommand};
 use crate::vault::page::{Page, PageMeta};
 
-use super::{COLUMNS, CreateTaskRequest, PRIORITIES, PatchTaskRequest, code_stems};
+use super::{COLUMNS, CreateTaskRequest, PRIORITIES, PatchTaskRequest, TASK_TYPES, code_stems};
 
 /// The Cycle sentinel that means "no Cycle" (Backlog) on any write.
 pub(crate) const BACKLOG: &str = "BACKLOG";
@@ -70,6 +70,7 @@ pub(crate) struct TaskPatch {
     pub cycle: FieldChange,
     pub assignee: FieldChange,
     pub estimate: FieldChange,
+    pub task_type: FieldChange,
     pub due: FieldChange,
     pub start: FieldChange,
     pub hold: FieldChange,
@@ -92,6 +93,7 @@ impl From<PatchTaskRequest> for TaskPatch {
             cycle: FieldChange::from_tri_state(body.cycle),
             assignee: FieldChange::from_tri_state(body.assignee),
             estimate: FieldChange::from_tri_state(body.estimate),
+            task_type: FieldChange::from_tri_state(body.task_type),
             due: FieldChange::from_tri_state(body.due),
             start: FieldChange::from_tri_state(body.start),
             hold: FieldChange::from_tri_state(body.hold),
@@ -116,6 +118,7 @@ impl From<&CreateTaskRequest> for TaskPatch {
             cycle: FieldChange::from_create(body.cycle.clone()),
             assignee: FieldChange::from_create(body.assignee.clone()),
             estimate: FieldChange::from_create(body.estimate.clone()),
+            task_type: FieldChange::from_create(body.task_type.clone()),
             due: FieldChange::from_create(body.due.clone()),
             start: FieldChange::from_create(body.start.clone()),
             hold: FieldChange::Keep,
@@ -167,6 +170,7 @@ impl BoardLookups {
 pub(crate) enum TaskPatchError {
     UnknownStatus(String),
     UnknownPriority(String),
+    UnknownTaskType(String),
     UnknownCycle(String),
     AmbiguousCycle {
         input: String,
@@ -194,6 +198,10 @@ impl From<TaskPatchError> for ApiError {
                 "unknown priority: '{priority}'; valid values: {}",
                 PRIORITIES.join(", ")
             )),
+            TaskPatchError::UnknownTaskType(task_type) => ApiError::bad_request(format!(
+                "unknown task_type: '{task_type}'; valid values: {}",
+                TASK_TYPES.join(", ")
+            )),
             TaskPatchError::UnknownCycle(input) => ApiError::bad_request(format!(
                 "unknown cycle '{input}'; must match an existing cycle code or a unique prefix of one"
             )),
@@ -215,8 +223,9 @@ pub(crate) struct Applied {
     pub reconcile: bool,
 }
 
-/// Validate every rule, then apply every field. Rules, in order: status and
-/// priority must be board vocabulary; a set Cycle is `BACKLOG` (clears) or
+/// Validate every rule, then apply every field. Rules, in order: status,
+/// priority and a set task type must be board vocabulary (the task type is
+/// matched case-insensitively and stored uppercase); a set Cycle is `BACKLOG` (clears) or
 /// resolves to exactly one Code; a set Project is a valid slug some PROJECT
 /// page declares. `meta` is untouched when any rule fails. `updated_at`
 /// becomes `now`.
@@ -236,6 +245,16 @@ pub(crate) fn apply_task_patch(
     {
         return Err(TaskPatchError::UnknownPriority(priority.clone()));
     }
+    let task_type = match &patch.task_type {
+        FieldChange::Set(input) => {
+            let upper = input.trim().to_uppercase();
+            if !TASK_TYPES.contains(&upper.as_str()) {
+                return Err(TaskPatchError::UnknownTaskType(input.clone()));
+            }
+            FieldChange::Set(upper)
+        }
+        other => other.clone(),
+    };
     let cycle = match &patch.cycle {
         FieldChange::Set(input) if input == BACKLOG => FieldChange::Clear,
         FieldChange::Set(input) => {
@@ -294,6 +313,7 @@ pub(crate) fn apply_task_patch(
     apply_field(meta, "cycle", &cycle);
     apply_field(meta, "assignee", &patch.assignee);
     apply_field(meta, "estimate", &patch.estimate);
+    apply_field(meta, "task_type", &task_type);
     apply_field(meta, "due", &patch.due);
     apply_field(meta, "start", &patch.start);
     apply_field(meta, "hold", &patch.hold);
@@ -528,6 +548,63 @@ mod tests {
         assert_eq!(extra(&meta, "priority").as_deref(), Some("P3"));
     }
 
+    // -- apply_task_patch: task type -----------------------------------------
+
+    #[test]
+    fn task_type_follows_the_tri_state_on_patch() {
+        let patch = TaskPatch::from(patch_request(json!({})));
+        assert_eq!(patch.task_type, FieldChange::Keep, "absent keeps");
+        let patch = TaskPatch::from(patch_request(json!({ "task_type": null })));
+        assert_eq!(patch.task_type, FieldChange::Clear, "null clears");
+        let patch = TaskPatch::from(patch_request(json!({ "task_type": "" })));
+        assert_eq!(patch.task_type, FieldChange::Clear, "empty clears");
+        let patch = TaskPatch::from(patch_request(json!({ "task_type": "FIX" })));
+        assert_eq!(
+            patch.task_type,
+            FieldChange::Set("FIX".into()),
+            "value sets"
+        );
+    }
+
+    #[test]
+    fn create_stores_the_task_type_uppercase() {
+        let patch = TaskPatch::from(&create_request(json!({
+            "title": "New", "task_type": "fix"
+        })));
+        let meta = new_task_meta(&patch, &lookups(), now()).unwrap();
+        assert_eq!(extra(&meta, "task_type").as_deref(), Some("FIX"));
+    }
+
+    #[test]
+    fn apply_rejects_an_unknown_task_type_and_changes_nothing() {
+        let mut meta = task_meta();
+        let before = meta.clone();
+        let patch = TaskPatch {
+            title: Some("Renamed".into()),
+            task_type: FieldChange::Set("BOGUS".into()),
+            ..TaskPatch::default()
+        };
+        assert_eq!(
+            apply_task_patch(&mut meta, &patch, &lookups(), now()),
+            Err(TaskPatchError::UnknownTaskType("BOGUS".into()))
+        );
+        assert_eq!(meta.title, before.title);
+        assert_eq!(meta.extra, before.extra);
+        assert_eq!(meta.updated_at, before.updated_at);
+    }
+
+    #[test]
+    fn apply_clear_removes_the_task_type() {
+        let mut meta = task_meta();
+        set_field(&mut meta, "task_type", "SPIKE");
+        let patch = TaskPatch {
+            task_type: FieldChange::Clear,
+            ..TaskPatch::default()
+        };
+        apply_task_patch(&mut meta, &patch, &lookups(), now()).unwrap();
+        assert_eq!(extra(&meta, "task_type"), None);
+    }
+
     // -- apply_task_patch: Cycle ----------------------------------------------
 
     #[test]
@@ -719,7 +796,7 @@ mod tests {
 
     #[test]
     fn apply_reports_the_first_failing_rule_in_order() {
-        // status, then priority, then cycle, then project.
+        // status, then priority, then task type, then cycle, then project.
         let mut meta = task_meta();
         let patch = TaskPatch {
             status: Some("BOGUS".into()),
@@ -813,6 +890,12 @@ mod tests {
         assert_eq!(
             error.error,
             "unknown priority: 'P9'; valid values: P0, P1, P2, P3"
+        );
+        let error: ApiError = TaskPatchError::UnknownTaskType("BOGUS".into()).into();
+        assert_eq!(error.status, 400);
+        assert_eq!(
+            error.error,
+            "unknown task_type: 'BOGUS'; valid values: FEATURE, FIX, TASK, STORY, SPIKE"
         );
         let error: ApiError = TaskPatchError::UnknownCycle("S-99".into()).into();
         assert_eq!(

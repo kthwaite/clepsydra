@@ -6,6 +6,7 @@ import {
   applyClientFilter,
   type ClientFilterConfig,
   EMPTY_FILTER_STATE,
+  type FacetOption,
   type FilterField,
   type FilterState,
   FLAG_ON,
@@ -21,6 +22,9 @@ import {
   type ColLabelFn,
   PRI_LABEL,
   PRI_ORDER,
+  TYPE_LABEL,
+  TYPE_NONE,
+  TYPE_ORDER,
   taskStatusLabel,
 } from "./board-constants";
 import {
@@ -62,16 +66,23 @@ export function filterTasks(tasks: BoardTask[], opFilter: string): BoardTask[] {
 // ── shared FilterBar wiring ───────────────────────────────────────────────────
 
 /** Client-side facet/text predicate config for the shared FilterBar. */
-const BOARD_FILTER_CONFIG: ClientFilterConfig<BoardTask> = {
+export const BOARD_FILTER_CONFIG: ClientFilterConfig<BoardTask> = {
   textHay: (t) => [t.title, t.code, t.assignee ?? "", ...t.tags].join("\n"),
   accessors: {
     project: (t) => (t.project ? [t.project] : []),
     tags: (t) => t.tags,
     pri: (t) => [t.priority],
+    type: (t) => [t.task_type || TYPE_NONE],
     status: (t) => [t.status],
     hold: (t) => (t.hold ? [FLAG_ON] : []),
   },
 };
+
+/** Type facet options: the five task types, then the Untyped sentinel. */
+export const TYPE_FILTER_OPTIONS: readonly FacetOption[] = [
+  ...TYPE_ORDER.map((value) => ({ value, label: TYPE_LABEL[value] })),
+  { value: TYPE_NONE, label: "Untyped" },
+];
 
 const colLabel: ColLabelFn = taskStatusLabel;
 // ── TaskingScreen ─────────────────────────────────────────────────────────────
@@ -175,7 +186,7 @@ export function TaskingScreen({
   }, [data, projects, opFilter, setOpFilter]);
 
   // Options are data-derived: project scope slugs (operations ∪ task
-  // projects), task tags, and the fixed priority/status vocabularies.
+  // projects), task tags, and the fixed priority/type/status vocabularies.
   const filterFields: FilterField[] = useMemo(
     () => [
       {
@@ -204,6 +215,12 @@ export function TaskingScreen({
           value,
           label: `${value} ${PRI_LABEL[value]}`,
         })),
+      },
+      {
+        id: "type",
+        kind: "multi",
+        label: "Type",
+        options: TYPE_FILTER_OPTIONS,
       },
       {
         id: "status",

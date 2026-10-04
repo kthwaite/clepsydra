@@ -28,3 +28,19 @@ export function ChecklistBar({
     </span>
   );
 }
+
+/**
+ * Task type as a small pill beside the priority chip. FIX is hot; every
+ * other type is mute. Untyped tasks render nothing.
+ */
+export function TypeChip({ type }: { type?: string | null }) {
+  if (!type) return null;
+  return (
+    <span
+      className="inline-block flex-shrink-0 rounded-full bg-sink px-2 text-[12px] leading-5 tabular-nums"
+      style={{ color: type === "FIX" ? "var(--hot)" : "var(--mute)" }}
+    >
+      {type}
+    </span>
+  );
+}

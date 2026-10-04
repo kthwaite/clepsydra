@@ -1038,6 +1038,102 @@ async fn patch_task_rejects_bogus_priority() {
 }
 
 // ---------------------------------------------------------------------------
+// task_type — closed vocabulary, stored uppercase, tri-state on PATCH
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_type_round_trips_uppercase() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "typed", "task_type": "fix" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["task_type"], "FIX", "{body}");
+
+    let code = body["code"].as_str().unwrap();
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{code}.md"))).unwrap();
+    assert!(
+        content.contains("task_type = \"FIX\""),
+        "frontmatter:\n{content}"
+    );
+
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    assert_eq!(board["tasks"][0]["task_type"], "FIX", "{board}");
+}
+
+#[tokio::test]
+async fn patch_task_type_sets_clears_and_rejects_unknown_values() {
+    let (server, tmp) = setup_patch_target();
+    let url = "/api/vault/board/tasks/01951234-0000-7000-8000-000000000060";
+
+    let res = server
+        .patch(url)
+        .json(&serde_json::json!({ "task_type": "Spike" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["task_type"], "SPIKE", "{body}");
+
+    let res = server
+        .patch(url)
+        .json(&serde_json::json!({ "task_type": "BOGUS" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    let message = body["error"].as_str().unwrap_or_default();
+    for value in ["FEATURE", "FIX", "TASK", "STORY", "SPIKE"] {
+        assert!(message.contains(value), "error should list {value}: {body}");
+    }
+
+    let res = server
+        .patch(url)
+        .json(&serde_json::json!({ "task_type": null }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(body["task_type"].is_null(), "{body}");
+    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
+    assert!(
+        !content.contains("task_type"),
+        "a cleared task_type leaves no key, got:\n{content}"
+    );
+}
+
+#[tokio::test]
+async fn board_task_type_is_null_when_absent_and_passes_unknown_values_through() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000071\n\
+             title: Untyped\ntype: TASK\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0002.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000072\n\
+             title: Hand typed\ntype: TASK\ntask_type: CHORE\n---\n",
+        )
+        .unwrap();
+    });
+
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    let by_code = |code: &str| {
+        tasks
+            .iter()
+            .find(|task| task["code"] == code)
+            .unwrap_or_else(|| panic!("{code} on the board: {tasks:?}"))
+    };
+    assert!(by_code("TSK-0001")["task_type"].is_null(), "{tasks:?}");
+    assert_eq!(by_code("TSK-0002")["task_type"], "CHORE", "{tasks:?}");
+}
+
+// ---------------------------------------------------------------------------
 // POST /board/tasks — all optional fields persist to frontmatter + response
 // ---------------------------------------------------------------------------
 

@@ -45,6 +45,10 @@ const COLUMNS: &[(&str, &str, &str)] = &[
 /// Valid priority tokens.
 const PRIORITIES: &[&str] = &["P0", "P1", DEFAULT_PRIORITY, "P3"];
 
+/// Valid task type tokens. Matched case-insensitively on write, stored
+/// uppercase.
+const TASK_TYPES: &[&str] = &["FEATURE", "FIX", "TASK", "STORY", "SPIKE"];
+
 // ---------------------------------------------------------------------------
 // Tri-state deserialization helper
 //
@@ -120,6 +124,9 @@ pub struct BoardTask {
     pub cycle: Option<String>,
     pub assignee: Option<String>,
     pub estimate: Option<String>,
+    /// The `task_type` frontmatter value, passed through as written; `null`
+    /// when the Task is untyped.
+    pub task_type: Option<String>,
     pub due: Option<String>,
     pub start: Option<String>,
     pub hold: Option<String>,
@@ -212,8 +219,8 @@ pub struct PatchCycleRequest {
     pub carry_to: Option<String>,
 }
 
-/// An empty or whitespace-only `cycle`, `assignee`, `estimate`, `due`,
-/// `start`, or `link` is treated as absent.
+/// An empty or whitespace-only `cycle`, `assignee`, `estimate`, `task_type`,
+/// `due`, `start`, or `link` is treated as absent.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateTaskRequest {
     pub title: String,
@@ -223,6 +230,8 @@ pub struct CreateTaskRequest {
     pub cycle: Option<String>,
     pub assignee: Option<String>,
     pub estimate: Option<String>,
+    /// One of FEATURE, FIX, TASK, STORY, SPIKE (case-insensitive).
+    pub task_type: Option<String>,
     pub due: Option<String>,
     pub start: Option<String>,
     pub tags: Option<Vec<String>>,
@@ -236,8 +245,8 @@ pub struct CreateTaskRequest {
 
 /// PATCH request for updating a task. All fields are optional.
 ///
-/// For tri-state fields (`cycle`, `assignee`, `estimate`, `due`, `start`,
-/// `hold`, `link`): absent = leave unchanged; `null` or an empty or whitespace-only string = clear the field; any other string =
+/// For tri-state fields (`cycle`, `assignee`, `estimate`, `task_type`, `due`,
+/// `start`, `hold`, `link`): absent = leave unchanged; `null` or an empty or whitespace-only string = clear the field; any other string =
 /// set to that value. Implemented via `#[serde(default, deserialize_with)]`
 /// which maps the outer `Option` to "present or absent" and the inner `Option`
 /// to "null or value".
@@ -261,6 +270,10 @@ pub struct PatchTaskRequest {
     /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub estimate: Option<Option<String>>,
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
+    /// A value must be FEATURE, FIX, TASK, STORY, or SPIKE (case-insensitive).
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub task_type: Option<Option<String>>,
     /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub due: Option<Option<String>>,
