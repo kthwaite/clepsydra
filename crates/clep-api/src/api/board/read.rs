@@ -332,6 +332,7 @@ pub(super) async fn build_board_task_dto(
             let cycle = extra_str(&meta, "cycle");
             let assignee = extra_str(&meta, "assignee");
             let estimate = extra_str(&meta, "estimate");
+            let task_type = extra_str(&meta, "task_type");
             let due = extra_str(&meta, "due");
             let task_start = extra_str(&meta, "start");
             let hold = extra_str(&meta, "hold");
@@ -362,6 +363,7 @@ pub(super) async fn build_board_task_dto(
                 cycle,
                 assignee,
                 estimate,
+                task_type,
                 due,
                 start: task_start,
                 hold,
@@ -487,6 +489,7 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
         let cycle = extra_str(&meta, "cycle");
         let assignee = extra_str(&meta, "assignee");
         let estimate = extra_str(&meta, "estimate");
+        let task_type = extra_str(&meta, "task_type");
         let due = extra_str(&meta, "due");
         let task_start = extra_str(&meta, "start");
         let hold = extra_str(&meta, "hold");
@@ -518,6 +521,7 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
                 cycle,
                 assignee,
                 estimate,
+                task_type,
                 due,
                 start: task_start,
                 hold,

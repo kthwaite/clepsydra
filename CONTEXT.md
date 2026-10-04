@@ -73,7 +73,7 @@ The stable identifier of a Task or Cycle: two short words and a five-character t
 _Avoid_: TSK number, sequential code, ticket number
 
 **Task Fields**:
-The structured attributes a Task carries beyond its title and body: status, priority, cycle, assignee, estimate, due, start, hold, link, and project.
+The structured attributes a Task carries beyond its title and body: status, priority, task type, cycle, assignee, estimate, due, start, hold, link, and project. Task type is optional and closed: `FEATURE`, `FIX`, `TASK`, `STORY`, or `SPIKE` (frontmatter `task_type`).
 _Avoid_: task properties, task metadata
 
 **Task Patch**:
