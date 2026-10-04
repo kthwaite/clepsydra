@@ -49,10 +49,22 @@ import {
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { error: toastError } }));
 vi.mock("../TaskBodyField", () => ({
-  TaskBodyField: ({ path }: { path: string }) => (
-    <div data-testid="edit-panel-body">{path}</div>
+  TaskBodyField: ({
+    path,
+    onOpenPage,
+  }: {
+    path: string;
+    onOpenPage?: (path: string) => void;
+  }) => (
+    <div data-testid="edit-panel-body">
+      {path}
+      <button type="button" onClick={() => onOpenPage?.(bodyLinkTarget.path)}>
+        body link
+      </button>
+    </div>
   ),
 }));
+const bodyLinkTarget = vi.hoisted(() => ({ path: "" }));
 
 const { operations, cycles } = BOARD_FIXTURE;
 const NEUTRAL_COL_LABEL: ColLabelFn = (id) => COL_LABEL[id] ?? id;
@@ -412,6 +424,30 @@ describe("TaskEditPanel — checklist read-only", () => {
     expect(
       link.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
+  });
+
+  it("opens a body link to a board task as that task's card", async () => {
+    const onOpenPage = vi.fn();
+    const other = BOARD_FIXTURE.tasks[0];
+    assert(other);
+    bodyLinkTarget.path = other.path;
+    useBoardStore.setState({ editTaskId: FULL_TASK.id });
+    wrap({ onOpenPage });
+
+    await userEvent.click(screen.getByRole("button", { name: "body link" }));
+
+    expect(useBoardStore.getState().editTaskId).toBe(other.id);
+    expect(onOpenPage).not.toHaveBeenCalled();
+  });
+
+  it("opens a body link to any other page in the Folio", async () => {
+    const onOpenPage = vi.fn();
+    bodyLinkTarget.path = "notes/design.md";
+    wrap({ onOpenPage });
+
+    await userEvent.click(screen.getByRole("button", { name: "body link" }));
+
+    expect(onOpenPage).toHaveBeenCalledWith("notes/design.md");
   });
 
   it("OPEN PAGE → calls onOpenPage with task.path", async () => {

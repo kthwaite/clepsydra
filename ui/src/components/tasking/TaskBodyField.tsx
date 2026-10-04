@@ -1,5 +1,6 @@
 import { usePage } from "#/api/pages";
 import { MarkdownRenderer } from "#/components/MarkdownRenderer";
+import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { EdField } from "./fields";
 
 const IGNORE_PAGE = () => {};
@@ -7,7 +8,9 @@ const IGNORE_PAGE = () => {};
 /**
  * The Task page's full markdown body, read-only. Unlike the card
  * description, nothing is stripped or capped: checklist items render as
- * disabled checkboxes. A protected page shows no body.
+ * disabled checkboxes. A protected page shows no body. Wikilinks resolve
+ * against the page's indexed outlinks, so Task codes and aliases resolve as
+ * they do in the Folio.
  */
 export function TaskBodyField({
   path,
@@ -26,11 +29,13 @@ export function TaskBodyField({
   } else if (body) {
     content = (
       <div className="min-w-0 break-words text-[14px] leading-[1.6] text-ink-2">
-        <MarkdownRenderer
-          content={body}
-          pagePath={path}
-          onOpenPage={onOpenPage ?? IGNORE_PAGE}
-        />
+        <WikilinkResolutionProvider path={path}>
+          <MarkdownRenderer
+            content={body}
+            pagePath={path}
+            onOpenPage={onOpenPage ?? IGNORE_PAGE}
+          />
+        </WikilinkResolutionProvider>
       </div>
     );
   } else if (page.data) {
