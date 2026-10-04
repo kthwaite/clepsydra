@@ -346,6 +346,7 @@ export function TaskingScreen({
                 showOp={opFilter === "ALL"}
                 activeProject={activeScope?.slug ?? undefined}
                 onOpenDossier={onOpenDossier}
+                onOpenPage={onOpenPage}
                 colLabel={colLabel}
               />
             )}

@@ -1,5 +1,6 @@
 import { type ReactNode, useRef } from "react";
 import Markdown, {
+  type Components,
   defaultUrlTransform,
   type UrlTransform,
 } from "react-markdown";
@@ -26,6 +27,7 @@ import {
   resolveResourceUrl,
   resolveVaultRelativeResource,
 } from "#/lib/resourceUrl";
+import type { OpenTabTarget } from "#/store/workspace";
 
 interface MarkdownRendererProps {
   content: string;
@@ -33,7 +35,20 @@ interface MarkdownRendererProps {
   restricted?: boolean;
   pagePath?: string;
   attachmentPaths?: ReadonlyMap<string, string>;
+  /**
+   * Compact styling for small surfaces such as a task card: headings at body
+   * size, images hidden, plain code blocks.
+   */
+  compact?: boolean;
+  /**
+   * Opens a linked page. Replaces the default workspace tab opening, so the
+   * renderer then needs no router. Unresolved wikilinks render as plain links
+   * (there is no resolution provider to tell them apart).
+   */
+  onOpenPage?: (path: string) => void;
 }
+
+type OpenPage = (path: string, label?: string, target?: OpenTabTarget) => void;
 
 function isMathDelimiter(value: unknown): value is MathDelimiter {
   return value === "$" || value === "$$" || value === "\\(" || value === "\\[";
@@ -85,14 +100,69 @@ const transformMarkdownUrl: UrlTransform = (url, key, node) => {
     : defaultUrlTransform(url);
 };
 
+// Compact element overrides: body-size headings, no images, plain blocks.
+const compactComponents: Components = {
+  h1: CompactHeading,
+  h2: CompactHeading,
+  h3: CompactHeading,
+  h4: CompactHeading,
+  h5: CompactHeading,
+  h6: CompactHeading,
+  img: () => null,
+  p: ({ children }) => <p className="my-1 first:mt-0">{children}</p>,
+  ul: ({ children }) => <ul className="my-1 ml-4 list-disc">{children}</ul>,
+  ol: ({ children }) => <ol className="my-1 ml-4 list-decimal">{children}</ol>,
+  blockquote: ({ children }) => (
+    <blockquote className="my-1 italic">{children}</blockquote>
+  ),
+  pre: ({ children }) => (
+    <pre className="my-1 whitespace-pre-wrap rounded-[6px] bg-sink px-2 py-1 [&_code]:bg-transparent [&_code]:p-0">
+      {children}
+    </pre>
+  ),
+};
+
+function CompactHeading({ children }: { children?: ReactNode }) {
+  return <p className="my-1 font-medium text-ink-2 first:mt-0">{children}</p>;
+}
+
 export function MarkdownRenderer({
+  onOpenPage,
+  ...props
+}: MarkdownRendererProps) {
+  if (onOpenPage) {
+    return <MarkdownBody {...props} openPage={(path) => onOpenPage(path)} />;
+  }
+  return <RoutedMarkdownRenderer {...props} />;
+}
+
+function RoutedMarkdownRenderer(props: BaseProps) {
+  const openTab = useOpenTab();
+  return (
+    <MarkdownBody
+      {...props}
+      openPage={(...args) => openTab("page", ...args)}
+      markDangling
+    />
+  );
+}
+
+type BaseProps = Omit<MarkdownRendererProps, "onOpenPage">;
+
+type MarkdownBodyProps = BaseProps & {
+  openPage: OpenPage;
+  markDangling?: boolean;
+};
+
+function MarkdownBody({
   content,
   restricted = false,
   pagePath,
   attachmentPaths,
-}: MarkdownRendererProps) {
-  const openTab = useOpenTab();
-
+  compact = false,
+  openPage,
+  markDangling = false,
+}: MarkdownBodyProps) {
   return (
     <Markdown
       remarkPlugins={remarkPlugins}
@@ -146,7 +216,13 @@ export function MarkdownRenderer({
           const target = wikilinkTarget(node);
           if (target !== null) {
             return (
-              <RenderedWikilink target={target}>{children}</RenderedWikilink>
+              <RenderedWikilink
+                target={target}
+                onOpen={openPage}
+                markDangling={markDangling}
+              >
+                {children}
+              </RenderedWikilink>
             );
           }
           const blockId = href ? blockIdFromHref(href) : null;
@@ -155,11 +231,12 @@ export function MarkdownRenderer({
               <BlockTransclusion
                 blockId={blockId}
                 onOpenSource={(block) => {
-                  openTab(
-                    "page",
+                  openPage(
                     block.page_path,
                     block.page_title || block.page_path,
-                    { blockId },
+                    {
+                      blockId,
+                    },
                   );
                 }}
               />
@@ -176,7 +253,7 @@ export function MarkdownRenderer({
                 href={href}
                 onClick={(e) => {
                   e.preventDefault();
-                  openTab("page", pagePath);
+                  openPage(pagePath);
                 }}
                 className="underline decoration-1 underline-offset-2 hover:decoration-2"
                 data-link-resource="wikilink"
@@ -267,6 +344,7 @@ export function MarkdownRenderer({
             {children}
           </blockquote>
         ),
+        ...(compact ? compactComponents : {}),
       }}
     >
       {content}

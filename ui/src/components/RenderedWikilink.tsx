@@ -10,7 +10,6 @@ import {
   wikilinkPageName,
 } from "#/editor/useResolveWikilinkTarget";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
-import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { pageHref } from "#/lib/markdown/wikilinks";
@@ -19,6 +18,14 @@ interface RenderedWikilinkProps {
   /** Raw wikilink target, e.g. `Target` or `Target#Heading`. */
   target: string;
   children?: ReactNode;
+  /** Opens the resolved page. */
+  onOpen: (path: string, label: string) => void;
+  /**
+   * Style an unresolved link as dangling (mute, italic). Turn off where no
+   * WikilinkResolutionProvider surrounds the link, so every lookup misses
+   * and dangling styling would mislabel real pages.
+   */
+  markDangling?: boolean;
 }
 
 /**
@@ -29,10 +36,14 @@ interface RenderedWikilinkProps {
  * page by path or file stem would otherwise create a duplicate. Without a
  * provider every lookup misses, and the click still resolves through search.
  */
-export function RenderedWikilink({ target, children }: RenderedWikilinkProps) {
+export function RenderedWikilink({
+  target,
+  children,
+  onOpen,
+  markDangling = true,
+}: RenderedWikilinkProps) {
   const { lookup } = useWikilinkResolution();
   const { resolve } = useResolveWikilinkTarget();
-  const openTab = useOpenTab();
   // Guards against double-fire while resolution is in flight.
   const inFlightRef = useRef(false);
   const resolved = lookup(target);
@@ -41,14 +52,14 @@ export function RenderedWikilink({ target, children }: RenderedWikilinkProps) {
   const handleClick = async (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     if (resolved) {
-      openTab("page", resolved, label);
+      onOpen(resolved, label);
       return;
     }
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     try {
       const found = await resolve(target);
-      if (found) openTab("page", found.path, label);
+      if (found) onOpen(found.path, label);
       else toast.error(`No page named “${label}”`);
     } catch {
       toast.error(`Could not look up “${label}”`);
@@ -62,7 +73,8 @@ export function RenderedWikilink({ target, children }: RenderedWikilinkProps) {
     FOCUS_RING_NATIVE,
     // Resolved links read as links; a missing page reads mute and italic,
     // as in the editor.
-    resolved ? undefined : "cursor-pointer italic text-mute",
+    resolved ? undefined : "cursor-pointer",
+    !resolved && markDangling && "italic text-mute",
   );
 
   if (resolved) {

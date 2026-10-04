@@ -19,6 +19,7 @@ use crate::vault::path::VaultPath;
 use crate::vault::query::body_excerpt;
 
 use super::blockers::{blocks_index, is_blocked, load_task_nodes, task_nodes_from};
+use super::description::task_description;
 use super::{
     BoardColumn, BoardCycle, BoardOperation, BoardResponse, BoardTask, COLUMNS, extra_str,
     path_stem,
@@ -366,6 +367,7 @@ pub(super) async fn build_board_task_dto(
                 code: code_str,
                 title: task_title,
                 body_excerpt: body.as_deref().map(body_excerpt),
+                description: body.as_deref().and_then(task_description),
                 project,
                 status,
                 priority,
@@ -545,6 +547,7 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
                 code,
                 title: task_title,
                 body_excerpt: body.as_deref().map(body_excerpt),
+                description: body.as_deref().and_then(task_description),
                 project,
                 status,
                 priority,

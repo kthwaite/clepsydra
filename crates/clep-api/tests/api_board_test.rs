@@ -316,6 +316,59 @@ async fn board_projects_bounded_body_excerpts_in_bulk_and_mutation_read_back() {
 }
 
 #[tokio::test]
+async fn board_description_is_body_markdown_without_counted_checklist_items() {
+    const PROSE_ID: &str = "01951234-0000-7000-8000-000000000121";
+    const CHECKS_ONLY_ID: &str = "01951234-0000-7000-8000-000000000122";
+
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0121.md"),
+            format!(
+                "---\nid: {PROSE_ID}\ntitle: Prose task\ntype: TASK\n---\n\
+                 Ship **the thing** per [[Design Note]].\n\n\
+                 - [x] draft\n- [ ] review\n\n\
+                 - context bullet\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0122.md"),
+            format!(
+                "---\nid: {CHECKS_ONLY_ID}\ntitle: Checks only\ntype: TASK\n---\n\
+                 - [ ] one\n- [x] two\n"
+            ),
+        )
+        .unwrap();
+    });
+
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    let task = |id: &str| {
+        tasks
+            .iter()
+            .find(|task| task["id"] == id)
+            .unwrap_or_else(|| panic!("missing task {id}"))
+    };
+
+    let prose = task(PROSE_ID);
+    assert_eq!(prose["checks"], serde_json::json!([1, 2]));
+    let description = prose["description"].as_str().unwrap();
+    assert_eq!(
+        description,
+        "Ship **the thing** per [[Design Note]].\n\n- context bullet"
+    );
+    assert!(task(CHECKS_ONLY_ID)["description"].is_null());
+
+    let mutation: serde_json::Value = server
+        .patch(&format!("/api/vault/board/tasks/{PROSE_ID}"))
+        .json(&serde_json::json!({ "title": "Prose task renamed" }))
+        .await
+        .json();
+    assert_eq!(mutation["description"], description);
+}
+
+#[tokio::test]
 async fn checklist_counts_preserve_checkbox_semantics_across_tasks() {
     let (server, _tmp) = setup_server_with(|root| {
         std::fs::create_dir_all(root.join("tasks")).unwrap();

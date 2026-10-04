@@ -10,6 +10,7 @@
 
 pub(crate) mod blockers;
 pub(crate) mod cycles;
+pub(crate) mod description;
 pub(crate) mod read;
 pub(crate) mod task_patch;
 pub(crate) mod tasks;
@@ -119,6 +120,10 @@ pub struct BoardTask {
     pub title: String,
     #[schema(required = true)]
     pub body_excerpt: Option<String>,
+    /// The page body as markdown, minus the checklist items counted in
+    /// `checks`, capped at a block boundary (~1500 chars); `null` when
+    /// nothing is left.
+    pub description: Option<String>,
     pub project: Option<String>,
     pub status: String,
     pub priority: String,

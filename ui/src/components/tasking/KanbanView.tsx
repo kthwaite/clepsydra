@@ -8,6 +8,7 @@
  * - Column header + button → openTaskModal({ status }) preset.
  * - Card click → setEditTaskId(task.id).
  * - Dossier link click → onOpenDossier prop (stopPropagation internally).
+ * - Description link click → onOpenPage prop.
  * - A drop into In Progress goes through useStartWarning: a task with open
  *   Blockers asks first.
  */
@@ -238,6 +239,8 @@ export interface KanbanViewProps {
    */
   activeProject?: string;
   onOpenDossier?: (link: string) => void;
+  /** Opens a page linked from a card description. */
+  onOpenPage?: (path: string) => void;
   /** Resolves a column id to its server-supplied display label. */
   colLabel: ColLabelFn;
 }
@@ -250,6 +253,7 @@ export function KanbanView({
   showOp,
   activeProject,
   onOpenDossier,
+  onOpenPage,
   colLabel,
 }: KanbanViewProps) {
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
@@ -366,6 +370,7 @@ export function KanbanView({
                     showOp={showOp}
                     onClick={() => setEditTaskId(t.id)}
                     onOpenDossier={onOpenDossier}
+                    onOpenPage={onOpenPage}
                     colLabel={colLabel}
                     taskByCode={taskByCode}
                   />

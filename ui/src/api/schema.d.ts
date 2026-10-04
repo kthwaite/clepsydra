@@ -2358,6 +2358,12 @@ export interface components {
       checks: number[];
       code: string;
       cycle?: string | null;
+      /**
+       * @description The page body as markdown, minus the checklist items counted in
+       *     `checks`, capped at a block boundary (~1500 chars); `null` when
+       *     nothing is left.
+       */
+      description?: string | null;
       due?: string | null;
       estimate?: string | null;
       hold?: string | null;

@@ -8,6 +8,7 @@
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { useEffect, useRef, useState } from "react";
 import type { BoardTask } from "#/api/board";
+import { MarkdownRenderer } from "#/components/MarkdownRenderer";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useBoardStore } from "#/store/board";
@@ -26,6 +27,8 @@ export interface TaskCardProps {
   /** Opens the task editor from card click/keyboard activation. */
   onClick: () => void;
   onOpenDossier?: (link: string) => void;
+  /** Opens a page linked from the description. */
+  onOpenPage?: (path: string) => void;
   /** Resolves a column id to its server-supplied display label. */
   colLabel: ColLabelFn;
   /** Every board task by code: resolves blocker chips. */
@@ -37,6 +40,7 @@ export function TaskCard({
   showOp,
   onClick,
   onOpenDossier,
+  onOpenPage,
   colLabel,
   taskByCode,
 }: TaskCardProps) {
@@ -151,13 +155,21 @@ export function TaskCard({
         {t.title}
       </div>
 
-      {t.body_excerpt && (
-        <p
-          className="mt-1.5 line-clamp-2 break-words text-[13px] leading-[1.45] text-mute"
-          data-testid={`task-excerpt-${t.id}`}
-        >
-          {t.body_excerpt}
-        </p>
+      {t.description ? (
+        <TaskDescription
+          id={t.id}
+          markdown={t.description}
+          onOpenPage={onOpenPage}
+        />
+      ) : (
+        t.body_excerpt && (
+          <p
+            className="mt-1.5 line-clamp-2 break-words text-[13px] leading-[1.45] text-mute"
+            data-testid={`task-excerpt-${t.id}`}
+          >
+            {t.body_excerpt}
+          </p>
+        )
       )}
 
       {/* Hold reason line */}
@@ -257,6 +269,43 @@ export function TaskCard({
           Due {t.due ?? "—"}
         </span>
       </div>
+    </div>
+  );
+}
+
+/** No-op for links when the board has no page opener. */
+const IGNORE_PAGE = () => {};
+
+/**
+ * The page body as compact markdown, clamped to about four lines with a fade
+ * over the last one. The card is pointer-transparent; only its links take
+ * pointer events. A link stops its click and pointerdown here, so neither
+ * the card editor nor a drag reacts to it.
+ */
+function TaskDescription({
+  id,
+  markdown,
+  onOpenPage,
+}: {
+  id: string;
+  markdown: string;
+  onOpenPage?: (path: string) => void;
+}) {
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: only stops link events bubbling to the card
+    // biome-ignore lint/a11y/useKeyWithClickEvents: links inside handle their own keys
+    <div
+      className="mt-1.5 max-h-[5.8em] overflow-hidden break-words text-[13px] leading-[1.45] text-mute [mask-image:linear-gradient(to_bottom,black_4.35em,transparent_5.8em)] [&_a]:pointer-events-auto [&_a]:relative [&_a]:z-[1] [&_a]:text-ink-2"
+      data-testid={`task-excerpt-${id}`}
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <MarkdownRenderer
+        content={markdown}
+        restricted
+        compact
+        onOpenPage={onOpenPage ?? IGNORE_PAGE}
+      />
     </div>
   );
 }
