@@ -438,6 +438,9 @@ pub struct TaskCreateParams {
     pub body: Option<String>,
     /// Checklist Items; each becomes a `- [ ]` Todo in the Task page body.
     pub checklist: Option<Vec<String>>,
+    /// Blockers: the Tasks this Task waits on, as TSK codes or unique
+    /// prefixes. Stored as `[[CODE]]` wikilinks. Absent = none.
+    pub blocked_by: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -492,6 +495,12 @@ pub struct TaskUpdateParams {
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     #[schemars(with = "Option<String>")]
     pub link: Option<Option<String>>,
+    /// Blockers: replaces the whole list of Tasks this Task waits on (TSK
+    /// codes or unique prefixes). Absent = keep, null or [] = clear, a list =
+    /// set. Unknown codes, the Task itself, and cycles are refused.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    #[schemars(with = "Option<Vec<String>>")]
+    pub blocked_by: Option<Option<Vec<String>>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1288,7 +1297,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_board",
-        description = "Orient on the Task Board: Inbox (INTAKE) → Ready (TRIAGE) → In Progress (FIELD) → Review (REVIEW) → Done (SEALED). Returns Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field. Codes are server-minted petnames (`TSK-<adjective>-<noun>-<tail>` / `S-<adjective>-<noun>-<tail>`); any unique prefix of one addresses the page elsewhere. Legacy `columns[].label`/`columns[].sub` pairs are INTAKE/unfiled, TRIAGE/staged, IN-FIELD/active, REVIEW/qa / seal, and SEALED/closed; derive display labels from the column status ID instead. `tasks[].checks` is [done, total] Checklist Item counts. `tasks[].link` and `operations[].dossier` are Related Page values. Look up Task and Cycle codes here before updates. Optional `project` filters Tasks and operations to that exact Project; columns and Cycles remain complete.",
+        description = "Orient on the Task Board: Inbox (INTAKE) → Ready (TRIAGE) → In Progress (FIELD) → Review (REVIEW) → Done (SEALED). Returns Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field. Codes are server-minted petnames (`TSK-<adjective>-<noun>-<tail>` / `S-<adjective>-<noun>-<tail>`); any unique prefix of one addresses the page elsewhere. Legacy `columns[].label`/`columns[].sub` pairs are INTAKE/unfiled, TRIAGE/staged, IN-FIELD/active, REVIEW/qa / seal, and SEALED/closed; derive display labels from the column status ID instead. `tasks[].checks` is [done, total] Checklist Item counts. `tasks[].link` and `operations[].dossier` are Related Page values. `tasks[].blocked_by` lists a Task's Blockers (codes), `tasks[].blocks` the Tasks waiting on it, and `tasks[].blocked` is true when `hold` is set or any Blocker is not Done (SEALED). Look up Task and Cycle codes here before updates. Optional `project` filters Tasks and operations to that exact Project; columns and Cycles remain complete.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1312,7 +1321,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_create",
-        description = "Create a Task on the Task Board — preferred over vault_create_page because it mints a TSK-<adjective>-<noun>-<tail> code (the server assigns it; never invent one) and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); `task_type` is optional and one of FEATURE, FIX, TASK, STORY, SPIKE; a Cycle must match an existing code or unique prefix of one (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
+        description = "Create a Task on the Task Board — preferred over vault_create_page because it mints a TSK-<adjective>-<noun>-<tail> code (the server assigns it; never invent one) and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); `task_type` is optional and one of FEATURE, FIX, TASK, STORY, SPIKE; a Cycle must match an existing code or unique prefix of one (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. `blocked_by` lists its Blockers (the Tasks it waits on) as TSK codes or unique prefixes. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1341,6 +1350,7 @@ impl VaultMcpServer {
             "tags": params.tags,
             "body": params.body,
             "checklist": params.checklist,
+            "blocked_by": params.blocked_by,
         });
         let value = self
             .client
@@ -1352,7 +1362,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_update",
-        description = "Update a Task on the Task Board, addressed by TSK code (or any unique prefix of one, matched case-insensitively), vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, `task_type`, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle; `task_type` is one of FEATURE, FIX, TASK, STORY, SPIKE. A non-empty `hold` wire value means Blocked; `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED). `project` must name an existing Project (a PROJECT page declaring that slug); unknown slugs are refused.",
+        description = "Update a Task on the Task Board, addressed by TSK code (or any unique prefix of one, matched case-insensitively), vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, `task_type`, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle; `task_type` is one of FEATURE, FIX, TASK, STORY, SPIKE. `blocked_by` replaces the whole Blocker list (TSK codes or unique prefixes): absent = keep, null or [] = clear, a list = set; unknown codes, the Task itself, and cycles are refused. A Task is Blocked when `hold` is non-empty or any Blocker is not Done (SEALED); `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED). `project` must name an existing Project (a PROJECT page declaring that slug); unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1388,6 +1398,15 @@ impl VaultMcpServer {
         insert_tri_state(&mut patch_body, "due", params.due);
         insert_tri_state(&mut patch_body, "hold", params.hold);
         insert_tri_state(&mut patch_body, "link", params.link);
+        match params.blocked_by {
+            None => {}
+            Some(None) => {
+                patch_body.insert("blocked_by".to_string(), Value::Null);
+            }
+            Some(Some(codes)) => {
+                patch_body.insert("blocked_by".to_string(), serde_json::json!(codes));
+            }
+        }
         if patch_body.is_empty() {
             return Err("nothing to update — provide at least one field to change".to_string());
         }
@@ -3392,6 +3411,39 @@ mod tests {
         assert_eq!(params.due, None, "absent keeps");
         assert_eq!(params.hold, None, "absent keeps");
         assert_eq!(params.link, None, "absent keeps");
+        assert_eq!(params.blocked_by, None, "absent keeps");
+
+        let params: TaskUpdateParams =
+            serde_json::from_value(json!({ "task": "TSK-0001", "blocked_by": null })).unwrap();
+        assert_eq!(params.blocked_by, Some(None), "null clears");
+        let params: TaskUpdateParams =
+            serde_json::from_value(json!({ "task": "TSK-0001", "blocked_by": ["TSK-a"] })).unwrap();
+        assert_eq!(
+            params.blocked_by,
+            Some(Some(vec!["TSK-a".to_string()])),
+            "list sets"
+        );
+    }
+
+    #[test]
+    fn task_tool_descriptions_cover_blockers() {
+        let tools = VaultMcpServer::tool_router().list_all();
+        let description = |name: &str| {
+            tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .and_then(|tool| tool.description.as_deref())
+                .unwrap_or_else(|| panic!("{name} should have a description"))
+                .to_string()
+        };
+        assert!(description("vault_task_create").contains("blocked_by"));
+        let update = description("vault_task_update");
+        assert!(update.contains("blocked_by"), "{update}");
+        assert!(update.contains("cycles"), "{update}");
+        let board = description("vault_board");
+        for field in ["tasks[].blocked_by", "tasks[].blocks", "tasks[].blocked"] {
+            assert!(board.contains(field), "vault_board should describe {field}");
+        }
     }
 
     #[test]
@@ -3582,6 +3634,7 @@ mod tests {
             tags: None,
             body: None,
             checklist: None,
+            blocked_by: None,
         }
     }
 
@@ -3601,6 +3654,7 @@ mod tests {
             due: None,
             hold: None,
             link: None,
+            blocked_by: None,
         }
     }
 
@@ -3769,6 +3823,87 @@ mod tests {
                 .await,
         );
         assert_eq!(value["task_type"], Value::Null, "{value}");
+    }
+
+    #[tokio::test]
+    async fn task_create_and_update_carry_blockers() {
+        let (server, _tmp) = serve_board_vault().await;
+        let blocker = parse(
+            server
+                .vault_task_create(Parameters(task_create_params("Blocker")))
+                .await,
+        );
+        let blocker_code = blocker["code"].as_str().unwrap().to_string();
+        let created = parse(
+            server
+                .vault_task_create(Parameters(TaskCreateParams {
+                    blocked_by: Some(vec![blocker_code.clone()]),
+                    ..task_create_params("Waiting")
+                }))
+                .await,
+        );
+        assert_eq!(created["blocked_by"], json!([blocker_code]), "{created}");
+        assert_eq!(created["blocked"], true, "{created}");
+        let code = created["code"].as_str().unwrap().to_string();
+
+        let value = parse(
+            server
+                .vault_task_update(Parameters(TaskUpdateParams {
+                    title: Some("Renamed".to_string()),
+                    ..task_update_params(&code)
+                }))
+                .await,
+        );
+        assert_eq!(value["blocked_by"], json!([blocker_code]), "absent keeps");
+
+        let value = parse(
+            server
+                .vault_task_update(Parameters(TaskUpdateParams {
+                    blocked_by: Some(None),
+                    ..task_update_params(&code)
+                }))
+                .await,
+        );
+        assert_eq!(value["blocked_by"], json!([]), "null clears: {value}");
+
+        let value = parse(
+            server
+                .vault_task_update(Parameters(TaskUpdateParams {
+                    blocked_by: Some(Some(vec![blocker_code.clone()])),
+                    ..task_update_params(&code)
+                }))
+                .await,
+        );
+        assert_eq!(value["blocked_by"], json!([blocker_code]), "list sets");
+
+        let value = parse(
+            server
+                .vault_task_update(Parameters(TaskUpdateParams {
+                    blocked_by: Some(Some(vec![])),
+                    ..task_update_params(&code)
+                }))
+                .await,
+        );
+        assert_eq!(value["blocked_by"], json!([]), "[] clears: {value}");
+
+        // The reverse edge would close a cycle: refused.
+        server
+            .vault_task_update(Parameters(TaskUpdateParams {
+                blocked_by: Some(Some(vec![blocker_code.clone()])),
+                ..task_update_params(&code)
+            }))
+            .await
+            .unwrap();
+        let refused = server
+            .vault_task_update(Parameters(TaskUpdateParams {
+                blocked_by: Some(Some(vec![code.clone()])),
+                ..task_update_params(&blocker_code)
+            }))
+            .await;
+        assert!(
+            refused.as_ref().is_err_and(|error| error.contains("cycle")),
+            "{refused:?}"
+        );
     }
 
     #[tokio::test]

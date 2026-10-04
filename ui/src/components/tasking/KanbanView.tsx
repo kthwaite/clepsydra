@@ -8,6 +8,8 @@
  * - Column header + button → openTaskModal({ status }) preset.
  * - Card click → setEditTaskId(task.id).
  * - Dossier link click → onOpenDossier prop (stopPropagation internally).
+ * - A drop into In Progress goes through useStartWarning: a task with open
+ *   Blockers asks first.
  */
 
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -30,8 +32,10 @@ import {
   useBoardStore,
 } from "#/store/board";
 import { Tick } from "../codex/Tick";
+import { indexByCode } from "./blockers";
 import { type ColLabelFn, PRI_ORDER } from "./board-constants";
 import { QuickAddRow } from "./QuickAddRow";
+import { useStartWarning } from "./StartWarning";
 import { TaskCard } from "./TaskCard";
 
 // ── sealed-cycle filter (Decision 8) ─────────────────────────────────────────
@@ -219,6 +223,11 @@ function KanbanDropColumn({
 export interface KanbanViewProps {
   columns: BoardColumn[];
   tasks: BoardTask[];
+  /**
+   * Every board task, before filters: resolves blocker chips. Defaults to
+   * `tasks`.
+   */
+  boardTasks?: BoardTask[];
   cycles: BoardCycle[];
   /** Whether ALL ops are showing (drives showOp on cards) */
   showOp: boolean;
@@ -236,6 +245,7 @@ export interface KanbanViewProps {
 export function KanbanView({
   columns,
   tasks,
+  boardTasks = tasks,
   cycles,
   showOp,
   activeProject,
@@ -246,11 +256,21 @@ export function KanbanView({
   const openTaskModal = useBoardStore((s) => s.openTaskModal);
 
   const { mutate: patchTask } = usePatchTask();
+  const { guard: guardStart, dialog: startWarningDialog } = useStartWarning();
+  // A ref keeps moveTask stable, so drop targets don't re-register on every
+  // board change.
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
   const moveTask = useCallback(
-    (taskId: string, status: string) =>
-      patchTask({ id: taskId, patch: { status } }),
-    [patchTask],
+    (taskId: string, status: string) => {
+      const task = tasksRef.current.find((t) => t.id === taskId);
+      const commit = () => patchTask({ id: taskId, patch: { status } });
+      if (task) guardStart(task, status, commit);
+      else commit();
+    },
+    [patchTask, guardStart],
   );
+  const taskByCode = useMemo(() => indexByCode(boardTasks), [boardTasks]);
 
   const visible = useMemo(
     () => visibleInKanban(tasks, cycles),
@@ -263,6 +283,7 @@ export function KanbanView({
 
   return (
     <div className="flex h-full min-h-0 gap-3 overflow-x-auto overflow-y-hidden px-3">
+      {startWarningDialog}
       {columns.map((col) => {
         const items = visible
           .filter((t) => t.status === col.id)
@@ -346,6 +367,7 @@ export function KanbanView({
                     onClick={() => setEditTaskId(t.id)}
                     onOpenDossier={onOpenDossier}
                     colLabel={colLabel}
+                    taskByCode={taskByCode}
                   />
                 ))
               )}

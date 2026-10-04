@@ -42,6 +42,9 @@ function freshQueryClient(): QueryClient {
 
 function makeTask(overrides: Partial<BoardTask> = {}): BoardTask {
   return {
+    blocked_by: [],
+    blocks: [],
+    blocked: false,
     id: "task-1",
     code: "T-1",
     title: "Test task",
@@ -187,6 +190,48 @@ describe("applyTaskPatch", () => {
   });
 });
 
+describe("applyTaskPatch — blockers", () => {
+  const blocker = makeTask({ id: "b", code: "B", status: "REVIEW" });
+  const waiter = makeTask({ id: "w", code: "W" });
+
+  it("replaces blocked_by and re-derives blocked and the inverse blocks", () => {
+    const result = applyTaskPatch(makeBoard([blocker, waiter]), "w", {
+      blocked_by: ["B"],
+    });
+    const [b, w] = result.tasks;
+    expect(w.blocked_by).toEqual(["B"]);
+    expect(w.blocked).toBe(true);
+    expect(b.blocks).toEqual(["W"]);
+  });
+
+  it("clears blocked_by with null", () => {
+    const linked = makeBoard([
+      { ...blocker, blocks: ["W"] },
+      { ...waiter, blocked_by: ["B"], blocked: true },
+    ]);
+    const result = applyTaskPatch(linked, "w", { blocked_by: null });
+    expect(result.tasks[1].blocked_by).toEqual([]);
+    expect(result.tasks[1].blocked).toBe(false);
+    expect(result.tasks[0].blocks).toEqual([]);
+  });
+
+  it("unblocks the waiter when its blocker is sealed", () => {
+    const linked = makeBoard([
+      { ...blocker, blocks: ["W"] },
+      { ...waiter, blocked_by: ["B"], blocked: true },
+    ]);
+    const result = applyTaskPatch(linked, "b", { status: "SEALED" });
+    expect(result.tasks[1].blocked).toBe(false);
+  });
+
+  it("keeps a task blocked by hold alone", () => {
+    const result = applyTaskPatch(makeBoard([waiter]), "w", {
+      hold: "waiting",
+    });
+    expect(result.tasks[0].blocked).toBe(true);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Mutation Error Toast Tests
 // ---------------------------------------------------------------------------
@@ -252,6 +297,22 @@ describe("Board mutations", () => {
         queryKey: queryKeys.agenda.all,
       });
     });
+  });
+
+  it("rejects with the server's error message on a 400", async () => {
+    const queryClient = freshQueryClient();
+    vi.spyOn(global, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ status: 400, error: "blocker cycle: A → B → A" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const { result } = renderHook(() => usePatchTask(), {
+      wrapper: wrapper(queryClient),
+    });
+    await expect(
+      result.current.mutateAsync({ id: "task-1", patch: { blocked_by: [] } }),
+    ).rejects.toThrow("blocker cycle: A → B → A");
   });
 
   it("toasts when create task fails", async () => {

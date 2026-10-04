@@ -312,8 +312,8 @@ export function TimelineView({
               {g.items.map(({ task: t, s, e }) => {
                 const l = pct(s, displayWindow);
                 const w = Math.max(2.5, pct(e, displayWindow) - l);
-                const hold = !!t.hold;
-                const label = hold ? "Hold" : colLabel(t.status);
+                const hold = t.blocked;
+                const label = hold ? "Blocked" : colLabel(t.status);
                 const inside = (e - s) / DAY_MS >= INSIDE_LABEL_MIN_DAYS;
                 const priBar = priColor(t.priority).bar;
 

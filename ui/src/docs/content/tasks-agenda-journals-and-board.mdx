@@ -219,7 +219,7 @@ Type, Cycle, dates, and optional Description and Checklist. Type defaults to
 **None**; pick Feature, Fix, Task, Story, or Spike to classify the Task. The Description becomes
 the opening prose in the Task page, above the Checklist, and appears beneath
 the title on Board cards. Mark a Task **Blocked** and add a blocker reason when
-it cannot proceed.
+it cannot proceed, or link the Tasks it waits on as Blockers (see below).
 
 The Task Board has four views:
 
@@ -230,8 +230,12 @@ The Task Board has four views:
   status: cobalt for In Progress, hot for Review, faint for Inbox and Done.
   A typed Task shows its type (`FIX`, `FEATURE`, …) in a small chip after the
   priority; `FIX` is hot, the rest muted. List and Cycles rows show the same
-  chip. Done cards have no fill. A blocked Task shows a **Blocked** pill and its
-  reason.
+  chip. Done cards have no fill. A blocked Task (an open Blocker or a hold)
+  shows a **Blocked** pill, and its reason when it has a hold. A card lists
+  each open Blocker as a **blocked by** chip; with more than two, it shows
+  the first and a **+N** count. A Blocker code with no Task on the board is
+  struck through. Choose a **blocked by** chip to open that Task in the
+  editor. A Task that others wait on shows a **blocks N** chip.
 - **List** groups Tasks by **Critical**, **High**, **Medium**, and **Low**
   priority. List hides Done (`SEALED`) Tasks by default; the **Show N
   completed** / **Hide completed** toggle beside the view tabs reveals them,
@@ -243,6 +247,8 @@ The Task Board has four views:
 
 The compact toolbar keeps search and view switching above the cards. Open
 **Filters** for Project, Tags, priority, Type, status, and Blocked facets.
+The Blocked facet, the header count, and the Cycle count all use the same rule:
+an open Blocker or a hold.
 The Type facet's **Untyped** option matches Tasks with no type. Its badge
 counts active facets. **Details** holds Project metadata, active Cycle progress,
 and the 14-day completion history without reducing the board's working height.
@@ -253,6 +259,19 @@ beside the board, so you can select another card without closing the editor.
 On narrower workspaces it overlays the right edge. Its fields scroll separately
 from the cards; **Close** or Escape closes it. Pending edits are saved when
 closing or switching cards. **Open page** opens the Task's full body and Checklist.
+
+The editor's **Blocked by** and **Blocks** fields list linked Tasks as chips.
+Choose a chip to open that Task; choose its remove button to unlink it. Type a
+code or title in the field's search box to link another board Task. **Blocked
+by** saves this Task's Blockers. **Blocks** saves the other Task's Blockers,
+because only the waiting Task stores the link. When the server rejects a
+change, such as a link that would make a cycle, its message shows under the
+field and nothing is saved.
+
+Moving a Task with open Blockers to **In Progress** asks first. This applies to
+a drag to the In Progress column, the status chip, and the editor's Status
+row. The dialog lists the open Blockers. **Start anyway** moves the Task;
+**Cancel** leaves its status unchanged.
 
 Project labels use the page title rather than its generated filename. Drag the
 Scope rail's right edge to resize it, or focus that edge and use the arrow keys
@@ -312,8 +331,20 @@ Cycle Markdown, or calling the API, use these persisted values:
   (`cycle`, `assignee`, `estimate`, `task_type`, `due`, `start`, `hold`,
   `link`) clears it, the same as `null`; on create (which has no `hold`) it
   means the field is not set.
-- Blocked is represented by a non-empty `hold` value; clearing `hold` removes
-  the Blocked condition.
+- Task `blocked_by` (optional): the Task's Blockers, as a list of wikilinks
+  to their codes, for example `blocked_by = ["[[TSK-brave-finch-7q3zd]]"]`.
+  Only the waiting Task stores the list. Each entry is a backlink on the
+  Blocker's page, and moving or recoding a Blocker rewrites it. Over the API,
+  `blocked_by` replaces the whole list: absent keeps it, `null` or `[]` clears
+  it, and each entry may be a code, a unique prefix, or `[[CODE]]`. The API
+  rejects an unknown or ambiguous code, the Task itself, and a list that would
+  close a cycle.
+- A Task is Blocked when any Blocker is not Done (`SEALED`) or `hold` is
+  non-empty. `hold` stays the free-text blocker reason. A Blocker that reaches
+  Done stops blocking, and a Blocker page that no longer exists does not
+  block. The board API returns `blocked_by`, the derived `blocks` (the Tasks
+  waiting on this one), and the derived `blocked` flag; none of the derived
+  values are stored.
 - When closing a Cycle through the API, `carry_to: "BACKLOG"` moves unfinished
   Tasks to Backlog, a Cycle code reassigns them, and omitting `carry_to` leaves
   them in place. Tasks whose status is `SEALED` are never carried.

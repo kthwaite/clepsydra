@@ -15,10 +15,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BoardTask } from "#/api/board";
+import { queryKeys } from "#/api/keys";
 import { InlineEditPopover } from "../InlineEditPopover";
-import { FIXTURE_COL_LABEL } from "./fixtures";
+import { BOARD_FIXTURE, FIXTURE_COL_LABEL } from "./fixtures";
 
 const TASK: BoardTask = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "t-inline",
   code: "TSK-0100",
   title: "Inline Task",
@@ -252,5 +256,45 @@ describe("InlineEditPopover — stacking", () => {
     // higher) would paint the chip over the sticky rows as they scroll past.
     expect(trigger.className).not.toMatch(/\bz-(?:10|20|30|40|50)\b/);
     expect(trigger.className).toContain("z-[1]");
+  });
+});
+
+describe("InlineEditPopover — start warning", () => {
+  it("asks before starting a task with an open blocker", async () => {
+    const stub = makeStub();
+    vi.stubGlobal("fetch", stub);
+    const user = userEvent.setup();
+    // TSK-0001 (t1) is In Progress in the fixture: an open blocker.
+    const waiter: BoardTask = { ...TASK, blocked_by: ["TSK-0001"] };
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    qc.setQueryData(queryKeys.board.all, {
+      ...BOARD_FIXTURE,
+      tasks: [...BOARD_FIXTURE.tasks, waiter],
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <InlineEditPopover
+          task={waiter}
+          field="status"
+          testIdPrefix="kb"
+          colLabel={FIXTURE_COL_LABEL}
+        >
+          <span>pip</span>
+        </InlineEditPopover>
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByTestId(`kb-inline-status-${TASK.id}`));
+    await user.click(screen.getByTestId("inline-status-FIELD"));
+
+    expect(await screen.findByTestId("start-warning")).toBeInTheDocument();
+    expect(patchCallsFrom(stub)).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "Start anyway" }));
+    await waitFor(() => expect(patchCallsFrom(stub)).toHaveLength(1));
+    expect(patchCallsFrom(stub)[0][1]).toEqual(
+      expect.objectContaining({ body: JSON.stringify({ status: "FIELD" }) }),
+    );
   });
 });

@@ -1134,6 +1134,232 @@ async fn board_task_type_is_null_when_absent_and_passes_unknown_values_through()
 }
 
 // ---------------------------------------------------------------------------
+// blocked_by — Blocker links, derived blocks/blocked, cycle check
+// ---------------------------------------------------------------------------
+
+/// Create a Task over the API and return its response body.
+async fn create_task(server: &TestServer, body: serde_json::Value) -> serde_json::Value {
+    let res = server.post("/api/vault/board/tasks").json(&body).await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+    res.json()
+}
+
+fn board_task<'a>(board: &'a serde_json::Value, code: &str) -> &'a serde_json::Value {
+    board["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["code"] == code)
+        .unwrap_or_else(|| panic!("{code} on the board: {board}"))
+}
+
+#[tokio::test]
+async fn blocked_by_round_trips_through_create_patch_and_board() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let blocker = create_task(&server, serde_json::json!({ "title": "Blocker" })).await;
+    let blocker_code = blocker["code"].as_str().unwrap().to_string();
+    let blocker_id = blocker["id"].as_str().unwrap().to_string();
+    assert_eq!(blocker["blocked_by"], serde_json::json!([]), "{blocker}");
+    assert_eq!(blocker["blocked"], false, "{blocker}");
+
+    // Create blocked by a unique prefix of the Blocker's code.
+    let prefix = &blocker_code[..blocker_code.len() - 2];
+    let waiting = create_task(
+        &server,
+        serde_json::json!({ "title": "Waiting", "blocked_by": [prefix] }),
+    )
+    .await;
+    let waiting_code = waiting["code"].as_str().unwrap().to_string();
+    let waiting_id = waiting["id"].as_str().unwrap().to_string();
+    assert_eq!(waiting["blocked_by"], serde_json::json!([blocker_code]));
+    assert_eq!(waiting["blocked"], true, "open blocker: {waiting}");
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{waiting_code}.md"))).unwrap();
+    assert!(
+        content.contains(&format!("blocked_by = [\"[[{blocker_code}]]\"]")),
+        "stored as a canonical wikilink:\n{content}"
+    );
+
+    // The Blocker's DTO and the board both derive the inverse.
+    let res = server
+        .patch(&format!("/api/vault/board/tasks/{blocker_id}"))
+        .json(&serde_json::json!({ "title": "Blocker!" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["blocks"], serde_json::json!([waiting_code]), "{body}");
+
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    assert_eq!(
+        board_task(&board, &blocker_code)["blocks"],
+        serde_json::json!([waiting_code])
+    );
+    assert_eq!(board_task(&board, &waiting_code)["blocked"], true);
+
+    // Sealing the Blocker stops it blocking.
+    server
+        .patch(&format!("/api/vault/board/tasks/{blocker_id}"))
+        .json(&serde_json::json!({ "status": "SEALED" }))
+        .await
+        .assert_status_ok();
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    let waiting = board_task(&board, &waiting_code);
+    assert_eq!(waiting["blocked"], false, "sealed blocker: {waiting}");
+    assert_eq!(waiting["blocked_by"], serde_json::json!([blocker_code]));
+
+    // `null` clears, removing the key.
+    let res = server
+        .patch(&format!("/api/vault/board/tasks/{waiting_id}"))
+        .json(&serde_json::json!({ "blocked_by": null }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["blocked_by"], serde_json::json!([]), "{body}");
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{waiting_code}.md"))).unwrap();
+    assert!(!content.contains("blocked_by"), "cleared:\n{content}");
+}
+
+#[tokio::test]
+async fn blocked_by_rejects_cycles_self_references_and_unknown_codes() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let a = create_task(&server, serde_json::json!({ "title": "A" })).await;
+    let a_code = a["code"].as_str().unwrap().to_string();
+    let a_id = a["id"].as_str().unwrap().to_string();
+    let b = create_task(
+        &server,
+        serde_json::json!({ "title": "B", "blocked_by": [format!("[[{a_code}]]")] }),
+    )
+    .await;
+    let b_code = b["code"].as_str().unwrap().to_string();
+
+    let res = server
+        .patch(&format!("/api/vault/board/tasks/{a_id}"))
+        .json(&serde_json::json!({ "blocked_by": [b_code] }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    let message = body["error"].as_str().unwrap_or_default();
+    assert!(message.contains("cycle"), "{body}");
+    assert!(
+        message.contains(&a_code) && message.contains(&b_code),
+        "{body}"
+    );
+
+    let res = server
+        .patch(&format!("/api/vault/board/tasks/{a_id}"))
+        .json(&serde_json::json!({ "blocked_by": [a_code] }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "C", "blocked_by": ["TSK-nope"] }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    assert_eq!(
+        board["tasks"].as_array().unwrap().len(),
+        2,
+        "no task created"
+    );
+    assert_eq!(
+        board_task(&board, &a_code)["blocked_by"],
+        serde_json::json!([])
+    );
+}
+
+#[tokio::test]
+async fn board_blocked_counts_hold_and_ignores_dangling_blockers() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000081\n\
+             title: Held\ntype: TASK\nhold: waiting on legal\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0002.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000082\n\
+             title: Dangling\ntype: TASK\nblocked_by: [\"[[TSK-gone]]\"]\n---\n",
+        )
+        .unwrap();
+    });
+
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    let held = board_task(&board, "TSK-0001");
+    assert_eq!(held["blocked"], true, "hold alone: {held}");
+    let dangling = board_task(&board, "TSK-0002");
+    assert_eq!(dangling["blocked_by"], serde_json::json!(["TSK-gone"]));
+    assert_eq!(dangling["blocked"], false, "dangling blocker: {dangling}");
+}
+
+#[tokio::test]
+async fn blocked_by_is_a_backlink_on_the_blocker_page() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let blocker = create_task(&server, serde_json::json!({ "title": "Blocker" })).await;
+    let blocker_path = blocker["path"].as_str().unwrap().to_string();
+    let waiting = create_task(
+        &server,
+        serde_json::json!({ "title": "Waiting", "blocked_by": [blocker["code"]] }),
+    )
+    .await;
+
+    let res = server
+        .get(&format!("/api/vault/index/backlinks/{blocker_path}"))
+        .await;
+    res.assert_status_ok();
+    let backlinks: serde_json::Value = res.json();
+    let entry = backlinks
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["source_path"] == waiting["path"])
+        .unwrap_or_else(|| panic!("waiting task missing from backlinks: {backlinks}"));
+    assert_eq!(entry["kind"], "property_ref");
+    assert_eq!(entry["context"], "frontmatter field: blocked_by");
+}
+
+#[tokio::test]
+async fn moving_a_blocker_rewrites_the_blocked_by_wikilink() {
+    let (server, tmp) = setup_server_with(|_root| {});
+    let blocker = create_task(&server, serde_json::json!({ "title": "Blocker" })).await;
+    let blocker_path = blocker["path"].as_str().unwrap().to_string();
+    let waiting = create_task(
+        &server,
+        serde_json::json!({ "title": "Waiting", "blocked_by": [blocker["code"]] }),
+    )
+    .await;
+    let waiting_code = waiting["code"].as_str().unwrap().to_string();
+
+    let new_code = "TSK-bold-lynx-8zz2q";
+    server
+        .post(&format!("/api/vault/pages-move/{blocker_path}"))
+        .json(&serde_json::json!({ "destination": format!("tasks/{new_code}.md") }))
+        .await
+        .assert_status_ok();
+
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{waiting_code}.md"))).unwrap();
+    assert!(
+        content.contains(&format!("blocked_by = [\"[[{new_code}]]\"]")),
+        "blocked_by follows the move:\n{content}"
+    );
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    assert_eq!(
+        board_task(&board, &waiting_code)["blocked_by"],
+        serde_json::json!([new_code])
+    );
+    assert_eq!(
+        board_task(&board, new_code)["blocks"],
+        serde_json::json!([waiting_code])
+    );
+}
+
+// ---------------------------------------------------------------------------
 // POST /board/tasks — all optional fields persist to frontmatter + response
 // ---------------------------------------------------------------------------
 

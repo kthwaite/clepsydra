@@ -62,6 +62,9 @@ export const BOARD_FIXTURE: BoardResponse = {
   ],
   tasks: [
     {
+      blocked_by: [],
+      blocks: [],
+      blocked: false,
       id: "t1",
       code: "TSK-0001",
       title: "Task Alpha 1",
@@ -76,6 +79,9 @@ export const BOARD_FIXTURE: BoardResponse = {
       body_excerpt: "A concise projected task body.",
     },
     {
+      blocked_by: [],
+      blocks: [],
+      blocked: true,
       id: "t2",
       code: "TSK-0002",
       title: "Task Alpha 2",
@@ -91,6 +97,9 @@ export const BOARD_FIXTURE: BoardResponse = {
       body_excerpt: "",
     },
     {
+      blocked_by: [],
+      blocks: [],
+      blocked: false,
       id: "t3",
       code: "TSK-0003",
       title: "Task Beta 1",
@@ -105,6 +114,9 @@ export const BOARD_FIXTURE: BoardResponse = {
       body_excerpt: null,
     },
     {
+      blocked_by: [],
+      blocks: [],
+      blocked: false,
       id: "t4",
       code: "TSK-0004",
       title: "Task Unfiled",
@@ -119,6 +131,9 @@ export const BOARD_FIXTURE: BoardResponse = {
       body_excerpt: null,
     },
     {
+      blocked_by: [],
+      blocks: [],
+      blocked: false,
       id: "t5",
       code: "TSK-0005",
       title: "Task Sealed",
@@ -186,6 +201,9 @@ export const CLOSED_CYCLE: BoardResponse["cycles"][number] = {
  * from the kanban SEALED column (but stay in backlog/other views).
  */
 export const SEALED_IN_CLOSED_CYCLE_TASK: BoardResponse["tasks"][number] = {
+  blocked_by: [],
+  blocks: [],
+  blocked: false,
   id: "t-hist",
   code: "TSK-0099",
   title: "Historical Sealed Task",

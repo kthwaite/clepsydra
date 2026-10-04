@@ -1,7 +1,9 @@
 use std::fs;
 
 use clep_bases::base::{BaseLinkableProperties, BaseRegistry, effective_linkable_properties};
-use clep_index::index::{ConfigLinkableProperties, VaultIndex, linkable_epoch};
+use clep_index::index::{
+    ConfigLinkableProperties, LinkablePropertiesProvider, VaultIndex, linkable_epoch,
+};
 use clep_vault::Vault;
 use clep_vault::path::VaultPath;
 
@@ -146,9 +148,11 @@ fn derivation_meta_created_and_epoch_written_by_build() {
         )
         .unwrap();
     assert_eq!(epoch.len(), 64);
+    // The effective set: the config's keys plus the built-in relations
+    // (`attendees`, `blocked_by`).
     assert_eq!(
         epoch,
-        linkable_epoch(&vault.config().vault.linkable_properties)
+        linkable_epoch(&ConfigLinkableProperties.linkable_properties(&vault))
     );
 }
 

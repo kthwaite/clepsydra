@@ -71,6 +71,9 @@ const CYCLE_PLANNED_2: BoardCycle = {
 
 const TASKS: BoardTask[] = [
   {
+    blocked_by: [],
+    blocks: [],
+    blocked: false,
     id: "t1",
     code: "TSK-0001",
     title: "Alpha",
@@ -85,6 +88,9 @@ const TASKS: BoardTask[] = [
     updated_at: "2026-06-01T00:00:00Z",
   },
   {
+    blocked_by: [],
+    blocks: [],
+    blocked: false,
     id: "t2",
     code: "TSK-0002",
     title: "Beta",
@@ -99,6 +105,9 @@ const TASKS: BoardTask[] = [
     updated_at: "2026-06-02T00:00:00Z",
   },
   {
+    blocked_by: [],
+    blocks: [],
+    blocked: false,
     id: "t3",
     code: "TSK-0003",
     title: "Gamma",

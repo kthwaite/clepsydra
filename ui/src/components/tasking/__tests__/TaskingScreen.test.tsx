@@ -19,7 +19,11 @@ import {
   vi,
 } from "vitest";
 import type { BoardResponse } from "#/api/board";
-import { EMPTY_FILTER_STATE, type FilterState } from "#/lib/filters/model";
+import {
+  EMPTY_FILTER_STATE,
+  type FilterState,
+  FLAG_ON,
+} from "#/lib/filters/model";
 import { useBoardStore } from "#/store/board";
 import {
   BOARD_FILTER_CONFIG,
@@ -40,6 +44,9 @@ const FILTER_FIXTURE: BoardResponse = {
   ...BOARD_FIXTURE,
   tasks: [
     {
+      blocked_by: [],
+      blocks: [],
+      blocked: false,
       id: "f1",
       code: "TSK-F1",
       title: "Alpha task",
@@ -54,6 +61,9 @@ const FILTER_FIXTURE: BoardResponse = {
       updated_at: "2026-06-01T00:00:00Z",
     },
     {
+      blocked_by: [],
+      blocks: [],
+      blocked: false,
       id: "f2",
       code: "TSK-F2",
       title: "Beta task",
@@ -68,6 +78,9 @@ const FILTER_FIXTURE: BoardResponse = {
       updated_at: "2026-06-01T00:00:00Z",
     },
     {
+      blocked_by: [],
+      blocks: [],
+      blocked: false,
       id: "f3",
       code: "TSK-F3",
       title: "Gamma task",
@@ -996,5 +1009,19 @@ describe("Type filter facet", () => {
       { value: "SPIKE", label: "Spike" },
       { value: "UNTYPED", label: "Untyped" },
     ]);
+  });
+});
+
+describe("Blocked filter flag", () => {
+  const [task] = BOARD_FIXTURE.tasks;
+  assert(task);
+
+  it("reads the derived blocked flag, not hold", () => {
+    const blockedOf = BOARD_FILTER_CONFIG.accessors.hold;
+    assert(blockedOf);
+    expect(blockedOf({ ...task, blocked: true, hold: null })).toEqual([
+      FLAG_ON,
+    ]);
+    expect(blockedOf({ ...task, blocked: false, hold: "stale" })).toEqual([]);
   });
 });
