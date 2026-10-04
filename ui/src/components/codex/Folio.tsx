@@ -86,6 +86,7 @@ import { BaseRenderingProvider } from "#/editor/baseRendering";
 import { diagnoseConversationMarkdown } from "#/editor/conversation/marker";
 import { ConversationPresentationProvider } from "#/editor/conversation/presentation";
 import { insertConversationTurn } from "#/editor/conversation/transforms";
+import { slateToMarkdown } from "#/editor/convert";
 import { PageEditorHeader, RawMarkdownButton } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor, type SlateEditorProps } from "#/editor/SlateEditor";
@@ -1260,6 +1261,7 @@ export function Folio({ tabId, path }: FolioProps) {
                     pagePath: path,
                     readonly: folioReadOnly || editor.encrypted,
                     beginGeneratedChange: editor.beginGeneratedChange,
+                    serializeMarkdown: slateToMarkdown,
                   }}
                 >
                   <FolioSlateEditor

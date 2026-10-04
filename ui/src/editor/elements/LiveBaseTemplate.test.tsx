@@ -36,6 +36,7 @@ function LiveHarness() {
         beginGeneratedChange: async () => {
           throw new Error("Not used by live rendering");
         },
+        serializeMarkdown: slateToMarkdown,
       }}
     >
       <Slate
