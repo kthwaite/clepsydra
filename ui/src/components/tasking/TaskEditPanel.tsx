@@ -29,7 +29,8 @@
  * the task has open Blockers.
  *
  * Body: the Task page's full markdown body renders read-only at the foot of
- * the dock (TaskBodyField), fetched with the page itself.
+ * the dock (TaskBodyField), fetched with the page itself. A link in it to a
+ * board task opens that task's card; any other link opens the page.
  *
  * Archive: two-step confirm — first click arms the button ("Confirm
  * archive"), second saves pending edits and archives the page. The armed
@@ -434,6 +435,13 @@ export function TaskEditPanel({
     );
   };
   const openTask = (other: BoardTask) => setEditTaskId(other.id);
+
+  // A body link to a board task opens its card; anything else opens a page.
+  const openBodyLink = (path: string) => {
+    const linked = tasks.find((t) => t.path === path);
+    if (linked) openTask(linked);
+    else onOpenPage?.(path);
+  };
 
   // Checklist progress (read-only: decision 7)
   const {
@@ -847,7 +855,7 @@ export function TaskEditPanel({
                 </div>
               </EdField>
 
-              <TaskBodyField path={task.path} onOpenPage={onOpenPage} />
+              <TaskBodyField path={task.path} onOpenPage={openBodyLink} />
             </fieldset>
             <span
               aria-hidden

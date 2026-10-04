@@ -18,6 +18,24 @@ vi.mock("#/editor/useResolveWikilinkTarget", async (importOriginal) => ({
   useResolveWikilinkTarget: () => ({ resolve: resolveMock }),
 }));
 
+const { outlinksState } = vi.hoisted(() => ({
+  outlinksState: {
+    data: [] as Array<{
+      kind: string;
+      target_raw: string;
+      target_path: string | null;
+    }>,
+  },
+}));
+const useOutlinksMock = vi.fn((_path: string) => ({
+  ...outlinksState,
+  refetch: async () => outlinksState,
+}));
+vi.mock("#/api", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useOutlinks: (path: string) => useOutlinksMock(path),
+}));
+
 const usePageMock = vi.fn((_path: string) => pageState);
 vi.mock("#/api/pages", () => ({
   usePage: (path: string) => usePageMock(path),
@@ -27,6 +45,9 @@ import { TaskBodyField } from "../TaskBodyField";
 
 beforeEach(() => {
   usePageMock.mockClear();
+  useOutlinksMock.mockClear();
+  resolveMock.mockReset().mockResolvedValue(null);
+  outlinksState.data = [];
   pageState.data = undefined;
   pageState.isLoading = false;
   pageState.isError = false;
@@ -72,6 +93,31 @@ describe("TaskBodyField", () => {
     await waitFor(() =>
       expect(onOpenPage).toHaveBeenCalledWith("notes/other-page.md"),
     );
+  });
+
+  it("resolves links through the Task page's indexed outlinks", async () => {
+    const user = userEvent.setup();
+    const onOpenPage = vi.fn();
+    outlinksState.data = [
+      {
+        kind: "wiki",
+        target_raw: "TSK-brave-finch",
+        target_path: "tasks/brave-finch.md",
+      },
+    ];
+    pageState.data = {
+      path: "tasks/t.md",
+      encrypted: false,
+      body: "Blocked on [[TSK-brave-finch]].",
+    };
+
+    render(<TaskBodyField path="tasks/t.md" onOpenPage={onOpenPage} />);
+    await user.click(screen.getByRole("link", { name: "TSK-brave-finch" }));
+
+    expect(useOutlinksMock).toHaveBeenCalledWith("tasks/t.md");
+    expect(onOpenPage).toHaveBeenCalledWith("tasks/brave-finch.md");
+    // Indexed resolution answers directly; no title search.
+    expect(resolveMock).not.toHaveBeenCalled();
   });
 
   it("states an empty body", () => {
