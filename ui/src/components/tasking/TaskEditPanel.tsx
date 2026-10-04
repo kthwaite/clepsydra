@@ -28,6 +28,9 @@
  * Moving to In Progress goes through useStartWarning, which asks first when
  * the task has open Blockers.
  *
+ * Body: the Task page's full markdown body renders read-only at the foot of
+ * the dock (TaskBodyField), fetched with the page itself.
+ *
  * Archive: two-step confirm — first click arms the button ("Confirm
  * archive"), second saves pending edits and archives the page. The armed
  * state auto-disarms after 3s and on pointer-leave of the footer.
@@ -63,6 +66,7 @@ import {
   TypeRow,
 } from "./fields";
 import { useStartWarning } from "./StartWarning";
+import { TaskBodyField } from "./TaskBodyField";
 
 /** How long the armed "Confirm archive" state persists before auto-disarm. */
 const ARCHIVE_DISARM_MS = 3000;
@@ -842,6 +846,8 @@ export function TaskEditPanel({
                   )}
                 </div>
               </EdField>
+
+              <TaskBodyField path={task.path} onOpenPage={onOpenPage} />
             </fieldset>
             <span
               aria-hidden
