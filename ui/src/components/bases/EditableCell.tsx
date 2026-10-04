@@ -72,7 +72,12 @@ export function EditableCell({
   useEffect(() => {
     if (!editing && (restoreFocusRef.current || focusOnDisplay)) {
       restoreFocusRef.current = false;
-      displayButtonRef.current?.focus();
+      // Only recover focus the closed editor dropped. A blur commit has
+      // already moved focus elsewhere; leave it there.
+      const active = document.activeElement;
+      if (active === null || active === document.body) {
+        displayButtonRef.current?.focus();
+      }
     }
   }, [editing, focusOnDisplay]);
 
