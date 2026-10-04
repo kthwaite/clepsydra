@@ -40,7 +40,8 @@ export function cycleStats(items: BoardTask[]): CycleStatsResult {
   for (const item of items) {
     if (item.status === "SEALED") sealed += 1;
     if (item.status === "FIELD") field += 1;
-    if (item.hold) hold += 1;
+    // "Blocked": an open Blocker or a hold (server-derived).
+    if (item.blocked) hold += 1;
     const progress = checklistProgress(item.checks);
     checkDone += progress.done;
     checkTot += progress.total;

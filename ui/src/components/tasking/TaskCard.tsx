@@ -10,6 +10,8 @@ import { useEffect, useRef, useState } from "react";
 import type { BoardTask } from "#/api/board";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { useBoardStore } from "#/store/board";
+import { type CardBlocker, cardBlockers } from "./blockers";
 import { type ColLabelFn, priColor, StatePip } from "./board-constants";
 import { ChecklistBar, TypeChip } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
@@ -26,6 +28,8 @@ export interface TaskCardProps {
   onOpenDossier?: (link: string) => void;
   /** Resolves a column id to its server-supplied display label. */
   colLabel: ColLabelFn;
+  /** Every board task by code: resolves blocker chips. */
+  taskByCode: ReadonlyMap<string, BoardTask>;
 }
 
 export function TaskCard({
@@ -34,6 +38,7 @@ export function TaskCard({
   onClick,
   onOpenDossier,
   colLabel,
+  taskByCode,
 }: TaskCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
@@ -66,6 +71,11 @@ export function TaskCard({
   const { text: priTextColor } = priColor(t.priority);
   const link = t.link;
   const sealed = t.status === "SEALED";
+  const blockers = cardBlockers(t, taskByCode);
+  // More than two blockers collapse to the first plus a +N count.
+  const shownBlockers = blockers.length > 2 ? blockers.slice(0, 1) : blockers;
+  const hiddenBlockers = blockers.length - shownBlockers.length;
+  const blocksCount = sealed ? 0 : t.blocks.length;
 
   return (
     <div
@@ -117,7 +127,7 @@ export function TaskCard({
         >
           <StatePip col={t.status} />
         </InlineEditPopover>
-        {t.hold && (
+        {t.blocked && (
           <span
             className="pointer-events-none rounded-full bg-[color-mix(in_oklab,var(--hot)_12%,transparent)] px-2 leading-5 text-hot"
             data-testid={`hold-stamp-${t.id}`}
@@ -157,6 +167,31 @@ export function TaskCard({
           data-testid={`hold-line-${t.id}`}
         >
           {t.hold}
+        </div>
+      )}
+
+      {/* Blocker chips: what this task waits on, and how many it holds up */}
+      {(blockers.length > 0 || blocksCount > 0) && (
+        <div className="mt-2 flex flex-wrap gap-1 text-[12px] leading-5">
+          {shownBlockers.map((b) => (
+            <BlockerChip key={b.code} blocker={b} />
+          ))}
+          {hiddenBlockers > 0 && (
+            <span
+              className="rounded-full bg-[color-mix(in_oklab,var(--hot)_12%,transparent)] px-2 text-hot"
+              data-testid={`blocker-more-${t.id}`}
+            >
+              +{hiddenBlockers}
+            </span>
+          )}
+          {blocksCount > 0 && (
+            <span
+              className="rounded-full bg-sink px-2 text-ink-2"
+              data-testid={`blocks-chip-${t.id}`}
+            >
+              blocks {blocksCount}
+            </span>
+          )}
         </div>
       )}
 
@@ -223,5 +258,42 @@ export function TaskCard({
         </span>
       </div>
     </div>
+  );
+}
+
+/**
+ * "blocked by CODE". An open blocker is a button that opens its editor; it
+ * stops propagation so the card underneath does not act too. A dangling code
+ * (no task on the board) is struck through and inert.
+ */
+function BlockerChip({ blocker }: { blocker: CardBlocker }) {
+  const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
+  const label = `blocked by ${blocker.code}`;
+  const target = blocker.task;
+  if (!target) {
+    return (
+      <span
+        className="rounded-full bg-sink px-2 text-mute line-through"
+        title="No task on the board has this code"
+      >
+        {label}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={cn(
+        "pointer-events-auto relative z-[1] cursor-pointer rounded-full bg-[color-mix(in_oklab,var(--hot)_12%,transparent)] px-2 text-hot hover:underline",
+        FOCUS_RING_NATIVE,
+      )}
+      title={target.title}
+      onClick={(e) => {
+        e.stopPropagation();
+        setEditTaskId(target.id);
+      }}
+    >
+      {label}
+    </button>
   );
 }

@@ -222,7 +222,7 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                       <PriChip pri={t.priority} />
                     </InlineEditPopover>
                     <TypeChip type={t.task_type} />
-                    {t.hold && (
+                    {t.blocked && (
                       <span
                         data-testid={`bk-hold-tag-${t.id}`}
                         className="inline-flex h-[22px] flex-shrink-0 items-center rounded-full bg-[color-mix(in_oklab,var(--hot)_10%,transparent)] px-[9px] text-[12px] text-hot"

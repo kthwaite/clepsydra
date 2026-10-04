@@ -1,6 +1,7 @@
 /**
  * Chip-triggered popover for editing a task's status or priority inline,
- * without opening the full TaskEditPanel.
+ * without opening the full TaskEditPanel. A status change goes through
+ * useStartWarning: starting a task with open Blockers asks first.
  */
 
 import { useState } from "react";
@@ -12,6 +13,7 @@ import { cn } from "#/lib/cn";
 import { FOCUS_RING } from "#/lib/focusRing";
 import type { ColLabelFn } from "./board-constants";
 import { DispositionRow, PriorityRow } from "./fields";
+import { useStartWarning } from "./StartWarning";
 
 export function InlineEditPopover({
   task,
@@ -29,53 +31,59 @@ export function InlineEditPopover({
 }) {
   const [open, setOpen] = useState(false);
   const patch = usePatchTask();
+  const startWarning = useStartWarning();
 
   const commit = (value: string) => {
-    patch.mutate({ id: task.id, patch: { [field]: value } });
+    const send = () => patch.mutate({ id: task.id, patch: { [field]: value } });
+    if (field === "status") startWarning.guard(task, value, send);
+    else send();
     setOpen(false);
   };
 
+  // No manual stopPropagation guard here: RAC's Button (via usePress)
+  // already stops propagation of the pointer/keyboard events it handles
+  // (click, Enter/Space) by default, which is sufficient to keep chip
+  // interaction from opening the card underneath. A blanket
+  // onKeyDown={stopPropagation} wrapper would additionally swallow every
+  // OTHER keydown while focus rests on the chip — including global
+  // shortcut chords the RAC press handling never touches — before they
+  // reach the window-level useGlobalShortcuts dispatcher.
   return (
-    // No manual stopPropagation guard here: RAC's Button (via usePress)
-    // already stops propagation of the pointer/keyboard events it handles
-    // (click, Enter/Space) by default, which is sufficient to keep chip
-    // interaction from opening the card underneath. A blanket
-    // onKeyDown={stopPropagation} wrapper would additionally swallow every
-    // OTHER keydown while focus rests on the chip — including global
-    // shortcut chords the RAC press handling never touches — before they
-    // reach the window-level useGlobalShortcuts dispatcher.
-    <DialogTrigger isOpen={open} onOpenChange={setOpen}>
-      <Button
-        className={cn(
-          "pointer-events-auto relative z-[1] cursor-pointer rounded-full",
-          FOCUS_RING,
-        )}
-        data-testid={`${testIdPrefix}-inline-${field}-${task.id}`}
-        aria-label={`Change ${field}`}
-      >
-        {children}
-      </Button>
-      <Popover hideArrow placement="bottom start">
-        <Dialog
-          aria-label={`Set ${field}`}
-          className="w-[360px] max-w-[92vw] rounded-xl bg-raise p-2 shadow-md outline-none"
-        >
-          {field === "status" ? (
-            <DispositionRow
-              value={task.status}
-              onChange={commit}
-              testIdPrefix="inline"
-              colLabel={colLabel}
-            />
-          ) : (
-            <PriorityRow
-              value={task.priority}
-              onChange={commit}
-              testIdPrefix="inline"
-            />
+    <>
+      {startWarning.dialog}
+      <DialogTrigger isOpen={open} onOpenChange={setOpen}>
+        <Button
+          className={cn(
+            "pointer-events-auto relative z-[1] cursor-pointer rounded-full",
+            FOCUS_RING,
           )}
-        </Dialog>
-      </Popover>
-    </DialogTrigger>
+          data-testid={`${testIdPrefix}-inline-${field}-${task.id}`}
+          aria-label={`Change ${field}`}
+        >
+          {children}
+        </Button>
+        <Popover hideArrow placement="bottom start">
+          <Dialog
+            aria-label={`Set ${field}`}
+            className="w-[360px] max-w-[92vw] rounded-xl bg-raise p-2 shadow-md outline-none"
+          >
+            {field === "status" ? (
+              <DispositionRow
+                value={task.status}
+                onChange={commit}
+                testIdPrefix="inline"
+                colLabel={colLabel}
+              />
+            ) : (
+              <PriorityRow
+                value={task.priority}
+                onChange={commit}
+                testIdPrefix="inline"
+              />
+            )}
+          </Dialog>
+        </Popover>
+      </DialogTrigger>
+    </>
   );
 }

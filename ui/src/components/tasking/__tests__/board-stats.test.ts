@@ -51,11 +51,12 @@ describe("checklistProgress", () => {
 });
 
 describe("cycleStats", () => {
-  it("aggregates statuses, holds, and checklist tuples", () => {
+  it("aggregates statuses, blocked tasks, and checklist tuples", () => {
     expect(
       cycleStats([
-        task({ checks: [2, 5], hold: "blocked" }),
-        task({ id: "t-2", status: "SEALED", checks: [3, 3] }),
+        task({ checks: [2, 5], blocked: true }),
+        // A stale hold without the derived flag does not count.
+        task({ id: "t-2", status: "SEALED", checks: [3, 3], hold: "x" }),
       ]),
     ).toEqual({
       committed: 2,

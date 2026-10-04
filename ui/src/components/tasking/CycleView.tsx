@@ -392,7 +392,7 @@ export function CycleView({
                     </span>
 
                     <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                      {t.hold && (
+                      {t.blocked && (
                         <span
                           className="flex-shrink-0"
                           data-testid={`cv-hold-${t.id}`}

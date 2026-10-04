@@ -1377,3 +1377,135 @@ describe("KanbanView — Stone & Lamp", () => {
     expect(container.querySelector(".uppercase")).toBeNull();
   });
 });
+
+// ── blockers ──────────────────────────────────────────────────────────────────
+
+describe("TaskCard — blockers", () => {
+  // t1 (TSK-0001) is In Progress: an open blocker. t3 waits on it.
+  const T1 = { ...tasks[0], blocks: ["TSK-0003"] };
+  const WAITER: BoardTask = {
+    ...tasks[2],
+    blocked_by: ["TSK-0001", "TSK-GONE"],
+    blocked: true,
+  };
+  const MANY: BoardTask = {
+    ...tasks[3],
+    blocked_by: ["TSK-0001", "TSK-0002", "TSK-0003"],
+    blocked: true,
+  };
+  const board = [T1, tasks[1], WAITER, MANY, ...tasks.slice(4)];
+
+  function renderBlockers(fetchStub = makeStub()) {
+    vi.stubGlobal("fetch", fetchStub);
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    qc.setQueryData(queryKeys.board.all, { ...BOARD_FIXTURE, tasks: board });
+    render(
+      <QueryClientProvider client={qc}>
+        <KanbanView
+          colLabel={FIXTURE_COL_LABEL}
+          columns={columns}
+          tasks={board}
+          cycles={cycles}
+          showOp={false}
+        />
+      </QueryClientProvider>,
+    );
+    return fetchStub;
+  }
+
+  beforeEach(() => {
+    useBoardStore.setState({ editTaskId: null });
+  });
+
+  it("shows one chip per blocker; a dangling code is struck and inert", () => {
+    renderBlockers();
+    const card = screen.getByTestId("task-card-t3");
+    expect(
+      within(card).getByRole("button", { name: "blocked by TSK-0001" }),
+    ).toBeInTheDocument();
+    const gone = within(card).getByText("blocked by TSK-GONE");
+    expect(gone).toHaveClass("line-through");
+    expect(gone.tagName).not.toBe("BUTTON");
+  });
+
+  it("collapses more than two blockers to the first plus +N", () => {
+    renderBlockers();
+    const card = screen.getByTestId("task-card-t4");
+    expect(
+      within(card).getByRole("button", { name: "blocked by TSK-0001" }),
+    ).toBeInTheDocument();
+    expect(within(card).queryByText("blocked by TSK-0002")).toBeNull();
+    expect(screen.getByTestId("blocker-more-t4")).toHaveTextContent("+2");
+  });
+
+  it("shows a blocks N chip on the blocker", () => {
+    renderBlockers();
+    expect(screen.getByTestId("blocks-chip-t1")).toHaveTextContent("blocks 1");
+  });
+
+  it("a blocker chip opens the blocker's editor, not the card's", async () => {
+    renderBlockers();
+    await userEvent.click(
+      within(screen.getByTestId("task-card-t3")).getByRole("button", {
+        name: "blocked by TSK-0001",
+      }),
+    );
+    expect(useBoardStore.getState().editTaskId).toBe("t1");
+  });
+
+  it("drives the Blocked stamp from task.blocked, not hold", () => {
+    renderBlockers();
+    expect(screen.getByTestId("hold-stamp-t3")).toHaveTextContent("Blocked");
+    expect(screen.queryByTestId("hold-line-t3")).toBeNull();
+  });
+
+  it("warns when a blocked card is dropped in In Progress; Cancel sends nothing", async () => {
+    const stub = renderBlockers();
+    const source = sourceFor(screen.getByTestId("task-card-t3"));
+    dispatchDrop(
+      source.source,
+      targetFor(screen.getByTestId("kb-col-FIELD")),
+      source.registration,
+    );
+
+    const dialog = await screen.findByTestId("start-warning");
+    expect(within(dialog).getByText("TSK-0001")).toBeInTheDocument();
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    );
+    expect(screen.queryByTestId("start-warning")).toBeNull();
+    expect(patchCalls(stub)).toHaveLength(0);
+  });
+
+  it("Start anyway sends the drop's status PATCH", async () => {
+    const stub = renderBlockers();
+    const source = sourceFor(screen.getByTestId("task-card-t3"));
+    dispatchDrop(
+      source.source,
+      targetFor(screen.getByTestId("kb-col-FIELD")),
+      source.registration,
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Start anyway" }),
+    );
+    await waitFor(() =>
+      expect(patchCalls(stub).map(([, o]) => o?.body)).toEqual([
+        JSON.stringify({ status: "FIELD" }),
+      ]),
+    );
+  });
+
+  it("drops to other columns without a warning", async () => {
+    const stub = renderBlockers();
+    const source = sourceFor(screen.getByTestId("task-card-t3"));
+    dispatchDrop(
+      source.source,
+      targetFor(screen.getByTestId("kb-col-REVIEW")),
+      source.registration,
+    );
+    await waitFor(() => expect(patchCalls(stub)).toHaveLength(1));
+    expect(screen.queryByTestId("start-warning")).toBeNull();
+  });
+});

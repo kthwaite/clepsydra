@@ -573,18 +573,18 @@ describe("TimelineView — bar positioning", () => {
     );
   });
 
-  it("a held task's bar reads Hold instead of its status", () => {
+  it("a blocked task's bar reads Blocked instead of its status", () => {
     wrap(
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
-        tasks={[{ ...TL_TASK_ALPHA, hold: "Waiting on review" }]}
+        tasks={[{ ...TL_TASK_ALPHA, blocked: true }]}
         projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
     const bar = screen.getByTestId("tl-bar-t-alpha-1");
-    expect(bar).toHaveTextContent("Hold");
-    expect(bar).toHaveAccessibleName("Edit TSK-0010: Alpha Scheduled, Hold");
+    expect(bar).toHaveTextContent("Blocked");
+    expect(bar).toHaveAccessibleName("Edit TSK-0010: Alpha Scheduled, Blocked");
   });
 
   it("a bar shorter than five days carries its label outside the bar", () => {
@@ -899,7 +899,7 @@ describe("TimelineView — token colours", () => {
         status,
         priority: `P${i % 4}`,
       })),
-      { ...TL_TASK_BETA, hold: "Waiting on review" },
+      { ...TL_TASK_BETA, hold: "Waiting on review", blocked: true },
       TL_TASK_UNFILED,
       TL_TASK_UNSCHEDULED,
     ];

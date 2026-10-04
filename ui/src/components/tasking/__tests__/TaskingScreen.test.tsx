@@ -19,7 +19,11 @@ import {
   vi,
 } from "vitest";
 import type { BoardResponse } from "#/api/board";
-import { EMPTY_FILTER_STATE, type FilterState } from "#/lib/filters/model";
+import {
+  EMPTY_FILTER_STATE,
+  type FilterState,
+  FLAG_ON,
+} from "#/lib/filters/model";
 import { useBoardStore } from "#/store/board";
 import {
   BOARD_FILTER_CONFIG,
@@ -1005,5 +1009,19 @@ describe("Type filter facet", () => {
       { value: "SPIKE", label: "Spike" },
       { value: "UNTYPED", label: "Untyped" },
     ]);
+  });
+});
+
+describe("Blocked filter flag", () => {
+  const [task] = BOARD_FIXTURE.tasks;
+  assert(task);
+
+  it("reads the derived blocked flag, not hold", () => {
+    const blockedOf = BOARD_FILTER_CONFIG.accessors.hold;
+    assert(blockedOf);
+    expect(blockedOf({ ...task, blocked: true, hold: null })).toEqual([
+      FLAG_ON,
+    ]);
+    expect(blockedOf({ ...task, blocked: false, hold: "stale" })).toEqual([]);
   });
 });

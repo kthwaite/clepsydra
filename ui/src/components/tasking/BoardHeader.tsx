@@ -84,7 +84,7 @@ export function BoardHeader({
   // Stats
   const open = tasks.filter((t) => t.status !== "SEALED").length;
   const inField = tasks.filter((t) => t.status === "FIELD").length;
-  const onHold = tasks.filter((t) => Boolean(t.hold)).length;
+  const onHold = tasks.filter((t) => t.blocked).length;
 
   const opHealthColor = healthColor(activeOp?.health ?? "");
   const dossier = activeOp?.dossier;

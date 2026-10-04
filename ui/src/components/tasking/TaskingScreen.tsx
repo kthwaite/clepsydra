@@ -74,7 +74,8 @@ export const BOARD_FILTER_CONFIG: ClientFilterConfig<BoardTask> = {
     pri: (t) => [t.priority],
     type: (t) => [t.task_type || TYPE_NONE],
     status: (t) => [t.status],
-    hold: (t) => (t.hold ? [FLAG_ON] : []),
+    // "Blocked" = an open Blocker or a hold (server-derived).
+    hold: (t) => (t.blocked ? [FLAG_ON] : []),
   },
 };
 
@@ -340,6 +341,7 @@ export function TaskingScreen({
               <KanbanView
                 columns={columns}
                 tasks={visibleTasks}
+                boardTasks={tasks}
                 cycles={cycles}
                 showOp={opFilter === "ALL"}
                 activeProject={activeScope?.slug ?? undefined}
@@ -390,6 +392,7 @@ export function TaskingScreen({
           <TaskEditPanel
             key={editTask.id}
             task={editTask}
+            tasks={tasks}
             projects={projects}
             cycles={cycles}
             colLabel={colLabel}

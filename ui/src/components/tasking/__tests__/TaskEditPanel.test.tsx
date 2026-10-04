@@ -95,6 +95,8 @@ interface WrapOpts {
   fetchStub?: ReturnType<typeof vi.fn>;
   /** Pre-populate board cache to enable optimistic PATCH */
   seedBoard?: boolean;
+  /** Board tasks the blocker pickers offer (defaults to the fixture + task). */
+  boardTasks?: BoardTask[];
 }
 
 function wrap({
@@ -106,15 +108,13 @@ function wrap({
   onOpenDossier = vi.fn(),
   fetchStub,
   seedBoard = false,
+  boardTasks = [...BOARD_FIXTURE.tasks.filter((t) => t.id !== task.id), task],
 }: WrapOpts = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   if (seedBoard) {
     // Insert our test task into the fixture so optimistic PATCH can find it
-    const boardWithTask = {
-      ...BOARD_FIXTURE,
-      tasks: [...BOARD_FIXTURE.tasks.filter((t) => t.id !== task.id), task],
-    };
+    const boardWithTask = { ...BOARD_FIXTURE, tasks: boardTasks };
     qc.setQueryData(queryKeys.board.all, boardWithTask);
   }
 
@@ -126,6 +126,7 @@ function wrap({
       <QueryClientProvider client={qc}>
         <TaskEditPanel
           task={task}
+          tasks={boardTasks}
           projects={projectsOverride}
           cycles={cyclesOverride}
           colLabel={NEUTRAL_COL_LABEL}
@@ -737,6 +738,7 @@ describe("TaskEditPanel — hold toggle", () => {
       <QueryClientProvider client={qc}>
         <TaskEditPanel
           task={updatedTask}
+          tasks={BOARD_FIXTURE.tasks}
           projects={PROJECT_SCOPES}
           cycles={cycles}
           colLabel={NEUTRAL_COL_LABEL}
@@ -1399,5 +1401,201 @@ describe("TaskEditPanel — dossier link", () => {
     wrap({ onOpenDossier });
     await userEvent.click(screen.getByTestId("edit-panel-open-dossier"));
     expect(onOpenDossier).toHaveBeenCalledWith("tasks/alpha-dossier");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Blockers
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("TaskEditPanel — blockers", () => {
+  // TSK-0001 (t1) is In Progress: an open blocker. TSK-0002 (t2) is Inbox.
+  const WAITER: BoardTask = {
+    ...FULL_TASK,
+    id: "t-wait",
+    code: "TSK-0050",
+    status: "TRIAGE",
+    blocked_by: ["TSK-0001", "TSK-GONE"],
+    blocks: ["TSK-0002"],
+    blocked: true,
+  };
+  const T2_BLOCKED_BY_WAITER: BoardTask = {
+    ...BOARD_FIXTURE.tasks[1],
+    blocked_by: ["TSK-0050"],
+  };
+  const boardTasks = [
+    BOARD_FIXTURE.tasks[0],
+    T2_BLOCKED_BY_WAITER,
+    ...BOARD_FIXTURE.tasks.slice(2),
+    WAITER,
+  ];
+
+  function patchBodies(stub: ReturnType<typeof vi.fn>) {
+    return stub.mock.calls
+      .filter(([, opts]) => opts?.method === "PATCH")
+      .map(([url, opts]) => [url, JSON.parse(opts.body as string)]);
+  }
+
+  it("lists blockers and blocked tasks as chips; dangling codes read as gone", () => {
+    wrap({ task: WAITER, boardTasks });
+    const blockedBy = screen.getByTestId("edit-panel-blocked-by");
+    expect(within(blockedBy).getByText("TSK-0001")).toBeInTheDocument();
+    expect(within(blockedBy).getByText("TSK-GONE")).toHaveClass("line-through");
+    const blocks = screen.getByTestId("edit-panel-blocks");
+    expect(within(blocks).getByText("TSK-0002")).toBeInTheDocument();
+  });
+
+  it("adding a blocker PATCHes this task's full blocked_by list", async () => {
+    const stub = makeStub(WAITER);
+    wrap({ task: WAITER, boardTasks, fetchStub: stub, seedBoard: true });
+    const user = userEvent.setup();
+
+    await user.type(
+      screen.getByRole("combobox", { name: "Add blocker" }),
+      "Beta",
+    );
+    await user.click(await screen.findByRole("option", { name: /TSK-0003/ }));
+
+    await waitFor(() =>
+      expect(patchBodies(stub)).toEqual([
+        [
+          "/api/vault/board/tasks/t-wait",
+          { blocked_by: ["TSK-0001", "TSK-GONE", "TSK-0003"] },
+        ],
+      ]),
+    );
+  });
+
+  it("the blocker picker excludes this task and blockers already listed", async () => {
+    wrap({ task: WAITER, boardTasks });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "Add blocker" }));
+    expect(
+      await screen.findByRole("option", { name: /TSK-0003/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /TSK-0001/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /TSK-0050/ })).toBeNull();
+  });
+
+  it("removing a blocker PATCHes this task without it", async () => {
+    const stub = makeStub(WAITER);
+    wrap({ task: WAITER, boardTasks, fetchStub: stub, seedBoard: true });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove blocker TSK-GONE" }),
+    );
+
+    await waitFor(() =>
+      expect(patchBodies(stub)).toEqual([
+        ["/api/vault/board/tasks/t-wait", { blocked_by: ["TSK-0001"] }],
+      ]),
+    );
+  });
+
+  it("adding a blocked task PATCHes the other task's blocked_by", async () => {
+    const stub = makeStub(WAITER);
+    wrap({ task: WAITER, boardTasks, fetchStub: stub, seedBoard: true });
+    const user = userEvent.setup();
+
+    await user.type(
+      screen.getByRole("combobox", { name: "Add blocked task" }),
+      "TSK-0004",
+    );
+    await user.click(await screen.findByRole("option", { name: /TSK-0004/ }));
+
+    await waitFor(() =>
+      expect(patchBodies(stub)).toEqual([
+        ["/api/vault/board/tasks/t4", { blocked_by: ["TSK-0050"] }],
+      ]),
+    );
+  });
+
+  it("removing a blocked task PATCHes the other task without this code", async () => {
+    const stub = makeStub(WAITER);
+    wrap({ task: WAITER, boardTasks, fetchStub: stub, seedBoard: true });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove blocked task TSK-0002" }),
+    );
+
+    await waitFor(() =>
+      expect(patchBodies(stub)).toEqual([
+        ["/api/vault/board/tasks/t2", { blocked_by: [] }],
+      ]),
+    );
+  });
+
+  it("shows the server's 400 message inline under the field", async () => {
+    const stub = vi.fn((_url: string, opts?: RequestInit) => {
+      if (opts?.method === "PATCH") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              status: 400,
+              error: "blocker cycle: TSK-0050 → TSK-0003 → TSK-0050",
+            }),
+            { status: 400, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(BOARD_FIXTURE),
+      } as Response);
+    });
+    wrap({ task: WAITER, boardTasks, fetchStub: stub, seedBoard: true });
+    const user = userEvent.setup();
+
+    await user.type(
+      screen.getByRole("combobox", { name: "Add blocker" }),
+      "Beta",
+    );
+    await user.click(await screen.findByRole("option", { name: /TSK-0003/ }));
+
+    const blockedBy = screen.getByTestId("edit-panel-blocked-by");
+    expect(
+      await within(blockedBy).findByText(
+        "blocker cycle: TSK-0050 → TSK-0003 → TSK-0050",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("warns before starting a task with open blockers; Cancel keeps the status", async () => {
+    const stub = makeStub(WAITER);
+    wrap({ task: WAITER, boardTasks, fetchStub: stub, seedBoard: true });
+    const status = screen.getByRole("radiogroup", { name: "Status" });
+
+    await userEvent.click(
+      within(status).getByRole("radio", { name: "In Progress" }),
+    );
+
+    const dialog = await screen.findByTestId("start-warning");
+    expect(within(dialog).getByText("TSK-0001")).toBeInTheDocument();
+    expect(within(dialog).queryByText("TSK-GONE")).toBeNull();
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    );
+
+    expect(screen.queryByTestId("start-warning")).toBeNull();
+    expect(patchBodies(stub)).toEqual([]);
+  });
+
+  it("Start anyway sends the status PATCH", async () => {
+    const stub = makeStub(WAITER);
+    wrap({ task: WAITER, boardTasks, fetchStub: stub, seedBoard: true });
+    const status = screen.getByRole("radiogroup", { name: "Status" });
+
+    await userEvent.click(
+      within(status).getByRole("radio", { name: "In Progress" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Start anyway" }),
+    );
+
+    await waitFor(() =>
+      expect(patchBodies(stub)).toEqual([
+        ["/api/vault/board/tasks/t-wait", { status: "FIELD" }],
+      ]),
+    );
   });
 });

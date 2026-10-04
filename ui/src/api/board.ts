@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { formatApiError } from "#/api/error";
 import type { components } from "#/api/schema";
 import {
   invalidateByPath,
@@ -90,11 +91,58 @@ export function applyTaskPatch(
     link: triState(task.link, "link"),
     // Tags: absent = keep, present = replace
     tags: "tags" in patch && patch.tags != null ? patch.tags : task.tags,
+    // Blockers: absent = keep, present = replace ([] or null clears)
+    blocked_by:
+      "blocked_by" in patch ? (patch.blocked_by ?? []) : task.blocked_by,
   };
 
   const tasks = [...board.tasks];
   tasks[idx] = updated;
-  return { ...board, tasks };
+  const touchesBlockers =
+    "blocked_by" in patch || "status" in patch || "hold" in patch;
+  return {
+    ...board,
+    tasks: touchesBlockers ? deriveBlockState(tasks) : tasks,
+  };
+}
+
+/**
+ * Re-derives each Task's `blocks` (the inverse of `blocked_by`, sorted) and
+ * `blocked` (an open Blocker or a hold), as the server does. A Blocker is
+ * open while it is on the board and not SEALED. Tasks whose derived fields
+ * do not change keep their identity.
+ */
+export function deriveBlockState(tasks: BoardTask[]): BoardTask[] {
+  const byCode = new Map(tasks.map((t) => [t.code, t]));
+  const blocksOf = new Map<string, string[]>();
+  for (const t of tasks) {
+    for (const code of t.blocked_by) {
+      blocksOf.set(code, [...(blocksOf.get(code) ?? []), t.code]);
+    }
+  }
+  return tasks.map((t) => {
+    const blocks = [...(blocksOf.get(t.code) ?? [])].sort();
+    const blocked =
+      Boolean(t.hold) ||
+      t.blocked_by.some((code) => {
+        const blocker = byCode.get(code);
+        return blocker !== undefined && blocker.status !== "SEALED";
+      });
+    const same =
+      blocked === t.blocked &&
+      blocks.length === t.blocks.length &&
+      blocks.every((code, i) => code === t.blocks[i]);
+    return same ? t : { ...t, blocks, blocked };
+  });
+}
+
+/** The server's `ApiError.error` message, else `fallback`. */
+async function responseError(res: Response, fallback: string): Promise<Error> {
+  try {
+    return new Error(formatApiError(await res.json(), fallback));
+  } catch {
+    return new Error(fallback);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +195,7 @@ export function usePatchTask() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
-      if (!res.ok) throw new Error("Failed to patch task");
+      if (!res.ok) throw await responseError(res, "Failed to patch task");
       return res.json() as Promise<BoardTask>;
     },
     onMutate: async ({ id, patch }) => {
