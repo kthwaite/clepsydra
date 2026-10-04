@@ -205,8 +205,6 @@ export function BaseEmbedElement({
   async function prepareInsertion(): Promise<PreparedGeneratedChange> {
     if (!lifecycle || lifecycle.readonly)
       throw new Error("Open a writable destination page first.");
-    // Schema descriptors import this renderer; load serialization after initialization.
-    const { slateToMarkdown } = await import("#/editor/convert");
     const target = ReactEditor.findPath(editor, element);
     if (
       target.length !== 1 ||
@@ -218,10 +216,12 @@ export function BaseEmbedElement({
       );
     }
     const preceding = editor.children.slice(0, target[0]);
-    const body = slateToMarkdown(
+    const body = lifecycle.serializeMarkdown(
       editor.children.filter((node) => node !== element),
     );
-    const prefix = preceding.length ? slateToMarkdown(preceding) : "";
+    const prefix = preceding.length
+      ? lifecycle.serializeMarkdown(preceding)
+      : "";
     const session = await lifecycle.beginGeneratedChange(body);
     if (!session.body.startsWith(prefix)) {
       session.cancel();
