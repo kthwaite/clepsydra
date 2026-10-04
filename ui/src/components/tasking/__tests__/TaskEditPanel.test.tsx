@@ -48,6 +48,11 @@ import {
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { error: toastError } }));
+vi.mock("../TaskBodyField", () => ({
+  TaskBodyField: ({ path }: { path: string }) => (
+    <div data-testid="edit-panel-body">{path}</div>
+  ),
+}));
 
 const { operations, cycles } = BOARD_FIXTURE;
 const NEUTRAL_COL_LABEL: ColLabelFn = (id) => COL_LABEL[id] ?? id;
@@ -397,6 +402,16 @@ describe("TaskEditPanel — checklist read-only", () => {
   it("renders OPEN PAGE → button", () => {
     wrap();
     expect(screen.getByTestId("edit-panel-open-page")).toBeInTheDocument();
+  });
+
+  it("shows the read-only page body last, under Related page", () => {
+    wrap();
+    const body = screen.getByTestId("edit-panel-body");
+    expect(body).toHaveTextContent("tasks/t-full.md");
+    const link = screen.getByTestId("edit-panel-link");
+    expect(
+      link.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
   });
 
   it("OPEN PAGE → calls onOpenPage with task.path", async () => {
