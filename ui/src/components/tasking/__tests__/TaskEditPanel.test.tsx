@@ -47,7 +47,7 @@ import {
 } from "./fixtures";
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
-vi.mock("sonner", () => ({ toast: { error: toastError } }));
+vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 vi.mock("../TaskBodyField", () => ({
   TaskBodyField: ({
     path,
@@ -227,6 +227,21 @@ describe("TaskEditPanel — render", () => {
     wrap();
     expect(screen.getByTestId("edit-panel-code")).toHaveTextContent("TSK-0042");
     expect(screen.getByTestId("edit-panel-title")).toHaveValue("FULL TASK");
+  });
+
+  it("copies the task code from the icon beside it", async () => {
+    // userEvent.setup() installs its own navigator.clipboard stub; spy after.
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    wrap();
+
+    const button = screen.getByRole("button", { name: "Copy task code" });
+    expect(screen.getByTestId("edit-panel-code").nextElementSibling).toBe(
+      button,
+    );
+    await user.click(button);
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("TSK-0042"));
   });
 
   it("uses approved accessible names and task field labels", () => {
