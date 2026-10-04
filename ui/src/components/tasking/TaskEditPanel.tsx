@@ -44,6 +44,7 @@ import type { BoardCycle, BoardTask, PatchTaskRequest } from "#/api/board";
 import { useArchiveTask, usePatchTask } from "#/api/board";
 import { formatApiError } from "#/api/error";
 import { Button } from "#/components/ui/button";
+import { CopyButton } from "#/components/ui/CopyButton";
 import { IconButton } from "#/components/ui/icon-button";
 import { Select, SelectItem } from "#/components/ui/select";
 import { cn } from "#/lib/cn";
@@ -528,6 +529,11 @@ export function TaskEditPanel({
             >
               {task.code}
             </span>
+            <CopyButton
+              getText={() => task.code}
+              label="Copy task code"
+              className="-ml-1 h-6 w-6 shrink-0"
+            />
             <span
               className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[12px]"
               style={{
