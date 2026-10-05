@@ -18,11 +18,9 @@ import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type { KindMetaExtrasProps } from "#/lib/kindPresentation";
 import {
   floorToQuarterHour,
-  isOneOnOne,
   localIso,
   OCCURRED_AT_KEY,
   readOccurredAt,
-  withOneOnOne,
 } from "#/lib/meeting";
 
 /** The `occurred_at` editor's schema. Declaring it here rather than reading a
@@ -40,24 +38,12 @@ const CHIP_ICON_BUTTON = cn(
 
 const LABEL = "text-[13px] text-mute";
 
-/** MEETING header band: when the meeting happened, which person pages it
- *  names, and whether it is a 1:1. These are facts of the note rather than
- *  sidebar metadata, so FOLIO renders this under the title/tags header
- *  (registered as the kind's `headerExtras`) rather than in the META rail.
+/** MEETING header band: when the meeting happened and which person pages it
+ *  names. FOLIO renders these facts under the title/tags header.
  *
- *  `occurred_at` and `attendees` are ordinary frontmatter properties, so this
- *  writes through the same property-patch path the Base rail uses — including
- *  the `datetime` type hint that keeps `occurred_at` a native TOML date-time
- *  rather than a string. The 1:1 is a tag (ADR 0006), so it goes through the
- *  editor's tag state the way the header's tag input does. The backend
- *  re-checks every write; the disabled affordances here only spare the reader
- *  a refusal they can already see coming. */
-export function MeetingMeta({
-  path,
-  isDraft,
-  tags,
-  onTagsChange,
-}: KindMetaExtrasProps) {
+ *  Both fields use the same property-patch path as Bases, including the
+ *  `datetime` hint that keeps `occurred_at` a native TOML date-time. */
+export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
   const { data: page } = usePage(path);
   const commit = usePropertyCommit();
   const pages = useIndexedPages();
@@ -69,7 +55,6 @@ export function MeetingMeta({
 
   const attendees = readAttendees(page?.meta.attendees);
   const occurredAt = readOccurredAt(page?.meta.occurred_at);
-  const oneOnOne = isOneOnOne(tags);
 
   const patch = async (key: string, value: CellValue, hint?: "datetime") => {
     if (!page) return;
@@ -141,35 +126,12 @@ export function MeetingMeta({
         )}
       </div>
 
-      <div className="flex flex-col items-start gap-2 pt-1.5">
+      <div className="col-span-full flex min-w-0 flex-wrap items-center gap-1.5">
         <span id={attendeesLabelId} className={LABEL}>
-          Attendees
+          Attendees:
         </span>
-        <button
-          type="button"
-          aria-pressed={oneOnOne}
-          title={oneOnOne ? "Tagged 1:1 — untag" : "Tag as a 1:1"}
-          className={cn(
-            "h-6 cursor-pointer rounded-full px-2.5 text-[12.5px] transition-colors",
-            FOCUS_RING_NATIVE,
-            oneOnOne
-              ? "bg-accent-tint text-accent"
-              : "bg-sink text-mute hover:text-ink",
-          )}
-          onClick={() => onTagsChange(withOneOnOne(tags, !oneOnOne))}
-        >
-          1:1
-        </button>
-      </div>
-
-      <div className="flex min-w-0 flex-col gap-2.5">
-        {attendees.length === 0 ? (
-          <span className="pt-1.5 text-[13.5px] text-mute">No attendees</span>
-        ) : (
-          <ul
-            aria-labelledby={attendeesLabelId}
-            className="m-0 flex list-none flex-wrap gap-1.5 p-0"
-          >
+        {attendees.length > 0 && (
+          <ul aria-labelledby={attendeesLabelId} className="contents list-none">
             {attendees.map((attendee) => {
               const target = findPageByName(pages, attendee);
               return (
@@ -226,9 +188,7 @@ export function MeetingMeta({
         )}
 
         {!isDraft && (
-          <div className="w-60 max-w-full">
-            <PersonCombo onPick={add} exclude={attendees} disabled={saving} />
-          </div>
+          <PersonCombo onPick={add} exclude={attendees} disabled={saving} />
         )}
 
         {createError && (

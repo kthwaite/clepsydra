@@ -11,7 +11,6 @@ import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { generateShortId, intakePath } from "#/lib/intake";
 import type { Kind } from "#/lib/kind";
-import { isOneOnOne, withOneOnOne } from "#/lib/meeting";
 import { useProjects } from "#/lib/useProjects";
 import { useUiStore } from "#/store/ui";
 
@@ -177,37 +176,17 @@ export function InscribeModal() {
             )}
           />
         </Field>
-        <div className="flex flex-col gap-2">
-          <TagInput
-            label="Tags"
-            ariaLabel="Tags"
-            values={tags}
-            suggestions={(tagIndex ?? []).map((tag) => tag.tag)}
-            onChange={updateTags}
-            placeholder="Tab to complete"
-            variant="codex"
-            valuePrefix="#"
-            maxSuggestions={8}
-          />
-          {/* TODO: we'll probably want more than one of these, with better semantics */}
-          {kind === "MEETING" && (
-            // A 1:1 is a MEETING tagged `1:1` (ADR 0006): the box edits the
-            // same tag list the chips above show.
-            <label className="flex cursor-pointer items-center gap-2.5 text-[14px] text-ink-2">
-              <input
-                type="checkbox"
-                checked={isOneOnOne(tags)}
-                onChange={(event) =>
-                  updateTags(
-                    withOneOnOne(tagsRef.current, event.target.checked),
-                  )
-                }
-                className={cn("size-4 accent-accent", FOCUS_RING_NATIVE)}
-              />
-              1:1
-            </label>
-          )}
-        </div>
+        <TagInput
+          label="Tags"
+          ariaLabel="Tags"
+          values={tags}
+          suggestions={(tagIndex ?? []).map((tag) => tag.tag)}
+          onChange={updateTags}
+          placeholder="Tab to complete"
+          variant="codex"
+          valuePrefix="#"
+          maxSuggestions={8}
+        />
         <div className="flex flex-col gap-[3px] rounded-xl bg-ground px-4 py-3">
           <span className="text-[12.5px] text-mute">Destination</span>
           <span className="break-all text-[13.5px] text-ink-2">

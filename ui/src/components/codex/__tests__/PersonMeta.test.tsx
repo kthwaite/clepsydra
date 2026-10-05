@@ -20,15 +20,7 @@ function page(birthday?: unknown) {
 }
 
 function renderMeta(isDraft = false) {
-  render(
-    <PersonMeta
-      path={PAGE.path}
-      tabId="t1"
-      isDraft={isDraft}
-      tags={[]}
-      onTagsChange={vi.fn()}
-    />,
-  );
+  render(<PersonMeta path={PAGE.path} tabId="t1" isDraft={isDraft} />);
 }
 
 const yearUnknown = () =>

@@ -107,10 +107,9 @@ well-formed: a wikilink string or an array of them, with no empty entries and
 nobody named twice; `clep doctor` reports pages whose hand-edited `attendees`
 the API would refuse.
 
-A 1:1 is a MEETING carrying the tag `1:1`. There is no separate Kind: the
-Meeting details band's **1:1** toggle and the Inscribe modal's **1:1**
-checkbox add and remove that tag, and it is an ordinary tag you can also type
-by hand.
+A 1:1 is a MEETING carrying the tag `1:1`. Add or remove it through the
+ordinary **Tags** input, on the page or in the Inscribe modal. There is no
+separate Kind or checkbox; the tag alone designates a 1:1.
 (Older pages declaring `type = "ONE_ON_ONE"`, or filed under `one-on-ones/`,
 `1-1s/` and similar folders, are read as MEETING; nothing is written back as
 the retired token.)
@@ -136,9 +135,9 @@ created without a body. The Folio shows a **Meeting details** band under the
 title that edits both fields: a date-time picker for **Occurred** (with a
 **Now** button while it is unset, which stamps the quarter hour already under
 way — 12:16 records `12:15:00` — since a meeting belongs to the slot it was
-booked in), and the attendees as chips you add to with
-the person combobox and remove from in place, with the **1:1** toggle beside
-the attendee label.
+booked in), and the attendees as removable chips. Type directly after the
+**Attendees** label or the last person to search for a person page or create
+one, without a separate input box.
 
 Bases offer both meeting fields without property declarations. If a meeting
 Base repeats these controls in **Base properties**, enable **Hide properties

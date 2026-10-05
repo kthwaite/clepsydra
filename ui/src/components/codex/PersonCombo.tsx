@@ -129,7 +129,7 @@ export function PersonCombo({
   };
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex min-w-[80px] flex-1 flex-col gap-1">
       <ComboBox
         key={epoch}
         aria-label={ariaLabel}
@@ -146,7 +146,6 @@ export function PersonCombo({
       >
         <Input
           ref={inputRef}
-          placeholder="Person"
           onKeyDown={(event) => {
             // A focused option belongs to react-aria; only a bare Enter on a
             // typed name is ours.
@@ -159,9 +158,8 @@ export function PersonCombo({
             }
           }}
           className={cn(
-            "h-9 w-full rounded-[10px] bg-sink px-3 text-[14px] text-ink outline-none transition-shadow",
-            "placeholder:text-mute",
-            "data-[focused]:ring-[1.5px] data-[focused]:ring-accent data-[focused]:ring-inset",
+            "h-[30px] w-full bg-transparent px-0.5 text-[13.5px] text-ink outline-none",
+            "data-[focus-visible]:ring-[1.5px] data-[focus-visible]:ring-accent data-[focus-visible]:ring-inset",
             "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-45",
           )}
         />

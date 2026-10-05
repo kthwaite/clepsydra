@@ -163,47 +163,16 @@ describe("InscribeModal", () => {
     expect(screen.getByText(/title is required/)).toBeInTheDocument();
   });
 
-  it("offers a 1:1 checkbox only for meetings", async () => {
-    const user = userEvent.setup();
-    render(<InscribeModal />);
-    expect(screen.queryByRole("checkbox", { name: "1:1" })).toBeNull();
-
-    await user.click(screen.getByRole("combobox", { name: "Kind" }));
-    await user.click(screen.getByRole("option", { name: "Meeting" }));
-    expect(screen.getByRole("checkbox", { name: "1:1" })).not.toBeChecked();
-
-    // The kind field filters on its text; clear it to reach NOTE again.
-    await user.clear(screen.getByRole("combobox", { name: "Kind" }));
-    await user.type(screen.getByRole("combobox", { name: "Kind" }), "no");
-    await user.click(await screen.findByRole("option", { name: "Note" }));
-    expect(screen.queryByRole("checkbox", { name: "1:1" })).toBeNull();
-  });
-
-  it("checking 1:1 adds the tag; unchecking removes it", async () => {
-    const user = userEvent.setup();
-    render(<InscribeModal />);
-    await user.click(screen.getByRole("combobox", { name: "Kind" }));
-    await user.click(screen.getByRole("option", { name: "Meeting" }));
-
-    await user.click(screen.getByRole("checkbox", { name: "1:1" }));
-    expect(screen.getByRole("checkbox", { name: "1:1" })).toBeChecked();
-    expect(screen.getByText("#1:1")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("checkbox", { name: "1:1" }));
-    expect(screen.getByRole("checkbox", { name: "1:1" })).not.toBeChecked();
-    expect(screen.queryByText("#1:1")).toBeNull();
-  });
-
-  it("ships the 1:1 tag with the meeting's create request, once", async () => {
+  it("creates a one-to-one through the ordinary tags input without duplicates", async () => {
     const user = userEvent.setup();
     render(<InscribeModal />);
     await user.click(screen.getByRole("combobox", { name: "Kind" }));
     await user.click(screen.getByRole("option", { name: "Meeting" }));
     await user.type(screen.getByRole("textbox", { name: "Title" }), "Ada");
-    await user.click(screen.getByRole("checkbox", { name: "1:1" }));
-    // Ticking twice more toggles off and on; the tag must not duplicate.
-    await user.click(screen.getByRole("checkbox", { name: "1:1" }));
-    await user.click(screen.getByRole("checkbox", { name: "1:1" }));
+    await user.type(
+      screen.getByRole("combobox", { name: "Tags" }),
+      "1:1{Enter}1:1{Enter}",
+    );
 
     await user.click(screen.getByRole("button", { name: "Inscribe" }));
 

@@ -51,25 +51,10 @@ const people = [
   person("people/grace.md", "Grace Hopper"),
 ];
 
-function renderMeta({
-  tags = [],
-  onTagsChange = vi.fn(),
-  isDraft = false,
-}: {
-  tags?: string[];
-  onTagsChange?: (next: string[]) => void;
-  isDraft?: boolean;
-} = {}) {
+function renderMeta({ isDraft = false }: { isDraft?: boolean } = {}) {
   render(
-    <MeetingMeta
-      path="meetings/kickoff.md"
-      tabId="t1"
-      isDraft={isDraft}
-      tags={tags}
-      onTagsChange={onTagsChange}
-    />,
+    <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={isDraft} />,
   );
-  return { onTagsChange };
 }
 
 const combobox = () => screen.getByRole("combobox", { name: "add attendee" });
@@ -93,27 +78,12 @@ describe("MeetingMeta", () => {
     ).toBeInTheDocument();
   });
 
-  it("says so in sentence case when nobody is named", () => {
-    usePageMock.mockReturnValue(page(undefined));
-    renderMeta();
-
-    expect(screen.getByText("No attendees")).toBeInTheDocument();
-  });
-
   it("lists the people a meeting names", () => {
     usePageMock.mockReturnValue(page(["[[Ada]]", "[[Grace]]"]));
     renderMeta();
 
     expect(screen.getByText("Ada")).toBeInTheDocument();
     expect(screen.getByText("Grace")).toBeInTheDocument();
-  });
-
-  it("names any number of people and never captions a limit", () => {
-    usePageMock.mockReturnValue(page(["[[Ada]]", "[[Grace Hopper]]"]));
-    renderMeta();
-
-    expect(combobox()).toBeInTheDocument();
-    expect(screen.queryByText(/names one person/)).toBeNull();
   });
 
   it("adds a picked person as a wikilink alongside the existing ones", async () => {
@@ -210,28 +180,6 @@ describe("MeetingMeta", () => {
     );
     expect(vars.body).toEqual({ title: "Grace", kind: "PERSON" });
     expect(commitMock).not.toHaveBeenCalled();
-  });
-
-  it("tags the meeting 1:1 without touching other tags", () => {
-    usePageMock.mockReturnValue(page(["[[Ada]]"]));
-    const { onTagsChange } = renderMeta({ tags: ["weekly"] });
-
-    const toggle = screen.getByRole("button", { name: "1:1" });
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(toggle);
-
-    expect(onTagsChange).toHaveBeenCalledWith(["weekly", "1:1"]);
-  });
-
-  it("untags a 1:1", () => {
-    usePageMock.mockReturnValue(page(["[[Ada]]"]));
-    const { onTagsChange } = renderMeta({ tags: ["weekly", "1:1"] });
-
-    const toggle = screen.getByRole("button", { name: "1:1" });
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(toggle);
-
-    expect(onTagsChange).toHaveBeenCalledWith(["weekly"]);
   });
 
   it("shows the recorded time and offers no shortcut once it is set", () => {
