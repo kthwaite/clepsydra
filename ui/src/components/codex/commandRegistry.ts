@@ -18,6 +18,7 @@ export type StaticCommandAction =
   | "add-book"
   | "inscribe-folio"
   | "open-settings"
+  | "open-sky"
   | "toggle-theme"
   | "open-shortcut-help"
   | "run-boot-sequence";
@@ -231,6 +232,11 @@ export const STATIC_COMMANDS: readonly StaticCommandDescriptor[] = [
     title: "Open Status / preferences",
     shortcut: "app.settings",
     action: "open-settings",
+  },
+  {
+    id: "app.sky",
+    title: "Open Sky",
+    action: "open-sky",
   },
   {
     id: "app.themeToggle",

@@ -40,6 +40,11 @@ const BookImportModal = lazy(() =>
     default: module.BookImportModal,
   })),
 );
+const SkyModal = lazy(() =>
+  import("#/components/codex/SkyModal").then((module) => ({
+    default: module.SkyModal,
+  })),
+);
 const LocationModal = lazy(() =>
   import("#/components/codex/LocationModal").then((module) => ({
     default: module.LocationModal,
@@ -63,6 +68,7 @@ export function GlobalOverlays() {
   const captureOpen = useUiStore((state) => state.isCaptureAsideOpen);
   const bookImportOpen = useUiStore((state) => state.isBookImportOpen);
   const locationOpen = useUiStore((state) => state.isLocationOpen);
+  const skyOpen = useUiStore((state) => state.isSkyOpen);
   const shortcutHelpOpen = useUiStore((state) => state.isShortcutHelpOpen);
   const booting = useUiStore((state) => state.isBooting);
   const closeSearch = useUiStore((state) => state.closeSearch);
@@ -71,6 +77,7 @@ export function GlobalOverlays() {
   const closeCaptureAside = useUiStore((state) => state.closeCaptureAside);
   const closeBookImport = useUiStore((state) => state.closeBookImport);
   const closeLocation = useUiStore((state) => state.closeLocation);
+  const closeSky = useUiStore((state) => state.closeSky);
   const closeShortcutHelp = useUiStore((state) => state.closeShortcutHelp);
   const endBoot = useUiStore((state) => state.endBoot);
   const hasPreviews = usePreviewStore((state) => state.windows.length > 0);
@@ -100,6 +107,11 @@ export function GlobalOverlays() {
       {bookImportOpen && (
         <OverlayBoundary onDismiss={closeBookImport} label="Add book">
           <BookImportModal />
+        </OverlayBoundary>
+      )}
+      {skyOpen && (
+        <OverlayBoundary onDismiss={closeSky} label="Sky">
+          <SkyModal />
         </OverlayBoundary>
       )}
       {locationOpen && (

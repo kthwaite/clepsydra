@@ -250,6 +250,12 @@ export const FEATURE_INVENTORY = [
     disposition: { kind: "reference", slug: "configuration" },
   },
   {
+    id: "app.sky",
+    label: "Open Sky",
+    surface: "command",
+    disposition: { kind: "guide", slug: "getting-started" },
+  },
+  {
     id: "app.themeToggle",
     label: "Toggle bone / night mode",
     surface: "command",

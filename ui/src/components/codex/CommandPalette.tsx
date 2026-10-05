@@ -74,6 +74,7 @@ function CommandPaletteContent() {
   const openCaptureAside = useUiStore((s) => s.openCaptureAside);
   const openBookImport = useUiStore((s) => s.openBookImport);
   const openSettings = useUiStore((s) => s.openSettings);
+  const openSky = useUiStore((s) => s.openSky);
   const openShortcutHelp = useUiStore((s) => s.openShortcutHelp);
   const runBoot = useUiStore((s) => s.runBoot);
   const navigate = useNavigate();
@@ -236,6 +237,9 @@ function CommandPaletteContent() {
             case "open-settings":
               openSettings("appearance");
               return;
+            case "open-sky":
+              openSky();
+              return;
             case "toggle-theme":
               toggleTheme();
               return;
@@ -263,6 +267,7 @@ function CommandPaletteContent() {
       openCaptureAside,
       openBookImport,
       openSettings,
+      openSky,
       openShortcutHelp,
       runBoot,
     ],

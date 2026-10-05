@@ -16,6 +16,7 @@ interface UiState {
   isCaptureAsideOpen: boolean;
   isBookImportOpen: boolean;
   isLocationOpen: boolean;
+  isSkyOpen: boolean;
   isShortcutHelpOpen: boolean;
   isBooting: boolean;
   isContentsOpen: boolean;
@@ -36,6 +37,8 @@ interface UiState {
   closeBookImport: () => void;
   openLocation: () => void;
   closeLocation: () => void;
+  openSky: () => void;
+  closeSky: () => void;
   openShortcutHelp: () => void;
   closeShortcutHelp: () => void;
   runBoot: () => void;
@@ -50,6 +53,7 @@ export const useUiStore = create<UiState>((set) => ({
   isCaptureAsideOpen: false,
   isBookImportOpen: false,
   isLocationOpen: false,
+  isSkyOpen: false,
   isShortcutHelpOpen: false,
   isBooting: false,
   isContentsOpen: false,
@@ -73,6 +77,8 @@ export const useUiStore = create<UiState>((set) => ({
   closeBookImport: () => set({ isBookImportOpen: false }),
   openLocation: () => set({ isLocationOpen: true }),
   closeLocation: () => set({ isLocationOpen: false }),
+  openSky: () => set({ isSkyOpen: true }),
+  closeSky: () => set({ isSkyOpen: false }),
   openShortcutHelp: () => set({ isShortcutHelpOpen: true }),
   closeShortcutHelp: () => set({ isShortcutHelpOpen: false }),
   runBoot: () => set({ isBooting: true }),
