@@ -166,6 +166,65 @@ describe("BaseDefinitionWorkspace", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
+
+  it("saves the General member-page visibility setting and can restore the default", async () => {
+    const user = userEvent.setup();
+    updateMock
+      .mockResolvedValueOnce(
+        mutationResponse({
+          hide_member_properties: true,
+          revision: "revision-2",
+        }),
+      )
+      .mockResolvedValueOnce(mutationResponse({ revision: "revision-3" }));
+    const view = renderWorkspace();
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Hide properties on member pages",
+    });
+    expect(checkbox).not.toBeChecked();
+    await user.click(checkbox);
+    expect(screen.getByText("Unsaved changes")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(updateMock).toHaveBeenNthCalledWith(1, {
+      params: { path: { slug: "reading-log" } },
+      body: {
+        expected_revision: "revision-1",
+        definition: expect.objectContaining({
+          hide_member_properties: true,
+          properties: [],
+        }),
+        view_origins: [{ kind: "existing", name: "All" }],
+      },
+    });
+    expect(await screen.findByText("Saved")).toBeVisible();
+    view.unmount();
+
+    baseState.data = {
+      ...detail,
+      hide_member_properties: true,
+      revision: "revision-2",
+    };
+    renderWorkspace();
+    const savedCheckbox = screen.getByRole("checkbox", {
+      name: "Hide properties on member pages",
+    });
+    expect(savedCheckbox).toBeChecked();
+    await user.click(savedCheckbox);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(updateMock).toHaveBeenNthCalledWith(2, {
+      params: { path: { slug: "reading-log" } },
+      body: {
+        expected_revision: "revision-2",
+        definition: expect.not.objectContaining({
+          hide_member_properties: expect.anything(),
+        }),
+        view_origins: [{ kind: "existing", name: "All" }],
+      },
+    });
+    expect(await screen.findByText("Saved")).toBeVisible();
+    expect(savedCheckbox).not.toBeChecked();
+  });
+
   it("places Preview properties immediately after Properties in definition navigation", () => {
     renderWorkspace();
 

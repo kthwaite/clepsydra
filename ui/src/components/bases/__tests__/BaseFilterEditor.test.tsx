@@ -822,8 +822,6 @@ describe("BaseFilterEditor", () => {
     expect(
       await screen.findByRole("option", { name: "ID" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Page fields")).toBeInTheDocument();
-    expect(screen.getByText("Declared properties")).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
     const operator = screen.getByRole("button", {

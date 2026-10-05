@@ -378,6 +378,59 @@ describe("BaseTableView compact scroller", () => {
 });
 
 describe("BaseTableView", () => {
+  it("edits undeclared meeting columns with their built-in types and friendly labels", async () => {
+    const user = userEvent.setup();
+    const meetingRow = {
+      ...row,
+      columns: {
+        occurred_at: "2026-10-05",
+        "prop.attendees": ["[[Jerry]]", "[[Sam]]"],
+      },
+    };
+    const props = renderView({
+      definition: {
+        ...definition,
+        properties: [],
+        views: [
+          {
+            name: "Continues",
+            columns: ["title", "occurred_at", "prop.attendees"],
+          },
+        ],
+      },
+      output: { ...flat, rows: [meetingRow] },
+    });
+    expect(
+      screen.getByRole("columnheader", { name: /^Occurred/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: /^Attendees/ }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "2026-10-05" }));
+    const dateInput = screen.getByLabelText("Edit datetime");
+    expect(dateInput).toHaveAttribute("type", "datetime-local");
+    expect(dateInput).toHaveValue("2026-10-05T00:00");
+    await user.keyboard("{Escape}");
+    expect(props.onCommitCell).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /Jerry.*Sam/ }));
+    const attendeesInput = screen.getByLabelText("Edit relation");
+    expect(attendeesInput).toHaveValue("Jerry, Sam");
+    await user.clear(attendeesInput);
+    await user.type(attendeesInput, "Jerry, Lee{Enter}");
+    expect(props.onCommitCell).toHaveBeenCalledWith(
+      meetingRow,
+      "prop.attendees",
+      ["[[Jerry]]", "[[Lee]]"],
+      undefined,
+    );
+    await user.click(screen.getByRole("columnheader", { name: /^Attendees/ }));
+    expect(props.onSortChange).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("columnheader", { name: /^Occurred/ }));
+    expect(props.onSortChange).toHaveBeenCalledWith([
+      { field: "occurred_at", dir: "asc" },
+    ]);
+  });
+
   it("renders every view name in the switcher and switches on click", async () => {
     const user = userEvent.setup();
     const props = renderView({});

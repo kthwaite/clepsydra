@@ -38,6 +38,7 @@ import {
   type BaseMemberDraftValue,
   composeMemberDraftFields,
 } from "./member-draft";
+import { propertyKey } from "./property-schema";
 import { outputContains } from "./query-output";
 import { useRowActions } from "./useRowActions";
 import { type OverridesSaveState, useViewOverrides } from "./useViewOverrides";
@@ -854,7 +855,7 @@ export function useBaseTableController(
   );
   const handleCommitCell = useCallback(
     (row: QueryRow, key: string, value: CellValue, hint?: PropertyType) => {
-      void commit(row, key, value, hint).catch(() => undefined);
+      void commit(row, propertyKey(key), value, hint).catch(() => undefined);
     },
     [commit],
   );

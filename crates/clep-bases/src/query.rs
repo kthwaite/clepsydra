@@ -16,7 +16,7 @@ use thiserror::Error;
 
 use crate::base::{
     Aggregate, AggregateFn, BODY_COLUMN, BaseDefinition, Filter, Op, PropertyType, SortDir,
-    SortKey, is_body_field_reference, relative_date_window,
+    SortKey, builtin_property, is_body_field_reference, relative_date_window,
 };
 use clep_vault::canonical::CanonicalName;
 use clep_vault::link::normalize_links_to_target;
@@ -208,11 +208,15 @@ impl<'a> QueryContext<'a> {
 
     fn property_type(&self, key: &str) -> PropertyType {
         if let Some(base) = self.base
-            && let Some(def) = base.property(key)
+            && let Some(def) = base.declared_property(key)
         {
             return def.property_type;
         }
-        self.types.get(key).copied().unwrap_or(PropertyType::Text)
+        self.types
+            .get(key)
+            .copied()
+            .or_else(|| builtin_property(key).map(|definition| definition.property_type))
+            .unwrap_or(PropertyType::Text)
     }
 }
 

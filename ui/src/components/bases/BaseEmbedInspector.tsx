@@ -755,7 +755,6 @@ export function BaseEmbedInspector({
                   label="Embed filter"
                   value={draft.filter}
                   properties={properties}
-                  allowAttendees={false}
                   diagnostics={diagnostics}
                   diagnosticRoot="filter"
                   onChange={(filter) =>

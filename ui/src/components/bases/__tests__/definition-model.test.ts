@@ -40,7 +40,23 @@ function stripResponseFields(detail: BaseDetailFixture): BaseFile {
 }
 
 describe("base definition model", () => {
-  it("declares attendee relations used by nested membership and saved-view filters", () => {
+  it("round-trips member-page visibility without declaring a property", () => {
+    const draft = fromWire(baseDetail({ hide_member_properties: true }));
+    expect(draft.hideMemberProperties).toBe(true);
+    expect(toWire(draft).hide_member_properties).toBe(true);
+    expect(toWire(draft).properties).toEqual([]);
+
+    draft.hideMemberProperties = false;
+    expect(toWire(draft)).not.toHaveProperty("hide_member_properties");
+    expect(toWire(fromWire(baseDetail()))).not.toHaveProperty(
+      "hide_member_properties",
+    );
+    expect(
+      toWire(fromWire(baseDetail({ hide_member_properties: false }))),
+    ).not.toHaveProperty("hide_member_properties");
+  });
+
+  it("keeps built-in membership and saved-view fields out of declarations", () => {
     const draft = createMinimalDraft("Meetings", undefined, {
       all: [
         { field: "kind", op: "eq", value: "MEETING" },
@@ -50,18 +66,17 @@ describe("base definition model", () => {
         },
       ],
     });
-    expect(toWire(draft).properties).toEqual([
-      { key: "attendees", definition: { type: "relation", many: true } },
-    ]);
+    expect(toWire(draft).properties).toEqual([]);
     draft.filter = undefined;
     draft.views[0].filter = {
       any: [
         { field: "prop.attendees", op: "links_to", value: "people/jerry.md" },
       ],
     };
-    expect(toWire(draft).properties).toEqual([
-      { key: "attendees", definition: { type: "relation", many: true } },
-    ]);
+    draft.views[0].columns = ["title", "occurred_at", "attendees"];
+    draft.views[0].sort = [{ field: "occurred_at", dir: "desc" }];
+    expect(toWire(draft).properties).toEqual([]);
+    expect(draft.properties).toEqual([]);
   });
 
   it("never overwrites an explicit attendee property declaration", () => {

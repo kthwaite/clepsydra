@@ -15,6 +15,7 @@ import {
 } from "#/components/bases/cells/types";
 import { EditableCell } from "#/components/bases/EditableCell";
 import { Tick } from "#/components/codex/Tick";
+import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
@@ -62,6 +63,7 @@ interface PropertyGroup {
 
 function groupProperties(
   projection: PageBasePropertiesResponse,
+  properties: PageBaseProperty[],
 ): PropertyGroup[] {
   const bySlug = new Map<string, PropertyGroup>(
     projection.matching_bases.map((base) => [
@@ -75,7 +77,7 @@ function groupProperties(
     properties: [],
   };
 
-  for (const property of projection.properties) {
+  for (const property of properties) {
     if (property.declarations.length > 1) {
       shared.properties.push(property);
       continue;
@@ -92,6 +94,15 @@ function groupProperties(
     );
   if (shared.properties.length > 0) groups.push(shared);
   return groups;
+}
+
+function isHiddenByDefault(property: PageBaseProperty): boolean {
+  return (
+    property.declarations.length > 0 &&
+    property.declarations.every(
+      ({ base }) => base.hide_member_properties === true,
+    )
+  );
 }
 
 function propertyTypeLabel(property: PageBaseProperty): string {
@@ -148,7 +159,11 @@ const ACTION_CLASS = cn(
  * Backend-authoritative Base properties for one Folio. Editing delegates to the
  * same typed cells and revision-guarded PATCH path as Base tables.
  */
-export function FolioProperties({
+export function FolioProperties(props: FolioPropertiesProps) {
+  return <PageFolioProperties key={props.pageId} {...props} />;
+}
+
+function PageFolioProperties({
   pageId,
   path,
   locked,
@@ -157,6 +172,7 @@ export function FolioProperties({
   const projection = usePageBaseProperties(pageId);
   const commit = usePropertyCommit();
   const id = useId();
+  const [showHidden, setShowHidden] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [failedSave, setFailedSave] = useState<FailedSave | null>(null);
@@ -235,7 +251,22 @@ export function FolioProperties({
         "Property projection is temporarily unavailable.",
       )
     : null;
-  const groups = projection.data ? groupProperties(projection.data) : [];
+  const properties = projection.data?.properties ?? [];
+  const hasHidden = properties.some(isHiddenByDefault);
+  const visibleProperties = showHidden
+    ? properties
+    : properties.filter(
+        (property) =>
+          !isHiddenByDefault(property) ||
+          property.key === editingKey ||
+          property.key === savingKey ||
+          property.key === failedSave?.key,
+      );
+  const groups = projection.data
+    ? groupProperties(projection.data, visibleProperties)
+    : [];
+  const hideDisabled =
+    editingKey !== null || savingKey !== null || failedSave !== null;
 
   if (!projection.isError && projection.data?.matching_bases.length === 0) {
     return null;
@@ -253,6 +284,18 @@ export function FolioProperties({
         </h2>
         {projection.isFetching ? (
           <span className="text-[12.5px] text-mute">Refreshing…</span>
+        ) : null}
+        {hasHidden ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={showHidden}
+            aria-controls={`${id}-properties`}
+            isDisabled={showHidden && hideDisabled}
+            onPress={() => setShowHidden((shown) => !shown)}
+          >
+            {showHidden ? "Hide hidden properties" : "Show hidden properties"}
+          </Button>
         ) : null}
       </div>
 
@@ -289,190 +332,186 @@ export function FolioProperties({
         </div>
       ) : null}
 
-      {groups.length > 0 ? (
-        <div className="space-y-3">
-          {groups.map((group) => {
-            const groupHeadingId = `${id}-group-${group.id}`;
+      <div id={`${id}-properties`} className="space-y-3">
+        {groups.map((group) => {
+          const groupHeadingId = `${id}-group-${group.id}`;
 
-            return (
-              <section key={group.id} aria-labelledby={groupHeadingId}>
-                <h3
-                  id={groupHeadingId}
-                  className="mb-1.5 text-[12.5px] text-mute"
-                >
-                  {group.label}
-                </h3>
-                <ul className="m-0 space-y-1 p-0">
-                  {group.properties.map((property, index) => {
-                    const provenanceId = `${id}-provenance-${group.id}-${index}`;
-                    const errorId = `${id}-error-${group.id}-${index}`;
-                    const propertyFailure =
-                      failedSave?.key === property.key ? failedSave : null;
-                    const describedBy = propertyFailure
-                      ? `${provenanceId} ${errorId}`
-                      : provenanceId;
-                    const canEdit =
-                      !locked &&
-                      !readOnly &&
-                      property.compatibility === "compatible" &&
-                      property.patchable &&
-                      property.definition !== null;
-                    const readOnlyReason = locked
-                      ? "Page is locked"
-                      : readOnly
-                        ? "Folio is read-only"
-                        : null;
-                    const blockers = property.blockers.map(blockerLabel);
-                    if (!canEdit && !readOnlyReason && blockers.length === 0) {
-                      blockers.push("Read-only property");
-                    }
+          return (
+            <section key={group.id} aria-labelledby={groupHeadingId}>
+              <h3
+                id={groupHeadingId}
+                className="mb-1.5 text-[12.5px] text-mute"
+              >
+                {group.label}
+              </h3>
+              <ul className="m-0 space-y-1 p-0">
+                {group.properties.map((property, index) => {
+                  const provenanceId = `${id}-provenance-${group.id}-${index}`;
+                  const errorId = `${id}-error-${group.id}-${index}`;
+                  const propertyFailure =
+                    failedSave?.key === property.key ? failedSave : null;
+                  const describedBy = propertyFailure
+                    ? `${provenanceId} ${errorId}`
+                    : provenanceId;
+                  const canEdit =
+                    !locked &&
+                    !readOnly &&
+                    property.compatibility === "compatible" &&
+                    property.patchable &&
+                    property.definition !== null;
+                  const readOnlyReason = locked
+                    ? "Page is locked"
+                    : readOnly
+                      ? "Folio is read-only"
+                      : null;
+                  const blockers = property.blockers.map(blockerLabel);
+                  if (!canEdit && !readOnlyReason && blockers.length === 0) {
+                    blockers.push("Read-only property");
+                  }
 
-                    return (
-                      <li
-                        key={property.key}
-                        className="grid list-none gap-x-4 gap-y-0.5 py-0.5 sm:grid-cols-[minmax(10rem,14rem)_minmax(0,1fr)]"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex min-w-0 items-baseline gap-2">
-                            <h4 className="m-0 break-all text-[13.5px] font-medium text-ink-2">
-                              {property.key}
-                            </h4>
-                            <span className="shrink-0 text-[12px] text-faint">
-                              {propertyTypeLabel(property)}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {readOnlyReason ? (
-                              <span className="text-[12px] text-mute">
-                                {readOnlyReason}
-                              </span>
-                            ) : null}
-                            {blockers.map((blocker) => (
-                              <span
-                                key={blocker}
-                                className="text-[12px] text-hot"
-                              >
-                                {blocker}
-                              </span>
-                            ))}
-                          </div>
+                  return (
+                    <li
+                      key={property.key}
+                      className="grid list-none gap-x-4 gap-y-0.5 py-0.5 sm:grid-cols-[minmax(10rem,14rem)_minmax(0,1fr)]"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-baseline gap-2">
+                          <h4 className="m-0 break-all text-[13.5px] font-medium text-ink-2">
+                            {property.key}
+                          </h4>
+                          <span className="shrink-0 text-[12px] text-faint">
+                            {propertyTypeLabel(property)}
+                          </span>
                         </div>
-
-                        <div className="min-w-0">
-                          {canEdit && property.definition ? (
-                            <EditableCell
-                              value={propertyCellValue(property)}
-                              definition={property.definition}
-                              isEditing={editingKey === property.key}
-                              focusOnDisplay={focusReturnKey === property.key}
-                              preserveEditingOnBlur={propertyFailure !== null}
-                              ariaLabel={`${property.key} property`}
-                              ariaDescribedBy={describedBy}
-                              commitOnBlur
-                              onEdit={() => openEditor(property.key)}
-                              onCancel={() => discardDraft(property.key)}
-                              onCommit={(value, hint) => {
-                                void saveProperty(property, value, hint);
-                              }}
-                              onCommitNext={(value, hint) => {
-                                void saveProperty(property, value, hint);
-                              }}
-                            />
-                          ) : (
-                            <p
-                              aria-describedby={provenanceId}
-                              className="m-0 break-words text-[13.5px] text-ink-2"
-                            >
-                              {displayPropertyValue(property)}
-                            </p>
-                          )}
-
-                          <ul
-                            id={provenanceId}
-                            className="sr-only"
-                            style={{ opacity: 0 }}
-                          >
-                            {property.declarations.map((declaration) => (
-                              <li
-                                key={declaration.base.slug}
-                                className="list-none text-[12px] leading-relaxed text-mute"
-                              >
-                                {declaration.base.name} ({declaration.base.slug}
-                                ) · {describeDefinition(declaration.definition)}
-                              </li>
-                            ))}
-                          </ul>
-
-                          {savingKey === property.key ? (
-                            <p
-                              role="status"
-                              className="mt-1 mb-0 text-[12px] text-mute"
-                            >
-                              Saving {property.key}…
-                            </p>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {readOnlyReason ? (
+                            <span className="text-[12px] text-mute">
+                              {readOnlyReason}
+                            </span>
                           ) : null}
+                          {blockers.map((blocker) => (
+                            <span
+                              key={blocker}
+                              className="text-[12px] text-hot"
+                            >
+                              {blocker}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
 
-                          {propertyFailure ? (
-                            <div id={errorId} className="mt-1">
-                              <p
-                                role="alert"
-                                className="m-0 text-[13px] text-hot"
-                              >
-                                {propertyFailure.message}
-                              </p>
-                              <div className="mt-1 flex flex-wrap gap-1.5">
-                                {propertyFailure.conflict ? (
-                                  <button
-                                    type="button"
-                                    className={ACTION_CLASS}
-                                    onMouseDown={(event) =>
-                                      event.preventDefault()
-                                    }
-                                    onClick={retryProjection}
-                                  >
-                                    Reload current properties
-                                  </button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    className={ACTION_CLASS}
-                                    onMouseDown={(event) =>
-                                      event.preventDefault()
-                                    }
-                                    onClick={() => {
-                                      void saveProperty(
-                                        property,
-                                        propertyFailure.value,
-                                        propertyFailure.hint,
-                                      );
-                                    }}
-                                  >
-                                    Retry saving {property.key}
-                                  </button>
-                                )}
+                      <div className="min-w-0">
+                        {canEdit && property.definition ? (
+                          <EditableCell
+                            value={propertyCellValue(property)}
+                            definition={property.definition}
+                            isEditing={editingKey === property.key}
+                            focusOnDisplay={focusReturnKey === property.key}
+                            preserveEditingOnBlur={propertyFailure !== null}
+                            ariaLabel={`${property.key} property`}
+                            ariaDescribedBy={describedBy}
+                            commitOnBlur
+                            onEdit={() => openEditor(property.key)}
+                            onCancel={() => discardDraft(property.key)}
+                            onCommit={(value, hint) => {
+                              void saveProperty(property, value, hint);
+                            }}
+                            onCommitNext={(value, hint) => {
+                              void saveProperty(property, value, hint);
+                            }}
+                          />
+                        ) : (
+                          <p
+                            aria-describedby={provenanceId}
+                            className="m-0 break-words text-[13.5px] text-ink-2"
+                          >
+                            {displayPropertyValue(property)}
+                          </p>
+                        )}
+
+                        <ul
+                          id={provenanceId}
+                          className="sr-only"
+                          style={{ opacity: 0 }}
+                        >
+                          {property.declarations.map((declaration) => (
+                            <li
+                              key={declaration.base.slug}
+                              className="list-none text-[12px] leading-relaxed text-mute"
+                            >
+                              {declaration.base.name} ({declaration.base.slug})
+                              · {describeDefinition(declaration.definition)}
+                            </li>
+                          ))}
+                        </ul>
+
+                        {savingKey === property.key ? (
+                          <p
+                            role="status"
+                            className="mt-1 mb-0 text-[12px] text-mute"
+                          >
+                            Saving {property.key}…
+                          </p>
+                        ) : null}
+
+                        {propertyFailure ? (
+                          <div id={errorId} className="mt-1">
+                            <p
+                              role="alert"
+                              className="m-0 text-[13px] text-hot"
+                            >
+                              {propertyFailure.message}
+                            </p>
+                            <div className="mt-1 flex flex-wrap gap-1.5">
+                              {propertyFailure.conflict ? (
                                 <button
                                   type="button"
                                   className={ACTION_CLASS}
                                   onMouseDown={(event) =>
                                     event.preventDefault()
                                   }
-                                  onClick={() => discardDraft(property.key)}
+                                  onClick={retryProjection}
                                 >
-                                  Discard {property.key} draft
+                                  Reload current properties
                                 </button>
-                              </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className={ACTION_CLASS}
+                                  onMouseDown={(event) =>
+                                    event.preventDefault()
+                                  }
+                                  onClick={() => {
+                                    void saveProperty(
+                                      property,
+                                      propertyFailure.value,
+                                      propertyFailure.hint,
+                                    );
+                                  }}
+                                >
+                                  Retry saving {property.key}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className={ACTION_CLASS}
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => discardDraft(property.key)}
+                              >
+                                Discard {property.key} draft
+                              </button>
                             </div>
-                          ) : null}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            );
-          })}
-        </div>
-      ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
     </section>
   );
 }

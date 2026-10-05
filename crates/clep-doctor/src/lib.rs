@@ -1691,12 +1691,12 @@ fn check_bases(vault: &Vault, report: &mut Report) {
         ));
     }
 
-    // Type-violation census: declared number/date/bool properties whose
+    // Type-violation census: effective number/date/bool properties whose
     // indexed rows lack the native typed projection (e.g. rating = "4").
     // Vault-wide by key; base membership filters are not applied here.
     let mut violations: Vec<String> = Vec::new();
     for base in &registry.bases {
-        for (key, def) in &base.file.properties {
+        for (key, def) in base.effective_properties() {
             let column = match def.property_type {
                 PropertyType::Number => "value_num",
                 PropertyType::Date | PropertyType::Datetime => "value_date",

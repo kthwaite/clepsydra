@@ -474,6 +474,111 @@ title = { type = "text" }
 }
 
 #[tokio::test]
+async fn member_property_visibility_round_trips_without_filtering_projection_or_rows() {
+    let (server, tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_projection)
+        .build()
+        .into_server_and_temp();
+    let endpoint = format!("/api/vault/pages/by-id/{PAGE_ID}/properties");
+    let baseline_response = server.get(&endpoint).await;
+    baseline_response.assert_status_ok();
+    let baseline: serde_json::Value = baseline_response.json();
+    let mut hidden = std::collections::BTreeSet::new();
+
+    for (slug, setting) in [
+        ("a-reader", Some(true)),
+        ("b-linked", Some(true)),
+        ("a-reader", Some(false)),
+        ("b-linked", None),
+    ] {
+        let base_endpoint = format!("/api/vault/bases/{slug}");
+        let detail_response = server.get(&base_endpoint).await;
+        detail_response.assert_status_ok();
+        let mut definition: serde_json::Value = detail_response.json();
+        let revision = definition["revision"].clone();
+        let before_query = server
+            .post("/api/vault/bases/preview")
+            .json(&serde_json::json!({ "definition": definition }))
+            .await;
+        before_query.assert_status_ok();
+        let before_query: serde_json::Value = before_query.json();
+        if let Some(value) = setting {
+            definition["hide_member_properties"] = value.into();
+        } else {
+            definition
+                .as_object_mut()
+                .unwrap()
+                .remove("hide_member_properties");
+        }
+        let response = server
+            .put(&base_endpoint)
+            .json(&serde_json::json!({
+                "expected_revision": revision,
+                "definition": definition,
+                "view_origins": []
+            }))
+            .await;
+        response.assert_status_ok();
+        let reloaded_response = server.get(&base_endpoint).await;
+        reloaded_response.assert_status_ok();
+        let reloaded: serde_json::Value = reloaded_response.json();
+        let enabled = setting.unwrap_or(false);
+        assert_eq!(
+            reloaded.get("hide_member_properties"),
+            enabled.then_some(&serde_json::Value::Bool(true))
+        );
+        let raw = fs::read_to_string(
+            tmp.path()
+                .join("vault/bases")
+                .join(format!("{slug}.base.toml")),
+        )
+        .unwrap();
+        let parsed: toml::Value = toml::from_str(&raw).unwrap();
+        assert_eq!(
+            parsed
+                .get("hide_member_properties")
+                .and_then(toml::Value::as_bool),
+            Some(enabled)
+        );
+        let after_query = server
+            .post("/api/vault/bases/preview")
+            .json(&serde_json::json!({ "definition": reloaded }))
+            .await;
+        after_query.assert_status_ok();
+        assert_eq!(after_query.json::<serde_json::Value>(), before_query);
+
+        if enabled {
+            hidden.insert(slug);
+        } else {
+            hidden.remove(slug);
+        }
+        let mut expected = baseline.clone();
+        for identity in expected["matching_bases"].as_array_mut().unwrap() {
+            if hidden.contains(identity["slug"].as_str().unwrap()) {
+                identity["hide_member_properties"] = true.into();
+            }
+        }
+        for property in expected["properties"].as_array_mut().unwrap() {
+            for declaration in property["declarations"].as_array_mut().unwrap() {
+                if hidden.contains(declaration["base"]["slug"].as_str().unwrap()) {
+                    declaration["base"]["hide_member_properties"] = true.into();
+                }
+            }
+        }
+        for field in expected["preview"]["fields"].as_array_mut().unwrap() {
+            for source in field["sources"].as_array_mut().unwrap() {
+                if hidden.contains(source["base"]["slug"].as_str().unwrap()) {
+                    source["base"]["hide_member_properties"] = true.into();
+                }
+            }
+        }
+        let response = server.get(&endpoint).await;
+        response.assert_status_ok();
+        assert_eq!(response.json::<serde_json::Value>(), expected);
+    }
+}
+
+#[tokio::test]
 async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
     let (server, _tmp) = ApiFixture::builder()
         .pre_index_seed(seed_projection)
@@ -573,6 +678,7 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
     assert_eq!(
         keys,
         vec![
+            "attendees",
             "choice_order",
             "conflict_relation",
             "conflict_type",
@@ -582,6 +688,7 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
             "kind",
             "non_finite",
             "note",
+            "occurred_at",
             "rating",
             "seen_at",
             "series",
@@ -991,7 +1098,20 @@ async fn get_distinguishes_no_matching_bases_from_bases_without_properties() {
         no_declarations["matching_bases"],
         serde_json::json!([{ "slug": "empty", "name": "Empty Base" }])
     );
-    assert_eq!(no_declarations["properties"], serde_json::json!([]));
+    assert_eq!(no_declarations["properties"].as_array().unwrap().len(), 2);
+    for (key, definition) in [
+        ("occurred_at", serde_json::json!({ "type": "datetime" })),
+        (
+            "attendees",
+            serde_json::json!({ "type": "relation", "many": true }),
+        ),
+    ] {
+        let property = projection_property(&no_declarations, key);
+        assert_eq!(property["definition"], definition);
+        assert_eq!(property["present"], false);
+        assert_eq!(property["value"], serde_json::Value::Null);
+        assert_eq!(property["patchable"], true);
+    }
     assert_eq!(
         no_declarations["preview"],
         serde_json::json!({ "fields": [], "remaining_count": 0 })
@@ -1132,4 +1252,115 @@ rating = { type = "number" }
         .get(&format!("/api/vault/pages/by-id/{PAGE_ID}/properties"))
         .await
         .assert_status_internal_server_error();
+}
+
+#[tokio::test]
+async fn hinted_builtin_property_patch_needs_no_declarations_and_preserves_relation_arrays() {
+    let (server, tmp) = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(root.join("book.md"), TOML_PAGE).unwrap();
+            fs::create_dir_all(root.join("bases")).unwrap();
+            fs::write(
+                root.join("bases/implicit.base.toml"),
+                "name = \"Implicit\"\npreview = [{ field = \"occurred_at\", label = \"Occurred\" }, { field = \"attendees\", label = \"Attendees\" }]\n",
+            )
+            .unwrap();
+        })
+        .build()
+        .into_server_and_temp();
+    let endpoint = format!("/api/vault/pages/by-id/{PAGE_ID}/properties");
+    let revision = revision_of(&server, "book.md").await;
+    let response = server
+        .patch(&endpoint)
+        .json(&serde_json::json!({
+            "expected_revision": revision,
+            "types": { "occurred_at": "datetime" },
+            "set": {
+                "occurred_at": "2026-08-09T12:34:56Z",
+                "attendees": ["[[Ada]]"]
+            }
+        }))
+        .await;
+    response.assert_status_ok();
+    let patched: serde_json::Value = response.json();
+    assert_eq!(patched["properties"]["occurred_at"], "2026-08-09T12:34:56Z");
+    assert_eq!(
+        patched["properties"]["attendees"],
+        serde_json::json!(["[[Ada]]"])
+    );
+    let raw = fs::read_to_string(tmp.path().join("vault/book.md")).unwrap();
+    assert!(raw.contains("occurred_at = 2026-08-09T12:34:56Z"), "{raw}");
+    let projection: serde_json::Value = server.get(&endpoint).await.json();
+    assert_eq!(
+        projection_property(&projection, "attendees")["definition"],
+        serde_json::json!({ "type": "relation", "many": true })
+    );
+    assert_eq!(
+        projection["preview"]["fields"][0]["value"],
+        "2026-08-09T12:34:56Z"
+    );
+    assert_eq!(
+        projection["preview"]["fields"][1]["value"],
+        serde_json::json!(["[[Ada]]"])
+    );
+
+    let response = server
+        .patch(&endpoint)
+        .json(&serde_json::json!({
+            "expected_revision": patched["revision"],
+            "set": { "attendees": [] }
+        }))
+        .await;
+    response.assert_status_ok();
+    let emptied: serde_json::Value = response.json();
+    assert_eq!(emptied["properties"]["attendees"], serde_json::json!([]));
+
+    // Text editors send no hint: PATCH stays schema-blind even for built-in keys.
+    let response = server
+        .patch(&endpoint)
+        .json(&serde_json::json!({
+            "expected_revision": emptied["revision"],
+            "set": { "occurred_at": "sometime", "attendees": "anyone" }
+        }))
+        .await;
+    response.assert_status_ok();
+    let patched: serde_json::Value = response.json();
+    assert_eq!(patched["properties"]["occurred_at"], "sometime");
+    assert_eq!(patched["properties"]["attendees"], "anyone");
+}
+
+#[tokio::test]
+async fn builtin_property_hints_do_not_bypass_meeting_frontmatter_validation() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(
+                root.join("meeting.md"),
+                format!("+++\nid = \"{PAGE_ID}\"\ntitle = \"Meeting\"\ntype = \"MEETING\"\noccurred_at = 2026-08-09\nattendees = [\"[[Ada]]\"]\n+++\n"),
+            )
+            .unwrap();
+        })
+        .build()
+        .into_server_and_temp();
+    let revision = revision_of(&server, "meeting.md").await;
+    for (set, types) in [
+        (
+            serde_json::json!({ "attendees": "" }),
+            serde_json::json!({ "attendees": "text" }),
+        ),
+        (
+            serde_json::json!({ "occurred_at": "sometime" }),
+            serde_json::json!({ "occurred_at": "text" }),
+        ),
+    ] {
+        server
+            .patch(&format!("/api/vault/pages/by-id/{PAGE_ID}/properties"))
+            .json(&serde_json::json!({
+                "expected_revision": revision,
+                "set": set,
+                "types": types
+            }))
+            .await
+            .assert_status_bad_request();
+    }
+    assert_eq!(revision_of(&server, "meeting.md").await, revision);
 }

@@ -1427,7 +1427,7 @@ impl LspBackend {
             } else {
                 '1'
             };
-            for (key, def) in &base.file.properties {
+            for (key, def) in base.effective_properties() {
                 if !key.starts_with(prefix) {
                     continue;
                 }
@@ -1437,14 +1437,14 @@ impl LspBackend {
                 };
                 if replace {
                     let item = CompletionItem {
-                        label: key.clone(),
+                        label: key.to_owned(),
                         kind: Some(CompletionItemKind::FIELD),
                         detail: Some(format!("{:?} — {}", def.property_type, base.file.name)),
                         insert_text: Some(format!("{key} = ")),
                         sort_text: Some(format!("{rank}{key}")),
                         ..Default::default()
                     };
-                    best.insert(key.clone(), (item, rank));
+                    best.insert(key.to_owned(), (item, rank));
                 }
             }
         }

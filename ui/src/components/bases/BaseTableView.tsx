@@ -65,6 +65,11 @@ import type {
 } from "./member-draft";
 import { useIdentifiedRows } from "./ordered-list";
 import {
+  builtInFieldLabel,
+  effectiveProperties,
+  propertyKey,
+} from "./property-schema";
+import {
   headerFilterPresets,
   headerOptionOverflow,
   quickFilterType,
@@ -215,8 +220,8 @@ interface CreatedFocusRequest {
 
 /**
  * System fields render read-only — the complete contract, mirroring
- * `SYSTEM_FIELDS` in `crates/clep-bases/src/base.rs`. Only *declared* properties reach
- * an editor; anything else (system metadata, undeclared keys) is inert.
+ * `SYSTEM_FIELDS` in `crates/clep-bases/src/base.rs`. Built-in and declared properties
+ * reach an editor; anything else (system metadata, undeclared keys) is inert.
  */
 const SYSTEM_COLUMNS: Record<string, boolean> = {
   id: true,
@@ -469,15 +474,14 @@ export const BaseTableView = forwardRef<
     const identity = presentationFieldIdentity(column);
     return identity === undefined
       ? column
-      : (displayLabelsByIdentity.get(identity) ?? column);
+      : (displayLabelsByIdentity.get(identity) ?? builtInFieldLabel(column));
   };
   const properties = useMemo(
     () =>
       new Map(
-        (definition.properties ?? []).map(({ key, definition }) => [
-          key,
-          definition,
-        ]),
+        effectiveProperties(definition.properties ?? []).map(
+          ({ key, definition }) => [key, definition],
+        ),
       ),
     [definition.properties],
   );
@@ -519,9 +523,9 @@ export const BaseTableView = forwardRef<
   const groupableColumn = (column: string) =>
     SYSTEM_COLUMNS[column] !== undefined
       ? GROUPABLE_SYSTEM[column] === true
-      : canGroup(properties.get(column)?.type);
+      : canGroup(properties.get(propertyKey(column))?.type);
   const columnAllowsSorting = (column: string) => {
-    const property = properties.get(column);
+    const property = properties.get(propertyKey(column));
     return (
       !readOnly &&
       (SYSTEM_COLUMNS[column] !== undefined
@@ -531,7 +535,7 @@ export const BaseTableView = forwardRef<
   };
   /** One source for the header `⋯` menus and the view-bar pickers. */
   const pickerColumn = (column: string): PickerColumn => {
-    const property = properties.get(column);
+    const property = properties.get(propertyKey(column));
     const label = displayLabelForColumn(column);
     return {
       column,
@@ -562,7 +566,9 @@ export const BaseTableView = forwardRef<
     ForwardFocusRequest | undefined
   >(undefined);
   const editableColumns = visibleColumns.filter(
-    (column) => SYSTEM_COLUMNS[column] === undefined && properties.has(column),
+    (column) =>
+      SYSTEM_COLUMNS[column] === undefined &&
+      properties.has(propertyKey(column)),
   );
   const adjacentEditableColumn = (
     column: string,
@@ -863,7 +869,7 @@ export const BaseTableView = forwardRef<
     return {
       column,
       label: displayLabelForColumn(column),
-      type: quickFilterType(column, properties.get(column)),
+      type: quickFilterType(column, properties.get(propertyKey(column))),
       value: (row.columns as Record<string, CellValue>)[column],
     };
   };
@@ -1042,7 +1048,7 @@ export const BaseTableView = forwardRef<
   };
 
   const cellFor = (rows: QueryRow[], row: QueryRow, column: string) => {
-    const property = properties.get(column);
+    const property = properties.get(propertyKey(column));
     return (
       // One menu serves the row; each cell forwards its context events to
       // the `⋯` button that owns it.

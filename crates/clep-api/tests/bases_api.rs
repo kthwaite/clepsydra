@@ -3955,3 +3955,289 @@ async fn project_kind_member_may_declare_a_new_slug() {
         "{body}"
     );
 }
+
+fn seed_builtin_meeting_fields(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/meetings.base.toml"),
+        format!(
+            r#"name = "Meetings"
+filter = {{ field = "kind", op = "eq", value = "MEETING" }}
+preview = [{{ field = "occurred_at", label = "Occurred" }}, {{ field = "attendees", label = "Attendees" }}]
+[[views]]
+name = "All"
+columns = ["occurred_at", "attendees"]
+sort = [{{ field = "occurred_at", dir = "asc" }}]
+[[views]]
+name = "Today"
+filter = {{ field = "occurred_at", op = "is_today" }}
+columns = ["occurred_at", "attendees"]
+[[views]]
+name = "WithAda"
+filter = {{ field = "attendees", op = "links_to", value = "{LINK_TARGET_ID}" }}
+columns = ["occurred_at", "attendees"]
+"#
+        ),
+    )
+    .unwrap();
+    fs::write(
+        root.join("ada.md"),
+        format!("+++\nid = \"{LINK_TARGET_ID}\"\ntitle = \"Ada\"\ntype = \"PERSON\"\n+++\n"),
+    )
+    .unwrap();
+    for (index, name, occurred, attendees) in [
+        (1, "early", "2026-08-08T10:00:00Z", "[\"[[Ada]]\"]"),
+        (2, "date-only", "2026-08-09", "[]"),
+        (
+            3,
+            "late",
+            "2026-08-09T16:00:00Z",
+            "[\"[[Ada]]\", \"[[Grace]]\"]",
+        ),
+        (4, "missing", "", "[]"),
+    ] {
+        let occurrence = if occurred.is_empty() {
+            String::new()
+        } else {
+            format!("occurred_at = {occurred}\n")
+        };
+        fs::write(
+            root.join(format!("{name}.md")),
+            format!(
+                "+++\nid = \"0190f8a0-0000-7000-8000-{index:012x}\"\ntitle = \"{name}\"\ntype = \"MEETING\"\n{occurrence}attendees = {attendees}\n+++\n"
+            ),
+        )
+        .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn builtin_meeting_fields_query_preview_and_embed_without_declarations() {
+    let fixture = member_fixture(seed_builtin_meeting_fields);
+    let before = base_files(fixture.state.vault.root());
+    let detail: serde_json::Value = fixture.server.get("/api/vault/bases/meetings").await.json();
+    assert_eq!(detail["properties"], serde_json::json!([]));
+    assert_eq!(detail["diagnostics"], serde_json::json!([]));
+
+    let response = fixture
+        .server
+        .get("/api/vault/bases/meetings/views/All")
+        .await;
+    response.assert_status_ok();
+    let output: serde_json::Value = response.json();
+    let rows = output["rows"].as_array().unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|row| row["path"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["early.md", "date-only.md", "late.md", "missing.md"]
+    );
+    assert_eq!(
+        rows[0]["columns"]["attendees"],
+        serde_json::json!(["[[Ada]]"])
+    );
+    assert_eq!(rows[1]["columns"]["occurred_at"], "2026-08-09");
+    assert_eq!(rows[1]["columns"]["attendees"], serde_json::json!([]));
+    assert!(rows[3]["columns"]["occurred_at"].is_null());
+    assert_eq!(
+        view_paths(&fixture, "meetings", "Today").await,
+        ["date-only.md", "late.md"]
+    );
+    assert_eq!(
+        view_paths(&fixture, "meetings", "WithAda").await,
+        ["early.md", "late.md"]
+    );
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/meetings/views/All/evaluate")
+        .json(&serde_json::json!({
+            "filter": { "field": "attendees", "op": "links_to", "value": LINK_TARGET_ID },
+            "sort": [{ "field": "occurred_at", "dir": "desc" }]
+        }))
+        .await;
+    response.assert_status_ok();
+    let embedded: serde_json::Value = response.json();
+    assert_eq!(embedded["output"]["total"], 2);
+    assert_eq!(embedded["output"]["rows"][0]["path"], "late.md");
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/preview")
+        .json(&serde_json::json!({
+            "definition": {
+                "name": "Implicit fields",
+                "filter": { "field": "occurred_at", "op": "is_today" },
+                "preview": [{ "field": "occurred_at", "label": "Occurred" }, { "field": "attendees", "label": "Attendees" }],
+                "views": [{
+                    "name": "All",
+                    "columns": ["occurred_at", "attendees"],
+                    "sort": [{ "field": "occurred_at", "dir": "asc" }]
+                }]
+            },
+            "view": "All"
+        }))
+        .await;
+    response.assert_status_ok();
+    let preview: serde_json::Value = response.json();
+    assert_eq!(preview["diagnostics"], serde_json::json!([]));
+    assert_eq!(preview["output"]["total"], 2);
+    assert_eq!(base_files(fixture.state.vault.root()), before);
+}
+
+#[tokio::test]
+async fn builtin_meeting_fields_support_generic_queries_and_explicit_type_overrides() {
+    let fixture = member_fixture(seed_builtin_meeting_fields);
+    let response = fixture
+        .server
+        .post("/api/vault/query")
+        .json(&serde_json::json!({
+            "filter": { "all": [
+                { "field": "occurred_at", "op": "is_today" },
+                { "field": "attendees", "op": "links_to", "value": LINK_TARGET_ID }
+            ] },
+            "columns": ["occurred_at", "attendees"]
+        }))
+        .await;
+    response.assert_status_ok();
+    let output: serde_json::Value = response.json();
+    assert_eq!(output["total"], 1);
+    assert_eq!(output["rows"][0]["path"], "late.md");
+
+    for key in ["occurred_at", "attendees"] {
+        let response = fixture
+            .server
+            .post("/api/vault/query")
+            .json(&serde_json::json!({
+                "filter": { "field": key, "op": "starts_with", "value": "" },
+                "types": { key: "text" }
+            }))
+            .await;
+        response.assert_status_ok();
+    }
+    let response = fixture
+        .server
+        .post("/api/vault/bases/preview")
+        .json(&serde_json::json!({
+            "definition": {
+                "name": "Explicit text",
+                "properties": [
+                    { "key": "occurred_at", "definition": { "type": "text" } },
+                    { "key": "attendees", "definition": { "type": "text" } }
+                ],
+                "views": [{
+                    "name": "All",
+                    "filter": { "field": "occurred_at", "op": "starts_with", "value": "2026" },
+                    "sort": [{ "field": "attendees", "dir": "asc" }],
+                    "columns": ["occurred_at", "attendees"]
+                }]
+            },
+            "view": "All"
+        }))
+        .await;
+    response.assert_status_ok();
+    let preview: serde_json::Value = response.json();
+    assert_eq!(preview["diagnostics"], serde_json::json!([]));
+    assert!(preview["evaluation_error"].is_null());
+
+    fixture
+        .server
+        .post("/api/vault/query")
+        .json(&serde_json::json!({ "group_by": "attendees" }))
+        .await
+        .assert_status_bad_request();
+}
+
+#[tokio::test]
+async fn builtin_meeting_fields_create_members_and_preserve_explicit_schema_overrides() {
+    let fixture = member_fixture(seed_builtin_meeting_fields);
+    let revision = current_base_revision(&fixture, "meetings").await;
+    let response = fixture
+        .server
+        .post("/api/vault/bases/meetings/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "WithAda",
+            "title": "New meeting",
+            "fields": {
+                "kind": "MEETING",
+                "occurred_at": "2026-08-09T12:34:56Z",
+                "attendees": ["[[Ada]]"]
+            }
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = response.json();
+    let path = clep_api::vault::path::VaultPath::new(created["path"].as_str().unwrap()).unwrap();
+    let page =
+        clep_api::vault::page::Page::from_file(&fixture.state.vault.resolve(&path), path).unwrap();
+    assert!(page.meta.extra["occurred_at"].is_datetime());
+    assert_eq!(
+        page.meta.extra["attendees"],
+        toml::Value::Array(vec![toml::Value::String("[[Ada]]".into())])
+    );
+    assert!(
+        view_paths(&fixture, "meetings", "WithAda")
+            .await
+            .contains(&created["path"].as_str().unwrap().to_owned())
+    );
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "text-overrides",
+            "definition": {
+                "name": "Text overrides",
+                "filter": { "field": "kind", "op": "eq", "value": "NOTE" },
+                "properties": [
+                    { "key": "occurred_at", "definition": { "type": "text" } },
+                    { "key": "attendees", "definition": { "type": "text" } }
+                ],
+                "views": [{ "name": "All" }]
+            }
+        }))
+        .await;
+    response.assert_status_ok();
+    let revision = current_base_revision(&fixture, "text-overrides").await;
+    let response = fixture
+        .server
+        .post("/api/vault/bases/text-overrides/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "All",
+            "title": "Text values",
+            "fields": { "occurred_at": "sometime", "attendees": "anyone" }
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = response.json();
+    let page: serde_json::Value = fixture
+        .server
+        .get(&format!(
+            "/api/vault/pages/{}",
+            created["path"].as_str().unwrap()
+        ))
+        .await
+        .json();
+    assert_eq!(page["meta"]["occurred_at"], "sometime");
+    assert_eq!(page["meta"]["attendees"], "anyone");
+    let projection: serde_json::Value = fixture
+        .server
+        .get(&format!(
+            "/api/vault/pages/by-id/{}/properties",
+            created["id"].as_str().unwrap()
+        ))
+        .await
+        .json();
+    let properties = projection["properties"].as_array().unwrap();
+    assert_eq!(properties.len(), 2);
+    for property in properties {
+        assert_eq!(
+            property["definition"],
+            serde_json::json!({ "type": "text" })
+        );
+        assert_eq!(property["compatibility"], "compatible");
+        assert_eq!(property["declarations"].as_array().unwrap().len(), 1);
+    }
+}

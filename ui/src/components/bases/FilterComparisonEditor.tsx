@@ -14,6 +14,11 @@ import {
 } from "./FilterValuePicker";
 import type { FilterDiagnosticScope } from "./filter-diagnostics";
 import { OPERATOR_LABELS, VALUELESS_OPERATORS } from "./operator-labels";
+import {
+  builtInFieldLabel,
+  effectiveProperties,
+  propertyKey,
+} from "./property-schema";
 
 interface FieldCapability {
   key: string;
@@ -150,7 +155,6 @@ interface FilterComparisonEditorProps {
   properties: DraftProperty[];
   onChange(value: BaseFilter): void;
   diagnosticScope: FilterDiagnosticScope;
-  allowAttendees?: boolean;
 }
 
 export function FilterComparisonEditor({
@@ -159,7 +163,6 @@ export function FilterComparisonEditor({
   properties,
   onChange,
   diagnosticScope,
-  allowAttendees = true,
 }: FilterComparisonEditorProps) {
   const [relationSuggestions, setRelationSuggestions] = useState<string[]>([]);
   const [freeformDraft, setFreeformDraft] = useState<{
@@ -170,31 +173,24 @@ export function FilterComparisonEditor({
   const relationListId = useId();
   const diagnosticId = useId();
 
-  const declaredFields: FieldCapability[] = properties
+  const declaredFields: FieldCapability[] = effectiveProperties(properties)
     .filter(
       (property) =>
         !SYSTEM_FIELDS.some((system) => system.key === property.key),
     )
     .map((property) => ({
       key: property.key,
-      label: property.key === "attendees" ? "Attendees" : property.key,
+      label: builtInFieldLabel(property.key),
       type: property.definition.type,
       options: property.definition.options,
     }));
-  const pageFields: readonly FieldCapability[] =
-    allowAttendees && !declaredFields.some((field) => field.key === "attendees")
-      ? [
-          ...SYSTEM_FIELDS,
-          { key: "attendees", label: "Attendees", type: "relation" },
-        ]
-      : SYSTEM_FIELDS;
-  const fields = [...pageFields, ...declaredFields];
+  const fields = [...SYSTEM_FIELDS, ...declaredFields];
   const filterValue =
     "field" in value
       ? value
       : ({ field: "kind", op: "eq", value: "" } satisfies BaseFilter);
   const knownCapability = fields.find(
-    (field) => field.key === filterValue.field,
+    (field) => field.key === propertyKey(filterValue.field),
   );
   const capability =
     knownCapability ??
@@ -356,6 +352,11 @@ export function FilterComparisonEditor({
             );
           }}
         >
+          {knownCapability && filterValue.field !== knownCapability.key && (
+            <SelectItem id={filterValue.field}>
+              {knownCapability.label}
+            </SelectItem>
+          )}
           {!knownCapability && (
             <SelectItem
               id={filterValue.field}
@@ -366,7 +367,7 @@ export function FilterComparisonEditor({
           )}
           <SelectSection>
             <Header>Page fields</Header>
-            {pageFields.map((field) => (
+            {SYSTEM_FIELDS.map((field) => (
               <SelectItem key={field.key} id={field.key}>
                 {field.label}
               </SelectItem>
@@ -374,7 +375,7 @@ export function FilterComparisonEditor({
           </SelectSection>
           {declaredFields.length > 0 && (
             <SelectSection>
-              <Header>Declared properties</Header>
+              <Header>Properties</Header>
               {declaredFields.map((field) => (
                 <SelectItem key={field.key} id={field.key}>
                   {field.label}

@@ -28,7 +28,7 @@ Open `/bases` from the **Bases** header item or run **Open Bases** in the comman
 
 The Configure workspace has five sections:
 
-- **General** changes the displayed name and description.
+- **General** changes the displayed name, description, and default property visibility on member pages.
 - **Filter** builds base membership from comparison, all, any, and not rules.
 - **Properties** declares ordered advisory property schemas and their options.
 - **Preview properties** chooses the ordered, optionally labelled fields used by generic page previews.
@@ -37,6 +37,23 @@ The Configure workspace has five sections:
 Changes remain a local draft until you explicitly choose **Save**; there is no autosave. **Discard** restores the last loaded revision. Leaving with unsaved changes opens a confirmation, and closing the browser is guarded by the browser's unsaved-change prompt. Every Save includes the revision that was loaded. If the file changed in another editor or Clepsydra session, Save retains the local draft and reports a conflict instead of overwriting the newer file. Reload the changed definition before deliberately reapplying or discarding the draft.
 
 The live preview evaluates the unsaved membership or selected view after a 250 ms pause. It is read-only, returns at most 100 preview rows, retains real totals in group headings, and does not move keyboard focus when results refresh. Structural, evaluation, and network failures are shown beside the preview; a preview network failure alone does not disable Save.
+
+### Hide properties on member pages
+
+In **Configure → General**, enable **Hide properties on member pages** and save.
+This stores `hide_member_properties = true` at the root of the Base file.
+The default is `false`: existing Bases keep their properties visible.
+
+Member pages initially hide fields contributed only by Bases with this setting
+enabled. If any other contributing Base leaves a shared field visible, it stays
+visible with its full provenance and any schema-conflict warning.
+**Show hidden properties** reveals the fields for the current page view;
+**Hide hidden properties** restores the default. Hiding is disabled while an
+editor, save, or failed-save draft is active.
+
+This is presentation only. It does not hide the meeting's native metadata
+controls, remove frontmatter, change membership, affect Base tables or embeds,
+or suppress generic page previews.
 
 ## Minimal working example
 
@@ -106,6 +123,21 @@ A base requires `name`. `description`, `filter`, `properties`, `preview`, and `v
 The `[properties]` table describes keys stored in page frontmatter; it does not create separate records or storage. Values retain their native TOML types when indexed. A declaration controls typed filtering, grouping, inline editors, LSP completions, and diagnostics for every matching page that carries the key.
 
 Schemas are advisory. A page whose value disagrees with a declaration still indexes, and the declaration does not rewrite or reject it. Clepsydra reports a warning instead. Likewise, a non-empty `options` list constrains diagnostics and completions rather than blocking an unfamiliar value, and `many = false` on a relation warns about multiple targets rather than enforcing a write constraint. An empty `options` list means an open vocabulary: the LSP can offer values already observed in the vault and does not warn about new ones.
+
+### Built-in meeting properties
+
+Every Base offers **Occurred** (`occurred_at`, `datetime`) and **Attendees**
+(`attendees`, `relation` with `many = true`) without a `[properties]`
+declaration. Add them directly to columns, filters, and preview properties.
+Occurred supports date comparisons, relative-date filters, sorting, and the
+date-time editor. Attendees supports person-link filtering and a multi-value
+relation editor; it is not a sortable or groupable field in saved Base views.
+
+These use the existing meeting frontmatter, not duplicate fields. Missing
+values remain empty, and native date-only occurrence values remain readable.
+An explicit declaration overrides the built-in schema for that Base.
+Both bare keys and `prop.occurred_at` / `prop.attendees` address the same
+properties. Saving a Base does not insert declarations for these defaults.
 
 ## Property types
 
@@ -177,7 +209,7 @@ Protected pages return an empty Base preview projection. Link and tab cards supp
 
 The shared filter editor is used during creation, in Configure, and for saved-view and embed filters. **Add condition** keeps every existing rule; adding a second rule combines them with **All** by default. Choose **Any** to match at least one rule. Each row has a remove control and an advanced menu for grouping, negation, and reordering. Wrapping a rule never replaces its contents. Incomplete rows show an inline error and must be completed or removed before saving.
 
-Values follow their field: **Kind** offers the known kinds, **Project** offers project values already present in the vault (including orphan slugs), **Tags** uses chips with suggestions, and **Attendees → includes** searches existing person pages. Selecting an attendee stores the person's page UUID, not a substring of their name, and never creates a person page. Creating or configuring an attendee rule adds an `attendees` relation declaration if none exists; an explicit property declaration is never overwritten. Embed filters cannot add declarations, so Attendees is available there only when the Base already declares it.
+Values follow their field: **Kind** offers the known kinds, **Project** offers project values already present in the vault (including orphan slugs), **Tags** uses chips with suggestions, and **Attendees → includes** searches existing person pages. Selecting an attendee stores the person's page UUID, not a substring of their name, and never creates a person page. Occurred and Attendees are available in membership, saved-view, and embed filters without property declarations; explicit declarations remain authoritative.
 
 For Jerry's one-to-ones, choose **All** with three conditions: **Kind → is → Meeting**, **Tags → Has all of → 1:1**, and **Attendees → includes → Jerry Maguire**. Add further tag chips to require each of those tags too. Dates, numbers, booleans, and declared option fields retain their typed controls; title and other text fields remain free text.
 
@@ -351,14 +383,14 @@ Each `[[views]]` entry is a saved view. Its fields are:
 - `group_by`: a grouping field.
 - `aggregates`: aggregate calculations shown with grouped results, or as a totals row for a flat view.
 
-Use a property in `group_by` only when it is declared. Groupable property types are `select`, `text`, `bool`, `date`, `datetime`, and `url`; scalar system fields such as `kind` are also groupable. `number`, `relation`, and `multi_select` properties are not groupable.
+Use a property in `group_by` when it is built in or declared. Groupable property types are `select`, `text`, `bool`, `date`, `datetime`, and `url`; scalar system fields such as `kind` are also groupable. `number`, `relation`, and `multi_select` properties are not groupable.
 
 The aggregate functions are:
 
 | Function | Field | Result |
 | --- | --- | --- |
 | `count` | none | number of rows |
-| `count_filled`, `count_empty` | any declared property or scalar system field | rows where the field is present / absent |
+| `count_filled`, `count_empty` | any built-in or declared property, or scalar system field | rows where the field is present / absent |
 | `percent_filled` | same | `100 × count_filled ÷ count`, one decimal |
 | `count_unique` | same | distinct present values (the first element of an array) |
 | `sum`, `avg`, `min`, `max` | `number`, `date`, `datetime`, or `word_count` | the usual folds |
@@ -386,7 +418,7 @@ Open `/bases` to discover, create, configure, open, or delete bases. Open `/base
 
 The view bar holds **Filter**, **Sort** and **Group** beside **Fields**. Filter offers each column's presets (the same ones as its header menu); Sort picks a column and a direction; Group picks a column or **No grouping**. The pills name the effective sort and grouping, and turn cobalt while they carry an override; **Use the view's sort** and **Use the view's grouping** drop the override. The **Compact** switch in the header toggles 32px and 42px rows — Bases start comfortable — and is remembered on this device. The footer shows the base file and its row count.
 
-System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions. The multi-select editor is a tag input: type any value and press <kbd>Enter</kbd> to add it, pick a suggestion (the declared options plus values already used in that column), or press <kbd>Backspace</kbd> in the empty field to remove the last value.
+System fields and columns without a built-in or declared schema are read-only. A typed property column opens an inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions. The multi-select editor is a tag input: type any value and press <kbd>Enter</kbd> to add it, pick a suggestion (the declared options plus values already used in that column), or press <kbd>Backspace</kbd> in the empty field to remove the last value.
 
 While a cell editor is open, <kbd>Tab</kbd> saves it and opens the next editable cell in the row, and <kbd>Shift</kbd>+<kbd>Tab</kbd> saves it and opens the previous one. Past the last editable cell, focus moves to the next row's title; before the first, to this row's title. <kbd>Enter</kbd> saves and <kbd>Escape</kbd> cancels. Arrow keys inside an editor move the text cursor, not the table focus.
 
@@ -468,7 +500,7 @@ Drag the splitter on an embed's right edge, or focus it and use the arrow keys, 
 
 An omitted `sort` inherits the saved view's ordered sort. An explicit `sort = []` removes saved-view sorting without inheriting it. Switching saved views keeps the embed filter and limit but resets sort to inherited for the new view. Changing the Base selects its first view, clears filter and sort, and keeps the limit. Clicking a sortable table header replaces any ordered override with that one column and direction. These Base/view/sort changes update only this Folio block and survive reload.
 
-The embedded table keeps the normal Base table controls. A title opens its member Folio, and declared properties use their type-specific inline editors. Property edits write the member page, not the Folio block. **Add member** is available only when the current Base membership, saved-view filter, and embed filter can be satisfied by a new page. Its draft includes fields required by all three scopes. A successful save creates one member page atomically; if the configured row cap excludes that matching page, the block keeps the success, leaves the updated cap notice visible, and does not try to focus a row that was not returned.
+The embedded table keeps the normal Base table controls. A title opens its member Folio, and built-in or declared properties use their type-specific inline editors. Property edits write the member page, not the Folio block. **Add member** is available only when the current Base membership, saved-view filter, and embed filter can be satisfied by a new page. Its draft includes fields required by all three scopes. A successful save creates one member page atomically; if the configured row cap excludes that matching page, the block keeps the success, leaves the updated cap notice visible, and does not try to focus a row that was not returned.
 
 Missing references remain in the document. A missing Base shows its slug with **Edit embed** and **Remove**; a missing or renamed view can be replaced from the inspector. Malformed or otherwise invalid `base` fences preserve their original bytes and open the inspector in source-repair mode. Invalid repairs stay local, and saving valid TOML replaces the recovery source with one canonical configured block.
 
@@ -607,7 +639,7 @@ preview/application contracts.
 
 ## Neovim/LSP completions and warnings
 
-With `clep lsp` attached, completion inside a page's `+++` frontmatter offers property keys declared by bases. Properties from bases that match the current page rank first. Quoted values for `select` and `multi_select` complete from declared options; an open vocabulary can complete from observed vault values. Typing `[[` in a relation value uses normal wikilink completion.
+With `clep lsp` attached, completion inside a page's `+++` frontmatter offers built-in property keys and keys declared by bases. Properties from bases that match the current page rank first. Quoted values for `select` and `multi_select` complete from declared options; an open vocabulary can complete from observed vault values. Typing `[[` in a relation value uses normal wikilink completion.
 
 For matching bases, the LSP warns about incompatible native TOML types, values outside a non-empty select vocabulary, multiple relation values when `many = false`, and missing relation targets. It does not diagnose an ambiguous relation target as ambiguous: ambiguity still appears as `invalid_relation_target` in Reference Repairs. These are warnings, never indexing errors. Legacy `---` frontmatter does not receive property-schema diagnostics. The LSP completes and checks page frontmatter; it does not provide an editor for `.base.toml` files.
 

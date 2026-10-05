@@ -21,6 +21,7 @@ import { moveItem } from "./definition-model";
 import { presentationFieldIdentity } from "./local-validation";
 import { ReorderHandle, useReorderable } from "./ordered-list";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
+import { builtInFieldLabel, effectiveProperties } from "./property-schema";
 
 export interface PresentationFieldChoice {
   field: string;
@@ -41,13 +42,13 @@ export function presentationFieldChoices(
         label: shadowed ? `System ${key}` : key,
       };
     }),
-    ...properties.map(({ key }) => {
+    ...effectiveProperties(properties).map(({ key }) => {
       const shadowed = systemKeys.has(key);
       const qualified =
         shadowed || key.startsWith("prop.") || key.startsWith("sys.");
       return {
         field: qualified ? `prop.${key}` : key,
-        label: shadowed ? `Property ${key}` : key,
+        label: shadowed ? `Property ${key}` : builtInFieldLabel(key),
       };
     }),
     {

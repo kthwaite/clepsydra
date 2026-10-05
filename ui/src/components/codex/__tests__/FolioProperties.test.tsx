@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -35,6 +36,12 @@ import { FolioProperties } from "../FolioProperties";
 const PAGE = {
   id: "018f0f3d-6b9a-7f4b-ae1b-36f6ed681bc5",
   path: "books/dune.md",
+};
+
+const HIDDEN_LIBRARY = {
+  slug: "library",
+  name: "Library",
+  hide_member_properties: true,
 };
 
 function definition(
@@ -99,6 +106,20 @@ function renderPanel(
   );
 }
 
+function hiddenProjection() {
+  return projection(
+    [
+      property("status", "text", {
+        value: "reading",
+        declarations: [
+          { base: HIDDEN_LIBRARY, definition: definition("text") },
+        ],
+      }),
+    ],
+    [HIDDEN_LIBRARY],
+  );
+}
+
 beforeEach(() => {
   commitMock.mockReset().mockResolvedValue({
     id: PAGE.id,
@@ -114,6 +135,214 @@ beforeEach(() => {
 });
 
 describe("FolioProperties", () => {
+  it.each([undefined, false])(
+    "keeps properties visible when member-page hiding is %s",
+    (hide_member_properties) => {
+      const base = { slug: "library", name: "Library", hide_member_properties };
+      projectionState.data = projection(
+        [
+          property("status", "text", {
+            declarations: [{ base, definition: definition("text") }],
+          }),
+        ],
+        [base],
+      );
+      renderPanel();
+      expect(
+        screen.getByRole("button", { name: "Edit status property" }),
+      ).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: "Show hidden properties" }),
+      ).toBeNull();
+    },
+  );
+
+  it("reveals hidden properties locally and restores the default on page navigation", async () => {
+    const user = userEvent.setup();
+    projectionState.data = hiddenProjection();
+    const view = renderPanel();
+
+    expect(screen.queryByRole("heading", { name: "status" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Library" })).toBeNull();
+    expect(screen.queryByText("No declared properties")).toBeNull();
+    const reveal = screen.getByRole("button", {
+      name: "Show hidden properties",
+    });
+    expect(reveal).toHaveAttribute("aria-expanded", "false");
+    await user.click(reveal);
+    expect(
+      screen.getByRole("button", { name: "Edit status property" }),
+    ).toBeVisible();
+    const hide = screen.getByRole("button", {
+      name: "Hide hidden properties",
+    });
+    expect(hide).toHaveAttribute("aria-expanded", "true");
+    await user.click(hide);
+    expect(screen.queryByRole("heading", { name: "status" })).toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Show hidden properties" }),
+    );
+
+    projectionState.data = {
+      ...hiddenProjection(),
+      id: "another-page",
+      path: "books/another.md",
+    };
+    view.rerender(
+      <FolioProperties
+        pageId="another-page"
+        path="books/another.md"
+        locked={false}
+        readOnly={false}
+      />,
+    );
+    expect(screen.queryByRole("heading", { name: "status" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Show hidden properties" }),
+    ).toBeVisible();
+
+    projectionState.data = hiddenProjection();
+    view.rerender(
+      <FolioProperties
+        pageId={PAGE.id}
+        path={PAGE.path}
+        locked={false}
+        readOnly={false}
+      />,
+    );
+    expect(screen.queryByRole("heading", { name: "status" })).toBeNull();
+  });
+
+  it("keeps mixed-visibility shared fields and their schema conflicts authoritative", async () => {
+    const user = userEvent.setup();
+    const visible = { slug: "reviews", name: "Reviews" };
+    const hiddenReading = {
+      slug: "reading",
+      name: "Reading",
+      hide_member_properties: true,
+    };
+    projectionState.data = projection(
+      [
+        property("status", "text", {
+          declarations: [
+            { base: HIDDEN_LIBRARY, definition: definition("text") },
+            { base: hiddenReading, definition: definition("text") },
+          ],
+        }),
+        property("author", "text", {
+          declarations: [
+            { base: HIDDEN_LIBRARY, definition: definition("text") },
+            { base: visible, definition: definition("text") },
+          ],
+        }),
+        property("rating", "number", {
+          value: 4,
+          compatibility: "conflict",
+          definition: null,
+          patchable: false,
+          blockers: ["schema_conflict"],
+          declarations: [
+            { base: HIDDEN_LIBRARY, definition: definition("number") },
+            { base: visible, definition: definition("text") },
+          ],
+        }),
+      ],
+      [HIDDEN_LIBRARY, hiddenReading, visible],
+    );
+    renderPanel();
+
+    const shared = screen.getByRole("region", { name: "Shared" });
+    expect(
+      within(shared).queryByRole("heading", { name: "status" }),
+    ).toBeNull();
+    expect(
+      within(shared).getByRole("button", { name: "Edit author property" }),
+    ).toHaveAccessibleDescription(
+      "Library (library) · text Reviews (reviews) · text",
+    );
+    expect(within(shared).getByText("Schema conflict")).toBeVisible();
+    expect(
+      within(shared).getByText("number / text", { selector: "span" }),
+    ).toBeVisible();
+    expect(within(shared).getByText("4")).toHaveAccessibleDescription(
+      "Library (library) · number Reviews (reviews) · text",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Edit rating property" }),
+    ).toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Show hidden properties" }),
+    );
+    expect(
+      within(shared).getAllByRole("button", { name: "Edit status property" }),
+    ).toHaveLength(1);
+    expect(within(shared).getByText("Schema conflict")).toBeVisible();
+  });
+
+  it("protects a revealed draft while editing, saving and recovering a failed save", async () => {
+    const user = userEvent.setup();
+    projectionState.data = hiddenProjection();
+    let rejectSave!: (reason: Error) => void;
+    const pendingSave = new Promise<void>((_resolve, reject) => {
+      rejectSave = reject;
+    });
+    commitMock.mockReturnValueOnce(pendingSave);
+    renderPanel();
+    await user.click(
+      screen.getByRole("button", { name: "Show hidden properties" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Edit status property" }),
+    );
+    const input = screen.getByRole("textbox", { name: "status property" });
+    await user.clear(input);
+    await user.type(input, "finished");
+    const hide = screen.getByRole("button", {
+      name: "Hide hidden properties",
+    });
+    expect(hide).toBeDisabled();
+    fireEvent.click(hide);
+    expect(input).toHaveValue("finished");
+    expect(commitMock).not.toHaveBeenCalled();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Saving status",
+    );
+    expect(hide).toBeDisabled();
+    fireEvent.click(hide);
+    expect(input).toHaveValue("finished");
+
+    await act(async () => rejectSave(new Error("network unavailable")));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "network unavailable",
+    );
+    expect(hide).toBeDisabled();
+    fireEvent.click(hide);
+    expect(input).toHaveValue("finished");
+
+    projectionState.refetch.mockImplementation(async () => {
+      const refreshed = hiddenProjection();
+      refreshed.properties[0].value = "finished";
+      projectionState.data = refreshed;
+      return { data: refreshed };
+    });
+    await user.click(
+      screen.getByRole("button", { name: "Retry saving status" }),
+    );
+    await waitFor(() => expect(hide).toBeEnabled());
+    expect(commitMock).toHaveBeenCalledTimes(2);
+    expect(commitMock).toHaveBeenLastCalledWith(
+      PAGE,
+      "status",
+      "finished",
+      undefined,
+      "projection-rev-1",
+    );
+    expect(screen.getByText("finished")).toBeVisible();
+    await user.click(hide);
+    expect(screen.queryByRole("heading", { name: "status" })).toBeNull();
+  });
+
   it("hides the section after an authoritative no-match projection", () => {
     projectionState.data = projection([], []);
 

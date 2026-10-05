@@ -74,6 +74,8 @@ pub struct PropertyPatchResponse {
 pub struct PageBaseIdentity {
     pub slug: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hide_member_properties: bool,
 }
 
 /// One matching Base that contributed a configured preview field.
@@ -187,6 +189,7 @@ fn page_base_identity(base: &BaseDefinition) -> PageBaseIdentity {
     PageBaseIdentity {
         slug: base.slug.clone(),
         name: base.file.name.clone(),
+        hide_member_properties: base.file.hide_member_properties,
     }
 }
 
@@ -222,9 +225,9 @@ fn project_matching_bases(
     for base in matching {
         let identity = page_base_identity(base);
         identities.push(identity.clone());
-        for (key, definition) in &base.file.properties {
+        for (key, definition) in base.effective_properties() {
             declarations
-                .entry(key.clone())
+                .entry(key.to_owned())
                 .or_default()
                 .push(PagePropertyDeclaration {
                     base: identity.clone(),
@@ -621,10 +624,9 @@ pub async fn patch_properties(
         }
     };
 
-    // Attendees are a schema-blind property like any other, so the shape a
-    // MEETING's list has to keep is checked here, against the page as it would
-    // be after the splice — that covers `set` and `clear` in one place,
-    // whatever the base registry does or does not declare.
+    // Base property defaults do not replace MEETING frontmatter invariants.
+    // Validate the complete spliced value for both `set` and `clear`, whatever
+    // explicit type hints the caller supplied.
     let touches = |key: &str| {
         request.set.contains_key(key) || request.clear.iter().any(|cleared| cleared == key)
     };
@@ -658,46 +660,21 @@ pub async fn patch_properties(
         .await
         .map_err(super::mutation_error)?;
 
-    // Read-after-write: refreshed projections so the UI reconciles without
-    // waiting on the SSE round-trip (the board pattern).
-    let props_id = page_id.clone();
-    let properties = state
-        .index
-        .with_index(move |index, _vault| -> Result<_, rusqlite::Error> {
-            let mut stmt = index.connection().prepare(
-                "SELECT key, value_json FROM page_properties WHERE page_id = ?1 AND key != 'conversation' ORDER BY key, ord",
-            )?;
-            let rows: Vec<(String, String)> = stmt
-                .query_map(rusqlite::params![props_id], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })?
-                .collect::<Result<_, _>>()?;
-            Ok(rows)
-        })
-        .await
-        .map_err(|e| ApiError::internal(format!("index error: {e}")))?
-        .map_err(|e| ApiError::internal(format!("read-after-write failed: {e}")))?;
-
-    let mut grouped: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
-    for (key, value_json) in properties {
-        let value: serde_json::Value =
-            serde_json::from_str(&value_json).unwrap_or(serde_json::Value::Null);
-        match grouped.get_mut(&key) {
-            None => {
-                grouped.insert(key, value);
-            }
-            Some(serde_json::Value::Array(items)) => items.push(value),
-            Some(existing) => {
-                let first = existing.take();
-                *existing = serde_json::Value::Array(vec![first, value]);
-            }
-        }
-    }
+    // Return the committed frontmatter values intact. The per-element index
+    // cannot distinguish a singleton relation array from a scalar, or preserve
+    // an empty array, both of which matter to the multi-relation editor.
+    let (meta, _, _, _) = parse_or_repair_frontmatter(&replacement.content);
+    let properties = meta
+        .extra
+        .iter()
+        .filter(|(key, _)| key.as_str() != "conversation")
+        .map(|(key, value)| (key.clone(), toml_value_to_json(value)))
+        .collect();
 
     Ok(Json(PropertyPatchResponse {
         id: page_id,
         path,
         revision: page_revision(&replacement.content),
-        properties: grouped,
+        properties,
     }))
 }

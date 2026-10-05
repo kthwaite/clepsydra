@@ -1,4 +1,5 @@
 import { CopyButton } from "#/components/ui/CopyButton";
+import { Checkbox } from "#/components/ui/checkbox";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type {
@@ -130,6 +131,16 @@ export function GeneralEditor({
             </p>
           ) : null}
         </label>
+
+        <Checkbox
+          isSelected={draft.hideMemberProperties ?? false}
+          onChange={(hideMemberProperties) =>
+            setDraft((current) => ({ ...current, hideMemberProperties }))
+          }
+          description="Members can reveal these properties on their page. Base tables and previews are unchanged."
+        >
+          Hide properties on member pages
+        </Checkbox>
 
         <dl className="grid gap-4 rounded-[14px] bg-sink px-[18px] py-4 sm:grid-cols-2">
           <div className="min-w-0">

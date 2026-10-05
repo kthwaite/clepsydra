@@ -6,6 +6,7 @@ import type {
 } from "#/api/bases";
 import type { CellValue } from "./cells/types";
 import { asciiCaseFold } from "./local-validation";
+import { effectiveProperties } from "./property-schema";
 
 const CREATABLE_SYSTEM: Record<
   Exclude<DraftFieldKind, "title" | "property">,
@@ -111,10 +112,9 @@ export function composeMemberDraftFields(
     (candidate) => asciiCaseFold(candidate.name) === asciiCaseFold(viewName),
   );
   const properties = new Map(
-    (definition.properties ?? []).map(({ key, definition }) => [
-      key,
-      definition,
-    ]),
+    effectiveProperties(definition.properties ?? []).map(
+      ({ key, definition }) => [key, definition],
+    ),
   );
   const ordered = [
     "title",

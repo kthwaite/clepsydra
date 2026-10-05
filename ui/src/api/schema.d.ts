@@ -2151,6 +2151,7 @@ export interface components {
     BaseFilePayload: {
       description?: string | null;
       filter?: null | components["schemas"]["Filter"];
+      hide_member_properties?: boolean;
       name: string;
       preview?: components["schemas"]["PreviewFieldDefinition"][];
       properties?: components["schemas"]["BasePropertyEntry"][];
@@ -3128,6 +3129,7 @@ export interface components {
     };
     /** @description Identity and display label for one matching Base. */
     PageBaseIdentity: {
+      hide_member_properties?: boolean;
       name: string;
       slug: string;
     };

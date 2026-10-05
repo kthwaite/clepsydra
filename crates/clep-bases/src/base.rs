@@ -116,6 +116,34 @@ pub struct PropertyDefinition {
     pub many: Option<bool>,
 }
 
+/// Property defaults available to every Base without persisting declarations.
+/// Explicit declarations always take precedence.
+static BUILTIN_PROPERTIES: &[(&str, PropertyDefinition)] = &[
+    (
+        clep_vault::meeting::OCCURRED_AT_KEY,
+        PropertyDefinition {
+            property_type: PropertyType::Datetime,
+            options: Vec::new(),
+            many: None,
+        },
+    ),
+    (
+        clep_vault::attendance::ATTENDEES_KEY,
+        PropertyDefinition {
+            property_type: PropertyType::Relation,
+            options: Vec::new(),
+            many: Some(true),
+        },
+    ),
+];
+
+pub fn builtin_property(key: &str) -> Option<&'static PropertyDefinition> {
+    BUILTIN_PROPERTIES
+        .iter()
+        .find(|(name, _)| *name == key)
+        .map(|(_, definition)| definition)
+}
+
 /// Comparison operators for filter predicates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -387,6 +415,9 @@ pub struct BaseFile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Hide declared properties by default on member pages, without changing their values.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hide_member_properties: bool,
     /// Optional `{field}` template that proposes a title for a new member.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_template: Option<String>,
@@ -409,6 +440,8 @@ struct RawBaseFile {
     name: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    hide_member_properties: bool,
     #[serde(default)]
     title_template: Option<String>,
     #[serde(default)]
@@ -475,12 +508,32 @@ pub struct BaseDefinition {
 }
 
 impl BaseDefinition {
-    pub fn property(&self, key: &str) -> Option<&PropertyDefinition> {
+    pub(crate) fn declared_property(&self, key: &str) -> Option<&PropertyDefinition> {
         self.file
             .properties
             .iter()
             .find(|(k, _)| k == key)
             .map(|(_, def)| def)
+    }
+
+    pub fn property(&self, key: &str) -> Option<&PropertyDefinition> {
+        self.declared_property(key)
+            .or_else(|| builtin_property(key))
+    }
+
+    /// Declared properties in file order followed by unoverridden built-ins.
+    /// This borrows the schema; it does not add declarations to the Base file.
+    pub fn effective_properties(&self) -> impl Iterator<Item = (&str, &PropertyDefinition)> {
+        self.file
+            .properties
+            .iter()
+            .map(|(key, definition)| (key.as_str(), definition))
+            .chain(
+                BUILTIN_PROPERTIES
+                    .iter()
+                    .filter(|(key, _)| self.declared_property(key).is_none())
+                    .map(|(key, definition)| (*key, definition)),
+            )
     }
 
     /// Resolve a saved view using the API's ASCII case-insensitive naming
@@ -551,7 +604,7 @@ pub fn candidate_link_targets<E>(
     mut resolve_target_id: impl FnMut(&str) -> Result<Option<String>, E>,
 ) -> Result<CandidateLinkTargets, E> {
     let mut targets = CandidateLinkTargets::new();
-    for (field, definition) in &base.file.properties {
+    for (field, definition) in base.effective_properties() {
         if !definition.property_type.supports_links_to() {
             continue;
         }
@@ -580,7 +633,7 @@ pub fn candidate_link_targets<E>(
                 })
             })
             .collect::<Result<Vec<_>, E>>()?;
-        targets.insert(field.clone(), links);
+        targets.insert(field.to_owned(), links);
     }
     Ok(targets)
 }
@@ -1259,6 +1312,7 @@ pub fn parse_base(path: &Path, content: &str) -> (Option<BaseDefinition>, Vec<Ba
     let file = BaseFile {
         name: raw.name,
         description: raw.description,
+        hide_member_properties: raw.hide_member_properties,
         title_template: raw.title_template,
         filter: raw.filter,
         preview: raw.preview,
@@ -1316,21 +1370,15 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
             );
         } else {
             let context = QueryContext::for_base(base);
-            let declared: HashSet<&str> = base
-                .file
-                .properties
-                .iter()
-                .map(|(key, _)| key.as_str())
-                .collect();
             for placeholder in title_template_fields(template) {
                 // A placeholder must name something a member draft can fill: a
-                // declared property or a system field. An undeclared bare name
+                // declared/built-in property or a system field. An unknown name
                 // resolves as a raw page property for filtering, but nothing
                 // would ever fill it at creation time.
                 let bare = placeholder
                     .strip_prefix("prop.")
                     .unwrap_or(placeholder.as_str());
-                let fillable = declared.contains(bare)
+                let fillable = base.property(bare).is_some()
                     || matches!(
                         resolve_field(&placeholder, &context),
                         Ok(ResolvedField::Sys(_))
@@ -1963,6 +2011,7 @@ name = "All"
         BaseFile {
             name: "Reading".to_string(),
             description: None,
+            hide_member_properties: false,
             title_template: None,
             filter: None,
             properties: Vec::new(),

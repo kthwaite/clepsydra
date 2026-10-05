@@ -58,12 +58,10 @@ const properties: DraftProperty[] = [
 function Harness({
   initial,
   onChange,
-  allowAttendees = true,
   declaredProperties = properties,
 }: {
   initial: BaseFilter;
   onChange(value: BaseFilter): void;
-  allowAttendees?: boolean;
   declaredProperties?: DraftProperty[];
 }) {
   const [value, setValue] = useState(initial);
@@ -77,7 +75,6 @@ function Harness({
       value={value}
       position={1}
       properties={declaredProperties}
-      allowAttendees={allowAttendees}
       onChange={(next) => {
         setValue(next);
         onChange(next);
@@ -241,12 +238,12 @@ describe("FilterComparisonEditor", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("hides only undeclared attendees when declaration is unavailable", async () => {
+  it("offers built-in fields without any property declarations", async () => {
     const user = userEvent.setup();
     render(
       <Harness
         initial={{ field: "kind", op: "eq", value: "" }}
-        allowAttendees={false}
+        declaredProperties={[]}
         onChange={vi.fn()}
       />,
     );
@@ -254,8 +251,11 @@ describe("FilterComparisonEditor", () => {
       screen.getByRole("button", { name: /Field for condition 1/ }),
     );
     expect(
-      screen.queryByRole("option", { name: "Attendees" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("option", { name: "Attendees" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Occurred" }),
+    ).toBeInTheDocument();
   });
 
   it("respects an explicitly declared non-relation attendee type", async () => {
@@ -267,7 +267,6 @@ describe("FilterComparisonEditor", () => {
         declaredProperties={[
           { id: "attendees", key: "attendees", definition: { type: "number" } },
         ]}
-        allowAttendees={false}
         onChange={onChange}
       />,
     );
@@ -280,6 +279,57 @@ describe("FilterComparisonEditor", () => {
       field: "attendees",
       op: "eq",
       value: 2,
+    });
+  });
+
+  it("uses datetime operators for Occurred without a declaration", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Harness
+        initial={{ field: "kind", op: "eq", value: "" }}
+        declaredProperties={[]}
+        onChange={onChange}
+      />,
+    );
+    await chooseSelectOption(user, "Field for condition 1", "Occurred");
+    expect(onChange).toHaveBeenLastCalledWith({
+      field: "occurred_at",
+      op: "eq",
+      value: "",
+    });
+    expect(screen.getByLabelText("Value for condition 1")).toHaveAttribute(
+      "type",
+      "datetime-local",
+    );
+    await chooseSelectOption(user, "Operator for condition 1", "is this month");
+    expect(onChange).toHaveBeenLastCalledWith({
+      field: "occurred_at",
+      op: "is_this_month",
+    });
+  });
+
+  it("keeps a qualified attendee reference when editing its typed value", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Harness
+        initial={{ field: "prop.attendees", op: "links_to", value: "" }}
+        declaredProperties={[]}
+        onChange={onChange}
+      />,
+    );
+    await user.type(
+      screen.getByRole("combobox", { name: "Value for condition 1" }),
+      "Jerry",
+    );
+    await user.click(
+      screen.getByRole("option", { name: /people\/jerry-two\.md/ }),
+    );
+    expect(onChange).toHaveBeenLastCalledWith({
+      field: "prop.attendees",
+      op: "links_to",
+      value: "0190f8a0-0000-7000-8000-000000000002",
     });
   });
 

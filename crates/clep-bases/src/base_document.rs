@@ -25,6 +25,7 @@ use clep_vault::atomic_file::{AtomicPublicationError, atomic_create, atomic_repl
 const MANAGED_KEYS: &[&str] = &[
     "name",
     "description",
+    "hide_member_properties",
     "filter",
     "preview",
     "properties",
@@ -335,6 +336,23 @@ fn merge_document(
     for key in MANAGED_KEYS {
         let current_item = current.as_table().get(key);
         let desired_item = desired.as_table().get(key);
+        if *key == "hide_member_properties" {
+            // Explicit false is omitted by model serialization, but is still a
+            // managed scalar in a hand-authored document. Retain an existing
+            // key when disabling so its comments survive the toggle.
+            let raw_current = document.as_table().get(key).cloned();
+            let explicit_false = Item::Value(Value::from(false));
+            let desired_item =
+                desired_item.or_else(|| raw_current.as_ref().map(|_| &explicit_false));
+            merge_table_key(
+                document.as_table_mut(),
+                key,
+                raw_current.as_ref(),
+                desired_item,
+                key,
+            )?;
+            continue;
+        }
         if *key == "preview" {
             merge_preview_key(document.as_table_mut(), key, current_item, desired_item)?;
         } else if *key == "views" {
@@ -1499,6 +1517,7 @@ mod tests {
         BaseFile {
             name: "Reading".into(),
             description: None,
+            hide_member_properties: false,
             title_template: None,
             filter: None,
             preview: Vec::new(),
@@ -1510,6 +1529,46 @@ mod tests {
     fn load_for_test(root: &Path, slug: &str) -> StoredBase {
         let path = root.join("bases").join(format!("{slug}.base.toml"));
         load_stored(&path, slug).unwrap()
+    }
+
+    #[test]
+    fn member_property_visibility_defaults_and_toggles_preserve_unmanaged_content() {
+        for initial in [
+            "",
+            "hide_member_properties = false # visibility comment\n",
+            "hide_member_properties = true # visibility comment\n",
+        ] {
+            let fixture = fixture_base(&format!(
+                "name = \"Reading\"\n{initial}# plugin comment\nplugin_key = \"keep\"\n\n[properties]\nrating = {{ type = \"number\" }}\n"
+            ));
+            let mut stored = load_for_test(fixture.root(), "reading");
+            assert_eq!(
+                stored.definition.file.hide_member_properties,
+                initial.contains("true")
+            );
+            for (index, enabled) in [false, true, false].into_iter().enumerate() {
+                let mut file = stored.definition.file.clone();
+                file.hide_member_properties = enabled;
+                stored = update(fixture.root(), "reading", &stored.revision, &file, &[]).unwrap();
+                assert_eq!(stored.definition.file.hide_member_properties, enabled);
+                let reloaded = load_for_test(fixture.root(), "reading");
+                assert_eq!(reloaded.definition.file.hide_member_properties, enabled);
+                let raw = fs::read_to_string(fixture.path()).unwrap();
+                assert!(raw.contains("# plugin comment"));
+                assert!(raw.contains("plugin_key = \"keep\""));
+                assert!(raw.contains("rating = { type = \"number\" }"));
+                if !initial.is_empty() {
+                    assert!(raw.contains("# visibility comment"));
+                }
+                let parsed: toml::Value = toml::from_str(&raw).unwrap();
+                assert_eq!(
+                    parsed
+                        .get("hide_member_properties")
+                        .and_then(toml::Value::as_bool),
+                    (!initial.is_empty() || index > 0).then_some(enabled)
+                );
+            }
+        }
     }
 
     #[test]

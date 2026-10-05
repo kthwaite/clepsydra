@@ -51,6 +51,45 @@ function validate({
 }
 
 describe("validateBaseEmbedSemantics", () => {
+  it("accepts built-in date and relation semantics without declarations", () => {
+    expect(
+      validateBaseEmbedSemantics(
+        {
+          base: "reading",
+          filter: {
+            all: [
+              { field: "prop.occurred_at", op: "is_this_month" },
+              { field: "attendees", op: "links_to", value: "people/jerry.md" },
+            ],
+          },
+          sort: [{ field: "occurred_at", dir: "desc" }],
+        },
+        { ...detail(), properties: [] },
+      ),
+    ).toEqual([]);
+    expect(validate({ sort: [{ field: "attendees" }] })).toEqual([
+      expect.objectContaining({
+        path: "sort[0].field",
+        message: expect.stringMatching(/not scalar-sortable/i),
+      }),
+    ]);
+  });
+
+  it("validates explicit meeting property overrides rather than defaults", () => {
+    expect(
+      validateBaseEmbedSemantics(
+        {
+          base: "reading",
+          filter: { field: "occurred_at", op: "is_this_month" },
+        },
+        {
+          ...detail(),
+          properties: [{ key: "occurred_at", definition: { type: "text" } }],
+        },
+      ),
+    ).toEqual([expect.objectContaining({ path: "filter.op" })]);
+  });
+
   it("resolves saved views with the server ASCII-case-insensitive contract", () => {
     expect(validate({ view: "aLL eNTRIES" })).toEqual([]);
   });

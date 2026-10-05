@@ -53,6 +53,51 @@ function makeCapability(
 }
 
 describe("composeMemberDraftFields", () => {
+  it("uses built-in editors for undeclared and qualified meeting columns", () => {
+    const fields = composeMemberDraftFields(
+      makeDefinition({
+        properties: [],
+        views: [
+          {
+            name: "All",
+            columns: ["occurred_at", "prop.attendees", "attendees"],
+          },
+        ],
+      }),
+      "All",
+      makeCapability({ view: "All" }),
+    );
+    expect(fields.map(({ key }) => key)).toEqual([
+      "title",
+      "occurred_at",
+      "attendees",
+    ]);
+    expect(fields[1]).toMatchObject({
+      kind: "property",
+      definition: { type: "datetime" },
+    });
+    expect(fields[2]).toMatchObject({
+      kind: "property",
+      definition: { type: "relation", many: true },
+    });
+  });
+
+  it("uses explicit schemas instead of built-in member editors", () => {
+    const fields = composeMemberDraftFields(
+      makeDefinition({
+        properties: [
+          { key: "occurred_at", definition: { type: "date" } },
+          { key: "attendees", definition: { type: "relation", many: false } },
+        ],
+        views: [{ name: "All", columns: ["occurred_at", "attendees"] }],
+      }),
+      "All",
+      makeCapability({ view: "All" }),
+    );
+    expect(fields[1].definition).toEqual({ type: "date" });
+    expect(fields[2].definition).toEqual({ type: "relation", many: false });
+  });
+
   it("orders title, active columns, then filter-only fields without duplicates", () => {
     const fields = composeMemberDraftFields(
       makeDefinition(),

@@ -36,7 +36,6 @@ interface BaseFilterEditorProps {
   label?: string;
   diagnostics?: BaseDiagnostic[];
   diagnosticRoot?: string;
-  allowAttendees?: boolean;
 }
 
 /** Nested groups alternate tone so each level reads as its own surface
@@ -63,7 +62,6 @@ interface FilterNodeEditorProps {
   registerFocus?: RegisterFocusTarget;
   diagnostics: BaseDiagnostic[];
   diagnosticRoot: string;
-  allowAttendees: boolean;
 }
 
 function FilterNodeEditor({
@@ -75,7 +73,6 @@ function FilterNodeEditor({
   registerFocus,
   diagnostics,
   diagnosticRoot,
-  allowAttendees,
 }: FilterNodeEditorProps) {
   const logicalChildren =
     "all" in value ? value.all : "any" in value ? value.any : [];
@@ -99,7 +96,6 @@ function FilterNodeEditor({
         value={value}
         position={position}
         properties={properties}
-        allowAttendees={allowAttendees}
         onChange={(next) =>
           dispatch(
             next === undefined
@@ -118,7 +114,6 @@ function FilterNodeEditor({
         value={value}
         position={position}
         properties={properties}
-        allowAttendees={allowAttendees}
         onChange={(next) => dispatch({ type: "replace", path, value: next })}
         diagnosticScope={diagnosticScope}
       />
@@ -148,7 +143,6 @@ function FilterNodeEditor({
           registerFocus={registerFocus}
           diagnostics={diagnostics}
           diagnosticRoot={diagnosticRoot}
-          allowAttendees={allowAttendees}
         />
         <div className="mt-3 flex flex-wrap gap-2">
           <FilterNodeMenu
@@ -256,7 +250,6 @@ function FilterNodeEditor({
                   registerFocus={registerFocus}
                   diagnostics={diagnostics}
                   diagnosticRoot={diagnosticRoot}
-                  allowAttendees={allowAttendees}
                 />
               </div>
               <div className="flex shrink-0 items-start gap-1 pt-5">
@@ -342,7 +335,6 @@ export function BaseFilterEditor({
   label = "Membership filter",
   diagnostics = [],
   diagnosticRoot = "filter",
-  allowAttendees = true,
 }: BaseFilterEditorProps) {
   const [draftValue, setDraftValue] = useState(value);
   const root = useRef<HTMLFieldSetElement>(null);
@@ -418,7 +410,6 @@ export function BaseFilterEditor({
         registerFocus={registerFocus}
         diagnostics={combinedDiagnostics}
         diagnosticRoot={diagnosticRoot}
-        allowAttendees={allowAttendees}
       />
       <fieldset className="m-0 mt-3 flex min-w-0 flex-wrap gap-2 p-0">
         <legend className="sr-only">Root membership controls</legend>

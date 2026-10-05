@@ -109,7 +109,7 @@ pub fn compute_link_diagnostics(
 
 use clep_bases::base::{BaseRegistry, PropertyType, base_matches_meta};
 
-/// Type-check declared properties against a document's native TOML values,
+/// Type-check effective properties against a document's native TOML values,
 /// per base whose filter matches the page. Native types make every finding a
 /// hard fact about the file rather than a coercion opinion; severity is
 /// warning, never error, and nothing here blocks indexing.
@@ -130,7 +130,7 @@ pub fn compute_property_diagnostics(
         if !base_matches_meta(base, &doc.meta, path) {
             continue;
         }
-        for (key, def) in &base.file.properties {
+        for (key, def) in base.effective_properties() {
             let Some(value) = doc.meta.extra.get(key) else {
                 continue;
             };
@@ -464,6 +464,32 @@ mod tests {
         let legacy =
             "---\nid: 0190f8a0-0000-7000-8000-000000000087\ntype: BOOK\nrating: \"4\"\n---\n";
         assert!(prop_diags(legacy, &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn builtin_property_diagnostics_preserve_native_dates_and_explicit_overrides() {
+        let names = HashMap::from([("ada".to_owned(), vec!["ada.md".to_owned()])]);
+        let registry = registry_with("name = \"Implicit\"\n");
+        for occurred in ["2026-08-09", "2026-08-09T12:34:56Z"] {
+            let doc = Document::from_text(
+                &format!("+++\noccurred_at = {occurred}\nattendees = [\"[[Ada]]\"]\n+++\n"),
+                1,
+            );
+            assert!(compute_property_diagnostics(&doc, &registry, "note.md", &names).is_empty());
+        }
+        let doc = Document::from_text(
+            "+++\noccurred_at = \"sometime\"\nattendees = \"not a person\"\n+++\n",
+            1,
+        );
+        let diagnostics = compute_property_diagnostics(&doc, &registry, "note.md", &names);
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("occurred_at")
+                && diagnostic.code == Some(NumberOrString::String("property-type".into()))
+        }));
+        let explicit = registry_with(
+            "name = \"Explicit\"\n[properties]\noccurred_at = { type = \"text\" }\nattendees = { type = \"text\" }\n",
+        );
+        assert!(compute_property_diagnostics(&doc, &explicit, "note.md", &names).is_empty());
     }
 
     #[test]

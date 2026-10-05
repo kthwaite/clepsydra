@@ -63,6 +63,25 @@ function renderEditor(
 }
 
 describe("PreviewPropertiesEditor", () => {
+  it("offers built-in preview fields without declarations and deduplicates qualified references", () => {
+    render(
+      <PreviewPropertiesEditor
+        preview={[{ id: "occurred", field: "prop.occurred_at" }]}
+        properties={[]}
+        diagnostics={[]}
+        onChange={vi.fn()}
+        registerFocus={vi.fn()}
+      />,
+    );
+    const picker = screen.getByLabelText("Preview property to add");
+    expect(
+      within(picker).getByRole("option", { name: /Occurred.*already added/i }),
+    ).toBeDisabled();
+    expect(
+      within(picker).getByRole("option", { name: "Attendees" }),
+    ).toHaveValue("attendees");
+  });
+
   it("reorders preview rows from the shared grip with Alt and an arrow", async () => {
     const user = userEvent.setup();
     renderEditor([

@@ -22,7 +22,6 @@ interface TagConditionEditorProps {
   properties: DraftProperty[];
   onChange(value: BaseFilter | undefined): void;
   diagnosticScope: FilterDiagnosticScope;
-  allowAttendees?: boolean;
 }
 
 const FIELD_LABELS: Record<TagConditionField, string> = {
@@ -46,7 +45,6 @@ export function TagConditionEditor({
   properties,
   onChange,
   diagnosticScope,
-  allowAttendees = true,
 }: TagConditionEditorProps) {
   const [advanced, setAdvanced] = useState(false);
   const [pendingQuantifier, setPendingQuantifier] = useState<TagQuantifier>();
@@ -63,7 +61,6 @@ export function TagConditionEditor({
           properties={properties}
           onChange={(next) => onChange(next)}
           diagnosticScope={diagnosticScope}
-          allowAttendees={allowAttendees}
         />
         {condition ? (
           <div>

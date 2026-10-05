@@ -609,6 +609,7 @@ mod tests {
             file: BaseFile {
                 name: "Reading".to_string(),
                 description: None,
+                hide_member_properties: false,
                 title_template: None,
                 filter: None,
                 preview: Vec::new(),

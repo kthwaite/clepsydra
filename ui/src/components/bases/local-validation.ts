@@ -2,6 +2,7 @@ import type { BaseDetailResponse } from "#/api/bases";
 import { type BaseDraft, canSort } from "./definition-model";
 import { validateFilterDraft } from "./filter-diagnostics";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
+import { effectiveProperties, propertyKey } from "./property-schema";
 
 type BaseDiagnostic = BaseDetailResponse["diagnostics"][number];
 
@@ -91,14 +92,12 @@ export function validateBaseDraftStructure(
 
   const indexesByName = new Map<string, number[]>();
   const propertyTypes = new Map(
-    draft.properties.map((property) => [
+    effectiveProperties(draft.properties).map((property) => [
       property.key,
       property.definition.type,
     ]),
   );
-  const propertyKeys = new Set(
-    draft.properties.map((property) => property.key),
-  );
+  const propertyKeys = new Set(propertyTypes.keys());
   const previewIdentities = new Set<string>();
   for (const [previewIndex, preview] of draft.preview.entries()) {
     if (preview.label !== undefined && preview.label.trim().length === 0) {
@@ -165,7 +164,7 @@ export function validateBaseDraftStructure(
     }
 
     for (const [sortIndex, sort] of view.sort.entries()) {
-      const propertyType = propertyTypes.get(sort.field);
+      const propertyType = propertyTypes.get(propertyKey(sort.field));
       if (propertyType !== undefined && !canSort(propertyType)) {
         diagnostics.push({
           slug,

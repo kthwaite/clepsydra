@@ -18,6 +18,11 @@ import {
   useReorderable,
 } from "./ordered-list";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
+import {
+  builtInFieldLabel,
+  effectiveProperties,
+  propertyKey,
+} from "./property-schema";
 
 interface FieldCapability {
   key: string;
@@ -39,7 +44,7 @@ export function sortableFieldKeys(
               : undefined,
       }),
     ),
-    ...properties.map((property) => ({
+    ...effectiveProperties(properties).map((property) => ({
       key: property.key,
       type: property.definition.type,
     })),
@@ -132,7 +137,7 @@ export function OrderedSortEditor({
           const sortInvalid = sortDiagnostics.some(
             (diagnostic) => diagnostic.severity === "error",
           );
-          const sortSupported = fields.includes(sort.field);
+          const sortSupported = fields.includes(propertyKey(sort.field));
           const errorId = `${idPrefix}-sort-field-error-${index}`;
           return (
             <SortRow
@@ -160,6 +165,11 @@ export function OrderedSortEditor({
                     });
                   }}
                 >
+                  {sortSupported && sort.field !== propertyKey(sort.field) ? (
+                    <SelectItem id={sort.field}>
+                      {builtInFieldLabel(sort.field)}
+                    </SelectItem>
+                  ) : null}
                   {!sortSupported ? (
                     <SelectItem
                       id={sort.field}
@@ -170,7 +180,7 @@ export function OrderedSortEditor({
                   ) : null}
                   {fields.map((key) => (
                     <SelectItem key={key} id={key}>
-                      {key}
+                      {builtInFieldLabel(key)}
                     </SelectItem>
                   ))}
                 </Select>

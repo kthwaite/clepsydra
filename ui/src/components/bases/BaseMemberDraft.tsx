@@ -21,6 +21,7 @@ import {
   type BaseMemberDraftValue,
   initialMemberDraft,
 } from "./member-draft";
+import { builtInFieldLabel } from "./property-schema";
 
 export interface BaseMemberDraftProps {
   fields: BaseMemberDraftField[];
@@ -37,7 +38,7 @@ export interface BaseMemberDraftProps {
 }
 
 function fieldLabel(key: string): string {
-  return key
+  return builtInFieldLabel(key)
     .replace(/^sys\.|^prop\./, "")
     .replace(/[_-]+/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());

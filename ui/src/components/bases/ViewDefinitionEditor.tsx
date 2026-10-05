@@ -30,6 +30,7 @@ import {
   useReorderable,
 } from "./ordered-list";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
+import { builtInFieldLabel, effectiveProperties } from "./property-schema";
 
 interface FieldCapability {
   key: string;
@@ -51,7 +52,7 @@ function fieldCapabilities(
               : undefined,
       }),
     ),
-    ...properties.map((property) => ({
+    ...effectiveProperties(properties).map((property) => ({
       key: property.key,
       type: property.definition.type,
     })),
@@ -165,7 +166,7 @@ function VisibleColumnRow({
     >
       <td className="w-8 py-0.5 pl-1 align-middle">
         <ReorderHandle
-          label={`${row.column} column`}
+          label={`${builtInFieldLabel(row.column)} column`}
           setHandle={setHandle}
           onKeyDown={onHandleKeyDown}
         />
@@ -174,19 +175,21 @@ function VisibleColumnRow({
         scope="row"
         className="break-words px-1.5 py-0.5 text-left align-middle text-[14px] font-normal text-ink"
       >
-        {row.column}
+        {builtInFieldLabel(row.column)}
       </th>
       <td className="w-[6.5rem] py-0.5 pr-1 align-middle">
         <fieldset className="m-0 flex justify-end border-0 p-0">
-          <legend className="sr-only">Actions for {row.column}</legend>
+          <legend className="sr-only">
+            Actions for {builtInFieldLabel(row.column)}
+          </legend>
           <MoveButtons
-            label={row.column}
+            label={builtInFieldLabel(row.column)}
             index={index}
             count={count}
             onMove={onMove}
           />
           <IconButton
-            aria-label={`Remove ${row.column} column`}
+            aria-label={`Remove ${builtInFieldLabel(row.column)} column`}
             variant="ghost"
             onPress={() => onRemove(index)}
           >
@@ -508,7 +511,7 @@ export function ViewDefinitionEditor({
                 <SelectItem id="">Choose a field</SelectItem>
                 {unselectedColumns.map(({ key }) => (
                   <SelectItem key={key} id={key}>
-                    {key}
+                    {builtInFieldLabel(key)}
                   </SelectItem>
                 ))}
               </Select>
@@ -584,7 +587,7 @@ export function ViewDefinitionEditor({
               <SelectItem id="">No grouping</SelectItem>
               {groupFields.map(({ key }) => (
                 <SelectItem key={key} id={key}>
-                  {key}
+                  {builtInFieldLabel(key)}
                 </SelectItem>
               ))}
             </Select>
@@ -663,7 +666,7 @@ export function ViewDefinitionEditor({
                       >
                         {eligibleFields.map(({ key }) => (
                           <SelectItem key={key} id={key}>
-                            {key}
+                            {builtInFieldLabel(key)}
                           </SelectItem>
                         ))}
                       </Select>

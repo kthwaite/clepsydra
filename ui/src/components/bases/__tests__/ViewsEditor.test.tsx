@@ -334,6 +334,39 @@ beforeEach(() => {
 });
 
 describe("ViewsEditor", () => {
+  it("offers built-in columns with type-appropriate sorting, grouping and aggregates", async () => {
+    const user = userEvent.setup();
+    const onChange = renderViews({
+      properties: [],
+      views: [
+        view({
+          sort: [{ field: "occurred_at", dir: "desc" }],
+          aggregates: [{ fn: "count_filled", field: "attendees" }],
+        }),
+      ],
+    });
+    await chooseSelectOption(user, "Column to add", "Occurred");
+    await user.click(screen.getByRole("button", { name: "Add column" }));
+    await chooseSelectOption(user, "Column to add", "Attendees");
+    await user.click(screen.getByRole("button", { name: "Add column" }));
+    expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
+      "title",
+      "occurred_at",
+      "attendees",
+    ]);
+    await openSelect(user, "Sort field 1");
+    expect(visibleOptionNames()).toContain("Occurred");
+    expect(visibleOptionNames()).not.toContain("Attendees");
+    await user.keyboard("{Escape}");
+    await openSelect(user, "Group by");
+    expect(visibleOptionNames()).not.toContain("Attendees");
+    await user.keyboard("{Escape}");
+    await openSelect(user, "Aggregate field 1");
+    expect(visibleOptionNames()).toEqual(
+      expect.arrayContaining(["Occurred", "Attendees"]),
+    );
+  });
+
   it("adds a table view with a stable fresh identity", async () => {
     const onChange = renderViews();
     await userEvent.click(screen.getByRole("button", { name: "Add view" }));

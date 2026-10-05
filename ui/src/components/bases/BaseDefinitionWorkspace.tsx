@@ -21,7 +21,6 @@ import {
   fromWire,
   toViewOrigins,
   toWire,
-  withFilterProperties,
 } from "./definition-model";
 import { GeneralEditor } from "./GeneralEditor";
 import { asciiCaseFold, validateBaseDraftStructure } from "./local-validation";
@@ -229,9 +228,7 @@ export function BaseDefinitionWorkspace({
   const changeDraft = useCallback(
     (update: (current: BaseDraft) => BaseDraft) => {
       editGeneration.current += 1;
-      setDraftState((current) =>
-        current ? withFilterProperties(update(current)) : current,
-      );
+      setDraftState((current) => (current ? update(current) : current));
       setSaveError(undefined);
     },
     [],

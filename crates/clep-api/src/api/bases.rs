@@ -71,6 +71,8 @@ pub struct BaseFilePayload {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hide_member_properties: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -88,6 +90,7 @@ impl From<BaseFile> for BaseFilePayload {
         Self {
             name: file.name,
             description: file.description,
+            hide_member_properties: file.hide_member_properties,
             title_template: file.title_template,
             filter: file.filter,
             preview: file.preview,
@@ -106,6 +109,7 @@ impl From<BaseFilePayload> for BaseFile {
         Self {
             name: payload.name,
             description: payload.description,
+            hide_member_properties: payload.hide_member_properties,
             title_template: payload.title_template,
             filter: payload.filter,
             preview: payload.preview,
@@ -921,6 +925,7 @@ mod tests {
                 file: BaseFile {
                     name: "Injected Snapshot".to_string(),
                     description: None,
+                    hide_member_properties: false,
                     title_template: None,
                     filter: None,
                     properties: Vec::new(),

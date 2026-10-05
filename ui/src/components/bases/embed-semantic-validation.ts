@@ -6,6 +6,7 @@ import type {
   SortKey,
 } from "#/api/bases";
 import { asciiCaseFold } from "./local-validation";
+import { effectiveProperties } from "./property-schema";
 
 export interface BaseEmbedSemanticConfig {
   base: string;
@@ -131,7 +132,7 @@ function propertyField(
   name: string,
   detail: BaseDetailResponse,
 ): ResolvedField | undefined {
-  const definition = detail.properties?.find(
+  const definition = effectiveProperties(detail.properties ?? []).find(
     (property) => property.key === name,
   )?.definition;
   if (!definition) return undefined;
