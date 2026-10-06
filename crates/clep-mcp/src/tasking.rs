@@ -176,6 +176,19 @@ pub fn resolve_project_patch(
     }
 }
 
+/// Query string that makes `GET /board` include Tasks of retired Projects
+/// (every PROJECT page for the slug says `board: false`).
+pub const INCLUDE_RETIRED: (&str, &str) = ("include_retired", "true");
+
+/// `GET /board` query for `vault_board`: a named `project` includes retired
+/// Projects' Tasks (the caller asked for that Project by name); an
+/// unscoped board hides them, like the UI does.
+pub fn board_query(project: Option<&str>) -> Vec<(&'static str, String)> {
+    project
+        .map(|_| vec![(INCLUDE_RETIRED.0, INCLUDE_RETIRED.1.to_string())])
+        .unwrap_or_default()
+}
+
 /// Filter a board response in place to one project: `tasks` and `operations`
 /// keep only entries declaring exactly `project`; `columns` and `cycles` are
 /// always left untouched.
@@ -193,6 +206,15 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn board_query_includes_retired_only_for_a_named_project() {
+        assert!(board_query(None).is_empty());
+        assert_eq!(
+            board_query(Some("old")),
+            vec![("include_retired", "true".to_string())]
+        );
+    }
 
     #[test]
     fn classify_ref_distinguishes_ids_paths_and_codes() {

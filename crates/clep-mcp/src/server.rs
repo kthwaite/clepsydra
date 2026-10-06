@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::tasking::{
-    BoardKind, TaskRef, classify_ref, deserialize_tri_state, filter_board_project, find_board_id,
-    insert_tri_state, page_meta_id, resolve_project_patch,
+    BoardKind, INCLUDE_RETIRED, TaskRef, board_query, classify_ref, deserialize_tri_state,
+    filter_board_project, find_board_id, insert_tri_state, page_meta_id, resolve_project_patch,
 };
 use clep_api::vault::kind::Kind;
 use clep_client::client::{ApiClient, encode_vault_path};
@@ -1297,7 +1297,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_board",
-        description = "Orient on the Task Board: Inbox (INTAKE) → Ready (TRIAGE) → In Progress (FIELD) → Review (REVIEW) → Done (SEALED). Returns Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field. Codes are server-minted petnames (`TSK-<adjective>-<noun>-<tail>` / `S-<adjective>-<noun>-<tail>`); any unique prefix of one addresses the page elsewhere. Legacy `columns[].label`/`columns[].sub` pairs are INTAKE/unfiled, TRIAGE/staged, IN-FIELD/active, REVIEW/qa / seal, and SEALED/closed; derive display labels from the column status ID instead. `tasks[].checks` is [done, total] Checklist Item counts. `tasks[].link` and `operations[].dossier` are Related Page values. `tasks[].blocked_by` lists a Task's Blockers (codes), `tasks[].blocks` the Tasks waiting on it, and `tasks[].blocked` is true when `hold` is set or any Blocker is not Done (SEALED). Look up Task and Cycle codes here before updates. Optional `project` filters Tasks and operations to that exact Project; columns and Cycles remain complete.",
+        description = "Orient on the Task Board: Inbox (INTAKE) → Ready (TRIAGE) → In Progress (FIELD) → Review (REVIEW) → Done (SEALED). Returns Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field. Codes are server-minted petnames (`TSK-<adjective>-<noun>-<tail>` / `S-<adjective>-<noun>-<tail>`); any unique prefix of one addresses the page elsewhere. Legacy `columns[].label`/`columns[].sub` pairs are INTAKE/unfiled, TRIAGE/staged, IN-FIELD/active, REVIEW/qa / seal, and SEALED/closed; derive display labels from the column status ID instead. `tasks[].checks` is [done, total] Checklist Item counts. `tasks[].link` and `operations[].dossier` are Related Page values. `tasks[].blocked_by` lists a Task's Blockers (codes), `tasks[].blocks` the Tasks waiting on it, and `tasks[].blocked` is true when `hold` is set or any Blocker is not Done (SEALED). Look up Task and Cycle codes here before updates. Optional `project` filters Tasks and operations to that exact Project; columns and Cycles remain complete. Tasks of retired Projects (every PROJECT page for the slug has `board: false`) are hidden unless `project` names that Project.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1310,7 +1310,7 @@ impl VaultMcpServer {
     ) -> Result<String, String> {
         let mut value = self
             .client
-            .get_json(BOARD_URL, &[])
+            .get_json(BOARD_URL, &board_query(params.project.as_deref()))
             .await
             .map_err(|e| e.to_string())?;
         if let Some(project) = &params.project {
@@ -1516,9 +1516,13 @@ impl VaultMcpServer {
                 page_meta_id(&page, &path)
             }
             TaskRef::Code(code) => {
+                // Codes of retired Projects' Tasks must still resolve.
                 let board = self
                     .client
-                    .get_json(BOARD_URL, &[])
+                    .get_json(
+                        BOARD_URL,
+                        &[(INCLUDE_RETIRED.0, INCLUDE_RETIRED.1.to_string())],
+                    )
                     .await
                     .map_err(|e| e.to_string())?;
                 find_board_id(&board, kind, &code)

@@ -2,12 +2,14 @@
 //! used by the mutation handlers (read from the index after a write so
 //! responses always match what a subsequent GET would return).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use rusqlite::params;
+use serde::Deserialize;
+use utoipa::IntoParams;
 use uuid::Uuid;
 
 use crate::api::AppState;
@@ -29,11 +31,21 @@ use super::{
 // GET /board
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct BoardQuery {
+    /// Include Tasks whose Project is retired (every PROJECT page for the
+    /// slug says `board: false`). Default `false`: those Tasks are hidden.
+    /// Affects `tasks` only; `operations` never list `board: false` pages.
+    pub include_retired: Option<bool>,
+}
+
 #[utoipa::path(
     get,
     path = "/board",
     context_path = "/api/vault",
     tag = "Board",
+    params(BoardQuery),
     responses(
         (status = 200, description = "Board read model", body = BoardResponse),
         (status = 500, description = "Internal server error", body = ApiError)
@@ -42,7 +54,9 @@ use super::{
 #[allow(clippy::type_complexity)]
 pub(crate) async fn get_board(
     State(state): State<Arc<AppState>>,
+    Query(query): Query<BoardQuery>,
 ) -> Result<Json<BoardResponse>, ApiError> {
+    let include_retired = query.include_retired.unwrap_or(false);
     let result = state
         .index
         .with_index(move |index, _vault| {
@@ -83,6 +97,7 @@ pub(crate) async fn get_board(
             // for a slug-less page admitted by `board: true`). Rows arrive in
             // path order, so a rank tie keeps the earlier path.
             let mut best: HashMap<String, (u8, BoardOperation)> = HashMap::new();
+            let mut retired = RetiredSlugs::default();
             for (id_str, path, title, canonical_name, meta_json, project) in op_rows {
                 let meta: serde_json::Value =
                     serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
@@ -91,7 +106,11 @@ pub(crate) async fn get_board(
                 // operation unless its frontmatter says `board: false`. An
                 // absent key (the common case — onboarding never sets one)
                 // and `board: true` both list the page, slug or not.
+                // `board: false` also retires the page's slug: when every
+                // PROJECT page declaring a slug says `board: false`, that
+                // slug's Tasks are hidden too (see `RetiredSlugs`).
                 let board_flag = meta.get("board").and_then(serde_json::Value::as_bool);
+                retired.record(project.as_deref(), board_flag != Some(false));
                 if board_flag == Some(false) {
                     continue;
                 }
@@ -212,7 +231,17 @@ pub(crate) async fn get_board(
             });
 
             // --- Tasks (all TASK pages) ----------------------------------------
-            let tasks = load_tasks(conn)?;
+            // Filtered after `load_tasks`: the Blocker graph is built over
+            // every Task, so `blocked`/`blocks` stay correct for those kept.
+            let mut tasks = load_tasks(conn)?;
+            if !include_retired {
+                let retired = retired.into_set();
+                tasks.retain(|task| {
+                    task.project
+                        .as_deref()
+                        .is_none_or(|slug| !retired.contains(slug))
+                });
+            }
 
             Ok::<_, rusqlite::Error>(BoardResponse {
                 columns,
@@ -238,6 +267,31 @@ type OperationRow = (
     String,
     Option<String>,
 );
+
+/// Tracks, per `project` slug, whether any PROJECT page declares it and
+/// whether any of those pages is listed (not `board: false`). A slug is
+/// retired iff it has at least one page and none is listed. Slug-less pages
+/// never retire anything; a Task slug with no PROJECT page is never retired.
+#[derive(Default)]
+struct RetiredSlugs {
+    /// slug -> any page listed on the board.
+    slugs: HashMap<String, bool>,
+}
+
+impl RetiredSlugs {
+    fn record(&mut self, slug: Option<&str>, listed: bool) {
+        if let Some(slug) = slug {
+            *self.slugs.entry(slug.to_string()).or_insert(false) |= listed;
+        }
+    }
+
+    fn into_set(self) -> HashSet<String> {
+        self.slugs
+            .into_iter()
+            .filter_map(|(slug, listed)| (!listed).then_some(slug))
+            .collect()
+    }
+}
 
 /// Rank a PROJECT page among the pages sharing its slug key: lower wins.
 /// `board: true` (0) beats a canonical name equal to the slug (1), which
@@ -639,7 +693,23 @@ fn count_checks(conn: &rusqlite::Connection, page_id: &str) -> Result<[u32; 2], 
 mod tests {
     use rusqlite::Connection;
 
-    use super::{count_checks_by_page, operation_rank};
+    use super::{RetiredSlugs, count_checks_by_page, operation_rank};
+
+    #[test]
+    fn retired_slugs_need_every_page_unlisted() {
+        let mut retired = RetiredSlugs::default();
+        retired.record(Some("old"), false);
+        retired.record(Some("old"), false);
+        retired.record(Some("mix"), false);
+        retired.record(Some("mix"), true);
+        retired.record(Some("live"), true);
+        retired.record(None, false);
+        let set = retired.into_set();
+        assert!(set.contains("old"));
+        assert!(!set.contains("mix"));
+        assert!(!set.contains("live"));
+        assert_eq!(set.len(), 1);
+    }
 
     #[test]
     fn operation_rank_prefers_board_flag_then_canonical_name() {

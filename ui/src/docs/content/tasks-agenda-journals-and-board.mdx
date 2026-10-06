@@ -287,7 +287,12 @@ independently.
 
 The Scope rail groups Tasks by Project and Cycle, with Backlog for Tasks not assigned to a Cycle.
 Every Project page appears in the rail; set `board = false` in a Project
-page's frontmatter to hide it. Pages that declare a `project` slug share one
+page's frontmatter to hide it. `board = false` also retires the Project: once
+every Project page that declares a slug says `board = false`, the Board hides
+that row and all of the slug's Tasks. A slug with no Project page is never
+retired. The MCP `vault_board` tool still returns a retired Project's Tasks
+when its `project` parameter names that Project, and Task codes still resolve.
+Pages that declare a `project` slug share one
 row per slug, and `board = true` breaks the tie when several pages declare the
 same slug. Every page's Project — a Task's included — must name a slug that a
 Project page declares; the Board, the MCP tools, and the API refuse an unknown

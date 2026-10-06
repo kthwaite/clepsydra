@@ -6267,7 +6267,14 @@ export interface operations {
   };
   get_board: {
     parameters: {
-      query?: never;
+      query?: {
+        /**
+         * @description Include Tasks whose Project is retired (every PROJECT page for the
+         *     slug says `board: false`). Default `false`: those Tasks are hidden.
+         *     Affects `tasks` only; `operations` never list `board: false` pages.
+         */
+        include_retired?: boolean;
+      };
       header?: never;
       path?: never;
       cookie?: never;
