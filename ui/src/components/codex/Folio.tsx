@@ -57,6 +57,7 @@ import {
   shortFolio,
   visibleFolioOutlinks,
 } from "#/components/codex/folio-utils";
+import { resolveFolioSurface } from "#/components/codex/folioSurface";
 import { buildToc, type TocEntry } from "#/components/codex/folioToc";
 import {
   highlightMatch,
@@ -73,6 +74,7 @@ import { RecipeFolioBody } from "#/components/codex/recipe/RecipeFolioBody";
 import { Section } from "#/components/codex/Section";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useEmbedTocExpander } from "#/components/codex/useEmbedTocExpander";
+import { useFolioMode } from "#/components/codex/useFolioMode";
 import { useReadingColumn } from "#/components/codex/useReadingColumn";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { KindIcon } from "#/components/KindIcon";
@@ -116,7 +118,6 @@ import { useProjects } from "#/lib/useProjects";
 import { isOfflineUncached } from "#/offline/swPolicy";
 import {
   parseRecipeMarkdown,
-  type RecipeParseResult,
   serializeRecipeMarkdown,
 } from "#/recipe/recipeCodec";
 import { useFolioDock } from "#/store/folioDock";
@@ -403,9 +404,6 @@ export function Folio({ tabId, path }: FolioProps) {
   >(null);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [organizationOpen, setOrganizationOpen] = useState(false);
-  const [conversationMode, setConversationMode] = useState<"read" | "edit">(
-    "read",
-  );
   const folioEditorRef = useRef<CustomEditor | null>(null);
   const lastMountedFolioEditorRef = useRef<CustomEditor | null>(null);
   const rawMarkdownSessionRef = useRef<RawMarkdownSession | null>(null);
@@ -490,23 +488,17 @@ export function Folio({ tabId, path }: FolioProps) {
     },
     [path, tabId],
   );
-  const [recipeMode, setRecipeMode] = useState<"read" | "edit">("read");
-  const [recipeProjection, setRecipeProjection] = useState<{
-    path: string;
-    editorRevision: number;
-    result: RecipeParseResult;
-  } | null>(null);
+  const {
+    conversationMode,
+    setConversationMode,
+    recipeMode,
+    setRecipeMode,
+    projectRecipe,
+    projectedRecipe,
+  } = useFolioMode(path);
   const [rawMarkdownSession, setRawMarkdownSession] =
     useState<RawMarkdownSession | null>(null);
   rawMarkdownSessionRef.current = rawMarkdownSession;
-  const modePathRef = useRef(path);
-  useEffect(() => {
-    if (modePathRef.current === path) return;
-    modePathRef.current = path;
-    setConversationMode("read");
-    setRecipeMode("read");
-    setRecipeProjection(null);
-  }, [path]);
   useEffect(() => {
     setRawMarkdownSession((current) => {
       if (
@@ -564,8 +556,6 @@ export function Folio({ tabId, path }: FolioProps) {
   );
   const isJournalKind = kind === "JOURNAL" || kind === "AI_JOURNAL";
   const presentation = presentationFor(kind);
-  const isAiConversation = presentation.bodyPresentation === "ai-conversation";
-  const conversationReadOnly = isAiConversation && conversationMode === "read";
   const isRecipe = presentation.bodyPresentation === "recipe";
   const recipeParse = useMemo(
     () =>
@@ -573,54 +563,55 @@ export function Folio({ tabId, path }: FolioProps) {
     [editor.bodyMarkdown, editor.title, isRecipe],
   );
   const activeRecipeParse =
-    recipeProjection?.path === path &&
-    recipeProjection.editorRevision === editor.editorRevision
-      ? recipeProjection.result
-      : recipeParse;
+    projectedRecipe(editor.editorRevision) ?? recipeParse;
   const recipeDocument =
     activeRecipeParse?.ok === true ? activeRecipeParse.value : null;
-  const recipeStructured = activeRecipeParse?.ok === true;
-  const recipeHasBlockIds =
-    isRecipe && containsBlockId(editor.editorValue ?? editor.initialValue);
-  const recipePresentationStructured = recipeStructured && !recipeHasBlockIds;
-  const recipeReadOnly = recipePresentationStructured && recipeMode === "read";
-  // Archived bodies are generated from a captured snapshot, and the page's
-  // frontmatter hash claims to describe them; the server refuses body writes
-  // until the reader explicitly unlocks the page.
-  const offlineReadOnly = editor.offline === true;
-  const bodyProtected =
-    editor.readonly === true &&
-    !offlineReadOnly &&
-    !editor.generatedChangePending;
-  const folioReadOnly =
-    conversationReadOnly || recipeReadOnly || bodyProtected || offlineReadOnly;
   const encrypted = editor.encrypted === true;
   const encryptionState = editor.encryptionState ?? {
     status: "plain" as const,
     body: editor.bodyMarkdown,
   };
+  const journalTodayPending = Boolean(
+    (isTodayDraftPath && (isJournalTodayLoading || journalToday)) ||
+      (isTodayAiDraftPath && (isAiJournalTodayLoading || aiJournalToday)),
+  );
+  const {
+    surface,
+    isAiConversation,
+    conversationReadOnly,
+    offlineReadOnly,
+    bodyProtected,
+    locked,
+    readOnly: folioReadOnly,
+    bodyReadOnly,
+    contentAvailable: restorationAvailable,
+    rawAvailable: rawMarkdownAvailable,
+  } = resolveFolioSurface({
+    bodyPresentation: presentation.bodyPresentation,
+    conversationMode,
+    recipeMode,
+    recipeStructured: activeRecipeParse?.ok === true,
+    recipeHasBlockIds:
+      isRecipe && containsBlockId(editor.editorValue ?? editor.initialValue),
+    isLoading: editor.isLoading,
+    error: Boolean(editor.error),
+    isDraft: editor.isDraft,
+    offline: editor.offline === true,
+    readonly: editor.readonly === true,
+    generatedChangePending: editor.generatedChangePending === true,
+    encrypted,
+    encryptionStatus: encryptionState.status,
+    journalTodayPending,
+    rawSessionOpen: rawMarkdownSession !== null,
+  });
   const folioProperties = (
     <FolioProperties
       pageId={editor.pageId ?? ""}
       path={path}
-      locked={encrypted && encryptionState.status !== "plain"}
+      locked={locked}
       readOnly={folioReadOnly}
     />
   );
-  const rawMarkdownPresentationAvailable =
-    presentation.bodyPresentation === "editor" ||
-    (isAiConversation && conversationMode === "edit") ||
-    (isRecipe &&
-      recipeStructured &&
-      (recipeHasBlockIds || recipeMode === "edit"));
-  const rawMarkdownAvailable =
-    rawMarkdownPresentationAvailable &&
-    !editor.isLoading &&
-    !(editor.error && !editor.isDraft) &&
-    !offlineReadOnly &&
-    (!encrypted || encryptionState.status === "plain") &&
-    !(isTodayDraftPath && (isJournalTodayLoading || journalToday)) &&
-    !(isTodayAiDraftPath && (isAiJournalTodayLoading || aiJournalToday));
   const rawMarkdownDirty =
     rawMarkdownSession !== null &&
     rawMarkdownSession.value !== rawMarkdownSession.snapshot;
@@ -671,11 +662,7 @@ export function Folio({ tabId, path }: FolioProps) {
         : null;
       editor.setBodyMarkdown(authoredRaw);
       if (projectedRecipe) {
-        setRecipeProjection({
-          path,
-          editorRevision: editor.editorRevision,
-          result: projectedRecipe,
-        });
+        projectRecipe(editor.editorRevision, projectedRecipe);
       }
       setRawMarkdownSession(null);
     } catch (error) {
@@ -759,10 +746,6 @@ export function Folio({ tabId, path }: FolioProps) {
     });
   };
 
-  const restorationAvailable =
-    !editor.isLoading &&
-    !(editor.error && !editor.isDraft) &&
-    (!encrypted || encryptionState.status === "plain");
   restorationStateRef.current = {
     tabId,
     path,
@@ -948,10 +931,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const project = editor.project;
 
   const currentEditorValue = editor.editorValue ?? editor.initialValue;
-  const visibleEditorValue =
-    encrypted && encryptionState.status !== "plain"
-      ? EMPTY_EDITOR_VALUE
-      : currentEditorValue;
+  const visibleEditorValue = locked ? EMPTY_EDITOR_VALUE : currentEditorValue;
   const wordCount = useMemo(
     () => countWordsFromSlate(visibleEditorValue),
     [visibleEditorValue],
@@ -997,28 +977,22 @@ export function Folio({ tabId, path }: FolioProps) {
         beforeMutation={editor.saveNow}
         onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
         onArchived={handleArchived}
-        archiveOnly={
-          folioReadOnly || (encrypted && encryptionState.status !== "plain")
-        }
+        archiveOnly={folioReadOnly || locked}
       />
     </Suspense>
   );
 
-  if (
-    !rawMarkdownSession &&
-    ((isTodayDraftPath && (isJournalTodayLoading || journalToday)) ||
-      (isTodayAiDraftPath && (isAiJournalTodayLoading || aiJournalToday)))
-  ) {
+  if (surface === "journal-today") {
     return (
       <div className="p-10 text-[13.5px] text-mute">
         Fetching today’s journal…
       </div>
     );
   }
-  if (!rawMarkdownSession && editor.isLoading) {
+  if (surface === "loading") {
     return <div className="p-10 text-[13.5px] text-mute">Fetching {path}…</div>;
   }
-  if (!rawMarkdownSession && editor.error && !editor.isDraft) {
+  if (surface === "error") {
     // Only a settled 404 means the file is actually gone; any other query
     // error is a load failure the user can retry without losing the tab.
     if (editor.pageNotFound) {
@@ -1039,7 +1013,8 @@ export function Folio({ tabId, path }: FolioProps) {
       />
     );
   }
-  if (!rawMarkdownSession && encrypted && encryptionState.status !== "plain") {
+  // The status check only narrows the state type; "locked" implies it.
+  if (surface === "locked" && encryptionState.status !== "plain") {
     return (
       <LockedFolio
         path={path}
@@ -1186,7 +1161,7 @@ export function Folio({ tabId, path }: FolioProps) {
         </>
       ) : null}
 
-      {isRecipe && !recipeStructured ? (
+      {isRecipe && activeRecipeParse?.ok !== true ? (
         <div
           className="my-4 rounded-[12px] bg-hot/5 px-4 py-3 text-[13.5px] leading-[1.5] text-hot"
           role="alert"
@@ -1199,7 +1174,7 @@ export function Folio({ tabId, path }: FolioProps) {
         </div>
       ) : null}
 
-      {rawMarkdownSession ? (
+      {surface === "raw-markdown" && rawMarkdownSession ? (
         <RawMarkdownEditor
           value={rawMarkdownSession.value}
           diagnostic={rawMarkdownSession.diagnostic}
@@ -1223,20 +1198,16 @@ export function Folio({ tabId, path }: FolioProps) {
             <ProtectedBodyNotice onUnlock={() => editor.setReadonly(false)} />
           ) : null}
           <WikilinkResolutionProvider path={path}>
-            {recipePresentationStructured && recipeDocument ? (
+            {surface === "recipe" && recipeDocument ? (
               <RecipeFolioBody
                 document={recipeDocument}
                 mode={recipeMode}
                 onModeChange={setRecipeMode}
                 onDocumentChange={(nextDocument) => {
-                  setRecipeProjection({
-                    path,
-                    editorRevision: editor.editorRevision,
-                    result: {
-                      ok: true,
-                      sourceFormat: "markdown",
-                      value: nextDocument,
-                    },
+                  projectRecipe(editor.editorRevision, {
+                    ok: true,
+                    sourceFormat: "markdown",
+                    value: nextDocument,
                   });
                   editor.setBodyMarkdown(serializeRecipeMarkdown(nextDocument));
                 }}
@@ -1272,12 +1243,7 @@ export function Folio({ tabId, path }: FolioProps) {
                     onSaveNow={editor.saveNow}
                     insertionRequest={attachmentInsertion}
                     onInsertionHandled={finishAttachmentInsertion}
-                    readOnly={
-                      conversationReadOnly ||
-                      bodyProtected ||
-                      offlineReadOnly ||
-                      editor.generatedChangePending
-                    }
+                    readOnly={bodyReadOnly}
                     journalDate={
                       journalDateFromPath(path) ?? aiJournalDateFromPath(path)
                     }
