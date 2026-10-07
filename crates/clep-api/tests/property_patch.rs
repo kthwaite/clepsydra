@@ -678,7 +678,6 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
     assert_eq!(
         keys,
         vec![
-            "attendees",
             "choice_order",
             "conflict_relation",
             "conflict_type",
@@ -688,7 +687,6 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
             "kind",
             "non_finite",
             "note",
-            "occurred_at",
             "rating",
             "seen_at",
             "series",
@@ -1098,20 +1096,8 @@ async fn get_distinguishes_no_matching_bases_from_bases_without_properties() {
         no_declarations["matching_bases"],
         serde_json::json!([{ "slug": "empty", "name": "Empty Base" }])
     );
-    assert_eq!(no_declarations["properties"].as_array().unwrap().len(), 2);
-    for (key, definition) in [
-        ("occurred_at", serde_json::json!({ "type": "datetime" })),
-        (
-            "attendees",
-            serde_json::json!({ "type": "relation", "many": true }),
-        ),
-    ] {
-        let property = projection_property(&no_declarations, key);
-        assert_eq!(property["definition"], definition);
-        assert_eq!(property["present"], false);
-        assert_eq!(property["value"], serde_json::Value::Null);
-        assert_eq!(property["patchable"], true);
-    }
+    // Meeting-only built-ins stay off a NOTE that has no value for them.
+    assert_eq!(no_declarations["properties"], serde_json::json!([]));
     assert_eq!(
         no_declarations["preview"],
         serde_json::json!({ "fields": [], "remaining_count": 0 })
@@ -1363,4 +1349,94 @@ async fn builtin_property_hints_do_not_bypass_meeting_frontmatter_validation() {
             .assert_status_bad_request();
     }
     assert_eq!(revision_of(&server, "meeting.md").await, revision);
+}
+
+const MEETING_ID: &str = "0190f8a0-0000-7000-8000-0000000000e1";
+const NOTE_WITH_ATTENDEES_ID: &str = "0190f8a0-0000-7000-8000-0000000000e2";
+const PLAIN_NOTE_ID: &str = "0190f8a0-0000-7000-8000-0000000000e3";
+
+fn projected_keys(response: &serde_json::Value) -> Vec<String> {
+    response["properties"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|property| property["key"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn meeting_builtins_project_only_for_meetings_values_or_declarations() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("bases")).unwrap();
+            fs::write(
+                root.join("standup.md"),
+                format!("+++\nid = \"{MEETING_ID}\"\ntitle = \"Standup\"\ntype = \"MEETING\"\n+++\n"),
+            )
+            .unwrap();
+            fs::write(
+                root.join("call-notes.md"),
+                format!(
+                    "+++\nid = \"{NOTE_WITH_ATTENDEES_ID}\"\ntitle = \"Call notes\"\ntype = \"NOTE\"\nattendees = [\"[[Ada]]\"]\n+++\n"
+                ),
+            )
+            .unwrap();
+            fs::write(
+                root.join("plain.md"),
+                format!("+++\nid = \"{PLAIN_NOTE_ID}\"\ntitle = \"Plain\"\ntype = \"NOTE\"\n+++\n"),
+            )
+            .unwrap();
+            fs::write(root.join("bases/all.base.toml"), "name = \"All\"\n").unwrap();
+        })
+        .build()
+        .into_server_and_temp();
+    let projection = |id: &'static str| {
+        let server = &server;
+        async move {
+            server
+                .get(&format!("/api/vault/pages/by-id/{id}/properties"))
+                .await
+                .json::<serde_json::Value>()
+        }
+    };
+
+    assert_eq!(
+        projected_keys(&projection(MEETING_ID).await),
+        vec!["attendees", "occurred_at"]
+    );
+    let with_value = projection(NOTE_WITH_ATTENDEES_ID).await;
+    assert_eq!(projected_keys(&with_value), vec!["attendees"]);
+    assert_eq!(
+        projection_property(&with_value, "attendees")["present"],
+        true
+    );
+    assert!(projected_keys(&projection(PLAIN_NOTE_ID).await).is_empty());
+}
+
+#[tokio::test]
+async fn a_declared_builtin_key_projects_on_any_page() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("bases")).unwrap();
+            fs::write(
+                root.join("plain.md"),
+                format!("+++\nid = \"{PLAIN_NOTE_ID}\"\ntitle = \"Plain\"\ntype = \"NOTE\"\n+++\n"),
+            )
+            .unwrap();
+            fs::write(
+                root.join("bases/log.base.toml"),
+                "name = \"Log\"\n\n[properties]\noccurred_at = { type = \"datetime\" }\n",
+            )
+            .unwrap();
+        })
+        .build()
+        .into_server_and_temp();
+
+    let body: serde_json::Value = server
+        .get(&format!(
+            "/api/vault/pages/by-id/{PLAIN_NOTE_ID}/properties"
+        ))
+        .await
+        .json();
+    assert_eq!(projected_keys(&body), vec!["occurred_at"]);
 }

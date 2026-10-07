@@ -136,6 +136,12 @@ relation editor; it is not a sortable or groupable field in saved Base views.
 These use the existing meeting frontmatter, not duplicate fields. Missing
 values remain empty, and native date-only occurrence values remain readable.
 An explicit declaration overrides the built-in schema for that Base.
+
+On a page, a Folio's **Base properties** panel lists Occurred and Attendees
+only for MEETING pages, or for another page that already has a value for
+that key. A plain note in the same Base does not show empty meeting fields.
+Declare the key in `[properties]` to offer it on every page of that Base.
+
 Both bare keys and `prop.occurred_at` / `prop.attendees` address the same
 properties. Saving a Base does not insert declarations for these defaults.
 
