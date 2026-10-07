@@ -133,7 +133,7 @@ export const DEFAULT_PRIORITY = "P2";
 /** The Done status: a sealed Task is finished. */
 export const DONE_STATUS = "SEALED";
 /** The In Progress status: the one a start warning guards. */
-export const IN_PROGRESS_STATUS = "FIELD";
+const IN_PROGRESS_STATUS = "FIELD";
 
 /** True when the Task status is Done. */
 export const isDone = (status: string): boolean => status === DONE_STATUS;
