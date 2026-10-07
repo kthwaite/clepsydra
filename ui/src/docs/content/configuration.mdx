@@ -289,8 +289,9 @@ environment → `serve --tls` / `serve --port`.
   - relative in `config.toml` → resolved relative to that config file's directory
   - relative from `CLEPSYDRA__VAULT__ROOT` → resolved relative to process working directory
   - leading `~` → expanded to the home directory
-- `clep new` resolves a relative file value against the config file's directory,
-  but does not expand `~` or accept the environment override.
+- `clep new` expands a leading `~` or `~/` to the home directory and resolves
+  other relative file values against the config file's directory. It does not
+  accept the environment override.
 - `server.tls.cert_path` / `server.tls.key_path`: the Settings-backed rules above
   apply (file-relative or process-relative by source, with `~` expansion).
 

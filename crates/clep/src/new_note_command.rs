@@ -73,7 +73,7 @@ fn load_vault_root_from_config_with_env(
         .filter(|s| !s.is_empty())
         .ok_or_else(|| NewNoteError::VaultRootMissing(config_path.display().to_string()))?;
 
-    let root_path = PathBuf::from(raw_root);
+    let root_path = clep_config::expand_tilde(&raw_root).unwrap_or_else(|| PathBuf::from(raw_root));
     if root_path.is_absolute() {
         Ok(root_path)
     } else {

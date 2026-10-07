@@ -29,8 +29,9 @@ If no candidate exists, the command fails. Settings-backed commands then merge
 built-in defaults, that file, and `CLEPSYDRA__...` environment overrides.
 `clep new` is the exception: it reads `[vault].root` directly from the selected
 file, requires that key, does not apply a `CLEPSYDRA__VAULT__ROOT` override or
-the normal `./vault` default, and resolves any relative value from the config
-file's directory without `~` expansion. See [Configuration](/docs/configuration).
+the normal `./vault` default. It expands a leading `~` or `~/` to the home
+directory and resolves other relative values from the config file's directory.
+See [Configuration](/docs/configuration).
 
 ## Command summary
 
@@ -90,10 +91,10 @@ initial body text. The vault's `.clepsydra/config.toml`
 
 This command requires a selected application config whose file explicitly
 defines a non-empty `[vault].root`; unlike Settings-backed commands, it ignores
-`CLEPSYDRA__VAULT__ROOT`, does not fall back to `./vault`, and does not expand
-`~`. It fails for missing or invalid config, a missing root key, an invalid
-vault, invalid title/path generation, or a colliding page instead of overwriting
-an existing file.
+`CLEPSYDRA__VAULT__ROOT` and does not fall back to `./vault`. A leading `~` or
+`~/` expands to the home directory. It fails for missing or invalid config, a
+missing root key, an invalid vault, invalid title/path generation, or a colliding
+page instead of overwriting an existing file.
 
 ```bash
 clep new "Daily Log"
