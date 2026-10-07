@@ -20,6 +20,7 @@ import {
   COL_ORDER,
   COL_SUBLABEL,
   type ColLabelFn,
+  isDone,
   PRI_LABEL,
   PRI_ORDER,
   TYPE_LABEL,
@@ -146,7 +147,7 @@ export function TaskingScreen({
     // (visibleInKanban); cycle and timeline modes are untouched.
     const hideCompleted = mode === "backlog" && !showCompleted;
     const opFiltered = hideCompleted
-      ? scoped.filter((t) => t.status !== "SEALED")
+      ? scoped.filter((t) => !isDone(t.status))
       : scoped;
     const filtered = applyClientFilter(
       opFiltered,

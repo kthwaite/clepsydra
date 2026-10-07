@@ -13,7 +13,7 @@ import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useBoardStore } from "#/store/board";
 import { type CardBlocker, cardBlockers } from "./blockers";
-import { type ColLabelFn, priColor, StatePip } from "./board-constants";
+import { type ColLabelFn, isDone, priColor, StatePip } from "./board-constants";
 import { ChecklistBar, TypeChip } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
 import { InlineEditPopover } from "./InlineEditPopover";
@@ -74,7 +74,7 @@ export function TaskCard({
 
   const { text: priTextColor } = priColor(t.priority);
   const link = t.link;
-  const sealed = t.status === "SEALED";
+  const sealed = isDone(t.status);
   const blockers = cardBlockers(t, taskByCode);
   // More than two blockers collapse to the first plus a +N count.
   const shownBlockers = blockers.length > 2 ? blockers.slice(0, 1) : blockers;

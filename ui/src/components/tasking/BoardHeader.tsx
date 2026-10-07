@@ -9,7 +9,13 @@ import { cn } from "#/lib/cn";
 import type { FilterField, FilterState } from "#/lib/filters/model";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useBoardStore } from "#/store/board";
-import { HealthDot, healthColor, MODES } from "./board-constants";
+import {
+  HealthDot,
+  healthColor,
+  isDone,
+  isInProgress,
+  MODES,
+} from "./board-constants";
 import { type ProjectScope, scopeLabel } from "./board-projects";
 
 // ── BoardHeader ──────────────────────────────────────────────────────────────
@@ -82,8 +88,8 @@ export function BoardHeader({
   }
 
   // Stats
-  const open = tasks.filter((t) => t.status !== "SEALED").length;
-  const inField = tasks.filter((t) => t.status === "FIELD").length;
+  const open = tasks.filter((t) => !isDone(t.status)).length;
+  const inField = tasks.filter((t) => isInProgress(t.status)).length;
   const onHold = tasks.filter((t) => t.blocked).length;
 
   const opHealthColor = healthColor(activeOp?.health ?? "");
@@ -106,7 +112,7 @@ export function BoardHeader({
         : scope
           ? scopeLabel(scope)
           : (activeOp?.name ?? "Task board");
-  const cycleDone = cycleTasks.filter((t) => t.status === "SEALED").length;
+  const cycleDone = cycleTasks.filter((t) => isDone(t.status)).length;
   const cycleTotal = cycleTasks.length;
 
   const activeFacetCount = Object.values(filterState.facets).filter(

@@ -25,6 +25,7 @@ import {
   type ColLabelFn,
   cycleStateLabel,
   fmtCycleWindow,
+  isDone,
   PRI_ORDER,
   PriChip,
   StatePip,
@@ -333,7 +334,7 @@ export function CycleView({
               data-testid={`cv-lane-${g.cid}`}
             >
               <h3 className="m-0 mb-2 flex items-center gap-2.5 font-normal">
-                <Tick variant={g.cid === "SEALED" ? "faint" : "live"} />
+                <Tick variant={isDone(g.cid) ? "faint" : "live"} />
                 <span className="font-serif text-[21px] italic text-ink">
                   {colLabel(g.cid)}
                 </span>
@@ -405,7 +406,7 @@ export function CycleView({
                       <span
                         className={cn(
                           "truncate",
-                          t.status === "SEALED" ? "text-mute" : "text-ink",
+                          isDone(t.status) ? "text-mute" : "text-ink",
                         )}
                         title={t.title}
                       >

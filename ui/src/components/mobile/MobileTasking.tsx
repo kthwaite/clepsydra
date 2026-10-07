@@ -7,6 +7,7 @@ import {
 import {
   COL_LABEL,
   COL_ORDER,
+  DEFAULT_STATUS,
   fmtCycleWindow,
   priColor,
 } from "#/components/tasking/board-constants";
@@ -32,7 +33,7 @@ function dueLabel(due: string, today: string): string {
 
 function firstStatus(groups: Record<BoardStatus, BoardTask[]>): BoardStatus {
   if (groups.TRIAGE.length > 0) return "TRIAGE";
-  return COL_ORDER.find((s) => groups[s].length > 0) ?? "INTAKE";
+  return COL_ORDER.find((s) => groups[s].length > 0) ?? DEFAULT_STATUS;
 }
 
 function TaskCard({ task, today }: { task: BoardTask; today: string }) {

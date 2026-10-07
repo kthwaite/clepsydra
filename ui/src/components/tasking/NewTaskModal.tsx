@@ -37,7 +37,12 @@ import {
   BoardModalFrame,
   ModalEscChip,
 } from "./BoardModalFrame";
-import { type ColLabelFn, cycleStateLabel } from "./board-constants";
+import {
+  type ColLabelFn,
+  cycleStateLabel,
+  DEFAULT_PRIORITY,
+  DEFAULT_STATUS,
+} from "./board-constants";
 import { type ProjectScope, scopeLabel } from "./board-projects";
 import {
   DispositionRow,
@@ -72,8 +77,8 @@ export function NewTaskModal({
   const [brief, setBrief] = useState("");
   const [project, setProject] = useState<string>("");
   const [cycle, setCycle] = useState<string>("BACKLOG");
-  const [status, setStatus] = useState<string>("INTAKE");
-  const [priority, setPriority] = useState<string>("P2");
+  const [status, setStatus] = useState<string>(DEFAULT_STATUS);
+  const [priority, setPriority] = useState<string>(DEFAULT_PRIORITY);
   const [taskType, setTaskType] = useState<string | null>(null);
   const [assignee, setAssignee] = useState("");
   const [estimate, setEstimate] = useState("");
@@ -94,8 +99,8 @@ export function NewTaskModal({
     setBrief("");
     setProject(taskModal.project ?? "");
     setCycle(taskModal.cycle ?? "BACKLOG");
-    setStatus(taskModal.status ?? "INTAKE");
-    setPriority("P2");
+    setStatus(taskModal.status ?? DEFAULT_STATUS);
+    setPriority(DEFAULT_PRIORITY);
     setTaskType(null);
     setAssignee("");
     setEstimate("");
