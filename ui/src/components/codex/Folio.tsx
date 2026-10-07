@@ -1,9 +1,4 @@
-import {
-  Link,
-  useBlocker,
-  useNavigate,
-  useRouter,
-} from "@tanstack/react-router";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -16,21 +11,11 @@ import {
   Suspense,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
-import {
-  type Descendant,
-  Editor,
-  type Range,
-  Element as SlateElement,
-  Transforms,
-} from "slate";
-import { ReactEditor } from "slate-react";
-import { useAiJournalToday } from "#/api/aiJournal";
+import { type Descendant, Element as SlateElement } from "slate";
 import {
   useBacklinks,
   useOutlinks,
@@ -38,7 +23,7 @@ import {
   useTagSuggestions,
   useUnlinkedMentions,
 } from "#/api/index";
-import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
+import { useJournalEditorOptions } from "#/api/journal";
 import { type ArchivedPage, useAssignPage } from "#/api/pages";
 import type { PageMeta } from "#/api/types";
 import { useAttachmentDropUpload } from "#/components/attachments/useAttachmentDropUpload";
@@ -57,6 +42,7 @@ import {
   shortFolio,
   visibleFolioOutlinks,
 } from "#/components/codex/folio-utils";
+import { resolveFolioSurface } from "#/components/codex/folioSurface";
 import { buildToc, type TocEntry } from "#/components/codex/folioToc";
 import {
   highlightMatch,
@@ -73,12 +59,18 @@ import { RecipeFolioBody } from "#/components/codex/recipe/RecipeFolioBody";
 import { Section } from "#/components/codex/Section";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useEmbedTocExpander } from "#/components/codex/useEmbedTocExpander";
+import { useFolioMode } from "#/components/codex/useFolioMode";
+import { useFolioRestoration } from "#/components/codex/useFolioRestoration";
+import { useFolioTab, useTodayJournal } from "#/components/codex/useFolioTab";
+import {
+  RawMarkdownNavigationGuard,
+  useRawMarkdownSession,
+} from "#/components/codex/useRawMarkdownSession";
 import { useReadingColumn } from "#/components/codex/useReadingColumn";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { KindIcon } from "#/components/KindIcon";
 import { OfflineUnavailable } from "#/components/OfflineUnavailable";
 import { Button } from "#/components/ui/button";
-import { Dialog } from "#/components/ui/dialog";
 import { IconButton } from "#/components/ui/icon-button";
 import { TagInput } from "#/components/ui/tag-input";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
@@ -95,19 +87,13 @@ import { usePageEditor } from "#/editor/usePageEditor";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { useDebounce } from "#/hooks/useDebounce";
 import {
-  registerFolioHistoryTraversalGuard,
   replaceFolioHistoryAfterArchive,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
-import {
-  aiJournalDateFromPath,
-  journalDateFromPath,
-  todayAiJournalPath,
-  todayJournalPath,
-} from "#/lib/journal";
+import { aiJournalDateFromPath, journalDateFromPath } from "#/lib/journal";
 import { kindDisplayLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { formatChord, matchesChord, SHORTCUTS } from "#/lib/shortcuts";
@@ -116,7 +102,6 @@ import { useProjects } from "#/lib/useProjects";
 import { isOfflineUncached } from "#/offline/swPolicy";
 import {
   parseRecipeMarkdown,
-  type RecipeParseResult,
   serializeRecipeMarkdown,
 } from "#/recipe/recipeCodec";
 import { useFolioDock } from "#/store/folioDock";
@@ -125,124 +110,14 @@ import {
   FOLIO_RIGHT_RAIL,
   useFolioRails,
 } from "#/store/folioRails";
-import {
-  clearFolioRestoration,
-  consumeFolioHistoryRestorationRequest,
-  type FolioRestoration,
-  readFolioHistoryRestorationRequest,
-  readFolioHistoryRestorationRequestId,
-  readFolioRestoration,
-  registerFolioHistoryCapture,
-  saveFolioRestoration,
-  snapshotTextPoint,
-  subscribeFolioHistoryRestorationRequests,
-  validateTextPointSnapshot,
-} from "#/store/folioRestoration";
 import { useFooterContext } from "#/store/footerContext";
 import { quireColorVar } from "#/store/quires";
-import {
-  registerWorkspaceTransitionGuard,
-  runWorkspaceTransition,
-  useWorkspaceStore,
-} from "#/store/workspace";
+import { runWorkspaceTransition, useWorkspaceStore } from "#/store/workspace";
 
 type FolioProps = {
   tabId: string;
   path: string;
 };
-
-type RawMarkdownSession = {
-  path: string;
-  entryRevision: string;
-  snapshot: string;
-  value: string;
-  diagnostic: string | null;
-};
-
-function rawMarkdownApplyDiagnostic(error: unknown) {
-  const detail =
-    error instanceof Error && error.message.trim() ? `: ${error.message}` : "";
-  return `Raw Markdown could not be applied${detail}. Fix the Markdown and try again.`;
-}
-
-function RawMarkdownNavigationGuard({
-  dirty,
-  onLeave,
-}: {
-  dirty: boolean;
-  onLeave: () => void;
-}) {
-  const leaveApprovedRef = useRef(false);
-  const blocker = useBlocker({
-    shouldBlockFn: () => dirty && !leaveApprovedRef.current,
-    enableBeforeUnload: dirty,
-    withResolver: true,
-  });
-  const pendingTransitionRef = useRef<{ proceed: () => void } | null>(null);
-  const [pendingTransition, setPendingTransition] = useState<{
-    proceed: () => void;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!dirty) return;
-    const guard = (proceed: () => void) => {
-      if (leaveApprovedRef.current) return false;
-      const pending = { proceed };
-      pendingTransitionRef.current = pending;
-      setPendingTransition(pending);
-      leaveApprovedRef.current = false;
-      return true;
-    };
-    const unregisterWorkspaceGuard = registerWorkspaceTransitionGuard(guard);
-    const unregisterHistoryGuard = registerFolioHistoryTraversalGuard(guard);
-    return () => {
-      unregisterWorkspaceGuard();
-      unregisterHistoryGuard();
-    };
-  }, [dirty]);
-
-  const stay = () => {
-    pendingTransitionRef.current = null;
-    leaveApprovedRef.current = false;
-    setPendingTransition(null);
-    if (blocker.status === "blocked") blocker.reset?.();
-  };
-  const leave = () => {
-    const pending = pendingTransitionRef.current;
-    if (!pending && blocker.status !== "blocked") return;
-    pendingTransitionRef.current = null;
-    leaveApprovedRef.current = true;
-    setPendingTransition(null);
-    onLeave();
-    if (pending) pending.proceed();
-    else blocker.proceed?.();
-  };
-
-  return (
-    <Dialog
-      isOpen={blocker.status === "blocked" || pendingTransition !== null}
-      onOpenChange={(open) => {
-        if (!open) stay();
-      }}
-      title="Unsaved raw Markdown"
-      description="Leaving now will discard the raw Markdown draft."
-      footer={
-        <>
-          <Button variant="secondary" onPress={stay}>
-            Stay
-          </Button>
-          <Button variant="danger" onPress={leave}>
-            Leave
-          </Button>
-        </>
-      }
-    >
-      <p className="text-[13.5px] text-mute">
-        This raw draft exists only in this browser until you Apply it.
-      </p>
-    </Dialog>
-  );
-}
 
 const EMPTY_EDITOR_VALUE: [] = [];
 
@@ -285,12 +160,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const router = useRouter();
   const routerHistory = router?.history;
   const leaveFolioWorkspace = useLeaveFolioWorkspace();
-  const isTodayDraftPath = path === todayJournalPath();
-  const { data: journalToday, isLoading: isJournalTodayLoading } =
-    useJournalToday(isTodayDraftPath);
-  const isTodayAiDraftPath = path === todayAiJournalPath();
-  const { data: aiJournalToday, isLoading: isAiJournalTodayLoading } =
-    useAiJournalToday(isTodayAiDraftPath);
+  const todayJournal = useTodayJournal(path);
   const editor = usePageEditor(path, useJournalEditorOptions(path));
   const { data: backlinks } = useBacklinks(path);
   const { data: unlinkedMentions } = useUnlinkedMentions(path);
@@ -328,14 +198,6 @@ export function Folio({ tabId, path }: FolioProps) {
     tagSuggestionRequest.error
       ? new Error(tagSuggestionRequest.error.error)
       : null;
-  const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
-  const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
-  const setTabPageId = useWorkspaceStore((state) => state.setTabPageId);
-  const closeTab = useWorkspaceStore((s) => s.closeTab);
-  const tabQuire = useWorkspaceStore((s) => {
-    const quireId = s.tabs.find((tab) => tab.id === tabId)?.quireId;
-    return quireId ? s.quires[quireId] : undefined;
-  });
   const closeArchivedPageTabs = useWorkspaceStore(
     (state) => state.closeArchivedPageTabs,
   );
@@ -347,17 +209,6 @@ export function Folio({ tabId, path }: FolioProps) {
     },
     [closeArchivedPageTabs, mobile, navigate, routerHistory],
   );
-  const focusRequestId = useWorkspaceStore(
-    (state) => state.tabs.find((tab) => tab.id === tabId)?.focusRequestId,
-  );
-  const takeTabFocus = useWorkspaceStore((state) => state.takeTabFocus);
-  const pendingHistoryLocationId = useSyncExternalStore(
-    subscribeFolioHistoryRestorationRequests,
-    () => readFolioHistoryRestorationRequestId(tabId, path),
-  );
-  useEffect(() => {
-    if (editor.pageId) setTabPageId(tabId, editor.pageId);
-  }, [editor.pageId, setTabPageId, tabId]);
   const onMobileBack = () => {
     if (!router.history.canGoBack()) {
       leaveFolioWorkspace(() => {
@@ -368,28 +219,6 @@ export function Folio({ tabId, path }: FolioProps) {
 
     router.history.back();
   };
-  useEffect(() => {
-    if (isTodayDraftPath && journalToday?.path && journalToday.path !== path) {
-      updateTabPath(
-        tabId,
-        journalToday.path,
-        journalToday.meta.title ?? undefined,
-      );
-    }
-  }, [isTodayDraftPath, journalToday, path, tabId, updateTabPath]);
-  useEffect(() => {
-    if (
-      isTodayAiDraftPath &&
-      aiJournalToday?.path &&
-      aiJournalToday.path !== path
-    ) {
-      updateTabPath(
-        tabId,
-        aiJournalToday.path,
-        aiJournalToday.meta.title ?? undefined,
-      );
-    }
-  }, [isTodayAiDraftPath, aiJournalToday, path, tabId, updateTabPath]);
 
   const assign = useAssignPage();
   const projects = useProjects();
@@ -403,122 +232,15 @@ export function Folio({ tabId, path }: FolioProps) {
   >(null);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [organizationOpen, setOrganizationOpen] = useState(false);
-  const [conversationMode, setConversationMode] = useState<"read" | "edit">(
-    "read",
-  );
   const folioEditorRef = useRef<CustomEditor | null>(null);
-  const lastMountedFolioEditorRef = useRef<CustomEditor | null>(null);
-  const rawMarkdownSessionRef = useRef<RawMarkdownSession | null>(null);
-  const restorationStateRef = useRef<{
-    tabId: string;
-    path: string;
-    available: boolean;
-    getRevision: () => string;
-  } | null>(null);
-  const consumedHistoryLocationIdRef = useRef<string | null>(null);
-
-  const buildRestorationSnapshot = useCallback((): FolioRestoration | null => {
-    const state = restorationStateRef.current;
-    const slateEditor =
-      folioEditorRef.current ?? lastMountedFolioEditorRef.current;
-    const scrollContainer = bodyRef.current;
-    if (
-      !state ||
-      state.tabId !== tabId ||
-      state.path !== path ||
-      !state.available ||
-      !slateEditor ||
-      !scrollContainer
-    ) {
-      return null;
-    }
-
-    const selection = slateEditor.selection;
-    return {
-      tabId,
-      path,
-      revision: state.getRevision(),
-      scrollTop: scrollContainer.scrollTop,
-      anchor: selection
-        ? snapshotTextPoint(slateEditor, selection.anchor)
-        : null,
-      focus: selection ? snapshotTextPoint(slateEditor, selection.focus) : null,
-    };
-  }, [path, tabId]);
-
-  useLayoutEffect(
-    () => registerFolioHistoryCapture(tabId, path, buildRestorationSnapshot),
-    [buildRestorationSnapshot, path, tabId],
-  );
-
-  // An in-place SlateEditor remount (external content adopt, conflict reload,
-  // unlock) destroys the caret. Snapshot selection and focus as the old
-  // instance unmounts so the editorRevision-keyed restore effect below can
-  // hand them back. bodyRef being empty means the whole folio is unmounting —
-  // the folio-level unmount save owns that case (and never records focus, so
-  // returning to a tab cannot steal it).
-  const handleEditorSwapSnapshot = useCallback(
-    (slateEditor: CustomEditor) => {
-      const scrollContainer = bodyRef.current;
-      if (!scrollContainer) return;
-      // Entering raw Markdown mode also unmounts the editor; the raw session
-      // owns caret state until it exits, so no snapshot belongs there.
-      if (rawMarkdownSessionRef.current) return;
-      const state = restorationStateRef.current;
-      if (
-        !state ||
-        state.tabId !== tabId ||
-        state.path !== path ||
-        !state.available
-      ) {
-        return;
-      }
-      const selection = slateEditor.selection;
-      saveFolioRestoration({
-        tabId,
-        path,
-        revision: state.getRevision(),
-        scrollTop: scrollContainer.scrollTop,
-        anchor: selection
-          ? snapshotTextPoint(slateEditor, selection.anchor)
-          : null,
-        focus: selection
-          ? snapshotTextPoint(slateEditor, selection.focus)
-          : null,
-        hadFocus: ReactEditor.isFocused(slateEditor),
-      });
-    },
-    [path, tabId],
-  );
-  const [recipeMode, setRecipeMode] = useState<"read" | "edit">("read");
-  const [recipeProjection, setRecipeProjection] = useState<{
-    path: string;
-    editorRevision: number;
-    result: RecipeParseResult;
-  } | null>(null);
-  const [rawMarkdownSession, setRawMarkdownSession] =
-    useState<RawMarkdownSession | null>(null);
-  rawMarkdownSessionRef.current = rawMarkdownSession;
-  const modePathRef = useRef(path);
-  useEffect(() => {
-    if (modePathRef.current === path) return;
-    modePathRef.current = path;
-    setConversationMode("read");
-    setRecipeMode("read");
-    setRecipeProjection(null);
-  }, [path]);
-  useEffect(() => {
-    setRawMarkdownSession((current) => {
-      if (
-        !current ||
-        current.path === path ||
-        current.value !== current.snapshot
-      ) {
-        return current;
-      }
-      return null;
-    });
-  }, [path]);
+  const {
+    conversationMode,
+    setConversationMode,
+    recipeMode,
+    setRecipeMode,
+    projectRecipe,
+    projectedRecipe,
+  } = useFolioMode(path);
   const insertionIdRef = useRef(0);
   const [attachmentInsertion, setAttachmentInsertion] = useState<{
     id: number;
@@ -531,18 +253,6 @@ export function Folio({ tabId, path }: FolioProps) {
   const finishAttachmentInsertion = useCallback((id: number) => {
     setAttachmentInsertion((current) => (current?.id === id ? null : current));
   }, []);
-
-  // Assigning a kind/project writes frontmatter AND moves the file, so the
-  // page path changes. Repoint the open tab to the new path; because FOLIO is
-  // keyed on the tab path (TabContent), this remounts the editor at the new
-  // location — the entire follow mechanism.
-  const followMove = (data: { path?: string }) => {
-    if (data.path && data.path !== path) updateTabPath(tabId, data.path);
-  };
-
-  useEffect(() => {
-    if (editor.title) updateTabLabel(tabId, editor.title);
-  }, [tabId, editor.title, updateTabLabel]);
 
   useEffect(() => {
     setProgress(0);
@@ -564,8 +274,6 @@ export function Folio({ tabId, path }: FolioProps) {
   );
   const isJournalKind = kind === "JOURNAL" || kind === "AI_JOURNAL";
   const presentation = presentationFor(kind);
-  const isAiConversation = presentation.bodyPresentation === "ai-conversation";
-  const conversationReadOnly = isAiConversation && conversationMode === "read";
   const isRecipe = presentation.bodyPresentation === "recipe";
   const recipeParse = useMemo(
     () =>
@@ -573,164 +281,84 @@ export function Folio({ tabId, path }: FolioProps) {
     [editor.bodyMarkdown, editor.title, isRecipe],
   );
   const activeRecipeParse =
-    recipeProjection?.path === path &&
-    recipeProjection.editorRevision === editor.editorRevision
-      ? recipeProjection.result
-      : recipeParse;
+    projectedRecipe(editor.editorRevision) ?? recipeParse;
   const recipeDocument =
     activeRecipeParse?.ok === true ? activeRecipeParse.value : null;
-  const recipeStructured = activeRecipeParse?.ok === true;
-  const recipeHasBlockIds =
-    isRecipe && containsBlockId(editor.editorValue ?? editor.initialValue);
-  const recipePresentationStructured = recipeStructured && !recipeHasBlockIds;
-  const recipeReadOnly = recipePresentationStructured && recipeMode === "read";
-  // Archived bodies are generated from a captured snapshot, and the page's
-  // frontmatter hash claims to describe them; the server refuses body writes
-  // until the reader explicitly unlocks the page.
-  const offlineReadOnly = editor.offline === true;
-  const bodyProtected =
-    editor.readonly === true &&
-    !offlineReadOnly &&
-    !editor.generatedChangePending;
-  const folioReadOnly =
-    conversationReadOnly || recipeReadOnly || bodyProtected || offlineReadOnly;
+  const { session: rawMarkdownSession, ...rawMarkdown } = useRawMarkdownSession(
+    {
+      path,
+      editor,
+      onApplied: (markdown) => {
+        if (isRecipe) {
+          projectRecipe(
+            editor.editorRevision,
+            parseRecipeMarkdown(markdown, editor.title),
+          );
+        }
+      },
+    },
+  );
   const encrypted = editor.encrypted === true;
   const encryptionState = editor.encryptionState ?? {
     status: "plain" as const,
     body: editor.bodyMarkdown,
   };
+  const {
+    surface,
+    isAiConversation,
+    conversationReadOnly,
+    offlineReadOnly,
+    bodyProtected,
+    locked,
+    readOnly: folioReadOnly,
+    bodyReadOnly,
+    contentAvailable: restorationAvailable,
+    rawAvailable: rawMarkdownAvailable,
+  } = resolveFolioSurface({
+    bodyPresentation: presentation.bodyPresentation,
+    conversationMode,
+    recipeMode,
+    recipeStructured: activeRecipeParse?.ok === true,
+    recipeHasBlockIds:
+      isRecipe && containsBlockId(editor.editorValue ?? editor.initialValue),
+    isLoading: editor.isLoading,
+    error: Boolean(editor.error),
+    isDraft: editor.isDraft,
+    offline: editor.offline === true,
+    readonly: editor.readonly === true,
+    generatedChangePending: editor.generatedChangePending === true,
+    encrypted,
+    encryptionStatus: encryptionState.status,
+    journalTodayPending: todayJournal.pending,
+    rawSessionOpen: rawMarkdownSession !== null,
+  });
+  const { onEditorUnmount } = useFolioRestoration({
+    tabId,
+    path,
+    available: restorationAvailable,
+    rawSessionOpen: rawMarkdownSession !== null,
+    editor,
+    bodyRef,
+    folioEditorRef,
+  });
+  const { tabQuire, isActiveTab, updateTabPath, closeTab, followMove } =
+    useFolioTab({
+      tabId,
+      path,
+      editor,
+      todayJournal: todayJournal.target,
+      conversationReadOnly,
+      bodyRef,
+      folioEditorRef,
+    });
   const folioProperties = (
     <FolioProperties
       pageId={editor.pageId ?? ""}
       path={path}
-      locked={encrypted && encryptionState.status !== "plain"}
+      locked={locked}
       readOnly={folioReadOnly}
     />
   );
-  const rawMarkdownPresentationAvailable =
-    presentation.bodyPresentation === "editor" ||
-    (isAiConversation && conversationMode === "edit") ||
-    (isRecipe &&
-      recipeStructured &&
-      (recipeHasBlockIds || recipeMode === "edit"));
-  const rawMarkdownAvailable =
-    rawMarkdownPresentationAvailable &&
-    !editor.isLoading &&
-    !(editor.error && !editor.isDraft) &&
-    !offlineReadOnly &&
-    (!encrypted || encryptionState.status === "plain") &&
-    !(isTodayDraftPath && (isJournalTodayLoading || journalToday)) &&
-    !(isTodayAiDraftPath && (isAiJournalTodayLoading || aiJournalToday));
-  const rawMarkdownDirty =
-    rawMarkdownSession !== null &&
-    rawMarkdownSession.value !== rawMarkdownSession.snapshot;
-  const openRawMarkdown = () => {
-    if (!rawMarkdownAvailable) return;
-    const snapshot = editor.getPlaintext();
-    setRawMarkdownSession({
-      path,
-      entryRevision: editor.getRevision(),
-      snapshot,
-      value: snapshot,
-      diagnostic: null,
-    });
-  };
-  const applyRawMarkdown = () => {
-    if (!rawMarkdownSession) return;
-    if (!rawMarkdownAvailable) {
-      setRawMarkdownSession((current) =>
-        current
-          ? {
-              ...current,
-              diagnostic:
-                "This Folio is no longer editable. Keep or copy this raw Markdown draft, then return to Edit before applying.",
-            }
-          : current,
-      );
-      return;
-    }
-    if (
-      rawMarkdownSession.path !== path ||
-      editor.getRevision() !== rawMarkdownSession.entryRevision
-    ) {
-      setRawMarkdownSession((current) =>
-        current
-          ? {
-              ...current,
-              diagnostic:
-                "This Folio changed after raw Markdown mode opened. Keep or copy this draft, then reopen raw mode before applying.",
-            }
-          : current,
-      );
-      return;
-    }
-    try {
-      const authoredRaw = rawMarkdownSession.value;
-      const projectedRecipe = isRecipe
-        ? parseRecipeMarkdown(authoredRaw, editor.title)
-        : null;
-      editor.setBodyMarkdown(authoredRaw);
-      if (projectedRecipe) {
-        setRecipeProjection({
-          path,
-          editorRevision: editor.editorRevision,
-          result: projectedRecipe,
-        });
-      }
-      setRawMarkdownSession(null);
-    } catch (error) {
-      setRawMarkdownSession((current) =>
-        current
-          ? { ...current, diagnostic: rawMarkdownApplyDiagnostic(error) }
-          : current,
-      );
-    }
-  };
-  useEffect(() => {
-    if (!focusRequestId || editor.isLoading || !editor.isEditorSynchronized) {
-      return;
-    }
-    const focusBlockId = takeTabFocus(tabId, focusRequestId);
-    if (!focusBlockId) return;
-
-    const target = Array.from(
-      bodyRef.current?.querySelectorAll<HTMLElement>("[data-block-id]") ?? [],
-    ).find((element) => element.dataset.blockId === focusBlockId);
-    if (!target) return;
-
-    target.scrollIntoView({ block: "center", inline: "nearest" });
-    if (!conversationReadOnly && folioEditorRef.current) {
-      const editorInstance = folioEditorRef.current;
-      const entry = Editor.nodes(editorInstance, {
-        at: [],
-        match: (node) =>
-          SlateElement.isElement(node) &&
-          node.type !== "block-ref" &&
-          "blockId" in node &&
-          node.blockId === focusBlockId,
-      }).next().value;
-      if (entry) {
-        Transforms.select(
-          editorInstance,
-          Editor.start(editorInstance, entry[1]),
-        );
-        ReactEditor.focus(editorInstance);
-      }
-      return;
-    }
-
-    const hadTabIndex = target.hasAttribute("tabindex");
-    if (!hadTabIndex) target.tabIndex = -1;
-    target.focus({ preventScroll: true });
-    if (!hadTabIndex) target.removeAttribute("tabindex");
-  }, [
-    conversationReadOnly,
-    editor.isLoading,
-    editor.isEditorSynchronized,
-    focusRequestId,
-    tabId,
-    takeTabFocus,
-  ]);
 
   // ⌘S / Ctrl-S flushes a save from anywhere in the folio (title, tags,
   // rails) — not just the editor body — and suppresses the browser dialog.
@@ -759,162 +387,6 @@ export function Folio({ tabId, path }: FolioProps) {
     });
   };
 
-  const restorationAvailable =
-    !editor.isLoading &&
-    !(editor.error && !editor.isDraft) &&
-    (!encrypted || encryptionState.status === "plain");
-  restorationStateRef.current = {
-    tabId,
-    path,
-    available: restorationAvailable,
-    getRevision: editor.getRevision,
-  };
-
-  useEffect(() => {
-    // A revision change can swap the mounted Slate editor without changing this effect's direct inputs.
-    void editor.editorRevision;
-    if (folioEditorRef.current) {
-      lastMountedFolioEditorRef.current = folioEditorRef.current;
-    }
-  }, [editor.editorRevision]);
-
-  useEffect(() => {
-    if (!editor.isLoading && !restorationAvailable) {
-      clearFolioRestoration(tabId);
-    }
-  }, [editor.isLoading, restorationAvailable, tabId]);
-
-  useLayoutEffect(
-    () => () => {
-      const currentTab = useWorkspaceStore
-        .getState()
-        .tabs.find((tab) => tab.id === tabId);
-      if (currentTab?.path !== path) {
-        clearFolioRestoration(tabId);
-        return;
-      }
-
-      const restoration = buildRestorationSnapshot();
-      if (!restoration) {
-        clearFolioRestoration(tabId);
-        return;
-      }
-      saveFolioRestoration(restoration);
-    },
-    [buildRestorationSnapshot, path, tabId],
-  );
-
-  useLayoutEffect(() => {
-    // A revision change remounts the keyed Slate editor and must retry any captured restoration.
-    void editor.editorRevision;
-    if (
-      pendingHistoryLocationId === null &&
-      consumedHistoryLocationIdRef.current !== null
-    ) {
-      consumedHistoryLocationIdRef.current = null;
-      return;
-    }
-    const historyRequest = readFolioHistoryRestorationRequest(tabId, path);
-    if (!restorationAvailable) {
-      if (!editor.isLoading && editor.pageNotFound && historyRequest) {
-        consumeFolioHistoryRestorationRequest(
-          historyRequest.request.locationId,
-        );
-      }
-      return;
-    }
-
-    const restoration = historyRequest
-      ? historyRequest.restoration
-      : readFolioRestoration(tabId, path);
-    if (!historyRequest && !restoration) return;
-
-    const frame = requestAnimationFrame(() => {
-      const state = restorationStateRef.current;
-      if (
-        !state ||
-        state.tabId !== tabId ||
-        state.path !== path ||
-        !state.available
-      ) {
-        if (
-          historyRequest &&
-          state &&
-          (state.tabId !== tabId || state.path !== path)
-        ) {
-          consumeFolioHistoryRestorationRequest(
-            historyRequest.request.locationId,
-          );
-        }
-        return;
-      }
-
-      const slateEditor = folioEditorRef.current;
-      const scrollContainer = bodyRef.current;
-      if (!slateEditor || !scrollContainer) return;
-
-      if (restoration) {
-        const requireTextMatch = restoration.revision !== editor.getRevision();
-        let selection: Range | null = null;
-        if (restoration.anchor && restoration.focus) {
-          const anchor = validateTextPointSnapshot(
-            slateEditor,
-            restoration.anchor,
-            requireTextMatch,
-          );
-          const focus = validateTextPointSnapshot(
-            slateEditor,
-            restoration.focus,
-            requireTextMatch,
-          );
-          if (anchor && focus) selection = { anchor, focus };
-        }
-
-        scrollContainer.scrollTop = restoration.scrollTop;
-        if (selection) Transforms.select(slateEditor, selection);
-        if (restoration.hadFocus) {
-          // The user was typing in the swapped-out instance; hand the caret
-          // back. When the saved points no longer fit the adopted content,
-          // fall back to the end of the document rather than dropping focus.
-          if (!selection) {
-            Transforms.select(slateEditor, Editor.end(slateEditor, []));
-          }
-          ReactEditor.focus(slateEditor);
-        }
-      }
-
-      if (historyRequest) {
-        consumedHistoryLocationIdRef.current =
-          historyRequest.request.locationId;
-        consumeFolioHistoryRestorationRequest(
-          historyRequest.request.locationId,
-        );
-      }
-    });
-
-    return () => {
-      cancelAnimationFrame(frame);
-      const state = restorationStateRef.current;
-      if (
-        historyRequest &&
-        state &&
-        (state.tabId !== tabId || state.path !== path)
-      ) {
-        consumeFolioHistoryRestorationRequest(
-          historyRequest.request.locationId,
-        );
-      }
-    };
-  }, [
-    editor.editorRevision,
-    editor.getRevision,
-    editor.isLoading,
-    pendingHistoryLocationId,
-    editor.pageNotFound,
-    path,
-    restorationAvailable,
-    tabId,
-  ]);
   const computedTags = useMemo(
     () => [...new Set(editor.computedTags)],
     [editor.computedTags],
@@ -948,15 +420,11 @@ export function Folio({ tabId, path }: FolioProps) {
   const project = editor.project;
 
   const currentEditorValue = editor.editorValue ?? editor.initialValue;
-  const visibleEditorValue =
-    encrypted && encryptionState.status !== "plain"
-      ? EMPTY_EDITOR_VALUE
-      : currentEditorValue;
+  const visibleEditorValue = locked ? EMPTY_EDITOR_VALUE : currentEditorValue;
   const wordCount = useMemo(
     () => countWordsFromSlate(visibleEditorValue),
     [visibleEditorValue],
   );
-  const isActiveTab = useWorkspaceStore((s) => s.activeTabId === tabId);
   useFooterContext(
     isActiveTab
       ? [
@@ -997,28 +465,22 @@ export function Folio({ tabId, path }: FolioProps) {
         beforeMutation={editor.saveNow}
         onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
         onArchived={handleArchived}
-        archiveOnly={
-          folioReadOnly || (encrypted && encryptionState.status !== "plain")
-        }
+        archiveOnly={folioReadOnly || locked}
       />
     </Suspense>
   );
 
-  if (
-    !rawMarkdownSession &&
-    ((isTodayDraftPath && (isJournalTodayLoading || journalToday)) ||
-      (isTodayAiDraftPath && (isAiJournalTodayLoading || aiJournalToday)))
-  ) {
+  if (surface === "journal-today") {
     return (
       <div className="p-10 text-[13.5px] text-mute">
         Fetching today’s journal…
       </div>
     );
   }
-  if (!rawMarkdownSession && editor.isLoading) {
+  if (surface === "loading") {
     return <div className="p-10 text-[13.5px] text-mute">Fetching {path}…</div>;
   }
-  if (!rawMarkdownSession && editor.error && !editor.isDraft) {
+  if (surface === "error") {
     // Only a settled 404 means the file is actually gone; any other query
     // error is a load failure the user can retry without losing the tab.
     if (editor.pageNotFound) {
@@ -1039,7 +501,8 @@ export function Folio({ tabId, path }: FolioProps) {
       />
     );
   }
-  if (!rawMarkdownSession && encrypted && encryptionState.status !== "plain") {
+  // The status check only narrows the state type; "locked" implies it.
+  if (surface === "locked" && encryptionState.status !== "plain") {
     return (
       <LockedFolio
         path={path}
@@ -1107,7 +570,7 @@ export function Folio({ tabId, path }: FolioProps) {
           archiveTagEditor={archiveTagEditor}
           onOpenRawMarkdown={
             rawMarkdownAvailable && !rawMarkdownSession
-              ? openRawMarkdown
+              ? rawMarkdown.open
               : undefined
           }
         />
@@ -1135,7 +598,7 @@ export function Folio({ tabId, path }: FolioProps) {
             }
             onOpenRawMarkdown={
               rawMarkdownAvailable && !rawMarkdownSession
-                ? openRawMarkdown
+                ? rawMarkdown.open
                 : undefined
             }
           />
@@ -1186,7 +649,7 @@ export function Folio({ tabId, path }: FolioProps) {
         </>
       ) : null}
 
-      {isRecipe && !recipeStructured ? (
+      {isRecipe && activeRecipeParse?.ok !== true ? (
         <div
           className="my-4 rounded-[12px] bg-hot/5 px-4 py-3 text-[13.5px] leading-[1.5] text-hot"
           role="alert"
@@ -1199,17 +662,13 @@ export function Folio({ tabId, path }: FolioProps) {
         </div>
       ) : null}
 
-      {rawMarkdownSession ? (
+      {surface === "raw-markdown" && rawMarkdownSession ? (
         <RawMarkdownEditor
           value={rawMarkdownSession.value}
           diagnostic={rawMarkdownSession.diagnostic}
-          onChange={(value) =>
-            setRawMarkdownSession((current) =>
-              current ? { ...current, value, diagnostic: null } : current,
-            )
-          }
-          onApply={applyRawMarkdown}
-          onCancel={() => setRawMarkdownSession(null)}
+          onChange={rawMarkdown.change}
+          onApply={() => rawMarkdown.apply(rawMarkdownAvailable)}
+          onCancel={rawMarkdown.discard}
         />
       ) : (
         <article
@@ -1223,20 +682,16 @@ export function Folio({ tabId, path }: FolioProps) {
             <ProtectedBodyNotice onUnlock={() => editor.setReadonly(false)} />
           ) : null}
           <WikilinkResolutionProvider path={path}>
-            {recipePresentationStructured && recipeDocument ? (
+            {surface === "recipe" && recipeDocument ? (
               <RecipeFolioBody
                 document={recipeDocument}
                 mode={recipeMode}
                 onModeChange={setRecipeMode}
                 onDocumentChange={(nextDocument) => {
-                  setRecipeProjection({
-                    path,
-                    editorRevision: editor.editorRevision,
-                    result: {
-                      ok: true,
-                      sourceFormat: "markdown",
-                      value: nextDocument,
-                    },
+                  projectRecipe(editor.editorRevision, {
+                    ok: true,
+                    sourceFormat: "markdown",
+                    value: nextDocument,
                   });
                   editor.setBodyMarkdown(serializeRecipeMarkdown(nextDocument));
                 }}
@@ -1272,17 +727,12 @@ export function Folio({ tabId, path }: FolioProps) {
                     onSaveNow={editor.saveNow}
                     insertionRequest={attachmentInsertion}
                     onInsertionHandled={finishAttachmentInsertion}
-                    readOnly={
-                      conversationReadOnly ||
-                      bodyProtected ||
-                      offlineReadOnly ||
-                      editor.generatedChangePending
-                    }
+                    readOnly={bodyReadOnly}
                     journalDate={
                       journalDateFromPath(path) ?? aiJournalDateFromPath(path)
                     }
                     editorRef={folioEditorRef}
-                    onUnmountSnapshot={handleEditorSwapSnapshot}
+                    onUnmountSnapshot={onEditorUnmount}
                   />
                 </BaseRenderingProvider>
               </ConversationPresentationProvider>
@@ -1644,8 +1094,8 @@ export function Folio({ tabId, path }: FolioProps) {
       {protection}
       {rawMarkdownSession ? (
         <RawMarkdownNavigationGuard
-          dirty={rawMarkdownDirty}
-          onLeave={() => setRawMarkdownSession(null)}
+          dirty={rawMarkdown.dirty}
+          onLeave={rawMarkdown.discard}
         />
       ) : null}
     </>
