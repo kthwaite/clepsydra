@@ -11,6 +11,7 @@ import { BaseTableView } from "#/components/bases/BaseTableView";
 import type { BaseMemberDraftField } from "#/components/bases/member-draft";
 import { EMPTY_OVERRIDES } from "#/components/bases/view-overrides";
 import { FooterControlsHost } from "#/components/codex/FooterControls";
+import { type FlatViewProps, viewProps } from "./flat-view-props";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
@@ -88,7 +89,7 @@ const memberDraftFields: BaseMemberDraftField[] = [
   },
 ];
 
-type ViewProps = Parameters<typeof BaseTableView>[0];
+type ViewProps = FlatViewProps;
 
 function renderScreen(props: Partial<ViewProps> = {}) {
   const spies = {
@@ -106,21 +107,23 @@ function renderScreen(props: Partial<ViewProps> = {}) {
   render(
     <>
       <BaseTableView
-        definition={definition}
-        activeView="Continues"
-        output={flat}
-        sort={undefined}
-        configureSlug="reading"
-        memberCapability={enabledCapability}
-        memberDraftFields={memberDraftFields}
-        memberDraftOpen={false}
-        memberSaving={false}
-        memberDiagnostics={[]}
-        projects={[]}
-        overrides={EMPTY_OVERRIDES}
-        screen
-        {...spies}
-        {...props}
+        {...viewProps({
+          definition,
+          activeView: "Continues",
+          output: flat,
+          sort: undefined,
+          configureSlug: "reading",
+          memberCapability: enabledCapability,
+          memberDraftFields,
+          memberDraftOpen: false,
+          memberSaving: false,
+          memberDiagnostics: [],
+          projects: [],
+          overrides: EMPTY_OVERRIDES,
+          screen: true,
+          ...spies,
+          ...props,
+        })}
       />
       <FooterControlsHost />
     </>,

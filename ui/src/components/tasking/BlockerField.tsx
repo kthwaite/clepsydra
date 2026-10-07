@@ -19,6 +19,7 @@ import {
 import type { BoardTask } from "#/api/board";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { isDone } from "./board-constants";
 import { EdField } from "./fields";
 
 export interface BlockerFieldProps {
@@ -72,7 +73,7 @@ export function BlockerField({
                       type="button"
                       className={cn(
                         "cursor-pointer rounded-full tabular-nums text-ink-2 hover:text-accent",
-                        linked.status === "SEALED" && "text-mute",
+                        isDone(linked.status) && "text-mute",
                         FOCUS_RING_NATIVE,
                       )}
                       title={linked.title}

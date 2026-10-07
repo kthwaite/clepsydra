@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  type BaseDetailResponse,
   type BaseFilter,
-  type BaseMemberCapability,
   type BaseMemberDiagnostic,
   type BaseViewEvaluateResponse,
   type PropertyType,
@@ -20,10 +18,10 @@ import {
 import { formatApiError, isApiConflict } from "#/api/error";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useProjects } from "#/lib/useProjects";
+import type { BaseTableModel } from "./base-table-model";
 import type { CellValue } from "./cells/types";
 import {
   type BaseEmbedConfig,
-  type EmbedScrollCap,
   predicateIdentity,
   queryIdentity,
 } from "./embed-query";
@@ -34,7 +32,6 @@ import {
   resolveMemberCreationSession,
 } from "./member-creation";
 import {
-  type BaseMemberDraftField,
   type BaseMemberDraftValue,
   composeMemberDraftFields,
 } from "./member-draft";
@@ -46,9 +43,6 @@ import {
   applyOverridesToView,
   composeQuickFilters,
   definitionPayload,
-  type GroupOverride,
-  type QuickFilter,
-  type ViewOverridesState,
 } from "./view-overrides";
 
 export interface BaseTableControllerOptions {
@@ -60,73 +54,6 @@ export interface BaseTableControllerOptions {
   limit?: number;
   onViewChange(view: string): void;
   onSortChange(sort: SortKey[] | undefined): void;
-}
-
-export interface BaseTableControllerModel {
-  definition: BaseDetailResponse | undefined;
-  detailLoading: boolean;
-  detailMissing: boolean;
-  activeView: string;
-  output: QueryOutput | undefined;
-  viewError: string | undefined;
-  viewLoading: boolean;
-  sort: SortKey[] | undefined;
-  onViewChange(name: string): void;
-  onSortChange(sort: SortKey[] | undefined): void;
-  onOpenPage(path: string): void;
-  configureSlug: string | undefined;
-  onCommitCell(
-    row: QueryRow,
-    key: string,
-    value: CellValue,
-    hint?: PropertyType,
-  ): void;
-  memberCapability: BaseMemberCapability | undefined;
-  memberDraftFields: BaseMemberDraftField[];
-  memberTitleTemplate: string | undefined;
-  memberDraftOpen: boolean;
-  memberSaving: boolean;
-  memberDiagnostics: BaseMemberDiagnostic[];
-  memberError: string | undefined;
-  memberNotice: string | undefined;
-  projects: string[];
-  onAddMember(): void;
-  onSaveMember(value: BaseMemberDraftValue): void;
-  onCancelMember(): void;
-  onMemberEdit(): void;
-  focusCreatedId: string | undefined;
-  onCreatedRowFocused(createdId: string): void;
-  overrides: ViewOverridesState;
-  onAddQuickFilter(filter: QuickFilter): void;
-  onRemoveQuickFilter(identity: string): void;
-  onSetGroup(group: GroupOverride | undefined): void;
-  onHideColumn(column: string): void;
-  onShowColumn(column: string): void;
-  onShowHiddenColumns(): void;
-  /** Order the active view's columns; the saved order clears the override. */
-  onReorderColumns(order: string[]): void;
-  onResetColumnOrder(): void;
-  onClearOverrides(): void;
-  onSaveOverrides(): void;
-  onReloadDefinition(): void;
-  overridesSave: OverridesSaveState;
-  onOpenPageInNewTab(path: string): void;
-  onCopyWikilink(row: QueryRow): void;
-  onCopyValue(value: CellValue): void;
-  onDuplicateRow(row: QueryRow): void;
-  onArchiveRow(row: QueryRow): Promise<void>;
-  rowActionError: string | undefined;
-  /** Windowed loading, for an embedded view that scrolls in place. */
-  rowWindow:
-    | {
-        total: number | undefined;
-        loaded: number;
-        hasMore: boolean;
-        isLoadingMore: boolean;
-        cappedBy: EmbedScrollCap | undefined;
-        loadMore(): void;
-      }
-    | undefined;
 }
 
 type PlacementIdentity =
@@ -193,7 +120,7 @@ function placementNotice(
 /** Shared orchestration for standalone and embedded Base tables. */
 export function useBaseTableController(
   options: BaseTableControllerOptions,
-): BaseTableControllerModel {
+): BaseTableModel {
   const {
     mode,
     slug,
@@ -896,57 +823,67 @@ export function useBaseTableController(
         creation.placement.queryIdentity === embeddedQueryKey))
       ? creation.createdId
       : undefined;
+  if (detail.isLoading) return { status: "loading" };
+  if (detail.error || !detail.data || !activeView)
+    return { status: "missing", slug };
   return {
+    status: "ready",
     definition: detail.data,
-    detailLoading: detail.isLoading,
-    detailMissing: !!detail.error || !detail.data || !activeView,
-    activeView,
-    output,
-    viewError: viewErrorValue
-      ? (viewErrorObject?.error ?? "request failed")
-      : undefined,
-    viewLoading,
-    sort,
-    onViewChange: handleViewChange,
-    onSortChange: handleSortChange,
-    onOpenPage: handleOpenPage,
-    configureSlug: mode === "standalone" ? slug : undefined,
-    onCommitCell: handleCommitCell,
-    memberCapability,
-    memberDraftFields,
-    memberTitleTemplate: detail.data?.title_template ?? undefined,
-    memberDraftOpen: memberState.draftOpen,
-    memberSaving,
-    memberDiagnostics: memberState.diagnostics,
-    memberError: memberState.error,
-    memberNotice: visibleMemberNotice ?? rowActions.notice,
-    projects,
-    onAddMember: handleAddMember,
-    onSaveMember: handleSaveMember,
-    onCancelMember: handleCancelMember,
-    onMemberEdit: handleMemberEdit,
-    focusCreatedId,
-    onCreatedRowFocused: handleCreatedRowFocused,
-    overrides: overrides.state,
-    onAddQuickFilter: overrides.addQuickFilter,
-    onRemoveQuickFilter: overrides.removeQuickFilter,
-    onSetGroup: overrides.setGroup,
-    onHideColumn: overrides.hideColumn,
-    onShowColumn: overrides.showColumn,
-    onShowHiddenColumns: overrides.showHiddenColumns,
-    onReorderColumns: reorderColumns,
-    onResetColumnOrder: overrides.resetColumnOrder,
-    onClearOverrides: clearOverrides,
-    onSaveOverrides: () => void saveOverrides(),
-    onReloadDefinition: () => void reloadDefinition(),
-    overridesSave,
-    onOpenPageInNewTab: rowActions.openInNewTab,
-    onCopyWikilink: rowActions.copyWikilink,
-    onCopyValue: rowActions.copyValue,
-    onDuplicateRow: handleDuplicateRow,
-    onArchiveRow: rowActions.archive,
-    rowActionError: rowActions.error,
-    rowWindow:
+    configureSlug: slug,
+    query: {
+      activeView,
+      output,
+      error: viewErrorValue
+        ? (viewErrorObject?.error ?? "request failed")
+        : undefined,
+      loading: viewLoading,
+      sort,
+      onViewChange: handleViewChange,
+      onSortChange: handleSortChange,
+    },
+    rowActions: {
+      onOpenPage: handleOpenPage,
+      onCommitCell: handleCommitCell,
+      onOpenPageInNewTab: rowActions.openInNewTab,
+      onCopyWikilink: rowActions.copyWikilink,
+      onCopyValue: rowActions.copyValue,
+      onDuplicateRow: handleDuplicateRow,
+      onArchiveRow: rowActions.archive,
+      error: rowActions.error,
+    },
+    members: {
+      capability: memberCapability,
+      draftFields: memberDraftFields,
+      titleTemplate: detail.data.title_template ?? undefined,
+      draftOpen: memberState.draftOpen,
+      saving: memberSaving,
+      diagnostics: memberState.diagnostics,
+      error: memberState.error,
+      notice: visibleMemberNotice ?? rowActions.notice,
+      projects,
+      focusCreatedId,
+      onAdd: handleAddMember,
+      onSave: handleSaveMember,
+      onCancel: handleCancelMember,
+      onEdit: handleMemberEdit,
+      onCreatedRowFocused: handleCreatedRowFocused,
+    },
+    overrides: {
+      state: overrides.state,
+      save: overridesSave,
+      onAddQuickFilter: overrides.addQuickFilter,
+      onRemoveQuickFilter: overrides.removeQuickFilter,
+      onSetGroup: overrides.setGroup,
+      onHideColumn: overrides.hideColumn,
+      onShowColumn: overrides.showColumn,
+      onShowHiddenColumns: overrides.showHiddenColumns,
+      onReorderColumns: reorderColumns,
+      onResetColumnOrder: overrides.resetColumnOrder,
+      onClear: clearOverrides,
+      onSave: () => void saveOverrides(),
+      onReloadDefinition: () => void reloadDefinition(),
+    },
+    window:
       mode === "embedded"
         ? {
             total: evaluationQuery.total,

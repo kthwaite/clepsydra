@@ -27,11 +27,7 @@ vi.mock("#/components/academic/AcademicLibrary", () => ({
   },
 }));
 
-import {
-  ACADEMIC_FILTER_URL,
-  academicFilterNavigation,
-  Route,
-} from "#/routes/academic";
+import { ACADEMIC_FILTER, Route } from "#/routes/academic";
 
 const AcademicRoute = Route.options.component as () => ReactNode;
 
@@ -43,7 +39,7 @@ beforeEach(() => {
 
 describe("Academic route filters", () => {
   it("exposes work_type/status/year/tag field ids matching the URL codec", () => {
-    expect(ACADEMIC_FILTER_URL.fields.map((f) => f.id)).toEqual([
+    expect(ACADEMIC_FILTER.url.fields.map((f) => f.id)).toEqual([
       "work_type",
       "status",
       "year",
@@ -89,7 +85,7 @@ describe("Academic route filters", () => {
   });
 
   it("builds text-only navigation for the exact route while retaining unrelated search and clearing stale fields", () => {
-    const navigation = academicFilterNavigation(
+    const navigation = ACADEMIC_FILTER.navigation(
       { text: "graph", facets: { status: ["reading"] } },
       { text: "old", facets: { status: ["reading"] } },
     );
@@ -114,7 +110,7 @@ describe("Academic route filters", () => {
   });
 
   it("pushes history when an Academic facet changes with the text", () => {
-    const navigation = academicFilterNavigation(
+    const navigation = ACADEMIC_FILTER.navigation(
       { text: "new", facets: { status: ["complete"] } },
       { text: "old", facets: { status: ["reading"] } },
     );

@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  CALENDAR_FILTER_URL,
+  CALENDAR_FILTER,
   calendarViewToSearch,
   DEFAULT_SPAN,
-  parseCalendarFilters,
   parseCalendarView,
   SPANS,
   validateCalendarSearch,
@@ -85,42 +84,42 @@ describe("calendar search", () => {
   describe("kind filter", () => {
     it("upper-cases kind values from an array", () => {
       expect(
-        parseCalendarFilters({ kind: ["journal", "NOTE"] }).facets.kind,
+        CALENDAR_FILTER.parse({ kind: ["journal", "NOTE"] }).facets.kind,
       ).toEqual(["JOURNAL", "NOTE"]);
     });
 
     it("splits a comma string", () => {
       expect(
-        parseCalendarFilters({ kind: "JOURNAL,NOTE" }).facets.kind,
+        CALENDAR_FILTER.parse({ kind: "JOURNAL,NOTE" }).facets.kind,
       ).toEqual(["JOURNAL", "NOTE"]);
     });
 
     it("drops unknown kinds", () => {
       expect(
-        parseCalendarFilters({ kind: ["note", "bogus"] }).facets.kind,
+        CALENDAR_FILTER.parse({ kind: ["note", "bogus"] }).facets.kind,
       ).toEqual(["NOTE"]);
     });
 
     it("omits the kind facet when every kind is unknown", () => {
       expect(
-        parseCalendarFilters({ kind: "bogus" }).facets.kind,
+        CALENDAR_FILTER.parse({ kind: "bogus" }).facets.kind,
       ).toBeUndefined();
     });
 
     it("keeps single tag and project", () => {
       expect(
-        parseCalendarFilters({ tag: ["wine", "beer"], project: "clepsydra" })
+        CALENDAR_FILTER.parse({ tag: ["wine", "beer"], project: "clepsydra" })
           .facets,
       ).toEqual({ tag: ["wine"], project: ["clepsydra"] });
     });
 
     it("declares kind multi (upper-cased), tag and project single", () => {
-      expect(CALENDAR_FILTER_URL.fields.map((f) => [f.id, f.kind])).toEqual([
+      expect(CALENDAR_FILTER.url.fields.map((f) => [f.id, f.kind])).toEqual([
         ["kind", "multi"],
         ["tag", "single"],
         ["project", "single"],
       ]);
-      expect(CALENDAR_FILTER_URL.fields[0].normalize?.("note")).toBe("NOTE");
+      expect(CALENDAR_FILTER.url.fields[0].normalize?.("note")).toBe("NOTE");
     });
   });
 

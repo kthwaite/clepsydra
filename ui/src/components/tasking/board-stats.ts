@@ -1,4 +1,5 @@
 import type { BoardTask } from "#/api/board";
+import { isDone, isInProgress } from "./board-constants";
 
 export interface ChecklistProgress {
   done: number;
@@ -38,8 +39,8 @@ export function cycleStats(items: BoardTask[]): CycleStatsResult {
   let checkTot = 0;
 
   for (const item of items) {
-    if (item.status === "SEALED") sealed += 1;
-    if (item.status === "FIELD") field += 1;
+    if (isDone(item.status)) sealed += 1;
+    if (isInProgress(item.status)) field += 1;
     // "Blocked": an open Blocker or a hold (server-derived).
     if (item.blocked) hold += 1;
     const progress = checklistProgress(item.checks);

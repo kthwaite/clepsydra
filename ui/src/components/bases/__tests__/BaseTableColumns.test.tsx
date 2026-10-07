@@ -74,6 +74,7 @@ import type {
 import { BaseTableView } from "#/components/bases/BaseTableView";
 import { columnWidthsKey } from "#/components/bases/column-widths";
 import { EMPTY_OVERRIDES } from "#/components/bases/view-overrides";
+import { type FlatViewProps, viewProps } from "./flat-view-props";
 
 const definition: BaseDetailResponse = {
   slug: "reading",
@@ -128,7 +129,7 @@ const capability: BaseMemberCapability = {
   blockers: [],
 };
 
-type ViewProps = Parameters<typeof BaseTableView>[0];
+type ViewProps = FlatViewProps;
 
 function renderView(overrides: Partial<ViewProps> = {}) {
   const spies = {
@@ -143,15 +144,17 @@ function renderView(overrides: Partial<ViewProps> = {}) {
   };
   const element = (next: Partial<ViewProps> = {}) => (
     <BaseTableView
-      definition={definition}
-      activeView="Continues"
-      output={flat}
-      sort={undefined}
-      memberCapability={capability}
-      overrides={EMPTY_OVERRIDES}
-      {...spies}
-      {...overrides}
-      {...next}
+      {...viewProps({
+        definition,
+        activeView: "Continues",
+        output: flat,
+        sort: undefined,
+        memberCapability: capability,
+        overrides: EMPTY_OVERRIDES,
+        ...spies,
+        ...overrides,
+        ...next,
+      })}
     />
   );
   const result = render(element());
