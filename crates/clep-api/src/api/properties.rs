@@ -23,9 +23,9 @@ use super::events::SyncNotification;
 use crate::vault::attendance;
 use crate::vault::base::{
     BODY_COLUMN, BaseDefinition, BaseRegistry, Filter, Op, PropertyDefinition, PropertyType,
-    SYSTEM_FIELDS,
+    SYSTEM_FIELDS, builtin_property,
 };
-use crate::vault::kind::resolve;
+use crate::vault::kind::{Kind, resolve};
 use crate::vault::meeting;
 use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
 use crate::vault::page::{Page, page_revision, parse_or_repair_frontmatter, write_page_content};
@@ -216,16 +216,39 @@ fn is_reserved_property_key(key: &str) -> bool {
     RESERVED_KEYS.contains(&key) || SYSTEM_FIELDS.contains(&key) || key == BODY_COLUMN
 }
 
+/// Whether the page's kind records this meeting-only built-in key.
+fn kind_records_builtin(kind: Kind, key: &str) -> bool {
+    match key {
+        meeting::OCCURRED_AT_KEY => meeting::records_occurrence(kind),
+        attendance::ATTENDEES_KEY => attendance::has_attendees(kind),
+        _ => true,
+    }
+}
+
+/// A built-in default (not a Base declaration) is offered only where it means
+/// something: on a kind that records it, or on a page that already has a value.
+fn projects_builtin(base: &BaseDefinition, page: &Page, kind: Kind, key: &str) -> bool {
+    let declared = base.file.properties.iter().any(|(name, _)| name == key);
+    declared
+        || builtin_property(key).is_none()
+        || kind_records_builtin(kind, key)
+        || page.meta.extra.contains_key(key)
+}
+
 fn project_matching_bases(
     matching: &[BaseDefinition],
     page: &Page,
 ) -> (Vec<PageBaseIdentity>, Vec<PageBaseProperty>) {
+    let (kind, _) = resolve(page.path.as_str(), page.meta.kind);
     let mut identities = Vec::with_capacity(matching.len());
     let mut declarations: BTreeMap<String, Vec<PagePropertyDeclaration>> = BTreeMap::new();
     for base in matching {
         let identity = page_base_identity(base);
         identities.push(identity.clone());
-        for (key, definition) in base.effective_properties() {
+        for (key, definition) in base
+            .effective_properties()
+            .filter(|(key, _)| projects_builtin(base, page, kind, key))
+        {
             declarations
                 .entry(key.to_owned())
                 .or_default()
