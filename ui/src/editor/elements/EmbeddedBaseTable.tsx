@@ -83,7 +83,7 @@ export const EmbeddedBaseTable = forwardRef<
     [editor, element, path],
   );
 
-  const controller = useBaseTableController({
+  const model = useBaseTableController({
     mode: "embedded",
     slug: element.base,
     activeView: view,
@@ -93,44 +93,13 @@ export const EmbeddedBaseTable = forwardRef<
     onViewChange: setView,
     onSortChange: setSort,
   });
-  const { detailLoading, detailMissing, definition, ...viewProps } = controller;
-
-  // The Base cannot be rendered, but the embed still has to be editable and
-  // removable — so the actions travel with the message that replaces it.
-  const withActions = (message: ReactNode) =>
-    actions === undefined ? (
-      message
-    ) : (
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {message}
-        <span className="flex items-center gap-1.5">{actions}</span>
-      </div>
-    );
-
-  if (detailLoading && !definition) {
-    return withActions(
-      <p role="status" className="p-4 text-[13px] text-mute">
-        Loading Base embed…
-      </p>,
-    );
-  }
-  if (detailMissing || !definition) {
-    return withActions(
-      <p role="alert" className="p-4 text-[13px] text-mute">
-        No Base named “{element.base}” is available. Edit the embed to choose a
-        saved Base and view.
-      </p>,
-    );
-  }
 
   return (
     <BaseTableView
       ref={ref}
-      definition={definition}
-      {...viewProps}
+      model={model}
       chrome={chrome}
       {...(actions === undefined ? {} : { toolbarActions: actions })}
-      configureSlug={element.base}
     />
   );
 });

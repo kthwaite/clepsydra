@@ -15,13 +15,9 @@ import {
 import type {
   Aggregate,
   BaseDetailResponse,
-  BaseMemberCapability,
-  BaseMemberDiagnostic,
   GroupResult,
   PropertyType,
-  QueryOutput,
   QueryRow,
-  SortKey,
 } from "#/api/bases";
 import { FooterControls } from "#/components/codex/FooterControls";
 import { Tick } from "#/components/codex/Tick";
@@ -51,18 +47,20 @@ import {
   type RowMenuActions,
   type RowMenuCell,
 } from "./BaseRowMenu";
+import type {
+  BaseTableMembers,
+  BaseTableOverrides,
+  BaseTableStatus,
+  BaseTableViewModel,
+  BaseTableViewReady,
+} from "./base-table-model";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { columnWidthsKey } from "./column-widths";
 import { canGroup, canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
-import type { EmbedScrollCap } from "./embed-query";
 import { FieldsPopover } from "./FieldsPopover";
 import { groupCollapseKey, groupIdentity } from "./group-collapse";
 import { asciiCaseFold, presentationFieldIdentity } from "./local-validation";
-import type {
-  BaseMemberDraftField,
-  BaseMemberDraftValue,
-} from "./member-draft";
 import { useIdentifiedRows } from "./ordered-list";
 import {
   builtInFieldLabel,
@@ -80,16 +78,15 @@ import type { OverridesSaveState } from "./useViewOverrides";
 import { ViewOverridesStrip } from "./ViewOverridesStrip";
 import {
   EMPTY_OVERRIDES,
-  type GroupOverride,
   movedColumnOrder,
   orderColumns,
-  type QuickFilter,
-  type ViewOverridesState,
 } from "./view-overrides";
 
 const EMPTY_AGGREGATES: readonly Aggregate[] = [];
 const DEFAULT_COLUMNS = ["title"];
 const IDLE_SAVE: OverridesSaveState = { phase: "idle" };
+const NO_MEMBERS: Partial<BaseTableMembers> = {};
+const NO_OVERRIDES: Partial<BaseTableOverrides> = {};
 const noop = () => {};
 /** Default column widths in pixels; the title fills what is left. */
 const COLUMN_WIDTH = 160;
@@ -111,17 +108,7 @@ export interface BaseTableViewHandle {
 }
 
 export interface BaseTableViewProps {
-  definition: BaseDetailResponse;
-  activeView: string;
-  onViewChange: (name: string) => void;
-  output: QueryOutput | undefined;
-  /** When set without cached output, the grid is replaced by an error banner. */
-  viewError?: string;
-  viewLoading?: boolean;
-  sort: SortKey[] | undefined;
-  onSortChange: (sort: SortKey[] | undefined) => void;
-  onOpenPage: (path: string) => void;
-  configureSlug?: string;
+  model: BaseTableViewModel;
   /** The standalone `/bases/$slug` screen: serif header, Compact switch,
    *  view pickers and footer context. Embeds never set it. */
   screen?: boolean;
@@ -129,60 +116,10 @@ export interface BaseTableViewProps {
   chrome?: "full" | "compact";
   /** Controls owned by the surface hosting the table, shown in its toolbar. */
   toolbarActions?: ReactNode;
-  /** Windowed loading state, for a compact view that scrolls in place. */
-  rowWindow?: {
-    /** The authoritative row count, not the rows rendered. */
-    total: number | undefined;
-    loaded: number;
-    hasMore: boolean;
-    isLoadingMore: boolean;
-    /** Which bound ended the scroll short of the total, if either did. */
-    cappedBy: EmbedScrollCap | undefined;
-    loadMore(): void;
-  };
-  onCommitCell: (
-    row: QueryRow,
-    key: string,
-    value: CellValue,
-    hint?: PropertyType,
-  ) => void;
-  readOnly?: boolean;
-  memberCapability?: BaseMemberCapability;
-  memberDraftFields?: BaseMemberDraftField[];
-  memberTitleTemplate?: string;
-  memberDraftOpen?: boolean;
-  memberSaving?: boolean;
-  memberDiagnostics?: BaseMemberDiagnostic[];
-  memberError?: string;
-  memberNotice?: string;
-  projects?: string[];
-  onAddMember?: () => void;
-  onSaveMember?: (value: BaseMemberDraftValue) => void;
-  onCancelMember?: () => void;
-  onMemberEdit?: () => void;
-  focusCreatedId?: string;
-  onCreatedRowFocused?: (createdId: string) => void;
-  overrides?: ViewOverridesState;
-  onAddQuickFilter?(filter: QuickFilter): void;
-  onRemoveQuickFilter?(identity: string): void;
-  onSetGroup?(group: GroupOverride | undefined): void;
-  onHideColumn?(column: string): void;
-  onShowColumn?(column: string): void;
-  onShowHiddenColumns?(): void;
-  /** The whole column order, hidden columns included, after a move. */
-  onReorderColumns?(order: string[]): void;
-  onResetColumnOrder?(): void;
-  onClearOverrides?(): void;
-  onSaveOverrides?(): void;
-  onReloadDefinition?(): void;
-  overridesSave?: OverridesSaveState;
-  onOpenPageInNewTab?(path: string): void;
-  onCopyWikilink?(row: QueryRow): void;
-  onCopyValue?(value: CellValue): void;
-  onDuplicateRow?(row: QueryRow): void;
-  /** Resolves once the page is archived; rejects with an Error whose message the dialog shows. */
-  onArchiveRow?(row: QueryRow): Promise<void>;
-  rowActionError?: string;
+}
+
+interface ReadyBaseTableViewProps extends Omit<BaseTableViewProps, "model"> {
+  model: BaseTableViewReady;
 }
 
 /** Which system columns a group-by can key on; the rest are unique per row. */
@@ -370,49 +307,126 @@ function ScrollViewport({
   );
 }
 
+/** What a table that cannot render yet says instead. The standalone screen
+ * speaks of a base; an embed keeps its own actions beside the message so it
+ * can still be edited or removed. */
+function BaseTableStatusMessage({
+  model,
+  screen,
+  toolbarActions,
+}: {
+  model: BaseTableStatus;
+  screen: boolean;
+  toolbarActions: ReactNode;
+}) {
+  if (screen) {
+    return model.status === "loading" ? (
+      <p className="p-4 text-[13px] text-mute">Loading…</p>
+    ) : (
+      <p className="p-4 text-[13px] text-mute">
+        No base named “{model.slug}” (or it declares no views).
+      </p>
+    );
+  }
+  const message =
+    model.status === "loading" ? (
+      <p role="status" className="p-4 text-[13px] text-mute">
+        Loading Base embed…
+      </p>
+    ) : (
+      <p role="alert" className="p-4 text-[13px] text-mute">
+        No Base named “{model.slug}” is available. Edit the embed to choose a
+        saved Base and view.
+      </p>
+    );
+  return toolbarActions === undefined ? (
+    message
+  ) : (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      {message}
+      <span className="flex items-center gap-1.5">{toolbarActions}</span>
+    </div>
+  );
+}
+
 /**
- * The Base data grid: one `DataTable` per (group of) rows, column
- * sorting mapped to ordered query sort keys, group header rows carrying
- * aggregate chips. Purely presentational — data and commits flow through
- * props (`BaseTable` wires the queries).
+ * A Base table over its model: the status message until the definition is
+ * ready, then the grid. Purely presentational — data and commits flow through
+ * the model (`useBaseTableController` builds it, `readOnlyModel` for previews).
  */
 export const BaseTableView = forwardRef<
   BaseTableViewHandle,
   BaseTableViewProps
->(function BaseTableView(
-  {
+>(function BaseTableView({ model, ...presentation }, ref) {
+  if (model.status !== "ready") {
+    return (
+      <BaseTableStatusMessage
+        model={model}
+        screen={presentation.screen ?? false}
+        toolbarActions={presentation.toolbarActions}
+      />
+    );
+  }
+  return <ReadyBaseTableView ref={ref} model={model} {...presentation} />;
+});
+
+/**
+ * The Base data grid: one `DataTable` per (group of) rows, column
+ * sorting mapped to ordered query sort keys, group header rows carrying
+ * aggregate chips.
+ */
+const ReadyBaseTableView = forwardRef<
+  BaseTableViewHandle,
+  ReadyBaseTableViewProps
+>(function ReadyBaseTableView(
+  { model, chrome = "full", screen = false, toolbarActions },
+  ref,
+) {
+  const {
     definition,
-    activeView,
-    onViewChange,
-    output,
-    viewError,
-    viewLoading,
-    sort,
-    onSortChange,
-    onOpenPage,
-    configureSlug,
-    chrome = "full",
-    screen = false,
-    toolbarActions,
-    rowWindow,
-    onCommitCell,
     readOnly = false,
-    memberCapability,
-    memberDraftFields = [],
-    memberTitleTemplate,
-    memberDraftOpen = false,
-    memberSaving = false,
-    memberDiagnostics = [],
-    memberError,
-    memberNotice,
+    configureSlug,
+    query: {
+      activeView,
+      output,
+      error: viewError,
+      loading: viewLoading,
+      sort,
+      onViewChange,
+      onSortChange,
+    },
+    rowActions: {
+      onOpenPage,
+      onCommitCell,
+      onOpenPageInNewTab,
+      onCopyWikilink,
+      onCopyValue,
+      onDuplicateRow,
+      onArchiveRow,
+      error: rowActionError,
+    },
+    window: rowWindow,
+  } = model;
+  const {
+    capability: memberCapability,
+    draftFields: memberDraftFields = [],
+    titleTemplate: memberTitleTemplate,
+    draftOpen: memberDraftOpen = false,
+    saving: memberSaving = false,
+    diagnostics: memberDiagnostics = [],
+    error: memberError,
+    notice: memberNotice,
     projects = [],
-    onAddMember,
-    onSaveMember,
-    onCancelMember,
-    onMemberEdit,
     focusCreatedId,
+    onAdd: onAddMember,
+    onSave: onSaveMember,
+    onCancel: onCancelMember,
+    onEdit: onMemberEdit,
     onCreatedRowFocused,
-    overrides = EMPTY_OVERRIDES,
+  } = model.members ?? NO_MEMBERS;
+  const {
+    state: overrides = EMPTY_OVERRIDES,
+    save: overridesSave = IDLE_SAVE,
     onAddQuickFilter,
     onRemoveQuickFilter,
     onSetGroup,
@@ -421,19 +435,10 @@ export const BaseTableView = forwardRef<
     onShowHiddenColumns,
     onReorderColumns,
     onResetColumnOrder,
-    onClearOverrides,
-    onSaveOverrides,
+    onClear: onClearOverrides,
+    onSave: onSaveOverrides,
     onReloadDefinition,
-    overridesSave = IDLE_SAVE,
-    onOpenPageInNewTab,
-    onCopyWikilink,
-    onCopyValue,
-    onDuplicateRow,
-    onArchiveRow,
-    rowActionError,
-  },
-  ref,
-) {
+  } = model.overrides ?? NO_OVERRIDES;
   const compact = chrome === "compact";
   // Embeds are always dense (user ruling); the screen follows its switch.
   const [compactRows, setCompactRows] = useTableCompact("bases", false);
