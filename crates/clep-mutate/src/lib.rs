@@ -11,3 +11,4 @@ pub mod recode;
 pub mod reconcile;
 pub mod reference_repair;
 pub mod relabel;
+pub mod watch_reconcile;

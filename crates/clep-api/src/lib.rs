@@ -18,10 +18,10 @@ use tracing::{Level, info};
 use tracing_subscriber::{EnvFilter, fmt};
 
 use api::AppState;
+use clep_mutate::watch_reconcile::{BatchChanges, WatchHost, run_watch_loop};
 use vault::Vault;
 use vault::index::VaultIndex;
 use vault::index_handle::IndexHandle;
-use vault::path::VaultPath;
 use vault::sync::ChangeEvent;
 use vault::sync::watcher::VaultWatcher;
 
@@ -39,35 +39,16 @@ const GRACEFUL_SHUTDOWN_BUDGET: Duration = Duration::from_secs(5);
 /// signal task's only lever on the running server.
 type ServerHandle = axum_server::Handle<std::net::SocketAddr>;
 
-fn drain_change_batch(
-    first: ChangeEvent,
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<ChangeEvent>,
-) -> Vec<ChangeEvent> {
-    let mut batch = vec![first];
-    while let Ok(event) = rx.try_recv() {
-        batch.push(event);
-    }
-    batch
-}
-
-fn notifications_from_batch(batch: &[ChangeEvent]) -> Vec<api::events::SyncNotification> {
-    let mut upserted: Vec<String> = Vec::new();
-    let mut removed: Vec<String> = Vec::new();
-    let mut base_registry_changed = false;
-
-    for ev in batch {
-        match ev {
-            ChangeEvent::Upsert(vp) => upserted.push(vp.as_str().to_string()),
-            ChangeEvent::Remove(vp) => removed.push(vp.as_str().to_string()),
-            ChangeEvent::BaseChanged => base_registry_changed = true,
-        }
-    }
-
+/// The SSE notifications for one indexed watcher batch.
+fn notifications_from_changes(changes: BatchChanges) -> Vec<api::events::SyncNotification> {
     let mut notifications = Vec::new();
-    if !upserted.is_empty() || !removed.is_empty() {
-        notifications.push(api::events::SyncNotification::IndexChanged { upserted, removed });
+    if !changes.upserted.is_empty() || !changes.removed.is_empty() {
+        notifications.push(api::events::SyncNotification::IndexChanged {
+            upserted: changes.upserted,
+            removed: changes.removed,
+        });
     }
-    if base_registry_changed {
+    if changes.base_registry_changed {
         notifications.push(api::events::SyncNotification::BaseRegistryChanged);
     }
     notifications
@@ -381,81 +362,6 @@ pub async fn build_app_state_with_settings(
     }))
 }
 
-/// Process one drained batch of change events: reindex, log, broadcast a sync
-/// notification. (Exact extraction of the per-batch body of the former sync loop.)
-async fn process_sync_batch(
-    index: &IndexHandle,
-    batch: Vec<ChangeEvent>,
-    change_tx: &tokio::sync::broadcast::Sender<api::events::SyncNotification>,
-) {
-    let notifications = notifications_from_batch(&batch);
-    match index.process_sync_events(batch).await {
-        Ok(stats) => {
-            if stats.pages_indexed > 0 || stats.pages_removed > 0 {
-                tracing::info!(
-                    indexed = stats.pages_indexed,
-                    skipped = stats.pages_skipped,
-                    removed = stats.pages_removed,
-                    resolved = stats.links_resolved,
-                    deps = stats.deps_reresolved,
-                    "sync cycle complete"
-                );
-            }
-            for notification in notifications {
-                let _ = change_tx.send(notification);
-            }
-        }
-        Err(e) => {
-            tracing::error!("sync error: {e}");
-        }
-    }
-}
-
-/// Reconcile pages the watcher just saw change: folder-follows-metadata
-/// (ADR 0001 layer 2). Runs after the batch is indexed so projection sees
-/// fresh frontmatter. A move produces new watch events; reconciling an
-/// already-correct page is a no-op, so the loop terminates.
-///
-/// Excluded paths are skipped, matching `process_sync_batch`: a subtree the
-/// vault does not index must not be relocated (or warned about) either.
-///
-/// Each reconcile runs under the [`MutationCoordinator`] path guard, the same
-/// lock the API write path holds across read → write → index. Without it, an
-/// in-flight `atomic_replace` can recreate the source file the watcher just
-/// renamed, leaving two files carrying one page id. The guard covers the
-/// source path only — `reconcile_page` derives its destination internally —
-/// which is exactly the path the racing writer holds.
-///
-/// [`MutationCoordinator`]: crate::vault::mutation_coordinator::MutationCoordinator
-async fn reconcile_upserts(state: &AppState, upserts: Vec<VaultPath>) {
-    for vp in upserts {
-        if state.vault.is_excluded(&vp) {
-            continue;
-        }
-        let hooks = Arc::clone(&state.hooks);
-        let target = vp.as_str().to_string();
-        let _guard = state
-            .mutation_coordinator
-            .lock_paths(std::slice::from_ref(&vp))
-            .await;
-        let result = state
-            .index
-            .with_index(move |index, vault| {
-                crate::vault::reconcile::reconcile_page(vault, index, &target, &hooks)
-            })
-            .await;
-        match result {
-            Err(e) | Ok(Err(e)) => tracing::warn!("watcher reconcile failed for {vp}: {e}"),
-            Ok(Ok(Some(new_path))) => {
-                tracing::info!(
-                    "watcher reconcile moved {vp} → {new_path} (folder follows kind/project)"
-                );
-            }
-            Ok(Ok(None)) => {}
-        }
-    }
-}
-
 fn batch_touches_manifest(batch: &[ChangeEvent]) -> bool {
     batch.iter().any(|event| match event {
         ChangeEvent::Upsert(path) | ChangeEvent::Remove(path) => path.as_str() == "feeds.md",
@@ -474,42 +380,49 @@ fn notify_feed_scheduler_from_batch(state: &AppState, batch: &[ChangeEvent]) {
     }
 }
 
+/// The server side of the watch loop: feed-manifest wake-ups and SSE
+/// broadcast.
+impl WatchHost for AppState {
+    fn vault(&self) -> &Vault {
+        &self.vault
+    }
+
+    fn index(&self) -> &IndexHandle {
+        &self.index
+    }
+
+    fn mutation_coordinator(&self) -> &vault::mutation_coordinator::MutationCoordinator {
+        &self.mutation_coordinator
+    }
+
+    fn post_move_hooks(&self) -> Arc<Vec<Box<dyn vault::hooks::PostMoveHook>>> {
+        Arc::clone(&self.hooks)
+    }
+
+    fn batch_received(&self, batch: &[ChangeEvent]) {
+        notify_feed_scheduler_from_batch(self, batch);
+    }
+
+    fn batch_indexed(&self, changes: BatchChanges) {
+        for notification in notifications_from_changes(changes) {
+            let _ = self.change_tx.send(notification);
+        }
+    }
+}
+
 /// Start the file watcher and spawn the sync loop. Returns the watcher, which the
 /// caller MUST keep alive for the server's lifetime.
 fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std::error::Error>> {
-    let vault_root_buf = state.vault.root().to_path_buf();
-    let sync_index = state.index.clone();
-    let (change_tx, mut change_rx) = tokio::sync::mpsc::unbounded_channel::<ChangeEvent>();
-    let sync_change_tx = state.change_tx.clone();
-    // The reconcile pass needs the vault (exclusions) and the mutation
-    // coordinator (path locks), so the loop holds the whole state.
-    let reconcile_state = Arc::clone(state);
+    let (change_tx, change_rx) = tokio::sync::mpsc::unbounded_channel::<ChangeEvent>();
 
     let watcher = VaultWatcher::start_with_pause(
-        vault_root_buf,
+        state.vault.root().to_path_buf(),
         Duration::from_millis(500),
         change_tx,
         Arc::clone(&state.watcher_paused),
     )?;
 
-    tokio::spawn(async move {
-        loop {
-            let batch = match change_rx.recv().await {
-                Some(event) => drain_change_batch(event, &mut change_rx),
-                None => break,
-            };
-            notify_feed_scheduler_from_batch(&reconcile_state, &batch);
-            let upserts: Vec<VaultPath> = batch
-                .iter()
-                .filter_map(|e| match e {
-                    ChangeEvent::Upsert(vp) => Some(vp.clone()),
-                    _ => None,
-                })
-                .collect();
-            process_sync_batch(&sync_index, batch, &sync_change_tx).await;
-            reconcile_upserts(&reconcile_state, upserts).await;
-        }
-    });
+    tokio::spawn(run_watch_loop(Arc::clone(state), change_rx));
 
     Ok(watcher)
 }
@@ -934,14 +847,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn notifications_from_batch_collect_upserts_and_removes() {
-        let batch = vec![
-            ChangeEvent::Upsert(vault::path::VaultPath::new("notes/a.md").unwrap()),
-            ChangeEvent::Remove(vault::path::VaultPath::new("notes/b.md").unwrap()),
-            ChangeEvent::Upsert(vault::path::VaultPath::new("notes/c.md").unwrap()),
-        ];
+    fn notifications_from_changes_map_upserts_and_removes() {
+        let changes = BatchChanges {
+            upserted: vec!["notes/a.md".into(), "notes/c.md".into()],
+            removed: vec!["notes/b.md".into()],
+            base_registry_changed: false,
+        };
 
-        let notifications = notifications_from_batch(&batch);
+        let notifications = notifications_from_changes(changes);
         assert_eq!(notifications.len(), 1);
         let api::events::SyncNotification::IndexChanged { upserted, removed } = &notifications[0]
         else {
@@ -950,12 +863,6 @@ mod tests {
 
         assert_eq!(upserted, &["notes/a.md", "notes/c.md"]);
         assert_eq!(removed, &["notes/b.md"]);
-    }
-
-    #[test]
-    fn notifications_from_empty_batch_are_empty() {
-        let batch = Vec::<ChangeEvent>::new();
-        assert!(notifications_from_batch(&batch).is_empty());
     }
 
     #[tokio::test]
@@ -980,12 +887,13 @@ mod tests {
     }
 
     #[test]
-    fn base_change_in_batch_emits_registry_notification() {
-        let batch = vec![
-            ChangeEvent::Upsert(vault::path::VaultPath::new("notes/a.md").unwrap()),
-            ChangeEvent::BaseChanged,
-        ];
-        let notifications = notifications_from_batch(&batch);
+    fn base_change_emits_registry_notification_after_index_change() {
+        let changes = BatchChanges {
+            upserted: vec!["notes/a.md".into()],
+            removed: Vec::new(),
+            base_registry_changed: true,
+        };
+        let notifications = notifications_from_changes(changes);
         assert_eq!(notifications.len(), 2);
         assert!(matches!(
             notifications[1],
@@ -993,26 +901,17 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn drain_change_batch_collects_buffered_events() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ChangeEvent>();
-        tx.send(ChangeEvent::Upsert(
-            vault::path::VaultPath::new("notes/a.md").unwrap(),
-        ))
-        .unwrap();
-        tx.send(ChangeEvent::Remove(
-            vault::path::VaultPath::new("notes/b.md").unwrap(),
-        ))
-        .unwrap();
-        tx.send(ChangeEvent::Upsert(
-            vault::path::VaultPath::new("notes/c.md").unwrap(),
-        ))
-        .unwrap();
-
-        let first = rx.recv().await.expect("first event missing");
-        let batch = drain_change_batch(first, &mut rx);
-
-        assert_eq!(batch.len(), 3);
+    #[test]
+    fn base_change_alone_emits_only_registry_notification() {
+        let changes = BatchChanges {
+            base_registry_changed: true,
+            ..BatchChanges::default()
+        };
+        let notifications = notifications_from_changes(changes);
+        assert!(matches!(
+            notifications.as_slice(),
+            [api::events::SyncNotification::BaseRegistryChanged]
+        ));
     }
 
     #[test]
@@ -1440,166 +1339,9 @@ mod feed_serving_lifecycle_tests {
 }
 
 #[cfg(test)]
-mod watcher_reconcile_tests {
+mod watcher_feed_tests {
     use super::*;
-
-    /// The watcher's per-batch reconcile must heal folder drift after indexing:
-    /// a page declaring `type: quote` that still lives under `notes/` is moved
-    /// to `quotes/`. Mirrors `serve_startup_reconciles_drifted_pages`'s fixture,
-    /// but drives the batch path (`process_sync_events` + `reconcile_upserts`)
-    /// instead of the startup sweep.
-    #[tokio::test]
-    async fn watcher_batch_reconciles_drifted_upsert() {
-        let (state, tmp) = state_test_support::make_state().await;
-        let root = tmp.path().join("vault");
-
-        // A drifted page: declares `type: quote` but lives under notes/.
-        let drifted = root.join("notes").join("q.md");
-        std::fs::create_dir_all(drifted.parent().unwrap()).unwrap();
-        std::fs::write(
-            &drifted,
-            "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntype: quote\n---\nbody",
-        )
-        .unwrap();
-
-        let vp = VaultPath::new("notes/q.md").unwrap();
-        state
-            .index
-            .process_sync_events(vec![ChangeEvent::Upsert(vp.clone())])
-            .await
-            .unwrap();
-
-        reconcile_upserts(&state, vec![vp.clone()]).await;
-
-        assert!(
-            root.join("quotes").join("q.md").exists(),
-            "drifted page should have moved to quotes/q.md"
-        );
-        assert!(
-            !root.join("notes").join("q.md").exists(),
-            "source notes/q.md should be gone after reconcile"
-        );
-    }
-
-    /// A page whose folder already matches its declared kind must be left
-    /// alone: reconcile is a no-op, not a rewrite.
-    #[tokio::test]
-    async fn reconcile_upserts_leaves_clean_pages_alone() {
-        let (state, tmp) = state_test_support::make_state().await;
-        let root = tmp.path().join("vault");
-
-        // A clean page: declares `type: quote` and already lives under quotes/.
-        let clean = root.join("quotes").join("q.md");
-        std::fs::create_dir_all(clean.parent().unwrap()).unwrap();
-        std::fs::write(
-            &clean,
-            "---\nid: 0190f8a0-0000-7000-8000-0000000000a2\ntype: quote\n---\nbody",
-        )
-        .unwrap();
-
-        let vp = VaultPath::new("quotes/q.md").unwrap();
-        state
-            .index
-            .process_sync_events(vec![ChangeEvent::Upsert(vp.clone())])
-            .await
-            .unwrap();
-
-        reconcile_upserts(&state, vec![vp.clone()]).await;
-
-        assert!(
-            root.join("quotes").join("q.md").exists(),
-            "clean page should not have moved"
-        );
-    }
-
-    /// Exclusions bound the reconcile the same way they bound indexing
-    /// (`process_sync_batch` skips excluded paths): a drifted page inside an
-    /// excluded subtree is neither indexed nor physically relocated.
-    #[tokio::test]
-    async fn reconcile_upserts_skips_excluded_paths() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
-        std::fs::write(
-            root.join(".clepsydra/config.toml"),
-            "[vault]\nexcluded_patterns = [\".clepsydra\", \".clepsydra/**\", \
-             \"_attachments\", \"_attachments/**\", \"private\", \"private/**\"]\n",
-        )
-        .unwrap();
-        let state = build_app_state(&root).await.unwrap();
-
-        // Same drift as `watcher_batch_reconciles_drifted_upsert`, but inside
-        // an excluded folder.
-        let drifted = root.join("private").join("q.md");
-        std::fs::create_dir_all(drifted.parent().unwrap()).unwrap();
-        std::fs::write(
-            &drifted,
-            "---\nid: 0190f8a0-0000-7000-8000-0000000000a3\ntype: quote\n---\nbody",
-        )
-        .unwrap();
-
-        let vp = VaultPath::new("private/q.md").unwrap();
-        reconcile_upserts(&state, vec![vp]).await;
-
-        assert!(
-            drifted.exists(),
-            "excluded page must stay where the user put it"
-        );
-        assert!(
-            !root.join("quotes").join("q.md").exists(),
-            "excluded page must not be projected into a canonical folder"
-        );
-    }
-
-    /// The reconcile takes the same `MutationCoordinator` path guard the API
-    /// write path holds across read → write → index, so a watcher move cannot
-    /// interleave with an in-flight page write on that path.
-    #[tokio::test]
-    async fn reconcile_upserts_waits_for_the_mutation_coordinator_lock() {
-        let (state, tmp) = state_test_support::make_state().await;
-        let root = tmp.path().join("vault");
-
-        let drifted = root.join("notes").join("q.md");
-        std::fs::create_dir_all(drifted.parent().unwrap()).unwrap();
-        std::fs::write(
-            &drifted,
-            "---\nid: 0190f8a0-0000-7000-8000-0000000000a4\ntype: quote\n---\nbody",
-        )
-        .unwrap();
-
-        let vp = VaultPath::new("notes/q.md").unwrap();
-        state
-            .index
-            .process_sync_events(vec![ChangeEvent::Upsert(vp.clone())])
-            .await
-            .unwrap();
-
-        // Hold the path guard, as a concurrent API write would.
-        let guard = state
-            .mutation_coordinator
-            .lock_paths(std::slice::from_ref(&vp))
-            .await;
-
-        let reconcile = tokio::spawn({
-            let state = Arc::clone(&state);
-            let vp = vp.clone();
-            async move { reconcile_upserts(&state, vec![vp]).await }
-        });
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(
-            drifted.exists() && !root.join("quotes").join("q.md").exists(),
-            "reconcile must not move the page while the path guard is held"
-        );
-
-        drop(guard);
-        reconcile.await.unwrap();
-
-        assert!(
-            root.join("quotes").join("q.md").exists(),
-            "reconcile must proceed once the guard is released"
-        );
-    }
+    use vault::path::VaultPath;
 
     async fn assert_manifest_edit_notifies_scheduler(content: Option<&str>) {
         let (state, tmp) = state_test_support::make_state().await;
@@ -1619,7 +1361,7 @@ mod watcher_reconcile_tests {
         let notified = state.feed_runtime().feed_refresh.notified();
         tokio::pin!(notified);
 
-        notify_feed_scheduler_from_batch(&state, &[event]);
+        state.batch_received(&[event]);
 
         tokio::time::timeout(Duration::from_millis(100), &mut notified)
             .await
@@ -1651,7 +1393,7 @@ mod watcher_reconcile_tests {
         .await;
         let event = ChangeEvent::Upsert(VaultPath::new("feeds.md").unwrap());
 
-        notify_feed_scheduler_from_batch(&state, &[event]);
+        state.batch_received(&[event]);
 
         assert!(state.feed_runtime.is_none());
     }
@@ -1686,7 +1428,7 @@ mod sync_tests {
     use super::*;
 
     #[tokio::test]
-    async fn process_sync_batch_broadcasts_notification_for_upsert() {
+    async fn index_batch_broadcasts_notification_for_upsert() {
         let (state, _tmp) = make_state().await;
         let mut rx = state.change_tx.subscribe();
 
@@ -1699,7 +1441,7 @@ mod sync_tests {
             vault::path::VaultPath::new("notes/x.md").unwrap(),
         )];
 
-        process_sync_batch(&state.index, batch, &state.change_tx).await;
+        clep_mutate::watch_reconcile::index_batch(&*state, batch).await;
 
         // The Ok path + Some(notification) branch should have sent on the channel
         let result = rx.try_recv();
