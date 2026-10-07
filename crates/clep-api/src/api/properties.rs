@@ -19,7 +19,6 @@ use uuid::Uuid;
 
 use super::AppState;
 use super::error::ApiError;
-use super::events::SyncNotification;
 use super::page_identity::{AttemptError, PathLock, resolve_stable_by_id};
 use crate::vault::attendance;
 use crate::vault::base::{
@@ -28,7 +27,7 @@ use crate::vault::base::{
 };
 use crate::vault::kind::{Kind, resolve};
 use crate::vault::meeting;
-use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
+use crate::vault::mutation_coordinator::ReplacePageContentCommand;
 use crate::vault::page::{Page, page_revision, parse_or_repair_frontmatter, write_page_content};
 use crate::vault::path::VaultPath;
 use crate::vault::query::{
@@ -689,12 +688,7 @@ async fn patch_properties_at(
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
     }
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = crate::api::mutation_notifier(state);
     let replacement = state
         .mutation_coordinator
         .replace_page_content(
@@ -705,7 +699,7 @@ async fn patch_properties_at(
                 expected_content: raw,
                 content: new_content.clone(),
             },
-            &notify,
+            notify.as_ref(),
         )
         .await
         .map_err(|error| AttemptError::vanished_if_not_found(super::mutation_error(error)))?;

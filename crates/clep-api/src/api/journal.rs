@@ -16,10 +16,9 @@ use super::AppState;
 use super::error::ApiError;
 use super::pages::{PageDetail, page_detail};
 use super::tasks::TaskItem;
-use crate::api::events::SyncNotification;
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{
-    CreatePageCommand, MutationError, MutationNotification, ProjectAssignment, UpdatePageCommand,
+    CreatePageCommand, MutationError, ProjectAssignment, UpdatePageCommand,
 };
 use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
@@ -625,12 +624,7 @@ pub(crate) async fn capture_into(
 
     let mut meta = page.meta;
     meta.updated_at = Some(now);
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = crate::api::mutation_notifier(state);
     let result = state
         .mutation_coordinator
         .update_page(
@@ -645,7 +639,7 @@ pub(crate) async fn capture_into(
                 project: ProjectAssignment::Unchanged,
                 reconcile: false,
             },
-            &notify,
+            notify.as_ref(),
         )
         .await
         .map_err(crate::api::mutation_error)?;

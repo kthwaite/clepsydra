@@ -20,7 +20,7 @@ use super::AppState;
 use super::base_templates::{TEMPLATE_REQUEST_BYTES, template_error};
 use super::error::{ApiError, parse_request_path};
 use crate::vault::Vault;
-use crate::vault::mutation_coordinator::{MutationError, ReplacePageContentCommand};
+use crate::vault::mutation_coordinator::ReplacePageContentCommand;
 use crate::vault::page::{Page, body_is_protected, body_of, page_revision, parse_frontmatter};
 use crate::vault::path::VaultPath;
 
@@ -499,17 +499,18 @@ pub async fn apply(
         .await;
     let result = match result {
         Ok(result) => result,
-        Err(MutationError::Stale(_)) => {
-            let state = Arc::clone(&state);
-            let path = snapshot.path.clone();
-            let current = tokio::task::spawn_blocking(move || read_destination(&state.vault, path))
-                .await
-                .map_err(|_| ApiError::internal("destination worker failed"))??;
-            return Err(ApiError::revision_conflict(page_revision(
-                &current.raw_content,
-            )));
+        Err(error) => {
+            return Err(super::stale_to_revision_conflict(error, || async {
+                let state = Arc::clone(&state);
+                let path = snapshot.path.clone();
+                let current =
+                    tokio::task::spawn_blocking(move || read_destination(&state.vault, path))
+                        .await
+                        .map_err(|_| ApiError::internal("destination worker failed"))??;
+                Ok(page_revision(&current.raw_content))
+            })
+            .await);
         }
-        Err(error) => return Err(super::mutation_error(error)),
     };
     store.lock().remove(&request.token);
     Ok(Json(ApplyResponse {

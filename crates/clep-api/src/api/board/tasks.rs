@@ -9,11 +9,10 @@ use axum::response::{IntoResponse, Response};
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
-use crate::api::events::SyncNotification;
 use crate::api::page_identity::{AttemptError, PathLock, resolve_stable_by_id};
 use crate::vault::code::CodeFamily;
 use crate::vault::kind::Kind;
-use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
+use crate::vault::mutation_coordinator::CreatePageCommand;
 use crate::vault::page::Page;
 use crate::vault::path::VaultPath;
 
@@ -163,12 +162,7 @@ async fn patch_task_at(
         plan_task_patch(page, patch, &lookups, state.clock.now()).map_err(ApiError::from)?;
 
     // 3. Execute.
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = crate::api::mutation_notifier(state);
     state
         .mutation_coordinator
         .update_page(
@@ -176,7 +170,7 @@ async fn patch_task_at(
             &state.index,
             Arc::clone(&state.hooks),
             command,
-            &notify,
+            notify.as_ref(),
         )
         .await
         .map_err(|error| AttemptError::vanished_if_not_found(crate::api::mutation_error(error)))

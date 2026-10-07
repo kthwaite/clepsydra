@@ -14,10 +14,12 @@ use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
-use super::page_identity::{AttemptError, PathLock, resolve_stable_by_id};
+use super::page_identity::{
+    AttemptError, MissingFile, PathLock, read_page_once, resolve_stable_by_id,
+};
+use super::page_update::{check_identity, check_revision, plan_page_update};
 use super::pagination::PaginatedResponse;
 use super::projects::{ensure_project_exists, project_exists, unknown_project};
-use crate::api::events::SyncNotification;
 use crate::vault::attendance;
 use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
 use crate::vault::canonical::CanonicalName;
@@ -25,9 +27,7 @@ use crate::vault::encryption::{EncryptionFormat, EncryptionMeta, validate_age_ar
 use crate::vault::kind::{Kind, resolve};
 use crate::vault::meeting;
 use crate::vault::mutation::{MutationOp, MutationPlanner};
-use crate::vault::mutation_coordinator::{
-    CreatePageCommand, MutationError, MutationNotification, ProjectAssignment, UpdatePageCommand,
-};
+use crate::vault::mutation_coordinator::{CreatePageCommand, ProjectAssignment, UpdatePageCommand};
 use crate::vault::new_note::build_note_path;
 use crate::vault::page::{Page, PageMeta, page_revision, parse_frontmatter, write_page_content};
 use crate::vault::path::VaultPath;
@@ -1023,16 +1023,8 @@ async fn transition_page_at_path(
         }
         error => ApiError::internal(format!("failed to read page: {error}")),
     })?;
-    if page.meta.id.to_string() != expected_uuid {
-        return Err(ApiError::not_found(format!(
-            "page moved while resolving id: {expected_uuid}"
-        )));
-    }
-
-    let current_revision = page_revision(&page.raw_content);
-    if current_revision != transition.expected_revision() {
-        return Err(ApiError::revision_conflict(current_revision));
-    }
+    check_identity(&page, Some(expected_uuid))?;
+    check_revision(&page, transition.expected_revision())?;
     match &transition {
         EncryptionTransition::Protect { .. } if page.is_encrypted() => {
             return Err(ApiError::bad_request("page is already protected"));
@@ -1059,12 +1051,7 @@ async fn transition_page_at_path(
     };
     meta.updated_at = Some(Utc::now());
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = super::mutation_notifier(&state);
     let result = match state
         .mutation_coordinator
         .update_page(
@@ -1079,30 +1066,17 @@ async fn transition_page_at_path(
                 project: ProjectAssignment::Unchanged,
                 reconcile: false,
             },
-            &notify,
+            notify.as_ref(),
         )
         .await
     {
         Ok(result) => result,
-        Err(MutationError::Stale(_)) => match fs::read_to_string(&abs_path) {
-            Ok(content) => {
-                if let Ok((current_meta, _)) = crate::vault::page::parse_frontmatter(&content)
-                    && current_meta.id.to_string() != expected_uuid
-                {
-                    return Err(ApiError::not_found(format!(
-                        "page moved while resolving id: {expected_uuid}"
-                    )));
-                }
-                return Err(ApiError::revision_conflict(page_revision(&content)));
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(ApiError::not_found(format!("page not found: {page_path}")));
-            }
-            Err(error) => {
-                return Err(ApiError::internal(format!("failed to read page: {error}")));
-            }
-        },
-        Err(error) => return Err(super::mutation_error(error)),
+        Err(error) => {
+            return Err(super::stale_to_revision_conflict(error, || async {
+                current_revision_after_stale(&abs_path, &page_path, Some(expected_uuid))
+            })
+            .await);
+        }
     };
 
     if transition.is_protection() {
@@ -1132,98 +1106,57 @@ async fn update_page_at_path(
         }
         error => ApiError::internal(format!("failed to read page: {error}")),
     })?;
-    if let Some(uuid) = expected_uuid
-        && page.meta.id.to_string() != uuid
-    {
-        return Err(ApiError::not_found(format!(
-            "page moved while resolving id: {uuid}"
-        )));
-    }
+    let command = plan_page_update(page, body, expected_uuid, state.clock.now())?;
 
-    let current_revision = page_revision(&page.raw_content);
-    if current_revision != body.expected_revision {
-        return Err(ApiError::revision_conflict(current_revision));
-    }
-
-    if page.is_encrypted()
-        && let Some(new_body) = body.body.as_deref()
-    {
-        validate_age_armor(new_body).map_err(|error| {
-            ApiError::bad_request(format!(
-                "protected page body must remain canonical age armor: {error}"
-            ))
-        })?;
-    }
-
-    let expected_content = page.raw_content;
-    let mut meta = page.meta;
-    let mut page_body = page.body;
-
-    if let Some(title) = body.title {
-        meta.title = Some(title);
-    }
-    if let Some(tags) = body.tags {
-        meta.tags = tags;
-    }
-    if let Some(aliases) = body.aliases {
-        meta.aliases = aliases;
-    }
-    if let Some(readonly) = body.readonly {
-        meta.readonly = Some(readonly);
-    }
-    if let Some(new_body) = body.body {
-        page_body = new_body;
-    }
-    meta.updated_at = Some(Utc::now());
-
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = super::mutation_notifier(&state);
     let result = match state
         .mutation_coordinator
         .update_page(
             &state.vault,
             &state.index,
             Arc::clone(&state.hooks),
-            UpdatePageCommand {
-                path: vault_path,
-                expected_content,
-                meta,
-                body: page_body,
-                project: ProjectAssignment::Unchanged,
-                reconcile: false,
-            },
-            &notify,
+            command,
+            notify.as_ref(),
         )
         .await
     {
         Ok(result) => result,
-        Err(MutationError::Stale(_)) => match fs::read_to_string(&abs_path) {
-            Ok(content) => {
-                if let Some(uuid) = expected_uuid
-                    && let Ok((current_meta, _)) = crate::vault::page::parse_frontmatter(&content)
-                    && current_meta.id.to_string() != uuid
-                {
-                    return Err(ApiError::not_found(format!(
-                        "page moved while resolving id: {uuid}"
-                    )));
-                }
-                return Err(ApiError::revision_conflict(page_revision(&content)));
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(ApiError::not_found(format!("page not found: {page_path}")));
-            }
-            Err(error) => {
-                return Err(ApiError::internal(format!("failed to read page: {error}")));
-            }
-        },
-        Err(error) => return Err(super::mutation_error(error)),
+        Err(error) => {
+            return Err(super::stale_to_revision_conflict(error, || async {
+                current_revision_after_stale(&abs_path, &page_path, expected_uuid)
+            })
+            .await);
+        }
     };
 
     Ok(Json(page_detail(result)))
+}
+
+/// The current revision of the page at `abs_path`, read after a stale write.
+/// A page that is gone, or that is no longer the page `expected_uuid` names,
+/// reads as not found.
+fn current_revision_after_stale(
+    abs_path: &std::path::Path,
+    page_path: &str,
+    expected_uuid: Option<&str>,
+) -> Result<String, ApiError> {
+    match fs::read_to_string(abs_path) {
+        Ok(content) => {
+            if let Some(uuid) = expected_uuid
+                && let Ok((current_meta, _)) = crate::vault::page::parse_frontmatter(&content)
+                && current_meta.id.to_string() != uuid
+            {
+                return Err(ApiError::not_found(format!(
+                    "page moved while resolving id: {uuid}"
+                )));
+            }
+            Ok(page_revision(&content))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(ApiError::not_found(format!("page not found: {page_path}")))
+        }
+        Err(error) => Err(ApiError::internal(format!("failed to read page: {error}"))),
+    }
 }
 
 #[utoipa::path(
@@ -1515,12 +1448,7 @@ pub async fn assign_page(
     }
     page.meta.updated_at = Some(Utc::now());
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = crate::api::mutation_notifier(&state);
     let result = state
         .mutation_coordinator
         .update_page(
@@ -1535,7 +1463,7 @@ pub async fn assign_page(
                 project,
                 reconcile: true,
             },
-            &notify,
+            notify.as_ref(),
         )
         .await
         .map_err(super::mutation_error)?;
@@ -1543,32 +1471,14 @@ pub async fn assign_page(
     Ok(Json(page_detail(result)))
 }
 
-fn read_assignment_page_once(
-    state: &AppState,
-    path: &VaultPath,
-    indexed_paths: &BTreeSet<String>,
-) -> Result<(String, PageMeta, String), ApiError> {
-    let expected = fs::read(state.vault.resolve(path)).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            if indexed_paths.contains(path.as_str()) {
-                ApiError::conflict(format!("page changed during mutation: {}", path.as_str()))
-            } else {
-                ApiError::not_found(format!("page not found: {}", path.as_str()))
-            }
-        } else {
-            ApiError::internal(format!("failed to read page {}: {error}", path.as_str()))
-        }
-    })?;
-    let expected = String::from_utf8(expected).map_err(|error| {
-        ApiError::internal(format!(
-            "failed to read page {} as UTF-8: {error}",
-            path.as_str()
-        ))
-    })?;
-    let (meta, body) = parse_frontmatter(&expected).map_err(|error| {
-        ApiError::internal(format!("failed to parse page {}: {error}", path.as_str()))
-    })?;
-    Ok((expected, meta, body))
+/// A missing file is a conflict for a page the index holds, and not found
+/// for one it does not.
+fn assignment_missing_file(indexed_paths: &BTreeSet<String>, path: &VaultPath) -> MissingFile {
+    if indexed_paths.contains(path.as_str()) {
+        MissingFile::Conflict
+    } else {
+        MissingFile::NotFound
+    }
 }
 
 fn collect_missing_assignment_directories(
@@ -1615,7 +1525,8 @@ fn plan_bulk_assignment(
     let mut pages = Vec::with_capacity(paths.len());
     for path in paths {
         let path = path.clone();
-        let (expected, meta, page_body) = read_assignment_page_once(state, &path, indexed_paths)?;
+        let (expected, meta, page_body) =
+            read_page_once(state, &path, assignment_missing_file(indexed_paths, &path))?;
         if let Some(kind) = assigned_kind {
             validate_kind_assignment(&path, &meta, kind)?;
         }
@@ -1794,7 +1705,7 @@ pub async fn assign_bulk(
 
     if body.kind.is_none() && body.project.is_none() && !body.clear_project {
         for path in &normalized_paths {
-            read_assignment_page_once(&state, path, &indexed_paths)?;
+            read_page_once(&state, path, assignment_missing_file(&indexed_paths, path))?;
         }
         return Ok(Json(BulkAssignResponse {
             moved: Vec::new(),

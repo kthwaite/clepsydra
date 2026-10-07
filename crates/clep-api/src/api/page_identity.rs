@@ -7,12 +7,14 @@
 //! on it, and when the attempt finds the page gone it looks the id up again:
 //! a new path means the page moved, so the attempt runs again there.
 //! [`page_path_by_id`] is the plain lookup, for handlers that need no retry.
+//! [`read_page_once`] reads a page whose bytes guard a later write.
 
 use std::future::Future;
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
 use crate::vault::kind::Kind;
+use crate::vault::page::{PageMeta, parse_frontmatter};
 use crate::vault::path::VaultPath;
 
 /// How many paths [`resolve_stable_by_id`] tries before it gives up.
@@ -55,6 +57,61 @@ impl From<ApiError> for AttemptError {
     fn from(error: ApiError) -> Self {
         Self::Failed(error)
     }
+}
+
+/// Outside a retry, a vanished page is just its error.
+impl From<AttemptError> for ApiError {
+    fn from(error: AttemptError) -> Self {
+        match error {
+            AttemptError::Vanished(error) | AttemptError::Failed(error) => error,
+        }
+    }
+}
+
+/// What a missing file means to [`read_page_once`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MissingFile {
+    /// The index holds the page, so it changed under the mutation: 409.
+    Conflict,
+    /// The page does not exist: 404.
+    NotFound,
+}
+
+/// Read the page at `path` once: its raw content (the stale-write guard),
+/// meta and body. A missing file is [`AttemptError::Vanished`] with the
+/// `missing` policy's error; every other failure is a 500.
+pub(crate) fn read_page_once(
+    state: &AppState,
+    path: &VaultPath,
+    missing: MissingFile,
+) -> Result<(String, PageMeta, String), AttemptError> {
+    let expected = std::fs::read(state.vault.resolve(path)).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            AttemptError::Vanished(match missing {
+                MissingFile::Conflict => {
+                    ApiError::conflict(format!("page changed during mutation: {}", path.as_str()))
+                }
+                MissingFile::NotFound => {
+                    ApiError::not_found(format!("page not found: {}", path.as_str()))
+                }
+            })
+        } else {
+            AttemptError::Failed(ApiError::internal(format!(
+                "failed to read page {}: {error}",
+                path.as_str()
+            )))
+        }
+    })?;
+    let expected = String::from_utf8(expected).map_err(|error| {
+        ApiError::internal(format!(
+            "failed to read page {} as UTF-8: {error}",
+            path.as_str()
+        ))
+    })?;
+    let (meta, body) = parse_frontmatter(&expected).map_err(|error| {
+        ApiError::internal(format!("failed to parse page {}: {error}", path.as_str()))
+    })?;
+    Ok((expected, meta, body))
 }
 
 /// The indexed path of the page with this `id`, or `None`. With `kind`, a
@@ -347,6 +404,49 @@ mod tests {
             format!("page path did not stabilize for id: {ID}")
         );
         assert_eq!(*calls.lock(), BY_ID_PATH_ATTEMPTS);
+    }
+
+    #[tokio::test]
+    async fn read_page_once_returns_the_guard_bytes_meta_and_body() {
+        let fixture = fixture().await;
+        let path = VaultPath::new("notes/a.md").unwrap();
+        let (expected, meta, body) =
+            read_page_once(&fixture.state, &path, MissingFile::Conflict).unwrap();
+        assert_eq!(
+            expected,
+            fs::read_to_string(fixture.state.vault.resolve(&path)).unwrap()
+        );
+        assert_eq!(meta.id.to_string(), ID);
+        assert_eq!(body, "body\n");
+    }
+
+    #[tokio::test]
+    async fn read_page_once_applies_the_missing_file_policy() {
+        let fixture = fixture().await;
+        let path = VaultPath::new("notes/gone.md").unwrap();
+        for (missing, status, message) in [
+            (
+                MissingFile::Conflict,
+                409,
+                "page changed during mutation: notes/gone.md",
+            ),
+            (MissingFile::NotFound, 404, "page not found: notes/gone.md"),
+        ] {
+            let Err(AttemptError::Vanished(error)) = read_page_once(&fixture.state, &path, missing)
+            else {
+                panic!("a missing file is a vanished page");
+            };
+            assert_eq!(error.status, status);
+            assert_eq!(error.error, message);
+        }
+    }
+
+    #[test]
+    fn an_attempt_error_unwraps_to_its_api_error() {
+        let error: ApiError = AttemptError::Vanished(ApiError::conflict("x")).into();
+        assert_eq!(error.status, 409);
+        let error: ApiError = AttemptError::Failed(ApiError::bad_request("y")).into();
+        assert_eq!(error.status, 400);
     }
 
     #[test]

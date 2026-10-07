@@ -17,16 +17,13 @@ use super::AppState;
 use super::error::ApiError;
 use super::page_identity::{AttemptError, PathLock, resolve_stable_by_id};
 use super::pagination::{PaginatedResponse, PaginationParams};
-use crate::api::events::SyncNotification;
 use crate::vault::academic::{
     AnnotationMeta, AnnotationType, ExternalIds, ReadingStatus, SourceLocation, WorkMeta, WorkType,
     WorkUrls, annotation_meta_to_extra, extra_to_annotation_meta, extra_to_work_meta,
     work_meta_to_extra,
 };
 use crate::vault::canonical::CanonicalName;
-use crate::vault::mutation_coordinator::{
-    CreatePageCommand, MutationNotification, ProjectAssignment, UpdatePageCommand,
-};
+use crate::vault::mutation_coordinator::{CreatePageCommand, ProjectAssignment, UpdatePageCommand};
 use crate::vault::page::{Page, PageMeta, parse_frontmatter};
 
 // ---------------------------------------------------------------------------
@@ -435,12 +432,7 @@ async fn mutate_academic_page(
     let (mut meta, mut body) = parse_frontmatter(&expected_content)
         .map_err(|error| ApiError::internal(format!("Failed to parse page: {error}")))?;
     mutate(&mut meta, &mut body)?;
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = crate::api::mutation_notifier(state);
     let result = state
         .mutation_coordinator
         .update_page(
@@ -455,7 +447,7 @@ async fn mutate_academic_page(
                 project: ProjectAssignment::Unchanged,
                 reconcile: false,
             },
-            &notify,
+            notify.as_ref(),
         )
         .await
         .map_err(super::mutation_error)?;
@@ -1645,12 +1637,7 @@ pub async fn update_work(
     meta.extra = work_meta_to_extra(&wm);
     meta.updated_at = Some(Utc::now());
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = crate::api::mutation_notifier(&state);
     state
         .mutation_coordinator
         .update_page(
@@ -1665,7 +1652,7 @@ pub async fn update_work(
                 project: ProjectAssignment::Unchanged,
                 reconcile: false,
             },
-            &notify,
+            notify.as_ref(),
         )
         .await
         .map_err(super::mutation_error)?;

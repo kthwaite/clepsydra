@@ -1,7 +1,6 @@
 //! Cycle mutations: `POST /board/cycles` and `PATCH /board/cycles/{id}`,
 //! including the seal-with-carryover flow.
 
-use std::fs;
 use std::sync::Arc;
 
 use axum::Json;
@@ -12,12 +11,14 @@ use chrono::{DateTime, Utc};
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
-use crate::api::page_identity::{AttemptError, PathLock, resolve_stable_by_id};
+use crate::api::page_identity::{
+    AttemptError, MissingFile, PathLock, read_page_once, resolve_stable_by_id,
+};
 use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
 use crate::vault::code::{self, CodeFamily};
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::CreatePageCommand;
-use crate::vault::page::{PageMeta, parse_frontmatter, write_page_content};
+use crate::vault::page::{PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 use crate::vault::sync::ChangeEvent;
 use crate::vault::task_history::heal_task_update;
@@ -135,29 +136,6 @@ pub(crate) async fn create_cycle(
 // PATCH /board/cycles/{id}
 // ---------------------------------------------------------------------------
 
-fn read_indexed_page_once(
-    state: &AppState,
-    path: &VaultPath,
-) -> Result<(String, PageMeta, String), ApiError> {
-    let expected = fs::read(state.vault.resolve(path)).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            ApiError::conflict(format!("page changed during mutation: {}", path.as_str()))
-        } else {
-            ApiError::internal(format!("failed to read page {}: {error}", path.as_str()))
-        }
-    })?;
-    let expected = String::from_utf8(expected).map_err(|error| {
-        ApiError::internal(format!(
-            "failed to read page {} as UTF-8: {error}",
-            path.as_str()
-        ))
-    })?;
-    let (meta, body) = parse_frontmatter(&expected).map_err(|error| {
-        ApiError::internal(format!("failed to parse page {}: {error}", path.as_str()))
-    })?;
-    Ok((expected, meta, body))
-}
-
 /// The batch that executes a Cycle plan: the Cycle's own write, then one
 /// write per carried-over Task. Each Task is read once here; its bytes are
 /// the stale-write guard.
@@ -186,7 +164,8 @@ fn cycle_batch(
         for task_path in &carry.task_paths {
             let path =
                 crate::api::error::parse_internal_path(task_path, "invalid indexed task path")?;
-            let (expected, mut meta, page_body) = read_indexed_page_once(state, &path)?;
+            let (expected, mut meta, page_body) =
+                read_page_once(state, &path, MissingFile::Conflict)?;
             carry_task(&mut meta, carry.to.as_deref(), now);
             heal_task_update(&path, &expected, &mut meta).map_err(ApiError::bad_request)?;
             upserted.push(path.clone());
@@ -250,13 +229,7 @@ async fn patch_cycle_at(
     patch: &CyclePatch,
 ) -> Result<VaultPath, AttemptError> {
     // 1. Read once: the bytes double as the stale-write guard.
-    if !state.vault.resolve(&cycle_path).exists() {
-        return Err(AttemptError::Vanished(ApiError::conflict(format!(
-            "page changed during mutation: {}",
-            cycle_path.as_str()
-        ))));
-    }
-    let (expected, meta, body) = read_indexed_page_once(state, &cycle_path)?;
+    let (expected, meta, body) = read_page_once(state, &cycle_path, MissingFile::Conflict)?;
 
     // 2. Plan.
     let lookups = BoardLookups::load(state).await?;
