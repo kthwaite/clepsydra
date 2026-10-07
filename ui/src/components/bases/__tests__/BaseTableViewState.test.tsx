@@ -22,11 +22,9 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 import type { BaseDetailResponse, QueryOutput } from "#/api/bases";
-import {
-  BaseTableView,
-  type BaseTableViewProps,
-} from "#/components/bases/BaseTableView";
+import { BaseTableView } from "#/components/bases/BaseTableView";
 import { EMPTY_OVERRIDES } from "#/components/bases/view-overrides";
+import { type FlatViewProps, viewProps } from "./flat-view-props";
 
 const definition: BaseDetailResponse = {
   slug: "reading",
@@ -79,8 +77,8 @@ const grouped: QueryOutput = {
 
 const GROUPS_KEY = "clepsydra.bases.groups.reading.shelf.status";
 
-function renderView(overrides: Partial<BaseTableViewProps> = {}) {
-  const props: BaseTableViewProps = {
+function renderView(overrides: Partial<FlatViewProps> = {}) {
+  const props: FlatViewProps = {
     definition,
     activeView: "Shelf",
     onViewChange: vi.fn(),
@@ -91,7 +89,7 @@ function renderView(overrides: Partial<BaseTableViewProps> = {}) {
     onCommitCell: vi.fn(),
     ...overrides,
   };
-  return render(<BaseTableView {...props} />);
+  return render(<BaseTableView {...viewProps({ ...props })} />);
 }
 
 beforeEach(() => {

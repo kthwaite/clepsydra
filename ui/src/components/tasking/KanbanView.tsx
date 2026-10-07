@@ -34,7 +34,12 @@ import {
 } from "#/store/board";
 import { Tick } from "../codex/Tick";
 import { indexByCode } from "./blockers";
-import { type ColLabelFn, PRI_ORDER } from "./board-constants";
+import {
+  type ColLabelFn,
+  isDone,
+  PRI_ORDER,
+  statusLook,
+} from "./board-constants";
 import { QuickAddRow } from "./QuickAddRow";
 import { useStartWarning } from "./StartWarning";
 import { TaskCard } from "./TaskCard";
@@ -59,8 +64,8 @@ export function visibleInKanban(
   );
 
   return tasks.filter((t) => {
-    if (t.status !== "SEALED") return true;
-    // SEALED: exclude if its cycle is closed
+    if (!isDone(t.status)) return true;
+    // Done: exclude if its cycle is closed
     if (t.cycle && closedCycleCodes.has(t.cycle)) return false;
     return true;
   });
@@ -89,9 +94,6 @@ function getTaskCardDragData(
     status: data.status,
   };
 }
-
-/** Inbox and Done are the board's quiet ends: their ticks are faint. */
-const FAINT_COLUMNS = new Set(["INTAKE", "SEALED"]);
 
 // ── column resize handle ─────────────────────────────────────────────────────
 
@@ -315,7 +317,7 @@ export function KanbanView({
               className="sticky top-0 z-[2] flex h-11 shrink-0 items-center gap-2 bg-ground px-3"
               data-testid={`kb-head-${col.id}`}
             >
-              <Tick variant={FAINT_COLUMNS.has(col.id) ? "faint" : "live"} />
+              <Tick variant={statusLook(col.id).faint ? "faint" : "live"} />
               <span className="whitespace-nowrap font-serif text-[19px] italic text-ink">
                 {displayLabel}
               </span>

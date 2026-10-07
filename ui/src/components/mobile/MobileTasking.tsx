@@ -7,7 +7,9 @@ import {
 import {
   COL_LABEL,
   COL_ORDER,
+  DEFAULT_STATUS,
   fmtCycleWindow,
+  isDone,
   priColor,
 } from "#/components/tasking/board-constants";
 import { deriveProjectScopes } from "#/components/tasking/board-projects";
@@ -32,7 +34,7 @@ function dueLabel(due: string, today: string): string {
 
 function firstStatus(groups: Record<BoardStatus, BoardTask[]>): BoardStatus {
   if (groups.TRIAGE.length > 0) return "TRIAGE";
-  return COL_ORDER.find((s) => groups[s].length > 0) ?? "INTAKE";
+  return COL_ORDER.find((s) => groups[s].length > 0) ?? DEFAULT_STATUS;
 }
 
 function TaskCard({ task, today }: { task: BoardTask; today: string }) {
@@ -101,7 +103,7 @@ export function MobileTasking() {
 
   const cycle = data?.cycles.find((c) => c.state === "ACTIVE");
   const cycleTasks = cycle ? scoped.filter((t) => t.cycle === cycle.code) : [];
-  const cycleDone = cycleTasks.filter((t) => t.status === "SEALED").length;
+  const cycleDone = cycleTasks.filter((t) => isDone(t.status)).length;
 
   const submit = () => {
     const title = draft.trim();

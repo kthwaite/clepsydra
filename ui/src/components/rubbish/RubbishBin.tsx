@@ -14,6 +14,7 @@ import {
 import { PreviewMarkdown } from "#/components/codex/PreviewMarkdown";
 import { Tick } from "#/components/codex/Tick";
 import { FilterBar } from "#/components/filters/FilterBar";
+import { RUBBISH_FACETS } from "#/components/rubbish/rubbishFacets";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
@@ -22,10 +23,10 @@ import { cn } from "#/lib/cn";
 import {
   applyClientFilter,
   EMPTY_FILTER_STATE,
-  type FilterField,
   type FilterState,
   isFilterActive,
 } from "#/lib/filters/model";
+import { facetFields } from "#/lib/filters/route";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { KINDS, type Kind, kindDisplayLabel } from "#/lib/kind";
 import { formatCapturedAt } from "#/lib/time";
@@ -216,16 +217,11 @@ export function RubbishBin({
     ? (validItems.find((item) => item.item_id === selectedId) ?? null)
     : null;
 
-  const filterFields: FilterField[] = [
-    {
-      id: "kind",
-      kind: "single",
-      label: "Kind",
-      options: [...new Set(validItems.map((item) => item.kind))]
-        .sort()
-        .map((value) => ({ value, label: kindText(value) })),
-    },
-  ];
+  const filterFields = facetFields(RUBBISH_FACETS, {
+    kind: [...new Set(validItems.map((item) => item.kind))]
+      .sort()
+      .map((value) => ({ value, label: kindText(value) })),
+  });
 
   const filterActive = isFilterActive(filterState);
   const filteredValidEntries = applyClientFilter(validEntries, filterState, {

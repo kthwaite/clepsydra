@@ -27,6 +27,7 @@ import { useBoardStore } from "#/store/board";
 import {
   COL_ORDER,
   type ColLabelFn,
+  isDone,
   PRI_LABEL,
   PRI_ORDER,
   PriChip,
@@ -177,7 +178,7 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
             {g.items.map((t) => {
               const { done, total } = checklistProgress(t.checks);
               const selected = t.id === editTaskId;
-              const sealed = t.status === "SEALED";
+              const sealed = isDone(t.status);
 
               return (
                 <div

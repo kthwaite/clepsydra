@@ -72,7 +72,7 @@ export function BaseTable({
     },
     [onViewChange, requestedView, slug],
   );
-  const controller = useBaseTableController({
+  const model = useBaseTableController({
     mode: "standalone",
     slug,
     activeView,
@@ -80,18 +80,6 @@ export function BaseTable({
     onViewChange: handleViewChange,
     onSortChange: setSort,
   });
-  const { detailLoading, detailMissing, definition, ...viewProps } = controller;
 
-  if (detailLoading) {
-    return <p className="p-4 text-[13px] text-mute">Loading…</p>;
-  }
-  if (detailMissing || !definition) {
-    return (
-      <p className="p-4 text-[13px] text-mute">
-        No base named “{slug}” (or it declares no views).
-      </p>
-    );
-  }
-
-  return <BaseTableView definition={definition} screen {...viewProps} />;
+  return <BaseTableView model={model} screen />;
 }

@@ -29,8 +29,8 @@ import {
   BOARD_FILTER_CONFIG,
   filterTasks,
   TaskingScreen,
-  TYPE_FILTER_OPTIONS,
 } from "../TaskingScreen";
+import { TYPE_FILTER_OPTIONS } from "../taskingFacets";
 import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_NO_SLUG_OP,
