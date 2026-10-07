@@ -8,6 +8,7 @@ import { usePreviewBase } from "#/api/bases";
 import { formatApiError } from "#/api/error";
 import { Button } from "#/components/ui/button";
 import { BaseTableView } from "./BaseTableView";
+import { readOnlyModel } from "./base-table-model";
 import { DefinitionSectionHeading } from "./DefinitionHeader";
 import { type BaseDraft, toWire } from "./definition-model";
 import { diagnosticRows } from "./diagnostic-rows";
@@ -208,15 +209,11 @@ export function BasePreview({
         {!loading && output && !empty && errorMessages.length === 0 ? (
           <div className="mt-4 overflow-x-auto">
             <BaseTableView
-              definition={displayDefinition}
-              activeView={displayView.name}
-              onViewChange={() => undefined}
-              output={output}
-              sort={undefined}
-              onSortChange={() => undefined}
-              onOpenPage={() => undefined}
-              onCommitCell={() => undefined}
-              readOnly
+              model={readOnlyModel({
+                definition: displayDefinition,
+                activeView: displayView.name,
+                output,
+              })}
             />
           </div>
         ) : null}
