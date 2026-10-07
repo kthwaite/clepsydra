@@ -16,16 +16,13 @@ import {
   Suspense,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import {
   type Descendant,
   Editor,
-  type Range,
   Element as SlateElement,
   Transforms,
 } from "slate";
@@ -75,6 +72,7 @@ import { Section } from "#/components/codex/Section";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useEmbedTocExpander } from "#/components/codex/useEmbedTocExpander";
 import { useFolioMode } from "#/components/codex/useFolioMode";
+import { useFolioRestoration } from "#/components/codex/useFolioRestoration";
 import { useReadingColumn } from "#/components/codex/useReadingColumn";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { KindIcon } from "#/components/KindIcon";
@@ -126,19 +124,6 @@ import {
   FOLIO_RIGHT_RAIL,
   useFolioRails,
 } from "#/store/folioRails";
-import {
-  clearFolioRestoration,
-  consumeFolioHistoryRestorationRequest,
-  type FolioRestoration,
-  readFolioHistoryRestorationRequest,
-  readFolioHistoryRestorationRequestId,
-  readFolioRestoration,
-  registerFolioHistoryCapture,
-  saveFolioRestoration,
-  snapshotTextPoint,
-  subscribeFolioHistoryRestorationRequests,
-  validateTextPointSnapshot,
-} from "#/store/folioRestoration";
 import { useFooterContext } from "#/store/footerContext";
 import { quireColorVar } from "#/store/quires";
 import {
@@ -352,10 +337,6 @@ export function Folio({ tabId, path }: FolioProps) {
     (state) => state.tabs.find((tab) => tab.id === tabId)?.focusRequestId,
   );
   const takeTabFocus = useWorkspaceStore((state) => state.takeTabFocus);
-  const pendingHistoryLocationId = useSyncExternalStore(
-    subscribeFolioHistoryRestorationRequests,
-    () => readFolioHistoryRestorationRequestId(tabId, path),
-  );
   useEffect(() => {
     if (editor.pageId) setTabPageId(tabId, editor.pageId);
   }, [editor.pageId, setTabPageId, tabId]);
@@ -405,89 +386,6 @@ export function Folio({ tabId, path }: FolioProps) {
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [organizationOpen, setOrganizationOpen] = useState(false);
   const folioEditorRef = useRef<CustomEditor | null>(null);
-  const lastMountedFolioEditorRef = useRef<CustomEditor | null>(null);
-  const rawMarkdownSessionRef = useRef<RawMarkdownSession | null>(null);
-  const restorationStateRef = useRef<{
-    tabId: string;
-    path: string;
-    available: boolean;
-    getRevision: () => string;
-  } | null>(null);
-  const consumedHistoryLocationIdRef = useRef<string | null>(null);
-
-  const buildRestorationSnapshot = useCallback((): FolioRestoration | null => {
-    const state = restorationStateRef.current;
-    const slateEditor =
-      folioEditorRef.current ?? lastMountedFolioEditorRef.current;
-    const scrollContainer = bodyRef.current;
-    if (
-      !state ||
-      state.tabId !== tabId ||
-      state.path !== path ||
-      !state.available ||
-      !slateEditor ||
-      !scrollContainer
-    ) {
-      return null;
-    }
-
-    const selection = slateEditor.selection;
-    return {
-      tabId,
-      path,
-      revision: state.getRevision(),
-      scrollTop: scrollContainer.scrollTop,
-      anchor: selection
-        ? snapshotTextPoint(slateEditor, selection.anchor)
-        : null,
-      focus: selection ? snapshotTextPoint(slateEditor, selection.focus) : null,
-    };
-  }, [path, tabId]);
-
-  useLayoutEffect(
-    () => registerFolioHistoryCapture(tabId, path, buildRestorationSnapshot),
-    [buildRestorationSnapshot, path, tabId],
-  );
-
-  // An in-place SlateEditor remount (external content adopt, conflict reload,
-  // unlock) destroys the caret. Snapshot selection and focus as the old
-  // instance unmounts so the editorRevision-keyed restore effect below can
-  // hand them back. bodyRef being empty means the whole folio is unmounting —
-  // the folio-level unmount save owns that case (and never records focus, so
-  // returning to a tab cannot steal it).
-  const handleEditorSwapSnapshot = useCallback(
-    (slateEditor: CustomEditor) => {
-      const scrollContainer = bodyRef.current;
-      if (!scrollContainer) return;
-      // Entering raw Markdown mode also unmounts the editor; the raw session
-      // owns caret state until it exits, so no snapshot belongs there.
-      if (rawMarkdownSessionRef.current) return;
-      const state = restorationStateRef.current;
-      if (
-        !state ||
-        state.tabId !== tabId ||
-        state.path !== path ||
-        !state.available
-      ) {
-        return;
-      }
-      const selection = slateEditor.selection;
-      saveFolioRestoration({
-        tabId,
-        path,
-        revision: state.getRevision(),
-        scrollTop: scrollContainer.scrollTop,
-        anchor: selection
-          ? snapshotTextPoint(slateEditor, selection.anchor)
-          : null,
-        focus: selection
-          ? snapshotTextPoint(slateEditor, selection.focus)
-          : null,
-        hadFocus: ReactEditor.isFocused(slateEditor),
-      });
-    },
-    [path, tabId],
-  );
   const {
     conversationMode,
     setConversationMode,
@@ -498,7 +396,6 @@ export function Folio({ tabId, path }: FolioProps) {
   } = useFolioMode(path);
   const [rawMarkdownSession, setRawMarkdownSession] =
     useState<RawMarkdownSession | null>(null);
-  rawMarkdownSessionRef.current = rawMarkdownSession;
   useEffect(() => {
     setRawMarkdownSession((current) => {
       if (
@@ -603,6 +500,15 @@ export function Folio({ tabId, path }: FolioProps) {
     encryptionStatus: encryptionState.status,
     journalTodayPending,
     rawSessionOpen: rawMarkdownSession !== null,
+  });
+  const { onEditorUnmount } = useFolioRestoration({
+    tabId,
+    path,
+    available: restorationAvailable,
+    rawSessionOpen: rawMarkdownSession !== null,
+    editor,
+    bodyRef,
+    folioEditorRef,
   });
   const folioProperties = (
     <FolioProperties
@@ -746,158 +652,6 @@ export function Folio({ tabId, path }: FolioProps) {
     });
   };
 
-  restorationStateRef.current = {
-    tabId,
-    path,
-    available: restorationAvailable,
-    getRevision: editor.getRevision,
-  };
-
-  useEffect(() => {
-    // A revision change can swap the mounted Slate editor without changing this effect's direct inputs.
-    void editor.editorRevision;
-    if (folioEditorRef.current) {
-      lastMountedFolioEditorRef.current = folioEditorRef.current;
-    }
-  }, [editor.editorRevision]);
-
-  useEffect(() => {
-    if (!editor.isLoading && !restorationAvailable) {
-      clearFolioRestoration(tabId);
-    }
-  }, [editor.isLoading, restorationAvailable, tabId]);
-
-  useLayoutEffect(
-    () => () => {
-      const currentTab = useWorkspaceStore
-        .getState()
-        .tabs.find((tab) => tab.id === tabId);
-      if (currentTab?.path !== path) {
-        clearFolioRestoration(tabId);
-        return;
-      }
-
-      const restoration = buildRestorationSnapshot();
-      if (!restoration) {
-        clearFolioRestoration(tabId);
-        return;
-      }
-      saveFolioRestoration(restoration);
-    },
-    [buildRestorationSnapshot, path, tabId],
-  );
-
-  useLayoutEffect(() => {
-    // A revision change remounts the keyed Slate editor and must retry any captured restoration.
-    void editor.editorRevision;
-    if (
-      pendingHistoryLocationId === null &&
-      consumedHistoryLocationIdRef.current !== null
-    ) {
-      consumedHistoryLocationIdRef.current = null;
-      return;
-    }
-    const historyRequest = readFolioHistoryRestorationRequest(tabId, path);
-    if (!restorationAvailable) {
-      if (!editor.isLoading && editor.pageNotFound && historyRequest) {
-        consumeFolioHistoryRestorationRequest(
-          historyRequest.request.locationId,
-        );
-      }
-      return;
-    }
-
-    const restoration = historyRequest
-      ? historyRequest.restoration
-      : readFolioRestoration(tabId, path);
-    if (!historyRequest && !restoration) return;
-
-    const frame = requestAnimationFrame(() => {
-      const state = restorationStateRef.current;
-      if (
-        !state ||
-        state.tabId !== tabId ||
-        state.path !== path ||
-        !state.available
-      ) {
-        if (
-          historyRequest &&
-          state &&
-          (state.tabId !== tabId || state.path !== path)
-        ) {
-          consumeFolioHistoryRestorationRequest(
-            historyRequest.request.locationId,
-          );
-        }
-        return;
-      }
-
-      const slateEditor = folioEditorRef.current;
-      const scrollContainer = bodyRef.current;
-      if (!slateEditor || !scrollContainer) return;
-
-      if (restoration) {
-        const requireTextMatch = restoration.revision !== editor.getRevision();
-        let selection: Range | null = null;
-        if (restoration.anchor && restoration.focus) {
-          const anchor = validateTextPointSnapshot(
-            slateEditor,
-            restoration.anchor,
-            requireTextMatch,
-          );
-          const focus = validateTextPointSnapshot(
-            slateEditor,
-            restoration.focus,
-            requireTextMatch,
-          );
-          if (anchor && focus) selection = { anchor, focus };
-        }
-
-        scrollContainer.scrollTop = restoration.scrollTop;
-        if (selection) Transforms.select(slateEditor, selection);
-        if (restoration.hadFocus) {
-          // The user was typing in the swapped-out instance; hand the caret
-          // back. When the saved points no longer fit the adopted content,
-          // fall back to the end of the document rather than dropping focus.
-          if (!selection) {
-            Transforms.select(slateEditor, Editor.end(slateEditor, []));
-          }
-          ReactEditor.focus(slateEditor);
-        }
-      }
-
-      if (historyRequest) {
-        consumedHistoryLocationIdRef.current =
-          historyRequest.request.locationId;
-        consumeFolioHistoryRestorationRequest(
-          historyRequest.request.locationId,
-        );
-      }
-    });
-
-    return () => {
-      cancelAnimationFrame(frame);
-      const state = restorationStateRef.current;
-      if (
-        historyRequest &&
-        state &&
-        (state.tabId !== tabId || state.path !== path)
-      ) {
-        consumeFolioHistoryRestorationRequest(
-          historyRequest.request.locationId,
-        );
-      }
-    };
-  }, [
-    editor.editorRevision,
-    editor.getRevision,
-    editor.isLoading,
-    pendingHistoryLocationId,
-    editor.pageNotFound,
-    path,
-    restorationAvailable,
-    tabId,
-  ]);
   const computedTags = useMemo(
     () => [...new Set(editor.computedTags)],
     [editor.computedTags],
@@ -1248,7 +1002,7 @@ export function Folio({ tabId, path }: FolioProps) {
                       journalDateFromPath(path) ?? aiJournalDateFromPath(path)
                     }
                     editorRef={folioEditorRef}
-                    onUnmountSnapshot={handleEditorSwapSnapshot}
+                    onUnmountSnapshot={onEditorUnmount}
                   />
                 </BaseRenderingProvider>
               </ConversationPresentationProvider>

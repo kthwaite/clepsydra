@@ -84,7 +84,7 @@ export interface GeneratedChangeSession {
   ): Promise<void>;
 }
 
-interface PageEditorState {
+export interface PageEditorState {
   isLoading: boolean;
   error: unknown;
   /** True when the page query settled on a 404 — the one case where an error
