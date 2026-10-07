@@ -364,7 +364,7 @@ describe("TagInput", () => {
     ).toBeNull();
   });
 
-  it("commits the raw draft on Enter while suggestions are open", async () => {
+  it("completes the highlighted suggestion on Enter, like Tab", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(
@@ -383,6 +383,58 @@ describe("TagInput", () => {
     await user.keyboard("{Enter}");
 
     expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith(["research"]);
+  });
+
+  it("prefers an exact match over the first suggestion on Enter and Tab", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["artifact", "art"]}
+        onChange={onChange}
+      />,
+    );
+
+    const input = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(input, "art");
+    expect(screen.getByRole("option", { name: "art" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await user.keyboard("{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith(["art"]);
+
+    rerender(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["artifact", "art"]}
+        onChange={onChange}
+      />,
+    );
+    await user.type(input, "ART");
+    await user.keyboard("{Tab}");
+    expect(onChange).toHaveBeenLastCalledWith(["art"]);
+  });
+
+  it("creates the raw draft on Enter after Escape closes the suggestions", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["research", "react"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "re");
+    await user.keyboard("{Escape}{Enter}");
+
     expect(onChange).toHaveBeenCalledWith(["re"]);
   });
 
