@@ -6,7 +6,7 @@ import type { PageEditorState } from "#/editor/usePageEditor";
 import { registerFolioHistoryTraversalGuard } from "#/hooks/useFolioHistoryNavigation";
 import { registerWorkspaceTransitionGuard } from "#/store/workspace";
 
-export type RawMarkdownSession = {
+type RawMarkdownSession = {
   path: string;
   entryRevision: string;
   snapshot: string;
