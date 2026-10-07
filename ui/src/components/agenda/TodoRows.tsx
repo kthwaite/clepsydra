@@ -2,6 +2,7 @@ import { usePatchTask } from "#/api/board";
 import { useToggleTaskStatus } from "#/api/tasks";
 import {
   COL_ORDER,
+  isDone,
   PRI_LABEL,
   taskStatusLabel,
 } from "#/components/tasking/board-constants";
@@ -147,9 +148,7 @@ export function TaskRow({
       {!stacked && status}
 
       <div className="min-w-0 flex-1">
-        <span className={titleClass(task.status === "SEALED")}>
-          {task.title}
-        </span>
+        <span className={titleClass(isDone(task.status))}>{task.title}</span>
 
         <div className={META}>
           <Badge size="sm">{task.code}</Badge>

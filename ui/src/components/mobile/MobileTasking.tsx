@@ -9,6 +9,7 @@ import {
   COL_ORDER,
   DEFAULT_STATUS,
   fmtCycleWindow,
+  isDone,
   priColor,
 } from "#/components/tasking/board-constants";
 import { deriveProjectScopes } from "#/components/tasking/board-projects";
@@ -102,7 +103,7 @@ export function MobileTasking() {
 
   const cycle = data?.cycles.find((c) => c.state === "ACTIVE");
   const cycleTasks = cycle ? scoped.filter((t) => t.cycle === cycle.code) : [];
-  const cycleDone = cycleTasks.filter((t) => t.status === "SEALED").length;
+  const cycleDone = cycleTasks.filter((t) => isDone(t.status)).length;
 
   const submit = () => {
     const title = draft.trim();
