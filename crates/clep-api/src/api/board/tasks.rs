@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
-use crate::api::page_identity::{AttemptError, PathLock, resolve_stable_by_id};
+use crate::api::page_identity::{AttemptError, mutate_stable_by_id};
 use crate::vault::code::CodeFamily;
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::CreatePageCommand;
@@ -122,11 +122,10 @@ pub(crate) async fn patch_task(
     Json(body): Json<PatchTaskRequest>,
 ) -> Result<Json<BoardTask>, ApiError> {
     let patch = TaskPatch::from(body);
-    let result = resolve_stable_by_id(
+    let result = mutate_stable_by_id(
         &state,
         &id,
         Some(Kind::Task),
-        PathLock::Release,
         || ApiError::not_found(format!("task not found with id: {id}")),
         |vault_path| patch_task_at(&state, vault_path, &patch),
     )

@@ -5396,6 +5396,32 @@ async fn create_and_list_annotations() {
     assert_eq!(body[0]["annotation_type"], "highlight");
 }
 
+/// The work check is the index's: an annotation only records the work's
+/// path, so a work whose file is gone but which is still indexed still takes
+/// annotations.
+#[tokio::test]
+async fn create_annotation_trusts_the_indexed_work_without_reading_its_file() {
+    let (server, tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({ "work_type": "paper", "title": "Vanished Paper" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let work: serde_json::Value = res.json();
+    let work_id = work["id"].as_str().unwrap();
+    let work_path = work["path"].as_str().unwrap();
+    fs::remove_file(tmp.path().join("vault").join(work_path)).unwrap();
+
+    let res = server
+        .post("/api/vault/academic/annotations")
+        .json(&serde_json::json!({ "work_id": work_id, "body": "still annotatable" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let ann: serde_json::Value = res.json();
+    assert_eq!(ann["work_path"], work_path);
+}
+
 #[tokio::test]
 async fn move_folder_updates_annotation_work_paths_for_moved_works() {
     let (server, _tmp) = setup_server();

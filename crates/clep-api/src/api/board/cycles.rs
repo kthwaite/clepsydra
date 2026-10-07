@@ -11,9 +11,7 @@ use chrono::{DateTime, Utc};
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
-use crate::api::page_identity::{
-    AttemptError, MissingFile, PathLock, read_page_once, resolve_stable_by_id,
-};
+use crate::api::page_identity::{AttemptError, MissingFile, mutate_stable_by_id, read_page_once};
 use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
 use crate::vault::code::{self, CodeFamily};
 use crate::vault::kind::Kind;
@@ -208,11 +206,10 @@ pub(crate) async fn patch_cycle(
     Json(body): Json<PatchCycleRequest>,
 ) -> Result<Json<BoardCycle>, ApiError> {
     let patch = CyclePatch::try_from(body).map_err(ApiError::from)?;
-    let cycle_path = resolve_stable_by_id(
+    let cycle_path = mutate_stable_by_id(
         &state,
         &id,
         Some(Kind::Cycle),
-        PathLock::Release,
         || ApiError::not_found(format!("cycle not found with id: {id}")),
         |cycle_path| patch_cycle_at(&state, cycle_path, &patch),
     )

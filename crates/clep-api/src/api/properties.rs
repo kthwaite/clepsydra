@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use super::AppState;
 use super::error::ApiError;
-use super::page_identity::{AttemptError, PathLock, resolve_stable_by_id};
+use super::page_identity::{AttemptError, mutate_stable_by_id};
 use crate::vault::attendance;
 use crate::vault::base::{
     BODY_COLUMN, BaseDefinition, BaseRegistry, Filter, Op, PropertyDefinition, PropertyType,
@@ -445,11 +445,10 @@ pub async fn get_page_base_properties(
 ) -> Result<Json<PageBasePropertiesResponse>, ApiError> {
     let uuid = Uuid::parse_str(&uuid).map_err(|_| ApiError::bad_request("malformed page UUID"))?;
     let page_id = uuid.to_string();
-    let page = resolve_stable_by_id(
+    let page = mutate_stable_by_id(
         &state,
         &page_id,
         None,
-        PathLock::Release,
         || ApiError::not_found(format!("no page with id {page_id}")),
         |vault_path| {
             let absolute_path = state.vault.resolve(&vault_path);
@@ -582,11 +581,10 @@ pub async fn patch_properties(
         )));
     }
 
-    let (vault_path, content) = resolve_stable_by_id(
+    let (vault_path, content) = mutate_stable_by_id(
         &state,
         &page_id,
         None,
-        PathLock::Release,
         || ApiError::not_found(format!("no page with id {page_id}")),
         |vault_path| patch_properties_at(&state, vault_path, &request),
     )

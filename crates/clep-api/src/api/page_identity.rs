@@ -2,8 +2,8 @@
 //! move.
 //!
 //! A page id is stable, but the page's path is not: a move can land between
-//! the index lookup and the file access. [`resolve_stable_by_id`] owns the
-//! retry for that race. It looks up the id's path, runs the caller's attempt
+//! the index lookup and the file access. [`read_stable_by_id`] and
+//! [`mutate_stable_by_id`] own the retry for that race. Each looks up the id's path, runs the caller's attempt
 //! on it, and when the attempt finds the page gone it looks the id up again:
 //! a new path means the page moved, so the attempt runs again there.
 //! [`page_path_by_id`] is the plain lookup, for handlers that need no retry.
@@ -20,9 +20,12 @@ use crate::vault::path::VaultPath;
 /// How many paths [`resolve_stable_by_id`] tries before it gives up.
 const BY_ID_PATH_ATTEMPTS: usize = 8;
 
-/// Whether the attempt runs with the page's path locked.
+/// Whether the attempt runs with the page's path locked. Private, so each
+/// caller picks a mode by picking [`read_stable_by_id`] or
+/// [`mutate_stable_by_id`]: an attempt that mutates while holding the lock
+/// would deadlock on the coordinator taking the same lock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PathLock {
+enum PathLock {
     /// Lock the path, confirm the id still maps to it, then run the attempt
     /// under the lock. For reads that must see one consistent file.
     Hold,
@@ -132,11 +135,47 @@ pub(crate) async fn page_path_by_id(
         .transpose()
 }
 
+/// Read the page with this `id`: run `attempt` on its path with the path
+/// locked, so the attempt sees one consistent file. The attempt must not
+/// mutate through the coordinator: that takes the same lock and would
+/// deadlock. See [`resolve_stable_by_id`] for the retry.
+pub(crate) async fn read_stable_by_id<T, F, Fut>(
+    state: &AppState,
+    id: &str,
+    kind: Option<Kind>,
+    not_found: impl Fn() -> ApiError,
+    attempt: F,
+) -> Result<T, ApiError>
+where
+    F: FnMut(VaultPath) -> Fut,
+    Fut: Future<Output = Result<T, AttemptError>>,
+{
+    resolve_stable_by_id(state, id, kind, PathLock::Hold, not_found, attempt).await
+}
+
+/// Mutate the page with this `id`: run `attempt` on its path without the
+/// path lock, because the coordinator the attempt mutates through takes that
+/// lock itself; holding it here would deadlock. See
+/// [`resolve_stable_by_id`] for the retry.
+pub(crate) async fn mutate_stable_by_id<T, F, Fut>(
+    state: &AppState,
+    id: &str,
+    kind: Option<Kind>,
+    not_found: impl Fn() -> ApiError,
+    attempt: F,
+) -> Result<T, ApiError>
+where
+    F: FnMut(VaultPath) -> Fut,
+    Fut: Future<Output = Result<T, AttemptError>>,
+{
+    resolve_stable_by_id(state, id, kind, PathLock::Release, not_found, attempt).await
+}
+
 /// Run `attempt` on the path of the page with this `id`, retrying when the
 /// page moves. `not_found` is the error for an id the index does not hold
 /// (or holds with another kind). After [`BY_ID_PATH_ATTEMPTS`] moves the
 /// path counts as unstable and the call fails.
-pub(crate) async fn resolve_stable_by_id<T, F, Fut>(
+async fn resolve_stable_by_id<T, F, Fut>(
     state: &AppState,
     id: &str,
     kind: Option<Kind>,

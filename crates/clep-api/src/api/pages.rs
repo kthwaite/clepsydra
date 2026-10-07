@@ -15,7 +15,7 @@ use utoipa::ToSchema;
 use super::AppState;
 use super::error::ApiError;
 use super::page_identity::{
-    AttemptError, MissingFile, PathLock, read_page_once, resolve_stable_by_id,
+    AttemptError, MissingFile, mutate_stable_by_id, read_page_once, read_stable_by_id,
 };
 use super::page_update::{check_identity, check_revision, plan_page_update};
 use super::pagination::PaginatedResponse;
@@ -686,11 +686,10 @@ pub async fn get_page_by_id(
     State(state): State<Arc<AppState>>,
     Path(uuid): Path<String>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    let page = resolve_stable_by_id(
+    let page = read_stable_by_id(
         &state,
         &uuid,
         None,
-        PathLock::Hold,
         || page_id_not_found(&uuid),
         |candidate| {
             let abs_path = state.vault.resolve(&candidate);
@@ -867,11 +866,10 @@ pub async fn update_page_by_id(
     Path(uuid): Path<String>,
     Json(body): Json<UpdatePageRequest>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    resolve_stable_by_id(
+    mutate_stable_by_id(
         &state,
         &uuid,
         None,
-        PathLock::Release,
         || page_id_not_found(&uuid),
         |candidate| {
             let state = Arc::clone(&state);
@@ -988,11 +986,10 @@ async fn transition_page_by_id(
     uuid: &str,
     transition: EncryptionTransition,
 ) -> Result<Json<PageDetail>, ApiError> {
-    resolve_stable_by_id(
+    mutate_stable_by_id(
         &state,
         uuid,
         None,
-        PathLock::Release,
         || page_id_not_found(uuid),
         |candidate| {
             let state = Arc::clone(&state);
