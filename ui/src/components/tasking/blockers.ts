@@ -8,9 +8,7 @@
  */
 
 import type { BoardTask } from "#/api/board";
-
-/** The status a start warning guards. */
-export const START_STATUS = "FIELD";
+import { isDone, isInProgress } from "./board-constants";
 
 /** Maps each board Task code to its Task. */
 export function indexByCode(
@@ -21,7 +19,7 @@ export function indexByCode(
 
 /** True when the Blocker exists on the board and is not Done. */
 export function isOpenBlocker(blocker: BoardTask | undefined | null): boolean {
-  return blocker != null && blocker.status !== "SEALED";
+  return blocker != null && !isDone(blocker.status);
 }
 
 /** The Task's open Blockers, in stored order. */
@@ -45,7 +43,7 @@ export function startWarningBlockers(
   nextStatus: string,
   tasks: readonly BoardTask[],
 ): BoardTask[] {
-  if (nextStatus !== START_STATUS || task.status === START_STATUS) return [];
+  if (!isInProgress(nextStatus) || isInProgress(task.status)) return [];
   return openBlockers(task, tasks);
 }
 

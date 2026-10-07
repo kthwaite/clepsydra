@@ -46,6 +46,25 @@ import {
   PriorityRow,
   TypeRow,
 } from "./fields";
+import {
+  BACKLOG_CYCLE,
+  type NewTaskDraft,
+  newTaskDraft,
+  toCreatePayload,
+} from "./taskDraft";
+
+/** The free-text fields whose content makes the form dirty. */
+const DIRTY_FIELDS = [
+  "title",
+  "body",
+  "assignee",
+  "estimate",
+  "due",
+  "start",
+  "tags",
+  "checklist",
+  "link",
+] as const;
 
 // ── NewTaskModal ──────────────────────────────────────────────────────────────
 
@@ -68,20 +87,11 @@ export function NewTaskModal({
   const create = useCreateTask();
 
   // Form state — re-initialised whenever the modal opens
-  const [title, setTitle] = useState("");
-  const [brief, setBrief] = useState("");
-  const [project, setProject] = useState<string>("");
-  const [cycle, setCycle] = useState<string>("BACKLOG");
-  const [status, setStatus] = useState<string>("INTAKE");
-  const [priority, setPriority] = useState<string>("P2");
-  const [taskType, setTaskType] = useState<string | null>(null);
-  const [assignee, setAssignee] = useState("");
-  const [estimate, setEstimate] = useState("");
-  const [start, setStart] = useState("");
-  const [due, setDue] = useState("");
-  const [tags, setTags] = useState("");
-  const [checklist, setChecklist] = useState("");
-  const [link, setLink] = useState("");
+  const [draft, setDraft] = useState<NewTaskDraft>(newTaskDraft);
+  const setField = <K extends keyof NewTaskDraft>(
+    field: K,
+    value: NewTaskDraft[K],
+  ) => setDraft((d) => ({ ...d, [field]: value }));
 
   const titleRef = useRef<HTMLInputElement>(null);
   const isOpen = taskModal !== null;
@@ -90,20 +100,7 @@ export function NewTaskModal({
   // biome-ignore lint/correctness/useExhaustiveDependencies: reinitialise only on open
   useEffect(() => {
     if (!isOpen) return;
-    setTitle("");
-    setBrief("");
-    setProject(taskModal.project ?? "");
-    setCycle(taskModal.cycle ?? "BACKLOG");
-    setStatus(taskModal.status ?? "INTAKE");
-    setPriority("P2");
-    setTaskType(null);
-    setAssignee("");
-    setEstimate("");
-    setStart("");
-    setDue("");
-    setTags("");
-    setChecklist("");
-    setLink("");
+    setDraft(newTaskDraft(taskModal));
     // Focus title after state flush
     setTimeout(() => titleRef.current?.focus(), 0);
   }, [isOpen]);
@@ -120,58 +117,21 @@ export function NewTaskModal({
   const selectableCycles = cycles.filter((c) => c.state !== "CLOSED");
 
   // Derived display for the sub-header
-  const selectedScope = projects.find((scope) => scope.key === project);
+  const selectedScope = projects.find((scope) => scope.key === draft.project);
   const opLabel = selectedScope
     ? scopeLabel(selectedScope)
-    : project || "No project";
-  const dirty =
-    title !== "" ||
-    brief !== "" ||
-    assignee !== "" ||
-    estimate !== "" ||
-    due !== "" ||
-    start !== "" ||
-    tags !== "" ||
-    checklist !== "" ||
-    link !== "";
+    : draft.project || "No project";
+  const dirty = DIRTY_FIELDS.some((field) => draft[field] !== "");
 
   const commit = () => {
-    const finalTitle = title.trim();
-    if (!finalTitle) return;
-
-    const tagsArr = tags
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
-    const checklistArr = checklist
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    create.mutate(
-      {
-        title: finalTitle,
-        project: project || null,
-        status: status || null,
-        priority: priority || null,
-        task_type: taskType,
-        cycle: cycle === "BACKLOG" ? null : cycle || null,
-        assignee: assignee.trim() || null,
-        estimate: estimate.trim() || null,
-        start: start.trim() || null,
-        due: due.trim() || null,
-        tags: tagsArr.length ? tagsArr : null,
-        link: link.trim() || null,
-        body: brief.trim() || null,
-        checklist: checklistArr.length ? checklistArr : null,
+    const payload = toCreatePayload(draft);
+    if (!payload) return;
+    create.mutate(payload, {
+      onSuccess: (task) => {
+        closeTaskModal();
+        setEditTaskId(task.id);
       },
-      {
-        onSuccess: (task) => {
-          closeTaskModal();
-          setEditTaskId(task.id);
-        },
-      },
-    );
+    });
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -213,8 +173,8 @@ export function NewTaskModal({
             aria-label="Title"
             className={INPUT_CLS}
             placeholder="What needs to be done…"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            value={draft.title}
+            onChange={(e) => setField("title", e.target.value)}
             data-testid="new-task-title"
           />
         </EdField>
@@ -226,8 +186,8 @@ export function NewTaskModal({
             className={cn(INPUT_CLS, "resize-none")}
             rows={3}
             placeholder="What the task is and why it matters…"
-            value={brief}
-            onChange={(e) => setBrief(e.target.value)}
+            value={draft.body}
+            onChange={(e) => setField("body", e.target.value)}
             data-testid="new-task-brief"
           />
         </EdField>
@@ -237,8 +197,10 @@ export function NewTaskModal({
           <EdField label="Project">
             <Select
               aria-label="Project"
-              value={project}
-              onChange={(key) => setProject(key === null ? "" : String(key))}
+              value={draft.project}
+              onChange={(key) =>
+                setField("project", key === null ? "" : String(key))
+              }
               data-testid="new-task-project"
             >
               <SelectItem id="">No project</SelectItem>
@@ -256,13 +218,13 @@ export function NewTaskModal({
           <EdField label="Cycle">
             <Select
               aria-label="Cycle"
-              value={cycle}
+              value={draft.cycle}
               onChange={(key) =>
-                setCycle(key === null ? "BACKLOG" : String(key))
+                setField("cycle", key === null ? BACKLOG_CYCLE : String(key))
               }
               data-testid="new-task-cycle"
             >
-              <SelectItem id="BACKLOG">Backlog</SelectItem>
+              <SelectItem id={BACKLOG_CYCLE}>Backlog</SelectItem>
               {selectableCycles.map((c) => (
                 <SelectItem
                   key={c.id}
@@ -279,8 +241,8 @@ export function NewTaskModal({
         {/* Status */}
         <EdField label="Status">
           <DispositionRow
-            value={status}
-            onChange={setStatus}
+            value={draft.status}
+            onChange={(v) => setField("status", v)}
             testIdPrefix="new-task"
             colLabel={colLabel}
           />
@@ -289,8 +251,8 @@ export function NewTaskModal({
         {/* Priority */}
         <EdField label="Priority">
           <PriorityRow
-            value={priority}
-            onChange={setPriority}
+            value={draft.priority}
+            onChange={(v) => setField("priority", v)}
             testIdPrefix="new-task"
           />
         </EdField>
@@ -298,8 +260,8 @@ export function NewTaskModal({
         {/* Type */}
         <EdField label="Type">
           <TypeRow
-            value={taskType}
-            onChange={setTaskType}
+            value={draft.taskType}
+            onChange={(v) => setField("taskType", v)}
             testIdPrefix="new-task"
           />
         </EdField>
@@ -311,8 +273,8 @@ export function NewTaskModal({
               type="text"
               aria-label="Assignee"
               className={INPUT_CLS}
-              value={assignee}
-              onChange={(e) => setAssignee(e.target.value)}
+              value={draft.assignee}
+              onChange={(e) => setField("assignee", e.target.value)}
               data-testid="new-task-assignee"
             />
           </EdField>
@@ -321,8 +283,8 @@ export function NewTaskModal({
               type="text"
               aria-label="Estimate"
               className={INPUT_CLS}
-              value={estimate}
-              onChange={(e) => setEstimate(e.target.value)}
+              value={draft.estimate}
+              onChange={(e) => setField("estimate", e.target.value)}
               data-testid="new-task-estimate"
             />
           </EdField>
@@ -335,8 +297,8 @@ export function NewTaskModal({
               type="date"
               aria-label="Start date"
               className={INPUT_CLS}
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
+              value={draft.start}
+              onChange={(e) => setField("start", e.target.value)}
               data-testid="new-task-start"
             />
           </EdField>
@@ -345,8 +307,8 @@ export function NewTaskModal({
               type="date"
               aria-label="Due date"
               className={INPUT_CLS}
-              value={due}
-              onChange={(e) => setDue(e.target.value)}
+              value={draft.due}
+              onChange={(e) => setField("due", e.target.value)}
               data-testid="new-task-due"
             />
           </EdField>
@@ -360,8 +322,8 @@ export function NewTaskModal({
               aria-label="Tags"
               className={INPUT_CLS}
               placeholder="tag-one, tag-two"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
+              value={draft.tags}
+              onChange={(e) => setField("tags", e.target.value)}
               data-testid="new-task-tags"
             />
           </EdField>
@@ -374,8 +336,8 @@ export function NewTaskModal({
               className={cn(INPUT_CLS, "resize-none")}
               rows={3}
               placeholder="One item per line"
-              value={checklist}
-              onChange={(e) => setChecklist(e.target.value)}
+              value={draft.checklist}
+              onChange={(e) => setField("checklist", e.target.value)}
               data-testid="new-task-checklist"
             />
           </EdField>
@@ -388,8 +350,8 @@ export function NewTaskModal({
             aria-label="Related page"
             className={INPUT_CLS}
             placeholder="[[page]]"
-            value={link}
-            onChange={(e) => setLink(e.target.value)}
+            value={draft.link}
+            onChange={(e) => setField("link", e.target.value)}
             data-testid="new-task-link"
           />
         </EdField>
@@ -420,7 +382,7 @@ export function NewTaskModal({
             variant="primary"
             size="sm"
             onPress={commit}
-            isDisabled={create.isPending || title.trim() === ""}
+            isDisabled={create.isPending || draft.title.trim() === ""}
             data-testid="new-task-commit"
           >
             {create.isPending ? "Creating…" : "Create task"}

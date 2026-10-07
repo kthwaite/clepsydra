@@ -1,6 +1,6 @@
 import type { BoardTask } from "#/api/board";
 import type { AgendaItem, AgendaResponse } from "#/api/tasks";
-import { COL_ORDER } from "#/components/tasking/board-constants";
+import { COL_ORDER, DONE_STATUS } from "#/components/tasking/board-constants";
 
 /** First prose paragraph of a markdown body, as plain text, for the mobile
  *  Today journal line. Null when the body has no prose. */
@@ -84,7 +84,7 @@ export function tasksByStatus(
   for (const task of tasks) {
     groups[task.status as BoardStatus]?.push(task);
   }
-  groups.SEALED = [...groups.SEALED]
+  groups[DONE_STATUS] = [...groups[DONE_STATUS]]
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     .slice(0, DONE_LIMIT);
   return groups;

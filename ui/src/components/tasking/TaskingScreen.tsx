@@ -17,6 +17,7 @@ import { BoardHeader } from "./BoardHeader";
 import {
   COL_SUBLABEL,
   type ColLabelFn,
+  isDone,
   TYPE_NONE,
   taskStatusLabel,
 } from "./board-constants";
@@ -134,7 +135,7 @@ export function TaskingScreen({
     // (visibleInKanban); cycle and timeline modes are untouched.
     const hideCompleted = mode === "backlog" && !showCompleted;
     const opFiltered = hideCompleted
-      ? scoped.filter((t) => t.status !== "SEALED")
+      ? scoped.filter((t) => !isDone(t.status))
       : scoped;
     const filtered = applyClientFilter(
       opFiltered,

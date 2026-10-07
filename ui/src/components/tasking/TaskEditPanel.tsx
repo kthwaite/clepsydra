@@ -40,7 +40,7 @@
 import { ArrowRight, Check, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FocusScope } from "react-aria";
-import type { BoardCycle, BoardTask, PatchTaskRequest } from "#/api/board";
+import type { BoardCycle, BoardTask } from "#/api/board";
 import { useArchiveTask, usePatchTask } from "#/api/board";
 import { formatApiError } from "#/api/error";
 import { Button } from "#/components/ui/button";
@@ -69,6 +69,8 @@ import {
 } from "./fields";
 import { useStartWarning } from "./StartWarning";
 import { TaskBodyField } from "./TaskBodyField";
+import { diffToPatch, fromTask, type TaskDraft } from "./taskDraft";
+import { useDebounced, usePatchQueue } from "./usePatchQueue";
 
 /** How long the armed "Confirm archive" state persists before auto-disarm. */
 const ARCHIVE_DISARM_MS = 3000;
@@ -92,75 +94,6 @@ type PatchIntentLane =
   | "cycle"
   | "holdToggle"
   | "blockedBy";
-
-// ── useDebounce ───────────────────────────────────────────────────────────────
-
-function useDebounced(
-  value: string,
-  delay: number,
-  onChange: (v: string) => void | Promise<void>,
-): () => Promise<void> {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
-  const pending = useRef<{ value: string; version: number } | null>(null);
-  const version = useRef(0);
-  const queue = useRef<Promise<void>>(Promise.resolve());
-  const active = useRef<Promise<void> | null>(null);
-
-  const deliver = useCallback((): Promise<void> => {
-    clearTimeout(timer.current ?? undefined);
-    timer.current = null;
-    if (pending.current === null) {
-      return active.current ?? Promise.resolve();
-    }
-
-    const next = pending.current;
-    pending.current = null;
-    const delivery = queue.current.then(() => onChangeRef.current(next.value));
-    active.current = delivery;
-    queue.current = delivery.catch(() => {
-      // A failed save remains pending for an explicit retry, unless a newer
-      // value has already superseded it.
-      if (version.current === next.version && pending.current === null) {
-        pending.current = next;
-      }
-      return undefined;
-    });
-    void delivery.then(
-      () => {
-        if (active.current === delivery) active.current = null;
-      },
-      () => {
-        if (active.current === delivery) active.current = null;
-      },
-    );
-    return delivery;
-  }, []);
-
-  useEffect(() => {
-    clearTimeout(timer.current ?? undefined);
-    version.current += 1;
-    pending.current = { value, version: version.current };
-    timer.current = setTimeout(() => {
-      void deliver().catch(() => undefined);
-    }, delay);
-    return () => {
-      clearTimeout(timer.current ?? undefined);
-    };
-  }, [value, delay, deliver]);
-
-  // Flush on unmount: closing the panel or switching tasks within the debounce
-  // window must not silently lose the edit.
-  useEffect(
-    () => () => {
-      void deliver().catch(() => undefined);
-    },
-    [deliver],
-  );
-
-  return deliver;
-}
 
 // ── TaskEditPanel ─────────────────────────────────────────────────────────────
 
@@ -194,14 +127,9 @@ export function TaskEditPanel({
   const link = task.link;
 
   // Local mirror of text fields that debounce before patching
-  const [titleVal, setTitleVal] = useState(task.title);
-  const [assigneeVal, setAssigneeVal] = useState(task.assignee ?? "");
-  const [estimateVal, setEstimateVal] = useState(task.estimate ?? "");
-  const [startVal, setStartVal] = useState(task.start ?? "");
-  const [dueVal, setDueVal] = useState(task.due ?? "");
-  const [holdReason, setHoldReason] = useState(task.hold ?? "");
-  const [linkVal, setLinkVal] = useState(task.link ?? "");
-  const [tagsVal, setTagsVal] = useState(task.tags.join(", "));
+  const [draft, setDraft] = useState<TaskDraft>(() => fromTask(task));
+  const setField = (field: keyof TaskDraft, value: string) =>
+    setDraft((d) => ({ ...d, [field]: value }));
 
   // Archive confirmation state (two-step; auto-disarms)
   const [archiveArmed, setArchiveArmed] = useState(false);
@@ -241,14 +169,7 @@ export function TaskEditPanel({
   const taskId = task.id;
   // biome-ignore lint/correctness/useExhaustiveDependencies: reinitialise only on open
   useEffect(() => {
-    setTitleVal(task.title);
-    setAssigneeVal(task.assignee ?? "");
-    setEstimateVal(task.estimate ?? "");
-    setStartVal(task.start ?? "");
-    setDueVal(task.due ?? "");
-    setHoldReason(task.hold ?? "");
-    setLinkVal(task.link ?? "");
-    setTagsVal(task.tags.join(", "));
+    setDraft(fromTask(task));
     setArchiveArmed(false);
     setArchiving(false);
   }, [taskId]);
@@ -270,13 +191,13 @@ export function TaskEditPanel({
     if (task.hold && focusReasonOnHold.current) {
       focusReasonOnHold.current = false;
       // Sync the state with the new hold value so the input is populated
-      setHoldReason(task.hold ?? "");
+      setDraft((d) => ({ ...d, hold: task.hold ?? "" }));
       // Signal that we need to focus after state updates
       setNeedsFocus(true);
     }
   }, [task.hold]);
 
-  // After holdReason state has been updated, focus and select the input
+  // After the reason draft has been updated, focus and select the input
   useEffect(() => {
     if (needsFocus && holdReasonRef.current) {
       holdReasonRef.current.focus();
@@ -288,130 +209,43 @@ export function TaskEditPanel({
   // Fallback focus target for the non-modal editor.
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Every Tasking PATCH enters one serial queue. `mutateAsync` retains the
-  // mutation hook's optimistic onMutate behavior while giving archive a single
+  // Every Tasking PATCH enters one serial queue, so archive has a single
   // barrier for immediate controls, debounced fields, and earlier failures.
   const patchAsync = patch.mutateAsync;
-  const patchQueue = useRef<Promise<void>>(Promise.resolve());
-  const failedPatchLanes = useRef(new Set<PatchIntentLane>());
-  const laneVersions = useRef<Partial<Record<PatchIntentLane, number>>>({});
-  const coordinatorTaskId = useRef(task.id);
-  const latestTaskPath = useRef(task.path);
-  const enqueuePatch = useCallback(
-    (lane: PatchIntentLane, nextPatch: PatchTaskRequest) => {
-      const requestTaskId = task.id;
-      const intentVersion = (laneVersions.current[lane] ?? 0) + 1;
-      laneVersions.current[lane] = intentVersion;
-      const request = patchQueue.current.then(async () => {
-        try {
-          const savedTask = await patchAsync({
-            id: requestTaskId,
-            patch: nextPatch,
-          });
-          if (coordinatorTaskId.current === requestTaskId) {
-            latestTaskPath.current = savedTask.path;
-            if (laneVersions.current[lane] === intentVersion) {
-              failedPatchLanes.current.delete(lane);
-            }
-          }
-        } catch (error) {
-          if (
-            coordinatorTaskId.current === requestTaskId &&
-            laneVersions.current[lane] === intentVersion
-          ) {
-            failedPatchLanes.current.add(lane);
-          }
-          throw error;
-        }
-      });
-      patchQueue.current = request.catch(() => undefined);
-      return request;
-    },
-    [patchAsync, task.id],
-  );
-  const patchNow = useCallback(
-    (lane: PatchIntentLane, nextPatch: PatchTaskRequest) => {
-      void enqueuePatch(lane, nextPatch).catch(() => undefined);
-    },
-    [enqueuePatch],
-  );
-  const savePatch = enqueuePatch;
-  const clearPatchFailure = useCallback((lane: PatchIntentLane) => {
-    laneVersions.current[lane] = (laneVersions.current[lane] ?? 0) + 1;
-    failedPatchLanes.current.delete(lane);
-  }, []);
-  const awaitPatchBarrier = useCallback(async () => {
-    await patchQueue.current;
-    if (failedPatchLanes.current.size > 0) {
-      throw new Error("One or more task edits failed to save.");
-    }
-  }, []);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only for a new task identity
-  useEffect(() => {
-    coordinatorTaskId.current = task.id;
-    latestTaskPath.current = task.path;
-    laneVersions.current = {};
-    failedPatchLanes.current.clear();
-  }, [task.id]);
+  const queue = usePatchQueue<PatchIntentLane>(task, patchAsync);
 
   // Debounced patches (300ms). Each hook exposes an awaited flush used by
-  // archive so no local edit can be discarded or race the DELETE.
-  const flushTitle = useDebounced(titleVal, DEBOUNCE_MS, (v) => {
-    const trimmed = v.trim();
-    if (trimmed && trimmed !== task.title)
-      return savePatch("title", { title: trimmed });
-    if (trimmed === task.title) clearPatchFailure("title");
-  });
-  const flushAssignee = useDebounced(assigneeVal, DEBOUNCE_MS, (v) => {
-    const trimmed = v.trim() || null;
-    if (trimmed !== (task.assignee ?? null))
-      return savePatch("assignee", { assignee: trimmed });
-    clearPatchFailure("assignee");
-  });
-  const flushEstimate = useDebounced(estimateVal, DEBOUNCE_MS, (v) => {
-    const trimmed = v.trim() || null;
-    if (trimmed !== (task.estimate ?? null))
-      return savePatch("estimate", { estimate: trimmed });
-    clearPatchFailure("estimate");
-  });
-  const flushDue = useDebounced(dueVal, DEBOUNCE_MS, (v) => {
-    const trimmed = v.trim() || null;
-    if (trimmed !== (task.due ?? null))
-      return savePatch("due", { due: trimmed });
-    clearPatchFailure("due");
-  });
-  const flushStart = useDebounced(startVal, DEBOUNCE_MS, (v) => {
-    const trimmed = v.trim() || null;
-    if (trimmed !== (task.start ?? null))
-      return savePatch("start", { start: trimmed });
-    clearPatchFailure("start");
-  });
-  // Asymmetric guard, deliberately: the reason input only exists while the
-  // task is held (task.hold truthy), and an emptied reason falls back to the
-  // previous reason rather than clearing the hold — clearing the hold is the
-  // toggle's job (hold: null), never a side effect of editing the reason.
-  const flushHoldReason = useDebounced(holdReason, DEBOUNCE_MS, (v) => {
-    if (task.hold && v !== task.hold)
-      return savePatch("holdReason", { hold: v.trim() || task.hold });
-    if (v === task.hold) clearPatchFailure("holdReason");
-  });
-  const flushLink = useDebounced(linkVal, DEBOUNCE_MS, (v) => {
-    const trimmed = v.trim() || null;
-    if (trimmed !== (task.link ?? null))
-      return savePatch("link", { link: trimmed });
-    clearPatchFailure("link");
-  });
-
-  // Tags: comma-sep input → debounced 300ms like the other text fields
-  const flushTags = useDebounced(tagsVal, DEBOUNCE_MS, (v) => {
-    const arr = v
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
-    const current = task.tags.join(",");
-    if (arr.join(",") !== current) return savePatch("tags", { tags: arr });
-    clearPatchFailure("tags");
-  });
+  // archive so no local edit can be discarded or race the DELETE. An edit
+  // that diffs to nothing is no longer pending: it clears its lane.
+  const saveField = (
+    lane: PatchIntentLane,
+    field: keyof TaskDraft,
+    value: string,
+  ) => {
+    const next = diffToPatch(task, { [field]: value });
+    if (Object.keys(next).length > 0) return queue.enqueue(lane, next);
+    queue.clearFailure(lane);
+  };
+  const flushes = [
+    useDebounced(draft.title, DEBOUNCE_MS, (v) =>
+      saveField("title", "title", v),
+    ),
+    useDebounced(draft.assignee, DEBOUNCE_MS, (v) =>
+      saveField("assignee", "assignee", v),
+    ),
+    useDebounced(draft.estimate, DEBOUNCE_MS, (v) =>
+      saveField("estimate", "estimate", v),
+    ),
+    useDebounced(draft.due, DEBOUNCE_MS, (v) => saveField("due", "due", v)),
+    useDebounced(draft.start, DEBOUNCE_MS, (v) =>
+      saveField("start", "start", v),
+    ),
+    useDebounced(draft.hold, DEBOUNCE_MS, (v) =>
+      saveField("holdReason", "hold", v),
+    ),
+    useDebounced(draft.link, DEBOUNCE_MS, (v) => saveField("link", "link", v)),
+    useDebounced(draft.tags, DEBOUNCE_MS, (v) => saveField("tags", "tags", v)),
+  ];
 
   // Blocker links. A rejected change is not a pending edit: clear its lane
   // so it never holds back archive, and show the server message instead.
@@ -419,8 +253,8 @@ export function TaskEditPanel({
   const [blocksError, setBlocksError] = useState<string | null>(null);
   const saveBlockedBy = (next: string[]) => {
     setBlockedByError(null);
-    enqueuePatch("blockedBy", { blocked_by: next }).catch((error) => {
-      clearPatchFailure("blockedBy");
+    queue.enqueue("blockedBy", { blocked_by: next }).catch((error) => {
+      queue.clearFailure("blockedBy");
       setBlockedByError(formatApiError(error, "Couldn’t save blockers"));
     });
   };
@@ -478,20 +312,11 @@ export function TaskEditPanel({
     disarmTimer.current = null;
 
     try {
-      for (const flush of [
-        flushTitle,
-        flushAssignee,
-        flushEstimate,
-        flushDue,
-        flushStart,
-        flushHoldReason,
-        flushLink,
-        flushTags,
-      ]) {
+      for (const flush of flushes) {
         await flush();
       }
-      await awaitPatchBarrier();
-      await archive.mutateAsync({ path: latestTaskPath.current });
+      await queue.barrier();
+      await archive.mutateAsync({ path: queue.latestPath() });
       setEditTaskId(null);
     } catch {
       // Both mutation hooks surface the specific failure. Keep the task open
@@ -580,8 +405,8 @@ export function TaskEditPanel({
                 )}
                 rows={2}
                 aria-label="Title"
-                value={titleVal}
-                onChange={(e) => setTitleVal(e.target.value)}
+                value={draft.title}
+                onChange={(e) => setField("title", e.target.value)}
                 data-testid="edit-panel-title"
               />
 
@@ -590,7 +415,7 @@ export function TaskEditPanel({
                   value={task.status}
                   onChange={(colId) =>
                     startWarning.guard(task, colId, () =>
-                      patchNow("status", { status: colId }),
+                      queue.patchNow("status", { status: colId }),
                     )
                   }
                   testIdPrefix="edit-panel"
@@ -601,7 +426,7 @@ export function TaskEditPanel({
               <EdField label="Priority">
                 <PriorityRow
                   value={task.priority}
-                  onChange={(p) => patchNow("priority", { priority: p })}
+                  onChange={(p) => queue.patchNow("priority", { priority: p })}
                   testIdPrefix="edit-panel"
                 />
               </EdField>
@@ -609,7 +434,7 @@ export function TaskEditPanel({
               <EdField label="Type">
                 <TypeRow
                   value={task.task_type}
-                  onChange={(t) => patchNow("taskType", { task_type: t })}
+                  onChange={(t) => queue.patchNow("taskType", { task_type: t })}
                   testIdPrefix="edit-panel"
                 />
               </EdField>
@@ -622,7 +447,7 @@ export function TaskEditPanel({
                     value={task.project ?? ""}
                     onChange={(key) =>
                       /* empty string is the sentinel for clear → UNFILED */
-                      patchNow("project", {
+                      queue.patchNow("project", {
                         project: key === null ? "" : String(key),
                       })
                     }
@@ -648,7 +473,7 @@ export function TaskEditPanel({
                     onChange={(key) => {
                       const value = key === null ? "BACKLOG" : String(key);
                       /* BACKLOG → send null to clear cycle */
-                      patchNow("cycle", {
+                      queue.patchNow("cycle", {
                         cycle: value === "BACKLOG" ? null : value,
                       });
                     }}
@@ -676,8 +501,8 @@ export function TaskEditPanel({
                     type="text"
                     aria-label="Assignee"
                     className={INPUT_CLS}
-                    value={assigneeVal}
-                    onChange={(e) => setAssigneeVal(e.target.value)}
+                    value={draft.assignee}
+                    onChange={(e) => setField("assignee", e.target.value)}
                     data-testid="edit-panel-assignee"
                   />
                 </EdField>
@@ -686,8 +511,8 @@ export function TaskEditPanel({
                     type="text"
                     aria-label="Estimate"
                     className={INPUT_CLS}
-                    value={estimateVal}
-                    onChange={(e) => setEstimateVal(e.target.value)}
+                    value={draft.estimate}
+                    onChange={(e) => setField("estimate", e.target.value)}
                     data-testid="edit-panel-estimate"
                   />
                 </EdField>
@@ -700,8 +525,8 @@ export function TaskEditPanel({
                     type="date"
                     aria-label="Start date"
                     className={INPUT_CLS}
-                    value={startVal}
-                    onChange={(e) => setStartVal(e.target.value)}
+                    value={draft.start}
+                    onChange={(e) => setField("start", e.target.value)}
                     data-testid="edit-panel-start"
                   />
                 </EdField>
@@ -710,8 +535,8 @@ export function TaskEditPanel({
                     type="date"
                     aria-label="Due date"
                     className={INPUT_CLS}
-                    value={dueVal}
-                    onChange={(e) => setDueVal(e.target.value)}
+                    value={draft.due}
+                    onChange={(e) => setField("due", e.target.value)}
                     data-testid="edit-panel-due"
                   />
                 </EdField>
@@ -748,8 +573,8 @@ export function TaskEditPanel({
                   type="text"
                   aria-label="Tags"
                   className={INPUT_CLS}
-                  value={tagsVal}
-                  onChange={(e) => setTagsVal(e.target.value)}
+                  value={draft.tags}
+                  onChange={(e) => setField("tags", e.target.value)}
                   data-testid="edit-panel-tags"
                 />
               </EdField>
@@ -766,7 +591,7 @@ export function TaskEditPanel({
                     )}
                     onClick={() => {
                       if (!task.hold) focusReasonOnHold.current = true;
-                      patchNow("holdToggle", {
+                      queue.patchNow("holdToggle", {
                         hold: task.hold ? null : "BLOCKED",
                       });
                     }}
@@ -794,8 +619,8 @@ export function TaskEditPanel({
                       type="text"
                       aria-label="Blocker"
                       className={INPUT_CLS}
-                      value={holdReason}
-                      onChange={(e) => setHoldReason(e.target.value)}
+                      value={draft.hold}
+                      onChange={(e) => setField("hold", e.target.value)}
                       data-testid="edit-panel-hold-reason"
                     />
                   )}
@@ -839,11 +664,11 @@ export function TaskEditPanel({
                     className={cn(
                       INPUT_CLS,
                       "flex-1",
-                      linkVal && "text-accent",
+                      draft.link && "text-accent",
                     )}
                     placeholder="[[page]]"
-                    value={linkVal}
-                    onChange={(e) => setLinkVal(e.target.value)}
+                    value={draft.link}
+                    onChange={(e) => setField("link", e.target.value)}
                     data-testid="edit-panel-link"
                   />
                   {link && (

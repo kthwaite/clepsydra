@@ -124,6 +124,53 @@ export function taskStatusLabel(status: string): string {
 /** Resolves a persisted board status id to its fixed display label. */
 export type ColLabelFn = (id: string) => string;
 
+// ── task field vocabulary ────────────────────────────────────────────────────
+
+/** A new Task's status and priority; the server's board_vocab defaults. */
+export const DEFAULT_STATUS = "INTAKE";
+export const DEFAULT_PRIORITY = "P2";
+
+/** The Done status: a sealed Task is finished. */
+export const DONE_STATUS = "SEALED";
+/** The In Progress status: the one a start warning guards. */
+const IN_PROGRESS_STATUS = "FIELD";
+
+/** True when the Task status is Done. */
+export const isDone = (status: string): boolean => status === DONE_STATUS;
+
+/** True when the Task status is In Progress. */
+export const isInProgress = (status: string): boolean =>
+  status === IN_PROGRESS_STATUS;
+
+/** How a Task status looks: pip colour, display label, and whether the
+ *  column is one of the board's quiet ends (faint tick). */
+export interface StatusLook {
+  color: string;
+  label: string;
+  faint: boolean;
+}
+
+/** Status colour per board column: Inbox and Done faint, Ready ink-2,
+ *  In Progress cobalt, Review hot. */
+const STATUS_COLOR: Record<string, string> = {
+  TRIAGE: "var(--ink-2)",
+  FIELD: "var(--accent)",
+  REVIEW: "var(--hot)",
+};
+
+/** Inbox and Done are the board's quiet ends. */
+const FAINT_STATUSES = new Set([DEFAULT_STATUS, DONE_STATUS]);
+
+/** Looks up a Task status's look; an unknown status is faint-coloured,
+ *  labelled by its id, and not a quiet end. */
+export function statusLook(status: string): StatusLook {
+  return {
+    color: STATUS_COLOR[status] ?? "var(--faint)",
+    label: taskStatusLabel(status),
+    faint: FAINT_STATUSES.has(status),
+  };
+}
+
 // ── mode descriptor ──────────────────────────────────────────────────────────
 
 export const MODES = [
@@ -161,21 +208,12 @@ export function PriChip({ pri }: { pri: string }) {
   );
 }
 
-/** Status colour per board column: Inbox and Done faint, Ready ink-2,
- *  In Progress cobalt, Review hot. */
-export function statusColor(col: string): string {
-  if (col === "FIELD") return "var(--accent)";
-  if (col === "REVIEW") return "var(--hot)";
-  if (col === "TRIAGE") return "var(--ink-2)";
-  return "var(--faint)";
-}
-
 /** 6px round status pip coloured by board column. */
 export function StatePip({ col }: { col: string }) {
   return (
     <span
       className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
-      style={{ background: statusColor(col) }}
+      style={{ background: statusLook(col).color }}
     />
   );
 }
