@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use super::AppState;
 use super::error::ApiError;
-use super::events::SyncNotification;
+use super::page_identity::{AttemptError, mutate_stable_by_id};
 use crate::vault::attendance;
 use crate::vault::base::{
     BODY_COLUMN, BaseDefinition, BaseRegistry, Filter, Op, PropertyDefinition, PropertyType,
@@ -27,7 +27,7 @@ use crate::vault::base::{
 };
 use crate::vault::kind::{Kind, resolve};
 use crate::vault::meeting;
-use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
+use crate::vault::mutation_coordinator::ReplacePageContentCommand;
 use crate::vault::page::{Page, page_revision, parse_or_repair_frontmatter, write_page_content};
 use crate::vault::path::VaultPath;
 use crate::vault::query::{
@@ -445,40 +445,40 @@ pub async fn get_page_base_properties(
 ) -> Result<Json<PageBasePropertiesResponse>, ApiError> {
     let uuid = Uuid::parse_str(&uuid).map_err(|_| ApiError::bad_request("malformed page UUID"))?;
     let page_id = uuid.to_string();
-    let lookup_id = page_id.clone();
-    let path = state
-        .index
-        .with_index(move |index, _vault| {
-            index.connection().query_row(
-                "SELECT path FROM pages WHERE id = ?1",
-                rusqlite::params![lookup_id],
-                |row| row.get::<_, String>(0),
-            )
-        })
-        .await
-        .map_err(|error| ApiError::internal(format!("index error: {error}")))?
-        .map_err(|error| match error {
-            rusqlite::Error::QueryReturnedNoRows => {
-                ApiError::not_found(format!("no page with id {page_id}"))
+    let page = mutate_stable_by_id(
+        &state,
+        &page_id,
+        None,
+        || ApiError::not_found(format!("no page with id {page_id}")),
+        |vault_path| {
+            let absolute_path = state.vault.resolve(&vault_path);
+            let page_id = &page_id;
+            async move {
+                let path = vault_path.as_str().to_string();
+                let page =
+                    Page::from_file(&absolute_path, vault_path).map_err(|error| match error {
+                        crate::vault::page::FrontmatterError::Io(error)
+                            if error.kind() == std::io::ErrorKind::NotFound =>
+                        {
+                            AttemptError::Vanished(ApiError::not_found(format!(
+                                "page file missing: {path}"
+                            )))
+                        }
+                        error => AttemptError::Failed(ApiError::internal(format!(
+                            "failed to read page: {error}"
+                        ))),
+                    })?;
+                if page.meta.id != uuid {
+                    return Err(AttemptError::Vanished(ApiError::internal(format!(
+                        "indexed page identity mismatch for id: {page_id}"
+                    ))));
+                }
+                Ok(page)
             }
-            error => ApiError::internal(format!("page lookup failed: {error}")),
-        })?;
-    let vault_path = VaultPath::new(&path)
-        .map_err(|error| ApiError::internal(format!("bad indexed path: {error}")))?;
-    let absolute_path = state.vault.resolve(&vault_path);
-    let page = Page::from_file(&absolute_path, vault_path).map_err(|error| match error {
-        crate::vault::page::FrontmatterError::Io(error)
-            if error.kind() == std::io::ErrorKind::NotFound =>
-        {
-            ApiError::not_found(format!("page file missing: {path}"))
-        }
-        error => ApiError::internal(format!("failed to read page: {error}")),
-    })?;
-    if page.meta.id != uuid {
-        return Err(ApiError::internal(format!(
-            "indexed page identity mismatch for id: {page_id}"
-        )));
-    }
+        },
+    )
+    .await?;
+    let path = page.path.as_str().to_string();
 
     let bases = BaseRegistry::load(state.vault.root()).bases;
     let membership_id = page_id.clone();
@@ -581,36 +581,59 @@ pub async fn patch_properties(
         )));
     }
 
-    // Resolve the page path from the index.
-    let lookup_id = page_id.clone();
-    let path: Option<String> = state
-        .index
-        .with_index(move |index, _vault| {
-            index
-                .connection()
-                .query_row(
-                    "SELECT path FROM pages WHERE id = ?1",
-                    rusqlite::params![lookup_id],
-                    |row| row.get(0),
-                )
-                .ok()
-        })
-        .await
-        .map_err(|e| ApiError::internal(format!("index error: {e}")))?;
-    let path = path.ok_or_else(|| ApiError::not_found(format!("no page with id {page_id}")))?;
-    let vault_path =
-        VaultPath::new(&path).map_err(|e| ApiError::internal(format!("bad indexed path: {e}")))?;
+    let (vault_path, content) = mutate_stable_by_id(
+        &state,
+        &page_id,
+        None,
+        || ApiError::not_found(format!("no page with id {page_id}")),
+        |vault_path| patch_properties_at(&state, vault_path, &request),
+    )
+    .await?;
+    let path = vault_path.as_str().to_string();
 
+    // Return the committed frontmatter values intact. The per-element index
+    // cannot distinguish a singleton relation array from a scalar, or preserve
+    // an empty array, both of which matter to the multi-relation editor.
+    let (meta, _, _, _) = parse_or_repair_frontmatter(&content);
+    let properties = meta
+        .extra
+        .iter()
+        .filter(|(key, _)| key.as_str() != "conversation")
+        .map(|(key, value)| (key.clone(), toml_value_to_json(value)))
+        .collect();
+
+    Ok(Json(PropertyPatchResponse {
+        id: page_id,
+        path,
+        revision: page_revision(&content),
+        properties,
+    }))
+}
+
+/// One attempt at a property patch on the page at `vault_path`: read, check
+/// the revision, splice, validate, replace. Returns the committed content.
+async fn patch_properties_at(
+    state: &AppState,
+    vault_path: VaultPath,
+    request: &PropertyPatchRequest,
+) -> Result<(VaultPath, String), AttemptError> {
     let abs_path = state.vault.resolve(&vault_path);
-    let raw = std::fs::read_to_string(&abs_path)
-        .map_err(|e| ApiError::internal(format!("cannot read page: {e}")))?;
+    let raw = std::fs::read_to_string(&abs_path).map_err(|e| {
+        let error = ApiError::internal(format!("cannot read page: {e}"));
+        if e.kind() == std::io::ErrorKind::NotFound {
+            AttemptError::Vanished(error)
+        } else {
+            AttemptError::Failed(error)
+        }
+    })?;
 
     let current_revision = page_revision(&raw);
     if current_revision != request.expected_revision {
         return Err(ApiError::conflict_with_detail(
             "page content changed since expected_revision",
             serde_json::json!({ "revision": current_revision }),
-        ));
+        )
+        .into());
     }
 
     let mut edits = FrontmatterEdits {
@@ -633,17 +656,18 @@ pub async fn patch_properties(
             if let Some(w) = warning {
                 return Err(ApiError::conflict(format!(
                     "legacy frontmatter cannot be healed: {w}"
-                )));
+                ))
+                .into());
             }
             let healed = write_page_content(&meta, &body);
             splice_frontmatter(&healed, &edits)
                 .map_err(|e| ApiError::bad_request(format!("cannot splice frontmatter: {e}")))?
         }
         Err(e @ (SpliceError::NoFrontmatter | SpliceError::Toml(_))) => {
-            return Err(ApiError::conflict(format!("cannot patch page: {e}")));
+            return Err(ApiError::conflict(format!("cannot patch page: {e}")).into());
         }
         Err(e) => {
-            return Err(ApiError::bad_request(format!("invalid patch value: {e}")));
+            return Err(ApiError::bad_request(format!("invalid patch value: {e}")).into());
         }
     };
 
@@ -662,12 +686,7 @@ pub async fn patch_properties(
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
     }
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = crate::api::mutation_notifier(state);
     let replacement = state
         .mutation_coordinator
         .replace_page_content(
@@ -678,26 +697,9 @@ pub async fn patch_properties(
                 expected_content: raw,
                 content: new_content.clone(),
             },
-            &notify,
+            notify.as_ref(),
         )
         .await
-        .map_err(super::mutation_error)?;
-
-    // Return the committed frontmatter values intact. The per-element index
-    // cannot distinguish a singleton relation array from a scalar, or preserve
-    // an empty array, both of which matter to the multi-relation editor.
-    let (meta, _, _, _) = parse_or_repair_frontmatter(&replacement.content);
-    let properties = meta
-        .extra
-        .iter()
-        .filter(|(key, _)| key.as_str() != "conversation")
-        .map(|(key, value)| (key.clone(), toml_value_to_json(value)))
-        .collect();
-
-    Ok(Json(PropertyPatchResponse {
-        id: page_id,
-        path,
-        revision: page_revision(&replacement.content),
-        properties,
-    }))
+        .map_err(|error| AttemptError::vanished_if_not_found(super::mutation_error(error)))?;
+    Ok((vault_path, replacement.content))
 }

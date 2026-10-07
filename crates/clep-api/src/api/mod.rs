@@ -24,6 +24,8 @@ pub mod journal;
 pub mod location;
 pub mod openapi;
 pub mod page_export;
+pub(crate) mod page_identity;
+pub(crate) mod page_update;
 pub mod pages;
 pub mod pagination;
 pub mod projects;
@@ -198,6 +200,27 @@ pub(crate) fn mutation_error(
         | MutationError::RubbishRemovalCatalogReconcile { .. } => {
             error::ApiError::internal(error.to_string())
         }
+    }
+}
+
+/// Map a coordinator error as [`mutation_error`] does, except that `Stale`
+/// becomes a revision conflict carrying the page's current revision. Only a
+/// stale write calls `current_revision`, and its own error wins.
+pub(crate) async fn stale_to_revision_conflict<Fut>(
+    error: crate::vault::mutation_coordinator::MutationError,
+    current_revision: impl FnOnce() -> Fut,
+) -> error::ApiError
+where
+    Fut: std::future::Future<Output = Result<String, error::ApiError>>,
+{
+    match error {
+        crate::vault::mutation_coordinator::MutationError::Stale(_) => {
+            match current_revision().await {
+                Ok(revision) => error::ApiError::revision_conflict(revision),
+                Err(error) => error,
+            }
+        }
+        error => mutation_error(error),
     }
 }
 

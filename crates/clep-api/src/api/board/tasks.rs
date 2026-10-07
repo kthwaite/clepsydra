@@ -6,14 +6,13 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use rusqlite::params;
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
-use crate::api::events::SyncNotification;
+use crate::api::page_identity::{AttemptError, mutate_stable_by_id};
 use crate::vault::code::CodeFamily;
 use crate::vault::kind::Kind;
-use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
+use crate::vault::mutation_coordinator::CreatePageCommand;
 use crate::vault::page::Page;
 use crate::vault::path::VaultPath;
 
@@ -122,62 +121,56 @@ pub(crate) async fn patch_task(
     Path(id): Path<String>,
     Json(body): Json<PatchTaskRequest>,
 ) -> Result<Json<BoardTask>, ApiError> {
-    // 1. Resolve the TASK page by UUID.
-    let id_clone = id.clone();
-    let page_path = state
-        .index
-        .with_index(move |index, _vault| {
-            let conn = index.connection();
-            // Must be a TASK page
-            conn.query_row(
-                "SELECT path FROM pages WHERE id = ?1 AND kind = ?2",
-                params![id_clone, Kind::Task.as_str()],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
-        })
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found(format!("task not found with id: {id}")))?;
+    let patch = TaskPatch::from(body);
+    let result = mutate_stable_by_id(
+        &state,
+        &id,
+        Some(Kind::Task),
+        || ApiError::not_found(format!("task not found with id: {id}")),
+        |vault_path| patch_task_at(&state, vault_path, &patch),
+    )
+    .await?;
 
-    let vault_path = VaultPath::new(&page_path)
-        .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
+    let code = path_stem(result.path.as_str()).to_string();
+    let task_dto = build_board_task_dto(&state, &result.path, &code).await?;
+    Ok(Json(task_dto))
+}
+
+/// One attempt at a Task Patch on the TASK page at `vault_path`: read,
+/// plan, execute.
+async fn patch_task_at(
+    state: &AppState,
+    vault_path: VaultPath,
+    patch: &TaskPatch,
+) -> Result<Page, AttemptError> {
     let abs_path = state.vault.resolve(&vault_path);
     if !abs_path.exists() {
-        return Err(ApiError::not_found(format!(
-            "task file missing: {page_path}"
-        )));
+        return Err(AttemptError::Vanished(ApiError::not_found(format!(
+            "task file missing: {}",
+            vault_path.as_str()
+        ))));
     }
 
-    // 2. Read once: `raw_content` doubles as the stale-write guard.
+    // 1. Read once: `raw_content` doubles as the stale-write guard.
     let page = Page::from_file(&abs_path, vault_path)
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    // 3. Plan the Task Patch.
-    let lookups = BoardLookups::load(&state).await?;
-    let patch = TaskPatch::from(body);
-    let command = plan_task_patch(page, &patch, &lookups, state.clock.now())?;
+    // 2. Plan the Task Patch.
+    let lookups = BoardLookups::load(state).await?;
+    let command =
+        plan_task_patch(page, patch, &lookups, state.clock.now()).map_err(ApiError::from)?;
 
-    // 4. Execute.
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
-    let result = state
+    // 3. Execute.
+    let notify = crate::api::mutation_notifier(state);
+    state
         .mutation_coordinator
         .update_page(
             &state.vault,
             &state.index,
             Arc::clone(&state.hooks),
             command,
-            &notify,
+            notify.as_ref(),
         )
         .await
-        .map_err(crate::api::mutation_error)?;
-
-    let code = path_stem(result.path.as_str()).to_string();
-    let task_dto = build_board_task_dto(&state, &result.path, &code).await?;
-    Ok(Json(task_dto))
+        .map_err(|error| AttemptError::vanished_if_not_found(crate::api::mutation_error(error)))
 }

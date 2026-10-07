@@ -27,6 +27,7 @@ use clep_vault::Vault;
 use clep_vault::canonical::CanonicalName;
 use clep_vault::config::DisambiguationStrategy;
 use clep_vault::context::extract_context;
+use clep_vault::kind::Kind;
 use clep_vault::link::{Link, extract_links, extract_property_refs};
 use clep_vault::page::{PageMeta, parse_or_repair_frontmatter, write_page_content};
 use clep_vault::page_filename::extract_journal_date;
@@ -611,6 +612,16 @@ impl VaultIndex {
     pub fn connection(&self) -> &Connection {
         &self.conn
     }
+
+    /// The vault path of the page with this `id`, if the index holds one.
+    /// With `kind`, a page of any other kind counts as absent.
+    pub fn page_path_by_id(
+        &self,
+        id: &str,
+        kind: Option<Kind>,
+    ) -> Result<Option<String>, IndexError> {
+        Ok(page_path_by_id(&self.conn, id, kind)?)
+    }
     /// Project the current index truth into typed, deterministic repair issues.
     pub fn reference_issues(
         &self,
@@ -1190,16 +1201,13 @@ impl VaultIndex {
             }
         };
 
+        // Prefetched for Passes 3 and 4.
+        let page_path =
+            page_path_by_id(&tx, &page_id, None)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+
         resolve_outgoing_wikilinks(&tx, &page_id, &mut resolved_count)?;
         resolve_outgoing_block_refs(&tx, &page_id, &mut resolved_count)?;
-        resolve_incoming_wikilinks(&tx, &page_id, &mut resolved_count)?;
-
-        // Prefetched for Pass 4 (was inline at the original lines 740–744).
-        let page_path: String = tx.query_row(
-            "SELECT path FROM pages WHERE id = ?1",
-            params![page_id],
-            |row| row.get(0),
-        )?;
+        resolve_incoming_wikilinks(&tx, &page_id, &page_path, &mut resolved_count)?;
         resolve_incoming_block_refs(&tx, &page_id, &page_path, &mut resolved_count)?;
 
         tx.commit()?;
@@ -1871,16 +1879,13 @@ fn resolve_outgoing_block_refs(
 
 /// Pass 3: resolve other pages' incoming wikilinks that target this page's
 /// canonical names (only when the canonical name is unambiguous).
+/// `page_path` is prefetched by the caller.
 fn resolve_incoming_wikilinks(
     tx: &rusqlite::Connection,
     page_id: &str,
+    page_path: &str,
     count: &mut usize,
 ) -> Result<(), IndexError> {
-    let page_path: String = tx.query_row(
-        "SELECT path FROM pages WHERE id = ?1",
-        params![page_id],
-        |row| row.get(0),
-    )?;
     let direct_count = tx.execute(
         "UPDATE links SET target_id = ?1, target_path = ?2
          WHERE target_id IS NULL AND target_canonical = ?1",
@@ -1912,15 +1917,10 @@ fn resolve_incoming_wikilinks(
             drop(count_stmt);
 
             if match_count == 1 {
-                let path: String = tx.query_row(
-                    "SELECT path FROM pages WHERE id = ?1",
-                    params![page_id],
-                    |row| row.get(0),
-                )?;
                 tx.execute(
                     "UPDATE links SET target_id = ?1, target_path = ?2
                      WHERE source_id = ?3 AND span_start = ?4",
-                    params![page_id, path, source_id, span_start],
+                    params![page_id, page_path, source_id, span_start],
                 )?;
                 *count += 1;
             }
@@ -1928,6 +1928,29 @@ fn resolve_incoming_wikilinks(
     }
 
     Ok(())
+}
+
+/// The vault path of the page with this `id`. With `kind`, a page of any
+/// other kind counts as absent.
+fn page_path_by_id(
+    conn: &Connection,
+    id: &str,
+    kind: Option<Kind>,
+) -> rusqlite::Result<Option<String>> {
+    match kind {
+        None => conn
+            .query_row("SELECT path FROM pages WHERE id = ?1", params![id], |row| {
+                row.get(0)
+            })
+            .optional(),
+        Some(kind) => conn
+            .query_row(
+                "SELECT path FROM pages WHERE id = ?1 AND kind = ?2",
+                params![id, kind.as_str()],
+                |row| row.get(0),
+            )
+            .optional(),
+    }
 }
 
 /// Pass 4: resolve other pages' incoming block-ref links that target block IDs
@@ -3225,6 +3248,41 @@ mod tests {
 
     fn paths(results: &[SearchResult]) -> Vec<&str> {
         results.iter().map(|result| result.path.as_str()).collect()
+    }
+
+    #[test]
+    fn page_path_by_id_finds_an_indexed_page() {
+        let index = search_index();
+        let path = index
+            .page_path_by_id("00000000-0000-0000-0000-000000000101", None)
+            .unwrap();
+        assert_eq!(path.as_deref(), Some("notes/clepsydra.md"));
+    }
+
+    #[test]
+    fn page_path_by_id_is_none_for_an_unknown_id() {
+        let index = search_index();
+        let path = index
+            .page_path_by_id("00000000-0000-0000-0000-0000000009ff", None)
+            .unwrap();
+        assert_eq!(path, None);
+    }
+
+    #[test]
+    fn page_path_by_id_filters_by_kind() {
+        let index = search_index();
+        let recipe = "00000000-0000-0000-0000-000000000104";
+        assert_eq!(
+            index
+                .page_path_by_id(recipe, Some(Kind::Recipe))
+                .unwrap()
+                .as_deref(),
+            Some("recipes/beer.md")
+        );
+        assert_eq!(
+            index.page_path_by_id(recipe, Some(Kind::Task)).unwrap(),
+            None
+        );
     }
 
     fn assert_paths(results: Vec<SearchResult>, expected: &[&str]) {

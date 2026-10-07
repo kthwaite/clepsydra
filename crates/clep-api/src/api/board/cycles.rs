@@ -1,7 +1,6 @@
 //! Cycle mutations: `POST /board/cycles` and `PATCH /board/cycles/{id}`,
 //! including the seal-with-carryover flow.
 
-use std::fs;
 use std::sync::Arc;
 
 use axum::Json;
@@ -9,23 +8,25 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
-use rusqlite::params;
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
+use crate::api::page_identity::{AttemptError, MissingFile, mutate_stable_by_id, read_page_once};
 use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
 use crate::vault::code::{self, CodeFamily};
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::CreatePageCommand;
-use crate::vault::page::{PageMeta, parse_frontmatter, write_page_content};
+use crate::vault::page::{PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 use crate::vault::sync::ChangeEvent;
 use crate::vault::task_history::heal_task_update;
 
+use super::cycle_patch::{CyclePatch, CyclePlan, carry_task, plan_cycle_patch};
 use super::read::build_board_cycle_dto;
+use super::task_patch::BoardLookups;
 use super::{
-    BoardCycle, CreateCycleRequest, CycleState, PatchCycleRequest, ensure_cycle_exists, extra_str,
-    fetch_cycle_codes, mint_unique_code, path_stem,
+    BoardCycle, CreateCycleRequest, CycleState, PatchCycleRequest, fetch_cycle_codes,
+    mint_unique_code, path_stem,
 };
 
 // ---------------------------------------------------------------------------
@@ -133,85 +134,37 @@ pub(crate) async fn create_cycle(
 // PATCH /board/cycles/{id}
 // ---------------------------------------------------------------------------
 
-fn read_indexed_page_once(
-    state: &AppState,
-    path: &VaultPath,
-) -> Result<(String, PageMeta, String), ApiError> {
-    let expected = fs::read(state.vault.resolve(path)).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            ApiError::conflict(format!("page changed during mutation: {}", path.as_str()))
-        } else {
-            ApiError::internal(format!("failed to read page {}: {error}", path.as_str()))
-        }
-    })?;
-    let expected = String::from_utf8(expected).map_err(|error| {
-        ApiError::internal(format!(
-            "failed to read page {} as UTF-8: {error}",
-            path.as_str()
-        ))
-    })?;
-    let (meta, body) = parse_frontmatter(&expected).map_err(|error| {
-        ApiError::internal(format!("failed to parse page {}: {error}", path.as_str()))
-    })?;
-    Ok((expected, meta, body))
-}
-
-fn plan_cycle_patch_and_carryover(
+/// The batch that executes a Cycle plan: the Cycle's own write, then one
+/// write per carried-over Task. Each Task is read once here; its bytes are
+/// the stale-write guard.
+fn cycle_batch(
     state: &AppState,
     cycle_path: VaultPath,
-    body: &PatchCycleRequest,
-    new_state: Option<CycleState>,
-    carry_to: Option<&str>,
-    task_paths: &[String],
+    expected_cycle: String,
+    cycle_body: &str,
+    plan: CyclePlan,
     now: DateTime<Utc>,
 ) -> Result<BatchMutationCommand, ApiError> {
-    let (expected_cycle, mut cycle_meta, cycle_body) = read_indexed_page_once(state, &cycle_path)?;
-    if let Some(cycle_state) = new_state {
-        cycle_meta.extra.insert(
-            "state".to_string(),
-            toml::Value::String(cycle_state.as_str().to_string()),
-        );
-    }
-    if let Some(goal) = &body.goal {
-        cycle_meta
-            .extra
-            .insert("goal".to_string(), toml::Value::String(goal.clone()));
-    }
-    if let Some(start) = &body.start {
-        cycle_meta
-            .extra
-            .insert("start".to_string(), toml::Value::String(start.clone()));
-    }
-    if let Some(end) = &body.end {
-        cycle_meta
-            .extra
-            .insert("end".to_string(), toml::Value::String(end.clone()));
-    }
-    cycle_meta.updated_at = Some(now);
-
-    let mut intents = Vec::with_capacity(task_paths.len() + 1);
-    let mut upserted = Vec::with_capacity(task_paths.len() + 1);
+    let task_count = plan
+        .carry_over
+        .as_ref()
+        .map_or(0, |carry| carry.task_paths.len());
+    let mut intents = Vec::with_capacity(task_count + 1);
+    let mut upserted = Vec::with_capacity(task_count + 1);
     upserted.push(cycle_path.clone());
     intents.push(BatchPathIntent::Write {
         path: cycle_path,
         expected: ExpectedPathState::Bytes(expected_cycle.into_bytes()),
-        content: write_page_content(&cycle_meta, &cycle_body).into_bytes(),
+        content: write_page_content(&plan.meta, cycle_body).into_bytes(),
     });
 
-    if let Some(carry_to) = carry_to {
-        for task_path in task_paths {
+    if let Some(carry) = &plan.carry_over {
+        for task_path in &carry.task_paths {
             let path =
                 crate::api::error::parse_internal_path(task_path, "invalid indexed task path")?;
-            let (expected, mut meta, page_body) = read_indexed_page_once(state, &path)?;
-            if carry_to == "BACKLOG" {
-                meta.extra.remove("cycle");
-            } else {
-                meta.extra.insert(
-                    "cycle".to_string(),
-                    toml::Value::String(carry_to.to_string()),
-                );
-            }
-            meta.updated_at = Some(now);
+            let (expected, mut meta, page_body) =
+                read_page_once(state, &path, MissingFile::Conflict)?;
+            carry_task(&mut meta, carry.to.as_deref(), now);
             heal_task_update(&path, &expected, &mut meta).map_err(ApiError::bad_request)?;
             upserted.push(path.clone());
             intents.push(BatchPathIntent::Write {
@@ -252,98 +205,37 @@ pub(crate) async fn patch_cycle(
     Path(id): Path<String>,
     Json(body): Json<PatchCycleRequest>,
 ) -> Result<Json<BoardCycle>, ApiError> {
-    let new_state = body
-        .state
-        .as_deref()
-        .map(|value| {
-            value.parse::<CycleState>().map_err(|error| {
-                ApiError::bad_request(format!("{error}; valid values: PLANNED, ACTIVE, CLOSED"))
-            })
-        })
-        .transpose()?;
-    let is_closing = new_state == Some(CycleState::Closed);
-
-    // Resolve carry_to to its canonical code ONCE — used below both for the
-    // self-reference check and for the frontmatter rewrite. "BACKLOG" is a
-    // sentinel and is never resolved.
-    let resolved_carry_to: Option<String> = match &body.carry_to {
-        None => None,
-        Some(_) if !is_closing => {
-            return Err(ApiError::bad_request(
-                "carry_to is only valid when state is CLOSED",
-            ));
-        }
-        Some(carry) if carry == "BACKLOG" => Some("BACKLOG".to_string()),
-        Some(carry) => Some(ensure_cycle_exists(&state, carry).await?),
-    };
-
-    let id_clone = id.clone();
-    let page_path = state
-        .index
-        .with_index(move |index, _vault| {
-            let conn = index.connection();
-            conn.query_row(
-                "SELECT path FROM pages WHERE id = ?1 AND kind = ?2",
-                params![id_clone, Kind::Cycle.as_str()],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
-        })
-        .await
-        .map_err(|error| ApiError::internal(error.to_string()))?
-        .ok_or_else(|| ApiError::not_found(format!("cycle not found with id: {id}")))?;
-    let cycle_path =
-        crate::api::error::parse_internal_path(&page_path, "invalid stored cycle path")?;
-    let cycle_code = path_stem(&page_path).to_string();
-
-    if matches!(&resolved_carry_to, Some(carry) if carry != "BACKLOG" && carry == &cycle_code) {
-        return Err(ApiError::bad_request(
-            "carry_to cannot reference the cycle being closed",
-        ));
-    }
-
-    let task_paths = if is_closing && resolved_carry_to.is_some() {
-        let cycle_code_for_query = cycle_code;
-        state
-            .index
-            .with_index(move |index, _vault| {
-                let mut statement = index
-                    .connection()
-                    .prepare("SELECT path, meta_json FROM pages WHERE kind = ?1 ORDER BY path")?;
-                let rows = statement
-                    .query_map(params![Kind::Task.as_str()], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok::<_, rusqlite::Error>(
-                    rows.into_iter()
-                        .filter(|(_, meta_json)| {
-                            let metadata: serde_json::Value =
-                                serde_json::from_str(meta_json).unwrap_or(serde_json::Value::Null);
-                            extra_str(&metadata, "cycle").as_deref()
-                                == Some(cycle_code_for_query.as_str())
-                                && extra_str(&metadata, "status").unwrap_or_default() != "SEALED"
-                        })
-                        .map(|(path, _)| path)
-                        .collect(),
-                )
-            })
-            .await
-            .map_err(|error| ApiError::internal(error.to_string()))?
-            .map_err(|error| ApiError::internal(error.to_string()))?
-    } else {
-        Vec::new()
-    };
-
-    let command = plan_cycle_patch_and_carryover(
+    let patch = CyclePatch::try_from(body).map_err(ApiError::from)?;
+    let cycle_path = mutate_stable_by_id(
         &state,
-        cycle_path.clone(),
-        &body,
-        new_state,
-        resolved_carry_to.as_deref(),
-        &task_paths,
-        state.clock.now(),
-    )?;
+        &id,
+        Some(Kind::Cycle),
+        || ApiError::not_found(format!("cycle not found with id: {id}")),
+        |cycle_path| patch_cycle_at(&state, cycle_path, &patch),
+    )
+    .await?;
+
+    Ok(Json(build_board_cycle_dto(&state, &cycle_path).await?))
+}
+
+/// One attempt at a Cycle patch on the CYCLE page at `cycle_path`: read,
+/// plan, execute. Returns the Cycle's path.
+async fn patch_cycle_at(
+    state: &AppState,
+    cycle_path: VaultPath,
+    patch: &CyclePatch,
+) -> Result<VaultPath, AttemptError> {
+    // 1. Read once: the bytes double as the stale-write guard.
+    let (expected, meta, body) = read_page_once(state, &cycle_path, MissingFile::Conflict)?;
+
+    // 2. Plan.
+    let lookups = BoardLookups::load(state).await?;
+    let now = state.clock.now();
+    let plan = plan_cycle_patch(path_stem(cycle_path.as_str()), meta, patch, &lookups, now)
+        .map_err(ApiError::from)?;
+
+    // 3. Execute.
+    let command = cycle_batch(state, cycle_path.clone(), expected, &body, plan, now)?;
     state
         .mutation_coordinator
         .execute_batch(
@@ -351,10 +243,9 @@ pub(crate) async fn patch_cycle(
             &state.index,
             Arc::clone(&state.hooks),
             command,
-            crate::api::mutation_notifier(state.as_ref()),
+            crate::api::mutation_notifier(state),
         )
         .await
-        .map_err(crate::api::mutation_error)?;
-
-    Ok(Json(build_board_cycle_dto(&state, &cycle_path).await?))
+        .map_err(|error| AttemptError::vanished_if_not_found(crate::api::mutation_error(error)))?;
+    Ok(cycle_path)
 }

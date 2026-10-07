@@ -12,9 +12,8 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
-use crate::api::events::SyncNotification;
 use crate::vault::index::find_body_start;
-use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
+use crate::vault::mutation_coordinator::ReplacePageContentCommand;
 use crate::vault::page::parse_frontmatter;
 use crate::vault::path::VaultPath;
 use crate::vault::task_history::{effective_indexed_history, matches_project_scope};
@@ -597,12 +596,7 @@ pub async fn update_task_status(
     new_content.push_str(replacement);
     new_content.push_str(&content[absolute_offset + 3..]);
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = crate::api::mutation_notifier(&state);
     state
         .mutation_coordinator
         .replace_page_content(
@@ -613,7 +607,7 @@ pub async fn update_task_status(
                 expected_content: content,
                 content: new_content,
             },
-            &notify,
+            notify.as_ref(),
         )
         .await
         .map_err(super::mutation_error)?;

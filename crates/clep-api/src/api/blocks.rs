@@ -12,10 +12,9 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
-use super::events::SyncNotification;
 use crate::vault::block::parse_blocks;
 use crate::vault::block_id::BlockId;
-use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
+use crate::vault::mutation_coordinator::ReplacePageContentCommand;
 use crate::vault::page::Page;
 use crate::vault::path::VaultPath;
 
@@ -350,12 +349,7 @@ pub async fn assign_block_id(
 
     let id_str = BlockId::generate().to_string();
     content.insert_str(insert_pos, &format!(" ^{}", id_str));
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = crate::api::mutation_notifier(&state);
     state
         .mutation_coordinator
         .replace_page_content(
@@ -366,7 +360,7 @@ pub async fn assign_block_id(
                 expected_content,
                 content,
             },
-            &notify,
+            notify.as_ref(),
         )
         .await
         .map_err(crate::api::mutation_error)?;

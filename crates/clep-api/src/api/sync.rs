@@ -26,7 +26,7 @@ use crate::vault::gitsync::SyncError;
 use crate::vault::gitsync::conflict_copy::{ConflictCopy, comparable_pair};
 use crate::vault::gitsync::engine::{MergeSummary, PushStatus, SyncReport, SyncStatus};
 use crate::vault::gitsync::journal_merge::JournalMerge;
-use crate::vault::mutation_coordinator::{MutationError, ProjectAssignment, UpdatePageCommand};
+use crate::vault::mutation_coordinator::{ProjectAssignment, UpdatePageCommand};
 use crate::vault::page::{Page, PageMeta, page_revision, parse_frontmatter};
 use crate::vault::path::VaultPath;
 
@@ -554,14 +554,7 @@ pub async fn resolve_conflict(
     meta.extra.remove("conflict_of");
     meta.updated_at = Some(state.clock.now());
 
-    let notify = |notification: crate::vault::mutation_coordinator::MutationNotification| {
-        let _ = state
-            .change_tx
-            .send(crate::api::events::SyncNotification::IndexChanged {
-                upserted: notification.upserted,
-                removed: notification.removed,
-            });
-    };
+    let notify = crate::api::mutation_notifier(&state);
     let original_path = original.path.as_str().to_string();
     let original_abs = state.vault.resolve(&original.path);
     match state
@@ -578,16 +571,18 @@ pub async fn resolve_conflict(
                 project: ProjectAssignment::Unchanged,
                 reconcile: false,
             },
-            &notify,
+            notify.as_ref(),
         )
         .await
     {
         Ok(_) => {}
-        Err(MutationError::Stale(_)) => {
-            let current = std::fs::read_to_string(&original_abs).unwrap_or_default();
-            return Err(ApiError::revision_conflict(page_revision(&current)));
+        Err(error) => {
+            return Err(super::stale_to_revision_conflict(error, || async {
+                let current = std::fs::read_to_string(&original_abs).unwrap_or_default();
+                Ok(page_revision(&current))
+            })
+            .await);
         }
-        Err(error) => return Err(super::mutation_error(error)),
     }
 
     let archived =

@@ -24,9 +24,7 @@ use crate::feeds::types::{
     Entry, EntryCursor, EntryFilters, EntryPatch, EntryView, FeedSummary, ManifestWarning,
     MarkReadScope,
 };
-use crate::vault::mutation_coordinator::{
-    MutationError, MutationNotification, ReservedManifestCommand,
-};
+use crate::vault::mutation_coordinator::{MutationNotification, ReservedManifestCommand};
 use crate::vault::path::VaultPath;
 
 const DEFAULT_GROUP: &str = "Subscriptions";
@@ -350,11 +348,11 @@ async fn publish_manifest(
                 .map_err(|error| ApiError::internal(error.to_string()))?;
             Ok(revision)
         }
-        Err(MutationError::Stale(_)) => {
+        Err(error) => Err(super::stale_to_revision_conflict(error, || async {
             let (_, _, current_revision) = read_manifest_raw(state).await?;
-            Err(ApiError::revision_conflict(current_revision))
-        }
-        Err(error) => Err(super::mutation_error(error)),
+            Ok(current_revision)
+        })
+        .await),
     }
 }
 
