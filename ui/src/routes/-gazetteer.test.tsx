@@ -283,14 +283,16 @@ describe("Gazetteer route filters", () => {
     );
     expect(screen.getByTestId("filter-bar-input")).toHaveValue("atlas");
 
-    Object.assign(routeMocks.search, {
+    // The router hands over a new search object on every change.
+    routeMocks.search = {
+      ...routeMocks.search,
       q: "beta",
       tags: ["active"],
       kind: "NOTE",
       project: "atlas",
       sort: "ts",
       page: 1,
-    });
+    };
     view.rerender(<GazetteerPage />);
     expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith(
       {
@@ -305,7 +307,7 @@ describe("Gazetteer route filters", () => {
       { enabled: true },
     );
 
-    Object.assign(routeMocks.search, completeSearch);
+    routeMocks.search = { ...routeMocks.search, ...completeSearch };
     view.rerender(<GazetteerPage />);
     expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith(
       {
@@ -436,7 +438,11 @@ describe("Gazetteer route filters", () => {
       page: 1,
     });
 
-    Object.assign(routeMocks.search, { tags: ["pkm", "research"], page: 1 });
+    routeMocks.search = {
+      ...routeMocks.search,
+      tags: ["pkm", "research"],
+      page: 1,
+    };
     routeMocks.navigate.mockClear();
     view.rerender(<GazetteerPage />);
     const activeTag = screen.getByRole("button", {

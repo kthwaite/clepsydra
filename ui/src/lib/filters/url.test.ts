@@ -132,6 +132,37 @@ describe("mergeFilterSearch", () => {
   });
 });
 
+describe("mergeFilterSearch aliases", () => {
+  it("drops alias keys so a cleared facet stays cleared", () => {
+    const merged = mergeFilterSearch(
+      { tag: "legacy", tags: ["legacy"] },
+      { text: "", facets: {} },
+      opts,
+    );
+    expect(merged).toMatchObject({ tag: undefined, tags: undefined });
+    expect("tags" in parseFilterSearch(merged, opts).facets).toBe(false);
+  });
+});
+
+describe("parseFilterSearch accept", () => {
+  it("drops values the field rejects, after normalizing", () => {
+    const fields = [
+      {
+        id: "kind",
+        kind: "multi" as const,
+        normalize: (v: string) => v.toUpperCase(),
+        accept: (v: string) => v !== "BOGUS",
+      },
+    ];
+    expect(
+      parseFilterSearch({ kind: "note,bogus" }, { fields }).facets.kind,
+    ).toEqual(["NOTE"]);
+    expect(
+      "kind" in parseFilterSearch({ kind: "bogus" }, { fields }).facets,
+    ).toBe(false);
+  });
+});
+
 describe("shouldReplaceFilterHistory", () => {
   it("replaces history when only text changes", () => {
     expect(

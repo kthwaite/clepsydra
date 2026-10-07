@@ -6,26 +6,19 @@ import {
   applyClientFilter,
   type ClientFilterConfig,
   EMPTY_FILTER_STATE,
-  type FacetOption,
-  type FilterField,
   type FilterState,
   FLAG_ON,
 } from "#/lib/filters/model";
+import { facetFields } from "#/lib/filters/route";
 import { useBoardStore } from "#/store/board";
 import { Button } from "../ui/button";
 import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
 import {
-  COL_LABEL,
-  COL_ORDER,
   COL_SUBLABEL,
   type ColLabelFn,
   isDone,
-  PRI_LABEL,
-  PRI_ORDER,
-  TYPE_LABEL,
   TYPE_NONE,
-  TYPE_ORDER,
   taskStatusLabel,
 } from "./board-constants";
 import {
@@ -42,6 +35,7 @@ import { ScopeRail } from "./ScopeRail";
 import { SealCycleModal } from "./SealCycleModal";
 import { TaskEditPanel } from "./TaskEditPanel";
 import { TimelineView } from "./TimelineView";
+import { TASKING_FACETS } from "./taskingFacets";
 
 // ── filterTasks ──────────────────────────────────────────────────────────────
 
@@ -79,12 +73,6 @@ export const BOARD_FILTER_CONFIG: ClientFilterConfig<BoardTask> = {
     hold: (t) => (t.blocked ? [FLAG_ON] : []),
   },
 };
-
-/** Type facet options: the five task types, then the Untyped sentinel. */
-export const TYPE_FILTER_OPTIONS: readonly FacetOption[] = [
-  ...TYPE_ORDER.map((value) => ({ value, label: TYPE_LABEL[value] })),
-  { value: TYPE_NONE, label: "Untyped" },
-];
 
 const colLabel: ColLabelFn = taskStatusLabel;
 // ── TaskingScreen ─────────────────────────────────────────────────────────────
@@ -187,54 +175,20 @@ export function TaskingScreen({
     }
   }, [data, projects, opFilter, setOpFilter]);
 
-  // Options are data-derived: project scope slugs (operations ∪ task
-  // projects), task tags, and the fixed priority/type/status vocabularies.
-  const filterFields: FilterField[] = useMemo(
-    () => [
-      {
-        id: "project",
-        kind: "multi",
-        label: "Project",
-        options: projects.flatMap((project) =>
+  // Data-derived options: project scope slugs (operations ∪ task projects)
+  // and task tags. The fixed vocabularies live in TASKING_FACETS.
+  const filterFields = useMemo(
+    () =>
+      facetFields(TASKING_FACETS, {
+        project: projects.flatMap((project) =>
           project.slug
             ? [{ value: project.slug, label: scopeLabel(project) }]
             : [],
         ),
-      },
-      {
-        id: "tags",
-        kind: "multi",
-        label: "Tags",
-        options: [...new Set(tasks.flatMap((t) => t.tags))]
+        tags: [...new Set(tasks.flatMap((t) => t.tags))]
           .sort()
           .map((value) => ({ value })),
-      },
-      {
-        id: "pri",
-        kind: "multi",
-        label: "Priority",
-        options: PRI_ORDER.map((value) => ({
-          value,
-          label: `${value} ${PRI_LABEL[value]}`,
-        })),
-      },
-      {
-        id: "type",
-        kind: "multi",
-        label: "Type",
-        options: TYPE_FILTER_OPTIONS,
-      },
-      {
-        id: "status",
-        kind: "multi",
-        label: "Status",
-        options: COL_ORDER.map((value) => ({
-          value,
-          label: COL_LABEL[value] ?? value,
-        })),
-      },
-      { id: "hold", kind: "flag", label: "Blocked", options: [] },
-    ],
+      }),
     [projects, tasks],
   );
 

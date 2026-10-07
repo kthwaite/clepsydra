@@ -1,8 +1,12 @@
-// Pure filtering + sorting for the GAZETTEER table. No React, no I/O — testable.
+// The GAZETTEER's URL search: its facets, sort and page. No I/O — testable.
 
 import type { ContentIndexSort } from "#/api/types";
+import { defineFilterRoute, type FacetDef } from "#/lib/filters/route";
+import { KINDS, kindDisplayLabel, sortKindsByLabel } from "#/lib/kind";
 
 export type GazetteerSort = "ts" | "created" | "title" | "words";
+
+const SORTS: readonly GazetteerSort[] = ["ts", "created", "title", "words"];
 
 const CONTENT_INDEX_SORT: Record<GazetteerSort, ContentIndexSort> = {
   ts: "updated",
@@ -20,52 +24,58 @@ export function appendUniqueTag(selectedTags: string[], tag: string): string[] {
   return selectedTags.includes(tag) ? selectedTags : [...selectedTags, tag];
 }
 
-export interface GazetteerRow {
-  path: string;
-  title?: string | null;
-  description?: string | null;
-  tags?: string[] | null;
-  updated_at?: string | null;
-  created_at?: string | null;
-  word_count?: number | null;
-}
+/** The Gazetteer's facets: one list for its URL and its FilterBar. Project
+ *  and Tag options come from the index at render. An unknown Kind is kept,
+ *  so the server can reject it. */
+export const GAZETTEER_FACETS: readonly FacetDef[] = [
+  {
+    id: "kind",
+    kind: "single",
+    label: "Kind",
+    normalize: (v) => v.toUpperCase(),
+    options: sortKindsByLabel(KINDS).map((k) => ({
+      value: k,
+      label: kindDisplayLabel(k),
+    })),
+  },
+  { id: "project", kind: "single", label: "Project" },
+  { id: "tags", kind: "multi", label: "Tag" },
+];
 
-export interface GazetteerFilter {
-  /** All selected tags must be present on a row (AND semantics). */
-  tags: string[];
-  /** Case-insensitive substring grep over title/path/description/tags. */
-  query: string;
+/** The Gazetteer's URL-backed filter. `?tag=x` is the older spelling of
+ *  `?tags=x`. A filter change returns to the first page. */
+export const GAZETTEER_FILTER = defineFilterRoute({
+  to: "/gazetteer",
+  facets: GAZETTEER_FACETS,
+  aliases: { tag: "tags" },
+  resetOnChange: { page: 1 },
+});
+
+export type GazetteerSearch = Record<string, unknown> & {
+  q?: string;
+  tags?: string[];
+  kind?: string;
+  project?: string;
   sort: GazetteerSort;
-}
+  page: number;
+};
 
-export function filterAndSortRows<T extends GazetteerRow>(
-  items: T[],
-  { tags, query, sort }: GazetteerFilter,
-): T[] {
-  const q = query.trim().toLowerCase();
-
-  let out = items;
-  if (tags.length > 0) {
-    out = out.filter((n) => {
-      const rowTags = n.tags ?? [];
-      return tags.every((t) => rowTags.includes(t));
-    });
-  }
-  if (q) {
-    out = out.filter((n) =>
-      `${n.title ?? ""} ${n.path} ${n.description ?? ""} ${(n.tags ?? []).join(" ")}`
-        .toLowerCase()
-        .includes(q),
-    );
-  }
-
-  const time = (iso: string | null | undefined) =>
-    iso ? Date.parse(iso) || 0 : 0;
-  const compare: Record<GazetteerSort, (a: T, b: T) => number> = {
-    ts: (a, b) => time(b.updated_at) - time(a.updated_at),
-    created: (a, b) => time(b.created_at) - time(a.created_at),
-    words: (a, b) => (b.word_count ?? 0) - (a.word_count ?? 0),
-    title: (a, b) => (a.title ?? a.path).localeCompare(b.title ?? b.path),
-  };
-  return [...out].sort(compare[sort]);
+export function validateGazetteerSearch(
+  search: Record<string, unknown>,
+): GazetteerSearch {
+  const sort: GazetteerSort = SORTS.includes(search.sort as GazetteerSort)
+    ? (search.sort as GazetteerSort)
+    : "ts";
+  const page =
+    typeof search.page === "number" &&
+    Number.isFinite(search.page) &&
+    search.page >= 1
+      ? Math.floor(search.page)
+      : 1;
+  // The filter codec writes q, tags, kind and project in these shapes.
+  return {
+    ...GAZETTEER_FILTER.validateSearch(search),
+    sort,
+    page,
+  } as GazetteerSearch;
 }

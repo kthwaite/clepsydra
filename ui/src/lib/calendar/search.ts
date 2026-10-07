@@ -2,21 +2,35 @@
 // date, span, selected day) plus the kind/tag/project filters.
 
 import type { CalendarMode, DateKey } from "#/lib/calendar/dates";
-import type { FilterState } from "#/lib/filters/model";
-import {
-  canonicalizeFilterSearch,
-  type FilterUrlOptions,
-  parseFilterSearch,
-} from "#/lib/filters/url";
-import { KINDS } from "#/lib/kind";
+import { defineFilterRoute, type FacetDef } from "#/lib/filters/route";
+import { KINDS, kindDisplayLabel, sortKindsByLabel } from "#/lib/kind";
 
-export const CALENDAR_FILTER_URL: FilterUrlOptions = {
-  fields: [
-    { id: "kind", kind: "multi", normalize: (v) => v.toUpperCase() },
-    { id: "tag", kind: "single" },
-    { id: "project", kind: "single" },
-  ],
-};
+const KIND_SET = new Set<string>(KINDS);
+
+/** The Calendar's facets: one list for its URL and its FilterBar. Tag and
+ *  Project options come from the index at render. Unknown kinds are
+ *  dropped. */
+export const CALENDAR_FACETS: readonly FacetDef[] = [
+  {
+    id: "kind",
+    kind: "multi",
+    label: "Kind",
+    normalize: (v) => v.toUpperCase(),
+    accept: (v) => KIND_SET.has(v),
+    options: sortKindsByLabel(KINDS).map((kind) => ({
+      value: kind,
+      label: kindDisplayLabel(kind),
+    })),
+  },
+  { id: "tag", kind: "single", label: "Tag" },
+  { id: "project", kind: "single", label: "Project" },
+];
+
+/** The Calendar's URL-backed filter. */
+export const CALENDAR_FILTER = defineFilterRoute({
+  to: "/calendar",
+  facets: CALENDAR_FACETS,
+});
 
 export interface CalendarViewSearch {
   mode: CalendarMode;
@@ -37,7 +51,6 @@ export const DEFAULT_SPAN: Record<CalendarMode, number> = {
   weeks: 2,
 };
 
-const KIND_SET = new Set<string>(KINDS);
 const DATE_KEY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 function parseMode(raw: unknown): CalendarMode {
@@ -80,19 +93,6 @@ export function parseCalendarView(
   return view;
 }
 
-/** `parseFilterSearch` with unknown kinds dropped. */
-export function parseCalendarFilters(
-  search: Record<string, unknown>,
-): FilterState {
-  const state = parseFilterSearch(search, CALENDAR_FILTER_URL);
-  const kinds = state.facets.kind?.filter((k) => KIND_SET.has(k)) ?? [];
-  const { kind: _dropped, ...rest } = state.facets;
-  return {
-    ...state,
-    facets: kinds.length > 0 ? { ...rest, kind: kinds } : rest,
-  };
-}
-
 /** The URL form of a view: the default mode and each mode's default span
  *  are omitted, so the bare `/calendar` URL stays clean. */
 export function calendarViewToSearch(view: CalendarViewSearch): {
@@ -112,11 +112,8 @@ export function calendarViewToSearch(view: CalendarViewSearch): {
 export function validateCalendarSearch(
   search: Record<string, unknown>,
 ): Record<string, unknown> {
-  const canonical = canonicalizeFilterSearch(search, CALENDAR_FILTER_URL);
-  const kinds = parseCalendarFilters(search).facets.kind;
   return {
-    ...canonical,
-    kind: kinds ? [...kinds] : undefined,
+    ...CALENDAR_FILTER.validateSearch(search),
     ...calendarViewToSearch(parseCalendarView(search)),
   };
 }

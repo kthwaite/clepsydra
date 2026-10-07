@@ -5,6 +5,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useSearch,
 } from "@tanstack/react-router";
 import {
   act,
@@ -45,6 +46,10 @@ vi.mock("#/components/FeatureFlagsProvider", () => ({
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { Constellation } from "#/components/codex/Constellation";
 import { Folio } from "#/components/codex/Folio";
+import {
+  type GazetteerSearch,
+  validateGazetteerSearch,
+} from "#/components/codex/gazetteer-filter";
 import { IndexHealthPanel } from "#/components/settings/IndexHealthPanel";
 import { renderElement } from "#/editor/elements/renderElement";
 import { withSchema } from "#/editor/schema/withSchema";
@@ -64,7 +69,6 @@ import {
   readFolioHistoryLocation,
   readFolioHistoryRestorationRequest,
 } from "#/store/folioRestoration";
-import { useGazetteerStore } from "#/store/gazetteer";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
@@ -352,14 +356,13 @@ function AtriumOrigin() {
 }
 
 function GazetteerOrigin() {
-  const state = useGazetteerStore();
-  const page = (state as typeof state & { page?: number }).page ?? 1;
+  const search = useSearch({ strict: false }) as GazetteerSearch;
   return (
     <section>
       <h1>Gazetteer origin</h1>
       <p>
-        {state.query} · {state.selectedTags.join(",")} · {state.sort} · page{" "}
-        {page}
+        {search.q} · {search.tags?.join(",")} · {search.sort} · page{" "}
+        {search.page}
       </p>
       <OpenAlpha origin="Gazetteer" />
     </section>
@@ -403,6 +406,7 @@ function renderNavigation(initialEntry: string, strictMode = false) {
   const gazetteerRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/gazetteer",
+    validateSearch: validateGazetteerSearch,
     component: GazetteerOrigin,
   });
   const workspaceRoute = createRoute({
@@ -532,13 +536,6 @@ describe("mobile Folio Back", () => {
       navigationMode: "new",
       openHistory: [],
       quires: {},
-    });
-    useGazetteerStore.setState({
-      query: "",
-      selectedTags: [],
-      sort: "ts",
-      page: 1,
-      routeTag: undefined,
     });
     useConstellationStore.setState({
       selectedAnchorId: null,
@@ -936,13 +933,9 @@ describe("mobile Folio Back", () => {
 
   it("returns to filtered Gazetteer through history, preserving query, tag, sort, and page without closing the page tab", async () => {
     const user = userEvent.setup();
-    useGazetteerStore.setState({
-      query: "atlas",
-      selectedTags: ["research"],
-      sort: "title",
-      page: 2,
-    });
-    const router = renderNavigation("/gazetteer");
+    const router = renderNavigation(
+      "/gazetteer?q=atlas&tags=research&sort=title&page=2",
+    );
 
     expect(
       await screen.findByText("atlas · research · title · page 2"),

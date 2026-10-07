@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { BaseDetailResponse, QueryOutput } from "#/api/bases";
 import { BaseTableView } from "./BaseTableView";
+import type { BaseTableViewReady } from "./base-table-model";
 
 const definition: BaseDetailResponse = {
   slug: "reading",
@@ -81,26 +82,35 @@ const grouped: QueryOutput = {
   ],
 };
 
+function model(activeView: string, output: QueryOutput): BaseTableViewReady {
+  return {
+    status: "ready",
+    definition,
+    query: {
+      activeView,
+      output,
+      error: undefined,
+      loading: false,
+      sort: undefined,
+      onViewChange: () => {},
+      onSortChange: () => {},
+    },
+    rowActions: { onOpenPage: () => {}, onCommitCell: () => {} },
+  };
+}
+
 const meta: Meta<typeof BaseTableView> = {
   title: "Bases/BaseTable",
   component: BaseTableView,
-  args: {
-    definition,
-    sort: undefined,
-    onViewChange: () => {},
-    onSortChange: () => {},
-    onOpenPage: () => {},
-    onCommitCell: () => {},
-  },
 };
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Flat: Story = {
-  args: { activeView: "Continues", output: flat },
+  args: { model: model("Continues", flat) },
 };
 
 export const Grouped: Story = {
-  args: { activeView: "Shelf", output: grouped },
+  args: { model: model("Shelf", grouped) },
 };

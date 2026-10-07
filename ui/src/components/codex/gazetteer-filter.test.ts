@@ -1,128 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  filterAndSortRows,
-  type GazetteerRow,
+  GAZETTEER_FILTER,
   toContentIndexSort,
+  validateGazetteerSearch,
 } from "./gazetteer-filter";
-
-const items: GazetteerRow[] = [
-  {
-    path: "a.md",
-    title: "Alpha",
-    description: "first note",
-    tags: ["x", "y"],
-    updated_at: "2026-05-03T00:00:00Z",
-    created_at: "2026-01-02T00:00:00Z",
-    word_count: 100,
-  },
-  {
-    path: "b.md",
-    title: "Beta",
-    description: "second",
-    tags: ["x"],
-    updated_at: "2026-05-01T00:00:00Z",
-    created_at: "2026-03-01T00:00:00Z",
-    word_count: 300,
-  },
-  {
-    path: "c.md",
-    title: "Gamma",
-    description: "third note",
-    tags: ["y"],
-    updated_at: "2026-05-02T00:00:00Z",
-    created_at: null,
-    word_count: 200,
-  },
-];
-
-describe("filterAndSortRows", () => {
-  it("returns all items sorted by updated_at desc when no filters", () => {
-    const out = filterAndSortRows(items, { tags: [], query: "", sort: "ts" });
-    expect(out.map((r) => r.path)).toEqual(["a.md", "c.md", "b.md"]);
-  });
-
-  it("filters by a single tag", () => {
-    const out = filterAndSortRows(items, {
-      tags: ["y"],
-      query: "",
-      sort: "ts",
-    });
-    expect(out.map((r) => r.path).sort()).toEqual(["a.md", "c.md"]);
-  });
-
-  it("AND-filters across multiple tags (row must include ALL selected)", () => {
-    const out = filterAndSortRows(items, {
-      tags: ["x", "y"],
-      query: "",
-      sort: "ts",
-    });
-    expect(out.map((r) => r.path)).toEqual(["a.md"]);
-  });
-
-  it("returns empty when no row has all selected tags", () => {
-    const out = filterAndSortRows(items, {
-      tags: ["x", "z"],
-      query: "",
-      sort: "ts",
-    });
-    expect(out).toEqual([]);
-  });
-
-  it("greps title, path, description and tags (case-insensitive)", () => {
-    expect(
-      filterAndSortRows(items, { tags: [], query: "third", sort: "ts" }).map(
-        (r) => r.path,
-      ),
-    ).toEqual(["c.md"]);
-    expect(
-      filterAndSortRows(items, { tags: [], query: "BETA", sort: "ts" }).map(
-        (r) => r.path,
-      ),
-    ).toEqual(["b.md"]);
-    expect(
-      filterAndSortRows(items, { tags: [], query: "#y", sort: "ts" }).length,
-    ).toBe(0); // query is plain text, tags joined without '#'
-    expect(
-      filterAndSortRows(items, { tags: [], query: "y", sort: "ts" }).length,
-    ).toBe(2); // matches tag "y" via joined tags
-  });
-
-  it("combines AND tags with grep", () => {
-    const out = filterAndSortRows(items, {
-      tags: ["x"],
-      query: "first",
-      sort: "ts",
-    });
-    expect(out.map((r) => r.path)).toEqual(["a.md"]);
-  });
-
-  it("sorts by words desc and title asc", () => {
-    expect(
-      filterAndSortRows(items, { tags: [], query: "", sort: "words" }).map(
-        (r) => r.path,
-      ),
-    ).toEqual(["b.md", "c.md", "a.md"]);
-    expect(
-      filterAndSortRows(items, { tags: [], query: "", sort: "title" }).map(
-        (r) => r.title,
-      ),
-    ).toEqual(["Alpha", "Beta", "Gamma"]);
-  });
-
-  it("sorts by created_at newest first, undated rows last", () => {
-    expect(
-      filterAndSortRows(items, { tags: [], query: "", sort: "created" }).map(
-        (r) => r.path,
-      ),
-    ).toEqual(["b.md", "a.md", "c.md"]);
-  });
-
-  it("does not mutate the input array", () => {
-    const snapshot = items.map((r) => r.path);
-    filterAndSortRows(items, { tags: [], query: "", sort: "words" });
-    expect(items.map((r) => r.path)).toEqual(snapshot);
-  });
-});
 
 describe("toContentIndexSort", () => {
   it("maps each Gazetteer sort to the server's content-index order", () => {
@@ -130,5 +11,89 @@ describe("toContentIndexSort", () => {
     expect(toContentIndexSort("created")).toBe("created");
     expect(toContentIndexSort("title")).toBe("title");
     expect(toContentIndexSort("words")).toBe("words");
+  });
+});
+
+describe("Gazetteer URL search", () => {
+  it("defaults to the first page by Edited with no filters", () => {
+    expect(validateGazetteerSearch({})).toEqual({
+      q: undefined,
+      tags: undefined,
+      kind: undefined,
+      project: undefined,
+      sort: "ts",
+      page: 1,
+    });
+  });
+
+  it("keeps the existing bookmark format", () => {
+    expect(
+      validateGazetteerSearch({
+        q: "atlas",
+        tags: ["research", "pkm"],
+        kind: "project",
+        project: " clepsydra ",
+        sort: "title",
+        page: 2,
+      }),
+    ).toEqual({
+      q: "atlas",
+      tags: ["research", "pkm"],
+      kind: "PROJECT",
+      project: "clepsydra",
+      sort: "title",
+      page: 2,
+    });
+  });
+
+  it("reads comma-joined and duplicate tags", () => {
+    expect(validateGazetteerSearch({ tags: "a, b,a" }).tags).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+
+  it("reads the older ?tag= spelling, preferring ?tags=", () => {
+    expect(validateGazetteerSearch({ tag: "legacy" }).tags).toEqual(["legacy"]);
+    expect(
+      validateGazetteerSearch({ tag: "legacy", tags: ["new"] }).tags,
+    ).toEqual(["new"]);
+  });
+
+  it("keeps an unknown Kind for the server to reject", () => {
+    expect(validateGazetteerSearch({ kind: "widget" }).kind).toBe("WIDGET");
+  });
+
+  it("falls back on an unknown sort and an invalid page", () => {
+    expect(validateGazetteerSearch({ sort: "id", page: 0 })).toMatchObject({
+      sort: "ts",
+      page: 1,
+    });
+    expect(validateGazetteerSearch({ page: 3.7 }).page).toBe(3);
+    expect(validateGazetteerSearch({ page: "2" }).page).toBe(1);
+  });
+
+  it("is idempotent", () => {
+    const once = validateGazetteerSearch({
+      q: "x",
+      tag: "legacy",
+      kind: "note",
+      sort: "words",
+      page: 4,
+    });
+    expect(validateGazetteerSearch(once)).toEqual(once);
+  });
+
+  it("returns to page 1 on a filter change and drops the older ?tag=", () => {
+    const nav = GAZETTEER_FILTER.navigation(
+      { text: "", facets: {} },
+      { text: "", facets: { tags: ["legacy"] } },
+    );
+    const next = validateGazetteerSearch(
+      nav.search({ tag: "legacy", tags: ["legacy"], sort: "title", page: 3 }),
+    );
+    expect(next).toMatchObject({ sort: "title", page: 1 });
+    expect(next.tags).toBeUndefined();
+    expect(next.tag).toBeUndefined();
   });
 });

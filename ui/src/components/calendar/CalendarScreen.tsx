@@ -28,18 +28,15 @@ import {
   weekRows,
 } from "#/lib/calendar/dates";
 import {
+  CALENDAR_FACETS,
   type CalendarViewSearch,
   DEFAULT_SPAN,
   SPANS,
 } from "#/lib/calendar/search";
 import { bucketTodos } from "#/lib/calendar/todos";
-import type { FilterField, FilterState } from "#/lib/filters/model";
-import {
-  KINDS,
-  type Kind,
-  kindDisplayLabel,
-  sortKindsByLabel,
-} from "#/lib/kind";
+import type { FilterState } from "#/lib/filters/model";
+import { facetFields } from "#/lib/filters/route";
+import type { Kind } from "#/lib/kind";
 import { isoAddDays, localDateKey } from "#/lib/time";
 import { useProjectValues } from "#/lib/useProjects";
 
@@ -67,10 +64,6 @@ const NO_ENTRIES: readonly CalendarEntryLike[] = [];
 const NO_BIRTHDAYS: readonly BirthdayEntry[] = [];
 const NO_OCCURRENCES: readonly BirthdayOccurrence[] = [];
 const NO_TODOS: readonly CalendarTodoItem[] = [];
-const KIND_OPTIONS = sortKindsByLabel(KINDS).map((kind) => ({
-  value: kind,
-  label: kindDisplayLabel(kind),
-}));
 
 function spanOptions(mode: CalendarMode) {
   const [one, many] = SPAN_UNIT[mode];
@@ -154,22 +147,12 @@ export function CalendarScreen({
   const projects = useProjectValues();
   const { data: tagIndex } = useTags();
 
-  const filterFields: FilterField[] = useMemo(
-    () => [
-      { id: "kind", kind: "multi", label: "Kind", options: KIND_OPTIONS },
-      {
-        id: "tag",
-        kind: "single",
-        label: "Tag",
-        options: (tagIndex ?? []).map((t) => ({ value: t.tag })),
-      },
-      {
-        id: "project",
-        kind: "single",
-        label: "Project",
-        options: projects.map((value) => ({ value })),
-      },
-    ],
+  const filterFields = useMemo(
+    () =>
+      facetFields(CALENDAR_FACETS, {
+        tag: (tagIndex ?? []).map((t) => ({ value: t.tag })),
+        project: projects.map((value) => ({ value })),
+      }),
     [tagIndex, projects],
   );
 

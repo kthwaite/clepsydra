@@ -5,6 +5,8 @@ export interface FilterFieldSpec {
   id: string;
   kind: FilterFieldKind;
   normalize?: (raw: string) => string;
+  /** Drops parsed values it rejects, after normalize. */
+  accept?: (value: string) => boolean;
 }
 
 export interface FacetOption {

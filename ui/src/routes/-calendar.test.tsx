@@ -25,11 +25,8 @@ vi.mock("#/components/calendar/CalendarScreen", () => ({
   },
 }));
 
-import {
-  calendarFilterNavigation,
-  calendarViewNavigation,
-  Route,
-} from "#/routes/calendar";
+import { CALENDAR_FILTER } from "#/lib/calendar/search";
+import { calendarViewNavigation, Route } from "#/routes/calendar";
 
 function validate(search: Record<string, unknown>) {
   const validateSearch = Route.options.validateSearch;
@@ -102,7 +99,7 @@ describe("Calendar route", () => {
     });
   });
 
-  it("navigates filter changes through calendarFilterNavigation", () => {
+  it("navigates filter changes through CALENDAR_FILTER", () => {
     const Page = Route.options.component as React.ComponentType;
     render(<Page />);
     screenProps.last?.onFilterChange({ text: "", facets: { kind: ["NOTE"] } });
@@ -157,9 +154,9 @@ describe("calendarViewNavigation", () => {
   });
 });
 
-describe("calendarFilterNavigation", () => {
+describe("CALENDAR_FILTER.navigation", () => {
   it("replaces history when only the text changes", () => {
-    const nav = calendarFilterNavigation(
+    const nav = CALENDAR_FILTER.navigation(
       { text: "a", facets: { tag: ["wine"] } },
       { text: "", facets: { tag: ["wine"] } },
     );
@@ -167,7 +164,7 @@ describe("calendarFilterNavigation", () => {
   });
 
   it("writes facets and clears stale ones, keeping view keys", () => {
-    const nav = calendarFilterNavigation(
+    const nav = CALENDAR_FILTER.navigation(
       { text: "", facets: { project: ["clepsydra"] } },
       { text: "", facets: { tag: ["wine"] } },
     );

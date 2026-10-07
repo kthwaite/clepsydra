@@ -18,10 +18,13 @@ import {
 import { Editable, Slate, withReact } from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BaseFilter } from "#/api/bases";
+import type { BaseTableViewProps } from "#/components/bases/BaseTableView";
 import type {
-  BaseTableControllerModel,
-  BaseTableControllerOptions,
-} from "#/components/bases/useBaseTableController";
+  BaseTableModel,
+  BaseTableQuery,
+  BaseTableReadyModel,
+} from "#/components/bases/base-table-model";
+import type { BaseTableControllerOptions } from "#/components/bases/useBaseTableController";
 import { EMPTY_OVERRIDES } from "#/components/bases/view-overrides";
 import {
   BaseEmbedEditingProvider,
@@ -33,8 +36,8 @@ import type { BaseEmbedElement } from "#/editor/types";
 
 const adapterState = vi.hoisted(() => ({
   options: null as BaseTableControllerOptions | null,
-  tableProps: null as Record<string, unknown> | null,
-  model: null as BaseTableControllerModel | null,
+  tableProps: null as BaseTableViewProps | null,
+  model: null as BaseTableModel | null,
 }));
 
 const inspectorMode = vi.hoisted(() => ({ real: false }));
@@ -96,53 +99,53 @@ vi.mock("#/api/bases", async (importOriginal) => {
 vi.mock("#/components/bases/useBaseTableController", () => ({
   useBaseTableController: (options: BaseTableControllerOptions) => {
     adapterState.options = options;
-    if (!adapterState.model) throw new Error("Controller model not installed");
+    const model = adapterState.model;
+    if (!model) throw new Error("Controller model not installed");
+    if (model.status !== "ready") return model;
     return {
-      ...adapterState.model,
-      onViewChange: (name: string) => {
-        options.onSortChange(undefined);
-        options.onViewChange(name);
+      ...model,
+      query: {
+        ...model.query,
+        onViewChange: (name: string) => {
+          options.onSortChange(undefined);
+          options.onViewChange(name);
+        },
+        onSortChange: options.onSortChange,
       },
-      onSortChange: options.onSortChange,
     };
   },
 }));
 
-vi.mock("#/components/bases/BaseTableView", async () => {
+vi.mock("#/components/bases/BaseTableView", async (importOriginal) => {
   const React = await import("react");
+  const actual =
+    await importOriginal<typeof import("#/components/bases/BaseTableView")>();
   return {
     BaseTableView: React.forwardRef(function MockBaseTableView(
-      props: Record<string, unknown>,
+      props: BaseTableViewProps,
       ref: ForwardedRef<{ focusEntry(): boolean }>,
     ) {
       adapterState.tableProps = props;
       React.useImperativeHandle(ref, () => ({ focusEntry: () => false }));
+      const { model } = props;
+      // Only the grid is mocked; the messages that replace it are real.
+      if (model.status !== "ready") return <actual.BaseTableView {...props} />;
+      const { query, rowActions } = model;
       return (
         <section aria-label="Mock Base table view">
-          <button
-            type="button"
-            onClick={() =>
-              (props.onViewChange as (view: string) => void)("Unread")
-            }
-          >
+          <button type="button" onClick={() => query.onViewChange("Unread")}>
             Switch view
           </button>
           <button
             type="button"
-            onClick={() =>
-              (
-                props.onSortChange as (
-                  sort: Array<{ field: string; dir: string }>,
-                ) => void
-              )([{ field: "title", dir: "asc" }])
-            }
+            onClick={() => query.onSortChange([{ field: "title", dir: "asc" }])}
           >
             Sort title
           </button>
           <button
             type="button"
             onClick={() =>
-              (props.onCommitCell as (...args: unknown[]) => void)(
+              rowActions.onCommitCell(
                 {
                   id: "one",
                   path: "one.md",
@@ -158,26 +161,15 @@ vi.mock("#/components/bases/BaseTableView", async () => {
           >
             Commit property
           </button>
-          <button
-            type="button"
-            onClick={() =>
-              (props.onOpenPage as (path: string) => void)("one.md")
-            }
-          >
+          <button type="button" onClick={() => rowActions.onOpenPage("one.md")}>
             Open title
           </button>
-          {props.configureSlug ? (
-            <a href={`/bases/${String(props.configureSlug)}/edit`}>
-              Configure Base
-            </a>
+          {model.configureSlug ? (
+            <a href={`/bases/${model.configureSlug}/edit`}>Configure Base</a>
           ) : null}
-          {props.viewLoading ? (
-            <p role="status">Refreshing cached rows…</p>
-          ) : null}
-          {props.viewError ? (
-            <p role="alert">{String(props.viewError)}</p>
-          ) : null}
-          {props.toolbarActions as React.ReactNode}
+          {query.loading ? <p role="status">Refreshing cached rows…</p> : null}
+          {query.error ? <p role="alert">{query.error}</p> : null}
+          {props.toolbarActions}
         </section>
       );
     }),
@@ -211,9 +203,10 @@ function configured(
 }
 
 function controllerModel(
-  overrides: Partial<BaseTableControllerModel> = {},
-): BaseTableControllerModel {
+  query: Partial<BaseTableQuery> = {},
+): BaseTableReadyModel {
   return {
+    status: "ready",
     definition: {
       slug: "reading",
       revision: "r1",
@@ -227,56 +220,63 @@ function controllerModel(
       diagnostics: [],
       member_creation: [],
     },
-    detailLoading: false,
-    detailMissing: false,
-    activeView: "All",
-    output: { shape: "flat", rows: [], total: 0, aggregates: [] },
-    viewError: undefined,
-    viewLoading: false,
-    sort: [
-      { field: "rating", dir: "desc" },
-      { field: "title", dir: "asc" },
-    ],
-    onViewChange: vi.fn(),
-    onSortChange: vi.fn(),
-    onOpenPage: vi.fn(),
     configureSlug: "reading",
-    onCommitCell: vi.fn(),
-    memberCapability: undefined,
-    memberDraftFields: [],
-    memberTitleTemplate: undefined,
-    memberDraftOpen: false,
-    memberSaving: false,
-    memberDiagnostics: [],
-    memberError: undefined,
-    memberNotice: undefined,
-    projects: [],
-    onAddMember: vi.fn(),
-    onSaveMember: vi.fn(),
-    onCancelMember: vi.fn(),
-    onMemberEdit: vi.fn(),
-    focusCreatedId: undefined,
-    onCreatedRowFocused: vi.fn(),
-    overrides: EMPTY_OVERRIDES,
-    onAddQuickFilter: vi.fn(),
-    onRemoveQuickFilter: vi.fn(),
-    onSetGroup: vi.fn(),
-    onHideColumn: vi.fn(),
-    onShowColumn: vi.fn(),
-    onShowHiddenColumns: vi.fn(),
-    onReorderColumns: vi.fn(),
-    onResetColumnOrder: vi.fn(),
-    onClearOverrides: vi.fn(),
-    onSaveOverrides: vi.fn(),
-    onReloadDefinition: vi.fn(),
-    overridesSave: { phase: "idle" },
-    onOpenPageInNewTab: vi.fn(),
-    onCopyWikilink: vi.fn(),
-    onCopyValue: vi.fn(),
-    onDuplicateRow: vi.fn(),
-    onArchiveRow: vi.fn(),
-    rowActionError: undefined,
-    rowWindow: {
+    query: {
+      activeView: "All",
+      output: { shape: "flat", rows: [], total: 0, aggregates: [] },
+      error: undefined,
+      loading: false,
+      sort: [
+        { field: "rating", dir: "desc" },
+        { field: "title", dir: "asc" },
+      ],
+      onViewChange: vi.fn(),
+      onSortChange: vi.fn(),
+      ...query,
+    },
+    rowActions: {
+      onOpenPage: vi.fn(),
+      onCommitCell: vi.fn(),
+      onOpenPageInNewTab: vi.fn(),
+      onCopyWikilink: vi.fn(),
+      onCopyValue: vi.fn(),
+      onDuplicateRow: vi.fn(),
+      onArchiveRow: vi.fn(),
+      error: undefined,
+    },
+    members: {
+      capability: undefined,
+      draftFields: [],
+      titleTemplate: undefined,
+      draftOpen: false,
+      saving: false,
+      diagnostics: [],
+      error: undefined,
+      notice: undefined,
+      projects: [],
+      focusCreatedId: undefined,
+      onAdd: vi.fn(),
+      onSave: vi.fn(),
+      onCancel: vi.fn(),
+      onEdit: vi.fn(),
+      onCreatedRowFocused: vi.fn(),
+    },
+    overrides: {
+      state: EMPTY_OVERRIDES,
+      save: { phase: "idle" },
+      onAddQuickFilter: vi.fn(),
+      onRemoveQuickFilter: vi.fn(),
+      onSetGroup: vi.fn(),
+      onHideColumn: vi.fn(),
+      onShowColumn: vi.fn(),
+      onShowHiddenColumns: vi.fn(),
+      onReorderColumns: vi.fn(),
+      onResetColumnOrder: vi.fn(),
+      onClear: vi.fn(),
+      onSave: vi.fn(),
+      onReloadDefinition: vi.fn(),
+    },
+    window: {
       total: 0,
       loaded: 0,
       hasMore: false,
@@ -284,7 +284,6 @@ function controllerModel(
       cappedBy: undefined,
       loadMore: vi.fn(),
     },
-    ...overrides,
   };
 }
 
@@ -300,7 +299,7 @@ function Harness({ editor, value }: { editor: Editor; value: Descendant[] }) {
 }
 
 function renderConfigured(
-  model: BaseTableControllerModel = controllerModel(),
+  model: BaseTableModel = controllerModel(),
   presentation: { display?: "compact" | "full"; width?: number } = {},
 ) {
   adapterState.model = model;
@@ -499,7 +498,7 @@ describe("EmbeddedBaseTable live Slate adapter", () => {
       (operation) => operation.type === "set_node",
     ).length;
     fireEvent.click(screen.getByRole("button", { name: "Commit property" }));
-    expect(model.onCommitCell).toHaveBeenCalledWith(
+    expect(model.rowActions.onCommitCell).toHaveBeenCalledWith(
       expect.objectContaining({ path: "one.md" }),
       "rating",
       5,
@@ -510,40 +509,34 @@ describe("EmbeddedBaseTable live Slate adapter", () => {
     ).toHaveLength(nodeTransforms);
 
     fireEvent.click(screen.getByRole("button", { name: "Open title" }));
-    expect(model.onOpenPage).toHaveBeenCalledWith("one.md");
+    expect(model.rowActions.onOpenPage).toHaveBeenCalledWith("one.md");
     expect(
       screen.getByRole("link", { name: "Configure Base" }),
     ).toHaveAttribute("href", "/bases/reading/edit");
   });
 
   it.each([
-    [
-      "loading",
-      controllerModel({ definition: undefined, detailLoading: true }),
-    ],
+    ["loading", { status: "loading" } satisfies BaseTableModel],
     [
       "missing Base",
-      controllerModel({ definition: undefined, detailMissing: true }),
+      { status: "missing", slug: "reading" } satisfies BaseTableModel,
     ],
     [
       "missing view",
       controllerModel({
-        viewError: "No saved view named All",
+        error: "No saved view named All",
         output: undefined,
       }),
     ],
-    [
-      "query loading",
-      controllerModel({ viewLoading: true, output: undefined }),
-    ],
+    ["query loading", controllerModel({ loading: true, output: undefined })],
     [
       "query error",
-      controllerModel({ viewError: "Query failed", output: undefined }),
+      controllerModel({ error: "Query failed", output: undefined }),
     ],
     [
       "cached query error",
       controllerModel({
-        viewError: "Refresh failed",
+        error: "Refresh failed",
         output: { shape: "flat", rows: [], total: 0, aggregates: [] },
       }),
     ],
@@ -555,7 +548,7 @@ describe("EmbeddedBaseTable live Slate adapter", () => {
       expect(
         screen.getByRole("button", { name: "Remove Base embed" }),
       ).toBeEnabled();
-      if (model.definition) {
+      if (model.status === "ready") {
         expect(
           screen.getByRole("region", { name: "Mock Base table view" }),
         ).toBeInTheDocument();

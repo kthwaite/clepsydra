@@ -38,6 +38,7 @@ import {
   type BaseTableViewHandle,
 } from "#/components/bases/BaseTableView";
 import type { BaseMemberDraftField } from "#/components/bases/member-draft";
+import { type FlatViewProps, viewProps } from "./flat-view-props";
 
 const definition: BaseDetailResponse = {
   slug: "reading",
@@ -97,7 +98,7 @@ const memberDraftFields: BaseMemberDraftField[] = [
   },
 ];
 
-type ViewProps = Parameters<typeof BaseTableView>[0];
+type ViewProps = FlatViewProps;
 
 function renderView(overrides: Partial<ViewProps>) {
   const spies = {
@@ -113,19 +114,21 @@ function renderView(overrides: Partial<ViewProps>) {
   };
   const element = (next: Partial<ViewProps> = {}) => (
     <BaseTableView
-      definition={definition}
-      activeView="Continues"
-      output={flat}
-      sort={undefined}
-      memberCapability={enabledCapability}
-      memberDraftFields={memberDraftFields}
-      memberDraftOpen={false}
-      memberSaving={false}
-      memberDiagnostics={[]}
-      projects={[]}
-      {...spies}
-      {...overrides}
-      {...next}
+      {...viewProps({
+        definition,
+        activeView: "Continues",
+        output: flat,
+        sort: undefined,
+        memberCapability: enabledCapability,
+        memberDraftFields,
+        memberDraftOpen: false,
+        memberSaving: false,
+        memberDiagnostics: [],
+        projects: [],
+        ...spies,
+        ...overrides,
+        ...next,
+      })}
     />
   );
   const result = render(element());
@@ -140,6 +143,46 @@ async function flushFocusTimer(): Promise<void> {
     await vi.runAllTimersAsync();
   });
 }
+
+describe("BaseTableView status", () => {
+  it("says the standalone screen is loading", () => {
+    render(<BaseTableView model={{ status: "loading" }} screen />);
+
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByRole("grid")).toBeNull();
+  });
+
+  it("names the missing base on the standalone screen", () => {
+    render(
+      <BaseTableView model={{ status: "missing", slug: "reading" }} screen />,
+    );
+
+    expect(
+      screen.getByText("No base named “reading” (or it declares no views)."),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps an embed's actions beside its loading and missing messages", () => {
+    const actions = <button type="button">Edit embed</button>;
+    const { rerender } = render(
+      <BaseTableView model={{ status: "loading" }} toolbarActions={actions} />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading Base embed…");
+    expect(screen.getByRole("button", { name: "Edit embed" })).toBeEnabled();
+
+    rerender(
+      <BaseTableView
+        model={{ status: "missing", slug: "reading" }}
+        toolbarActions={actions}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "No Base named “reading” is available.",
+    );
+    expect(screen.getByRole("button", { name: "Edit embed" })).toBeEnabled();
+  });
+});
 
 describe("BaseTableView compact chrome", () => {
   it("names the Base without claiming a document heading", () => {
@@ -783,15 +826,17 @@ describe("BaseTableView", () => {
     render(
       <BaseTableView
         ref={ref}
-        definition={definition}
-        activeView="Continues"
-        output={flat}
-        sort={undefined}
-        memberCapability={enabledCapability}
-        onViewChange={vi.fn()}
-        onSortChange={vi.fn()}
-        onOpenPage={vi.fn()}
-        onCommitCell={vi.fn()}
+        {...viewProps({
+          definition,
+          activeView: "Continues",
+          output: flat,
+          sort: undefined,
+          memberCapability: enabledCapability,
+          onViewChange: vi.fn(),
+          onSortChange: vi.fn(),
+          onOpenPage: vi.fn(),
+          onCommitCell: vi.fn(),
+        })}
       />,
     );
 
@@ -804,15 +849,17 @@ describe("BaseTableView", () => {
     render(
       <BaseTableView
         ref={ref}
-        definition={definition}
-        activeView="Continues"
-        output={flat}
-        sort={undefined}
-        readOnly
-        onViewChange={vi.fn()}
-        onSortChange={vi.fn()}
-        onOpenPage={vi.fn()}
-        onCommitCell={vi.fn()}
+        {...viewProps({
+          definition,
+          activeView: "Continues",
+          output: flat,
+          sort: undefined,
+          readOnly: true,
+          onViewChange: vi.fn(),
+          onSortChange: vi.fn(),
+          onOpenPage: vi.fn(),
+          onCommitCell: vi.fn(),
+        })}
       />,
     );
 
@@ -830,21 +877,23 @@ describe("BaseTableView", () => {
     render(
       <BaseTableView
         ref={ref}
-        definition={definition}
-        activeView="Shelf"
-        output={{
-          shape: "grouped",
-          groups: [
-            { key: "reading", total: 1, aggregates: [1, 4.5], rows: [row] },
-            { key: "queued", total: 0, aggregates: [0, null], rows: [] },
-          ],
-        }}
-        sort={undefined}
-        readOnly
-        onViewChange={vi.fn()}
-        onSortChange={vi.fn()}
-        onOpenPage={vi.fn()}
-        onCommitCell={vi.fn()}
+        {...viewProps({
+          definition,
+          activeView: "Shelf",
+          output: {
+            shape: "grouped",
+            groups: [
+              { key: "reading", total: 1, aggregates: [1, 4.5], rows: [row] },
+              { key: "queued", total: 0, aggregates: [0, null], rows: [] },
+            ],
+          },
+          sort: undefined,
+          readOnly: true,
+          onViewChange: vi.fn(),
+          onSortChange: vi.fn(),
+          onOpenPage: vi.fn(),
+          onCommitCell: vi.fn(),
+        })}
       />,
     );
 
@@ -865,15 +914,17 @@ describe("BaseTableView", () => {
     render(
       <BaseTableView
         ref={ref}
-        definition={{ ...definition, views: [] }}
-        activeView=""
-        output={undefined}
-        viewLoading
-        sort={undefined}
-        onViewChange={vi.fn()}
-        onSortChange={vi.fn()}
-        onOpenPage={vi.fn()}
-        onCommitCell={vi.fn()}
+        {...viewProps({
+          definition: { ...definition, views: [] },
+          activeView: "",
+          output: undefined,
+          viewLoading: true,
+          sort: undefined,
+          onViewChange: vi.fn(),
+          onSortChange: vi.fn(),
+          onOpenPage: vi.fn(),
+          onCommitCell: vi.fn(),
+        })}
       />,
     );
 
@@ -1373,12 +1424,14 @@ describe("BaseTableView", () => {
       onOpenPage: vi.fn(),
       onCommitCell: vi.fn(),
     };
-    const { rerender } = render(<BaseTableView {...props} />);
+    const { rerender } = render(<BaseTableView {...viewProps({ ...props })} />);
 
     await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
     expect(screen.getByRole("textbox", { name: "Edit text" })).toHaveFocus();
 
-    rerender(<BaseTableView {...props} activeView="Second" />);
+    rerender(
+      <BaseTableView {...viewProps({ ...props, activeView: "Second" })} />,
+    );
 
     expect(screen.queryByRole("textbox", { name: "Edit text" })).toBeNull();
     expect(
@@ -1438,7 +1491,7 @@ describe("BaseTableView", () => {
       onOpenPage: vi.fn(),
       onCommitCell: vi.fn(),
     };
-    const { rerender } = render(<BaseTableView {...props} />);
+    const { rerender } = render(<BaseTableView {...viewProps({ ...props })} />);
 
     await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Edit text" }), {
@@ -1450,13 +1503,15 @@ describe("BaseTableView", () => {
 
     rerender(
       <BaseTableView
-        {...props}
-        output={{ shape: "flat", rows: [], total: 0, aggregates: [] }}
+        {...viewProps({
+          ...props,
+          output: { shape: "flat", rows: [], total: 0, aggregates: [] },
+        })}
       />,
     );
     expect(screen.queryByLabelText(/^Edit /)).not.toBeInTheDocument();
 
-    rerender(<BaseTableView {...props} />);
+    rerender(<BaseTableView {...viewProps({ ...props })} />);
     expect(screen.queryByLabelText(/^Edit /)).not.toBeInTheDocument();
   });
 
