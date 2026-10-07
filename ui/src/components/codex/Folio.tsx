@@ -15,14 +15,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  type Descendant,
-  Editor,
-  Element as SlateElement,
-  Transforms,
-} from "slate";
-import { ReactEditor } from "slate-react";
-import { useAiJournalToday } from "#/api/aiJournal";
+import { type Descendant, Element as SlateElement } from "slate";
 import {
   useBacklinks,
   useOutlinks,
@@ -30,7 +23,7 @@ import {
   useTagSuggestions,
   useUnlinkedMentions,
 } from "#/api/index";
-import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
+import { useJournalEditorOptions } from "#/api/journal";
 import { type ArchivedPage, useAssignPage } from "#/api/pages";
 import type { PageMeta } from "#/api/types";
 import { useAttachmentDropUpload } from "#/components/attachments/useAttachmentDropUpload";
@@ -68,6 +61,7 @@ import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useEmbedTocExpander } from "#/components/codex/useEmbedTocExpander";
 import { useFolioMode } from "#/components/codex/useFolioMode";
 import { useFolioRestoration } from "#/components/codex/useFolioRestoration";
+import { useFolioTab, useTodayJournal } from "#/components/codex/useFolioTab";
 import {
   RawMarkdownNavigationGuard,
   useRawMarkdownSession,
@@ -99,12 +93,7 @@ import {
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
-import {
-  aiJournalDateFromPath,
-  journalDateFromPath,
-  todayAiJournalPath,
-  todayJournalPath,
-} from "#/lib/journal";
+import { aiJournalDateFromPath, journalDateFromPath } from "#/lib/journal";
 import { kindDisplayLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { formatChord, matchesChord, SHORTCUTS } from "#/lib/shortcuts";
@@ -171,12 +160,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const router = useRouter();
   const routerHistory = router?.history;
   const leaveFolioWorkspace = useLeaveFolioWorkspace();
-  const isTodayDraftPath = path === todayJournalPath();
-  const { data: journalToday, isLoading: isJournalTodayLoading } =
-    useJournalToday(isTodayDraftPath);
-  const isTodayAiDraftPath = path === todayAiJournalPath();
-  const { data: aiJournalToday, isLoading: isAiJournalTodayLoading } =
-    useAiJournalToday(isTodayAiDraftPath);
+  const todayJournal = useTodayJournal(path);
   const editor = usePageEditor(path, useJournalEditorOptions(path));
   const { data: backlinks } = useBacklinks(path);
   const { data: unlinkedMentions } = useUnlinkedMentions(path);
@@ -214,14 +198,6 @@ export function Folio({ tabId, path }: FolioProps) {
     tagSuggestionRequest.error
       ? new Error(tagSuggestionRequest.error.error)
       : null;
-  const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
-  const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
-  const setTabPageId = useWorkspaceStore((state) => state.setTabPageId);
-  const closeTab = useWorkspaceStore((s) => s.closeTab);
-  const tabQuire = useWorkspaceStore((s) => {
-    const quireId = s.tabs.find((tab) => tab.id === tabId)?.quireId;
-    return quireId ? s.quires[quireId] : undefined;
-  });
   const closeArchivedPageTabs = useWorkspaceStore(
     (state) => state.closeArchivedPageTabs,
   );
@@ -233,13 +209,6 @@ export function Folio({ tabId, path }: FolioProps) {
     },
     [closeArchivedPageTabs, mobile, navigate, routerHistory],
   );
-  const focusRequestId = useWorkspaceStore(
-    (state) => state.tabs.find((tab) => tab.id === tabId)?.focusRequestId,
-  );
-  const takeTabFocus = useWorkspaceStore((state) => state.takeTabFocus);
-  useEffect(() => {
-    if (editor.pageId) setTabPageId(tabId, editor.pageId);
-  }, [editor.pageId, setTabPageId, tabId]);
   const onMobileBack = () => {
     if (!router.history.canGoBack()) {
       leaveFolioWorkspace(() => {
@@ -250,28 +219,6 @@ export function Folio({ tabId, path }: FolioProps) {
 
     router.history.back();
   };
-  useEffect(() => {
-    if (isTodayDraftPath && journalToday?.path && journalToday.path !== path) {
-      updateTabPath(
-        tabId,
-        journalToday.path,
-        journalToday.meta.title ?? undefined,
-      );
-    }
-  }, [isTodayDraftPath, journalToday, path, tabId, updateTabPath]);
-  useEffect(() => {
-    if (
-      isTodayAiDraftPath &&
-      aiJournalToday?.path &&
-      aiJournalToday.path !== path
-    ) {
-      updateTabPath(
-        tabId,
-        aiJournalToday.path,
-        aiJournalToday.meta.title ?? undefined,
-      );
-    }
-  }, [isTodayAiDraftPath, aiJournalToday, path, tabId, updateTabPath]);
 
   const assign = useAssignPage();
   const projects = useProjects();
@@ -306,18 +253,6 @@ export function Folio({ tabId, path }: FolioProps) {
   const finishAttachmentInsertion = useCallback((id: number) => {
     setAttachmentInsertion((current) => (current?.id === id ? null : current));
   }, []);
-
-  // Assigning a kind/project writes frontmatter AND moves the file, so the
-  // page path changes. Repoint the open tab to the new path; because FOLIO is
-  // keyed on the tab path (TabContent), this remounts the editor at the new
-  // location — the entire follow mechanism.
-  const followMove = (data: { path?: string }) => {
-    if (data.path && data.path !== path) updateTabPath(tabId, data.path);
-  };
-
-  useEffect(() => {
-    if (editor.title) updateTabLabel(tabId, editor.title);
-  }, [tabId, editor.title, updateTabLabel]);
 
   useEffect(() => {
     setProgress(0);
@@ -368,10 +303,6 @@ export function Folio({ tabId, path }: FolioProps) {
     status: "plain" as const,
     body: editor.bodyMarkdown,
   };
-  const journalTodayPending = Boolean(
-    (isTodayDraftPath && (isJournalTodayLoading || journalToday)) ||
-      (isTodayAiDraftPath && (isAiJournalTodayLoading || aiJournalToday)),
-  );
   const {
     surface,
     isAiConversation,
@@ -398,7 +329,7 @@ export function Folio({ tabId, path }: FolioProps) {
     generatedChangePending: editor.generatedChangePending === true,
     encrypted,
     encryptionStatus: encryptionState.status,
-    journalTodayPending,
+    journalTodayPending: todayJournal.pending,
     rawSessionOpen: rawMarkdownSession !== null,
   });
   const { onEditorUnmount } = useFolioRestoration({
@@ -410,6 +341,16 @@ export function Folio({ tabId, path }: FolioProps) {
     bodyRef,
     folioEditorRef,
   });
+  const { tabQuire, isActiveTab, updateTabPath, closeTab, followMove } =
+    useFolioTab({
+      tabId,
+      path,
+      editor,
+      todayJournal: todayJournal.target,
+      conversationReadOnly,
+      bodyRef,
+      folioEditorRef,
+    });
   const folioProperties = (
     <FolioProperties
       pageId={editor.pageId ?? ""}
@@ -418,51 +359,6 @@ export function Folio({ tabId, path }: FolioProps) {
       readOnly={folioReadOnly}
     />
   );
-  useEffect(() => {
-    if (!focusRequestId || editor.isLoading || !editor.isEditorSynchronized) {
-      return;
-    }
-    const focusBlockId = takeTabFocus(tabId, focusRequestId);
-    if (!focusBlockId) return;
-
-    const target = Array.from(
-      bodyRef.current?.querySelectorAll<HTMLElement>("[data-block-id]") ?? [],
-    ).find((element) => element.dataset.blockId === focusBlockId);
-    if (!target) return;
-
-    target.scrollIntoView({ block: "center", inline: "nearest" });
-    if (!conversationReadOnly && folioEditorRef.current) {
-      const editorInstance = folioEditorRef.current;
-      const entry = Editor.nodes(editorInstance, {
-        at: [],
-        match: (node) =>
-          SlateElement.isElement(node) &&
-          node.type !== "block-ref" &&
-          "blockId" in node &&
-          node.blockId === focusBlockId,
-      }).next().value;
-      if (entry) {
-        Transforms.select(
-          editorInstance,
-          Editor.start(editorInstance, entry[1]),
-        );
-        ReactEditor.focus(editorInstance);
-      }
-      return;
-    }
-
-    const hadTabIndex = target.hasAttribute("tabindex");
-    if (!hadTabIndex) target.tabIndex = -1;
-    target.focus({ preventScroll: true });
-    if (!hadTabIndex) target.removeAttribute("tabindex");
-  }, [
-    conversationReadOnly,
-    editor.isLoading,
-    editor.isEditorSynchronized,
-    focusRequestId,
-    tabId,
-    takeTabFocus,
-  ]);
 
   // ⌘S / Ctrl-S flushes a save from anywhere in the folio (title, tags,
   // rails) — not just the editor body — and suppresses the browser dialog.
@@ -529,7 +425,6 @@ export function Folio({ tabId, path }: FolioProps) {
     () => countWordsFromSlate(visibleEditorValue),
     [visibleEditorValue],
   );
-  const isActiveTab = useWorkspaceStore((s) => s.activeTabId === tabId);
   useFooterContext(
     isActiveTab
       ? [
