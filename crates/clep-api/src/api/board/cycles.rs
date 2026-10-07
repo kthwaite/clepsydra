@@ -13,6 +13,7 @@ use rusqlite::params;
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
+use crate::api::page_identity::{AttemptError, PathLock, resolve_stable_by_id};
 use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
 use crate::vault::code::{self, CodeFamily};
 use crate::vault::kind::Kind;
@@ -277,29 +278,49 @@ pub(crate) async fn patch_cycle(
         Some(carry) => Some(ensure_cycle_exists(&state, carry).await?),
     };
 
-    let id_clone = id.clone();
-    let page_path = state
-        .index
-        .with_index(move |index, _vault| {
-            let conn = index.connection();
-            conn.query_row(
-                "SELECT path FROM pages WHERE id = ?1 AND kind = ?2",
-                params![id_clone, Kind::Cycle.as_str()],
-                |row| row.get::<_, String>(0),
+    let cycle_path = resolve_stable_by_id(
+        &state,
+        &id,
+        Some(Kind::Cycle),
+        PathLock::Release,
+        || ApiError::not_found(format!("cycle not found with id: {id}")),
+        |cycle_path| {
+            patch_cycle_at(
+                &state,
+                cycle_path,
+                &body,
+                new_state,
+                resolved_carry_to.as_deref(),
             )
-            .ok()
-        })
-        .await
-        .map_err(|error| ApiError::internal(error.to_string()))?
-        .ok_or_else(|| ApiError::not_found(format!("cycle not found with id: {id}")))?;
-    let cycle_path =
-        crate::api::error::parse_internal_path(&page_path, "invalid stored cycle path")?;
-    let cycle_code = path_stem(&page_path).to_string();
+        },
+    )
+    .await?;
 
-    if matches!(&resolved_carry_to, Some(carry) if carry != "BACKLOG" && carry == &cycle_code) {
-        return Err(ApiError::bad_request(
-            "carry_to cannot reference the cycle being closed",
-        ));
+    Ok(Json(build_board_cycle_dto(&state, &cycle_path).await?))
+}
+
+/// One attempt at a Cycle patch on the CYCLE page at `cycle_path`: gather
+/// the carry-over Tasks, plan, execute. Returns the Cycle's path.
+async fn patch_cycle_at(
+    state: &AppState,
+    cycle_path: VaultPath,
+    body: &PatchCycleRequest,
+    new_state: Option<CycleState>,
+    resolved_carry_to: Option<&str>,
+) -> Result<VaultPath, AttemptError> {
+    if !state.vault.resolve(&cycle_path).exists() {
+        return Err(AttemptError::Vanished(ApiError::conflict(format!(
+            "page changed during mutation: {}",
+            cycle_path.as_str()
+        ))));
+    }
+    let is_closing = new_state == Some(CycleState::Closed);
+    let cycle_code = path_stem(cycle_path.as_str()).to_string();
+
+    if matches!(resolved_carry_to, Some(carry) if carry != "BACKLOG" && carry == cycle_code) {
+        return Err(
+            ApiError::bad_request("carry_to cannot reference the cycle being closed").into(),
+        );
     }
 
     let task_paths = if is_closing && resolved_carry_to.is_some() {
@@ -336,11 +357,11 @@ pub(crate) async fn patch_cycle(
     };
 
     let command = plan_cycle_patch_and_carryover(
-        &state,
+        state,
         cycle_path.clone(),
-        &body,
+        body,
         new_state,
-        resolved_carry_to.as_deref(),
+        resolved_carry_to,
         &task_paths,
         state.clock.now(),
     )?;
@@ -351,10 +372,9 @@ pub(crate) async fn patch_cycle(
             &state.index,
             Arc::clone(&state.hooks),
             command,
-            crate::api::mutation_notifier(state.as_ref()),
+            crate::api::mutation_notifier(state),
         )
         .await
-        .map_err(crate::api::mutation_error)?;
-
-    Ok(Json(build_board_cycle_dto(&state, &cycle_path).await?))
+        .map_err(|error| AttemptError::vanished_if_not_found(crate::api::mutation_error(error)))?;
+    Ok(cycle_path)
 }

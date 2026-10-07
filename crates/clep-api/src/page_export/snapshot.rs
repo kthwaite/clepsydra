@@ -423,13 +423,12 @@ impl<'a> Snapshot<'a> {
                 .resolve_link_target_id(canonical.as_str())
                 .map_err(|_| unsupported("embed reference lookup failed"))?
                 .ok_or_else(|| unsupported("embedded page is missing or ambiguous"))?;
-            let path: String = self
+            let path = self
                 .index
-                .connection()
-                .query_row("SELECT path FROM pages WHERE id = ?1", [&id], |row| {
-                    row.get(0)
-                })
-                .map_err(|_| unsupported("embedded page is unavailable"))?;
+                .page_path_by_id(&id, None)
+                .ok()
+                .flatten()
+                .ok_or_else(|| unsupported("embedded page is unavailable"))?;
             VaultPath::new(&path).map_err(|_| unsupported("invalid embedded page path"))?
         };
         let page = self.page(path)?;

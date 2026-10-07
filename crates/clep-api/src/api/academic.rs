@@ -15,6 +15,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
+use super::page_identity::{AttemptError, PathLock, resolve_stable_by_id};
 use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
 use crate::vault::academic::{
@@ -1713,22 +1714,40 @@ pub async fn create_annotation(
     Json(req): Json<CreateAnnotationRequest>,
 ) -> Result<Response, ApiError> {
     // 1. Validate work_id exists and is a work
-    let work_id_str = req.work_id.clone();
-    let work_path = state
-        .index
-        .with_index(move |index, _vault| {
-            index
-                .connection()
-                .query_row(
-                    "SELECT path FROM pages WHERE id = ?1 AND json_extract(meta_json, '$.kind') = 'work'",
-                    params![work_id_str],
-                    |row| row.get::<_, String>(0),
-                )
-                .ok()
-        })
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found(format!("work not found: {}", req.work_id)))?;
+    let work_id = req.work_id.as_str();
+    let work_not_found = || ApiError::not_found(format!("work not found: {work_id}"));
+    let work_path = resolve_stable_by_id(
+        &state,
+        work_id,
+        None,
+        PathLock::Release,
+        work_not_found,
+        |path| {
+            let abs_path = state.vault.resolve(&path);
+            async move {
+                let content = std::fs::read_to_string(&abs_path).map_err(|error| {
+                    if error.kind() == std::io::ErrorKind::NotFound {
+                        AttemptError::Vanished(work_not_found())
+                    } else {
+                        AttemptError::Failed(ApiError::internal(format!(
+                            "failed to read work: {error}"
+                        )))
+                    }
+                })?;
+                let (meta, _) = parse_frontmatter(&content).map_err(|error| {
+                    ApiError::internal(format!("failed to parse work: {error}"))
+                })?;
+                if meta.id.to_string() != work_id {
+                    return Err(AttemptError::Vanished(work_not_found()));
+                }
+                if meta.extra.get("kind").and_then(|kind| kind.as_str()) != Some("work") {
+                    return Err(AttemptError::Failed(work_not_found()));
+                }
+                Ok(path.as_str().to_string())
+            }
+        },
+    )
+    .await?;
 
     // 2. Generate filename
     let type_prefix = match &req.annotation_type {

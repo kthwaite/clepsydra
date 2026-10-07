@@ -24,6 +24,7 @@ pub mod journal;
 pub mod location;
 pub mod openapi;
 pub mod page_export;
+pub(crate) mod page_identity;
 pub mod pages;
 pub mod pagination;
 pub mod projects;

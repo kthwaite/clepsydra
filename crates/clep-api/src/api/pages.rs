@@ -9,12 +9,12 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use chrono::Utc;
-use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
+use super::page_identity::{AttemptError, PathLock, resolve_stable_by_id};
 use super::pagination::PaginatedResponse;
 use super::projects::{ensure_project_exists, project_exists, unknown_project};
 use crate::api::events::SyncNotification;
@@ -656,8 +656,6 @@ pub async fn get_page(
     Ok(Json(page_detail(page)))
 }
 
-const BY_ID_PATH_ATTEMPTS: usize = 8;
-
 /// Body written for a RECIPE page created without one: the three canonical
 /// section headings. An empty body would open in the raw-Markdown fallback,
 /// because the codec needs all three sections present to read a recipe.
@@ -668,26 +666,10 @@ const RECIPE_SCAFFOLD: &str = "## Ingredients\n\n## Steps\n\n## Notes\n";
 /// note that opens empty is a meeting note nobody takes minutes in.
 const MEETING_SCAFFOLD: &str = "## Agenda\n\n## Notes\n\n## Actions\n";
 
-async fn indexed_page_path_by_id(state: &AppState, uuid: &str) -> Result<VaultPath, ApiError> {
-    let indexed_uuid = uuid.to_string();
-    let page_path = state
-        .index
-        .with_index(move |index, _vault| {
-            index
-                .connection()
-                .query_row(
-                    "SELECT path FROM pages WHERE id = ?1",
-                    params![indexed_uuid],
-                    |row| row.get::<_, String>(0),
-                )
-                .ok()
-        })
-        .await
-        .map_err(|error| ApiError::internal(error.to_string()))?
-        .ok_or_else(|| ApiError::not_found(format!("page not found with id: {uuid}")))?;
-
-    crate::api::error::parse_internal_path(&page_path, "invalid stored path")
+fn page_id_not_found(uuid: &str) -> ApiError {
+    ApiError::not_found(format!("page not found with id: {uuid}"))
 }
+
 #[utoipa::path(
     get,
     path = "/pages/by-id/{uuid}",
@@ -704,60 +686,41 @@ pub async fn get_page_by_id(
     State(state): State<Arc<AppState>>,
     Path(uuid): Path<String>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    for _ in 0..BY_ID_PATH_ATTEMPTS {
-        let candidate = indexed_page_path_by_id(&state, &uuid).await?;
-        state
-            .mutation_coordinator
-            .observe_page_id_lookup(&candidate);
-        let guard = state
-            .mutation_coordinator
-            .lock_paths(std::slice::from_ref(&candidate))
-            .await;
-        let confirmed = indexed_page_path_by_id(&state, &uuid).await?;
-        if confirmed != candidate {
-            drop(guard);
-            continue;
-        }
-
-        let abs_path = state.vault.resolve(&candidate);
-        let page = match Page::from_file(&abs_path, candidate.clone()) {
-            Ok(page) => page,
-            Err(crate::vault::page::FrontmatterError::Io(error))
-                if error.kind() == std::io::ErrorKind::NotFound =>
-            {
-                drop(guard);
-                let current = indexed_page_path_by_id(&state, &uuid).await?;
-                if current != candidate {
-                    continue;
+    let page = resolve_stable_by_id(
+        &state,
+        &uuid,
+        None,
+        PathLock::Hold,
+        || page_id_not_found(&uuid),
+        |candidate| {
+            let abs_path = state.vault.resolve(&candidate);
+            let uuid = &uuid;
+            async move {
+                let page =
+                    Page::from_file(&abs_path, candidate.clone()).map_err(|error| match error {
+                        crate::vault::page::FrontmatterError::Io(error)
+                            if error.kind() == std::io::ErrorKind::NotFound =>
+                        {
+                            AttemptError::Vanished(ApiError::not_found(format!(
+                                "page file missing: {}",
+                                candidate.as_str()
+                            )))
+                        }
+                        error => AttemptError::Failed(ApiError::internal(format!(
+                            "failed to read page: {error}"
+                        ))),
+                    })?;
+                if page.meta.id.to_string() != *uuid {
+                    return Err(AttemptError::Vanished(ApiError::internal(format!(
+                        "indexed page identity mismatch for id: {uuid}"
+                    ))));
                 }
-                return Err(ApiError::not_found(format!(
-                    "page file missing: {}",
-                    candidate.as_str()
-                )));
+                Ok(page)
             }
-            Err(error) => {
-                return Err(ApiError::internal(format!("failed to read page: {error}")));
-            }
-        };
-
-        if page.meta.id.to_string() != uuid {
-            drop(guard);
-            let current = indexed_page_path_by_id(&state, &uuid).await?;
-            if current != candidate {
-                continue;
-            }
-            return Err(ApiError::internal(format!(
-                "indexed page identity mismatch for id: {uuid}"
-            )));
-        }
-
-        let _guard = guard;
-        return Ok(Json(page_detail(page)));
-    }
-
-    Err(ApiError::internal(format!(
-        "page path did not stabilize for id: {uuid}"
-    )))
+        },
+    )
+    .await?;
+    Ok(Json(page_detail(page)))
 }
 
 #[utoipa::path(
@@ -904,28 +867,24 @@ pub async fn update_page_by_id(
     Path(uuid): Path<String>,
     Json(body): Json<UpdatePageRequest>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    for _ in 0..BY_ID_PATH_ATTEMPTS {
-        let candidate = indexed_page_path_by_id(&state, &uuid).await?;
-        state
-            .mutation_coordinator
-            .observe_page_id_lookup(&candidate);
-        let attempted = candidate.clone();
-        match update_page_at_path(Arc::clone(&state), candidate, body.clone(), Some(&uuid)).await {
-            Ok(updated) => return Ok(updated),
-            Err(error) if error.status == StatusCode::NOT_FOUND.as_u16() => {
-                let current = indexed_page_path_by_id(&state, &uuid).await?;
-                if current != attempted {
-                    continue;
-                }
-                return Err(error);
+    resolve_stable_by_id(
+        &state,
+        &uuid,
+        None,
+        PathLock::Release,
+        || page_id_not_found(&uuid),
+        |candidate| {
+            let state = Arc::clone(&state);
+            let body = body.clone();
+            let uuid = &uuid;
+            async move {
+                update_page_at_path(state, candidate, body, Some(uuid))
+                    .await
+                    .map_err(AttemptError::vanished_if_not_found)
             }
-            Err(error) => return Err(error),
-        }
-    }
-
-    Err(ApiError::internal(format!(
-        "page path did not stabilize for id: {uuid}"
-    )))
+        },
+    )
+    .await
 }
 
 #[utoipa::path(
@@ -1029,29 +988,23 @@ async fn transition_page_by_id(
     uuid: &str,
     transition: EncryptionTransition,
 ) -> Result<Json<PageDetail>, ApiError> {
-    for _ in 0..BY_ID_PATH_ATTEMPTS {
-        let candidate = indexed_page_path_by_id(&state, uuid).await?;
-        state
-            .mutation_coordinator
-            .observe_page_id_lookup(&candidate);
-        let attempted = candidate.clone();
-        match transition_page_at_path(Arc::clone(&state), candidate, uuid, transition.clone()).await
-        {
-            Ok(updated) => return Ok(updated),
-            Err(error) if error.status == StatusCode::NOT_FOUND.as_u16() => {
-                let current = indexed_page_path_by_id(&state, uuid).await?;
-                if current != attempted {
-                    continue;
-                }
-                return Err(error);
+    resolve_stable_by_id(
+        &state,
+        uuid,
+        None,
+        PathLock::Release,
+        || page_id_not_found(uuid),
+        |candidate| {
+            let state = Arc::clone(&state);
+            let transition = transition.clone();
+            async move {
+                transition_page_at_path(state, candidate, uuid, transition)
+                    .await
+                    .map_err(AttemptError::vanished_if_not_found)
             }
-            Err(error) => return Err(error),
-        }
-    }
-
-    Err(ApiError::internal(format!(
-        "page path did not stabilize for id: {uuid}"
-    )))
+        },
+    )
+    .await
 }
 
 async fn transition_page_at_path(
