@@ -43,19 +43,38 @@ describe("Tasking route filters", () => {
       bogus: "x",
       project: undefined,
       tags: undefined,
+      type: undefined,
       status: undefined,
       q: undefined,
     });
   });
 
-  it("exposes project/tags/pri/status/hold field ids matching the URL codec", () => {
+  it("exposes project/tags/pri/type/status/hold field ids matching the URL codec", () => {
     expect(TASKING_FILTER_URL.fields.map((f) => f.id)).toEqual([
       "project",
       "tags",
       "pri",
+      "type",
       "status",
       "hold",
     ]);
+  });
+
+  it("keeps the Type facet in the URL across navigation and validation", () => {
+    const navigation = taskingFilterNavigation(
+      { text: "", facets: { type: ["FIX", "UNTYPED"] } },
+      { text: "", facets: {} },
+    );
+    const next = navigation.search({});
+    expect(next.type).toEqual(["FIX", "UNTYPED"]);
+
+    const validateSearch = Route.options.validateSearch;
+    if (typeof validateSearch !== "function") {
+      throw new Error("Expected a callable search validator");
+    }
+    expect(validateSearch({ type: "fix,untyped" } as never)).toMatchObject({
+      type: ["FIX", "UNTYPED"],
+    });
   });
 
   it("builds text-only navigation for the exact route while retaining unrelated search and clearing stale fields", () => {
@@ -85,6 +104,7 @@ describe("Tasking route filters", () => {
       project: ["Clepsydra"],
       tags: undefined,
       pri: ["P1", "P2"],
+      type: undefined,
       status: undefined,
       hold: undefined,
       pane: "board",

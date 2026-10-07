@@ -25,6 +25,7 @@ export const TASKING_FILTER_URL: FilterUrlOptions = {
     { id: "project", kind: "multi" },
     { id: "tags", kind: "multi" },
     { id: "pri", kind: "multi", normalize: (v) => v.toUpperCase() },
+    { id: "type", kind: "multi", normalize: (v) => v.toUpperCase() },
     { id: "status", kind: "multi", normalize: (v) => v.toUpperCase() },
     { id: "hold", kind: "flag" },
   ],
