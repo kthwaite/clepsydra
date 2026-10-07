@@ -24,7 +24,7 @@ export interface FacetDef extends FilterFieldSpec {
   options?: readonly FacetOption[];
 }
 
-export interface FilterRouteSpec<TTo extends string> {
+interface FilterRouteSpec<TTo extends string> {
   to: TTo;
   facets: readonly FacetDef[];
   aliases?: FilterUrlOptions["aliases"];
@@ -33,7 +33,7 @@ export interface FilterRouteSpec<TTo extends string> {
   resetOnChange?: Readonly<Record<string, unknown>>;
 }
 
-export interface FilterRoute<TTo extends string> {
+interface FilterRoute<TTo extends string> {
   to: TTo;
   url: FilterUrlOptions;
   parse: (search: Record<string, unknown>) => FilterState;

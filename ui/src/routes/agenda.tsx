@@ -35,7 +35,7 @@ const upper = (v: string) => v.toUpperCase();
 
 /** The Agenda's facets: one list for its URL and its FilterBar. Project
  *  options come from the vault at render. */
-export const AGENDA_FACETS: readonly FacetDef[] = [
+const AGENDA_FACETS: readonly FacetDef[] = [
   {
     id: "type",
     kind: "single",

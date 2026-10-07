@@ -24,18 +24,12 @@ import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useTableCompact } from "#/hooks/useTableCompact";
 import { cn } from "#/lib/cn";
-import type { FilterField, FilterState } from "#/lib/filters/model";
+import type { FilterState } from "#/lib/filters/model";
+import { facetFields } from "#/lib/filters/route";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
-import {
-  KINDS,
-  type Kind,
-  kindDisplayLabel,
-  resolveKind,
-  sortKindsByLabel,
-} from "#/lib/kind";
+import { type Kind, kindDisplayLabel, resolveKind } from "#/lib/kind";
 import { formatDayMonthYear, formatRelativeTime } from "#/lib/time";
 import { useProjects, useProjectValues } from "#/lib/useProjects";
-import { useGazetteerStore } from "#/store/gazetteer";
 import {
   GAZETTEER_COL_MAX,
   GAZETTEER_COL_MIN,
@@ -44,7 +38,7 @@ import {
 } from "#/store/gazetteerColumns";
 import {
   appendUniqueTag,
-  filterAndSortRows,
+  GAZETTEER_FACETS,
   type GazetteerSort,
   toContentIndexSort,
 } from "./gazetteer-filter";
@@ -140,43 +134,24 @@ export interface GazetteerFilters {
 }
 
 type Props = {
-  initialTag?: string;
-  filters?: GazetteerFilters;
+  filters: GazetteerFilters;
 };
 
-export function Gazetteer({ initialTag, filters }: Props) {
-  const store = useGazetteerStore();
-  const storeFilterState: FilterState = {
-    text: store.query,
-    facets: {
-      ...(store.selectedTags.length ? { tags: store.selectedTags } : {}),
-      ...(store.kind ? { kind: [store.kind] } : {}),
-      ...(store.project ? { project: [store.project] } : {}),
-    },
-  };
-  const storeOnFilterChange = (next: FilterState) => {
-    store.setQuery(next.text);
-    store.setSelectedTags(next.facets.tags ? [...next.facets.tags] : []);
-    store.setKind(next.facets.kind?.[0] as Kind | undefined);
-    store.setProject(next.facets.project?.[0]);
-  };
-  const filterState = filters?.filterState ?? storeFilterState;
-  const onFilterChange = filters?.onFilterChange ?? storeOnFilterChange;
+export function Gazetteer({ filters }: Props) {
+  const {
+    filterState,
+    onFilterChange,
+    sort,
+    page,
+    onSortChange: setSort,
+    onPageChange: setPage,
+  } = filters;
   const query = filterState.text;
   const selectedTags = [...(filterState.facets.tags ?? [])];
   const kind = filterState.facets.kind?.[0] as Kind | undefined;
   const project = filterState.facets.project?.[0];
-  const sort = filters?.sort ?? store.sort;
-  const page = filters?.page ?? store.page;
-  const setSort = filters?.onSortChange ?? store.setSort;
-  const setPage: (page: number, replace?: boolean) => void =
-    filters?.onPageChange ?? store.setPage;
   const [selection, setSelection] = useState<RowSelectionState>({});
   const [compact, setCompact] = useTableCompact("gazetteer", true);
-
-  useLayoutEffect(() => {
-    if (!filters) store.enter(initialTag);
-  }, [filters, initialTag, store.enter]);
 
   const tagsQuery = useTags();
   const tags = tagsQuery.data ?? [];
@@ -212,17 +187,15 @@ export function Gazetteer({ initialTag, filters }: Props) {
       ? repage(requestedPage, basis.size, pageSize)
       : requestedPage;
   const contentQuery = useContentIndex(
-    filters
-      ? {
-          q: query || undefined,
-          tags: selectedTags.length > 0 ? selectedTags : undefined,
-          kind,
-          project,
-          limit: pageSize,
-          offset: (shownPage - 1) * pageSize,
-          sort: toContentIndexSort(sort),
-        }
-      : { kind, project, limit: 500 },
+    {
+      q: query || undefined,
+      tags: selectedTags.length > 0 ? selectedTags : undefined,
+      kind,
+      project,
+      limit: pageSize,
+      offset: (shownPage - 1) * pageSize,
+      sort: toContentIndexSort(sort),
+    },
     { enabled: measured },
   );
   const { data: content } = contentQuery;
@@ -231,60 +204,23 @@ export function Gazetteer({ initialTag, filters }: Props) {
   // Assign offers declared projects; the filter keeps orphan slugs findable.
   const projects = useProjects();
   const projectValues = useProjectValues();
-  const filterFields = useMemo<FilterField[]>(
-    () => [
-      {
-        id: "kind",
-        kind: "single",
-        label: "Kind",
-        options: sortKindsByLabel(KINDS).map((k) => ({
-          value: k,
-          label: kindDisplayLabel(k),
-        })),
-      },
-      {
-        id: "project",
-        kind: "single",
-        label: "Project",
-        options: projectValues.map((p) => ({ value: p })),
-      },
-      {
-        id: "tags",
-        kind: "multi",
-        label: "Tag",
-        options: tags.map((t) => ({ value: t.tag })),
-      },
-    ],
+  const filterFields = useMemo(
+    () =>
+      facetFields(GAZETTEER_FACETS, {
+        project: projectValues.map((p) => ({ value: p })),
+        tags: tags.map((t) => ({ value: t.tag })),
+      }),
     [projectValues, tags],
   );
 
-  const items = content?.items ?? [];
-  // Route mode pages on the server, which already sorted: its order is
-  // authoritative. Store mode fetches one large batch and sorts it here.
-  const rowsForPage = useMemo(
-    () =>
-      filters
-        ? items
-        : filterAndSortRows(items, {
-            tags: [...(filterState.facets.tags ?? [])],
-            query,
-            sort,
-          }),
-    [filters, items, query, filterState.facets.tags, sort],
-  );
-  const filteredCount = filters ? (content?.total ?? 0) : rowsForPage.length;
-  const totalCount = filters
-    ? (content?.total ?? 0)
-    : Math.max(content?.total ?? 0, items.length);
+  // The server pages and sorts: its order is authoritative.
+  const rows = content?.items ?? [];
+  const filteredCount = content?.total ?? 0;
+  const totalCount = filteredCount;
   const pageCount = Math.max(1, Math.ceil(filteredCount / pageSize));
   const currentPage = contentQuery.isSuccess
     ? Math.min(shownPage, pageCount)
     : shownPage;
-  const rows = useMemo(() => {
-    if (filters) return rowsForPage;
-    const start = (currentPage - 1) * pageSize;
-    return rowsForPage.slice(start, start + pageSize);
-  }, [currentPage, filters, pageSize, rowsForPage]);
 
   const columnWidths = useGazetteerColumnsStore((s) => s.columnWidths);
   const columnOrder = useGazetteerColumnsStore((s) => s.columnOrder);

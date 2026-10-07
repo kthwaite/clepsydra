@@ -8,8 +8,9 @@ import {
   kindDisplayLabel,
   sortKindsByLabel,
 } from "#/lib/kind";
-import { useGazetteerStore } from "#/store/gazetteer";
+import { Route as GazetteerRoute } from "#/routes/gazetteer";
 import { Gazetteer } from "./Gazetteer";
+import { validateGazetteerSearch } from "./gazetteer-filter";
 
 const {
   bulkMutateMock,
@@ -18,6 +19,7 @@ const {
   layoutState,
   openTabMock,
   routeBridge,
+  router,
   tagQueryState,
   useContentIndexMock,
 } = vi.hoisted(() => {
@@ -31,11 +33,19 @@ const {
       data: contentState as typeof contentState | undefined,
       error: null as Error | null,
       isSuccess: true,
+      serverPaging: false,
     },
     contentState,
     layoutState: { mobile: true },
     openTabMock: vi.fn(),
     routeBridge: { openWorkspace: undefined as (() => void) | undefined },
+    // The route's search, owned by the harness as the URL would be.
+    router: {
+      search: {} as Record<string, unknown>,
+      setSearch: undefined as
+        | ((next: Record<string, unknown>) => void)
+        | undefined,
+    },
     tagQueryState: {
       data: [
         { tag: "research", count: 4, computed_count: 0 },
@@ -49,10 +59,26 @@ const {
   };
 });
 
+vi.mock("@tanstack/react-router", () => ({
+  createFileRoute: () => (options: Record<string, unknown>) => ({
+    options,
+    useSearch: () => router.search,
+  }),
+  useNavigate:
+    () =>
+    ({
+      search,
+    }: {
+      search: (current: Record<string, unknown>) => Record<string, unknown>;
+    }) =>
+      router.setSearch?.(search(router.search)),
+}));
 vi.mock("#/api/index", () => ({
   useContentIndex: (...args: unknown[]) => {
     useContentIndexMock(...args);
-    return contentQueryState;
+    return contentQueryState.serverPaging
+      ? servePage(args[0] as ContentIndexArgs)
+      : contentQueryState;
   },
   useTags: () => tagQueryState,
 }));
@@ -79,12 +105,42 @@ vi.mock("#/lib/useProjects", () => ({
   useProjectValues: () => ["atlas", "clepsydra"],
 }));
 
+interface ContentIndexArgs {
+  q?: string;
+  tags?: string[];
+  limit: number;
+  offset: number;
+}
+
+/** The server's side of the paged query: filter by text and tags, then
+ *  slice one page. */
+function servePage({ q, tags, limit, offset }: ContentIndexArgs) {
+  const matches = contentState.items.filter(
+    (item) =>
+      (!q || String(item.title).toLowerCase().includes(q.toLowerCase())) &&
+      (tags ?? []).every((tag) => (item.tags as string[]).includes(tag)),
+  );
+  return {
+    data: {
+      items: matches.slice(offset, offset + limit),
+      total: matches.length,
+    },
+    error: null,
+    isSuccess: true,
+  };
+}
+
+/** The real route over a search that outlives the Gazetteer, as the URL
+ *  does when a Folio opens and the viewer returns. */
 function GazetteerNavigationHarness() {
   const [route, setRoute] = useState<"gazetteer" | "workspace">("gazetteer");
+  const [search, setSearch] = useState(() => validateGazetteerSearch({}));
+  router.search = search;
+  router.setSearch = (next) => setSearch(validateGazetteerSearch(next));
   routeBridge.openWorkspace = () => setRoute("workspace");
 
   return route === "gazetteer"
-    ? createElement(Gazetteer)
+    ? createElement(GazetteerRoute.options.component as () => null)
     : createElement(
         "button",
         { type: "button", onClick: () => setRoute("gazetteer") },
@@ -144,20 +200,13 @@ beforeEach(() => {
   contentQueryState.data = contentState;
   contentQueryState.error = null;
   contentQueryState.isSuccess = true;
-  useGazetteerStore.setState({
-    query: "",
-    selectedTags: [],
-    kind: undefined,
-    project: undefined,
-    sort: "ts",
-    page: 1,
-    routeTag: undefined,
-  });
+  contentQueryState.serverPaging = false;
 });
 
 describe("Gazetteer controller", () => {
   it("restores query, tag, and sort after opening a Folio and returning", async () => {
     const user = userEvent.setup();
+    contentQueryState.serverPaging = true;
     render(createElement(GazetteerNavigationHarness));
 
     await user.click(screen.getByRole("button", { name: "Filters" }));
@@ -196,6 +245,7 @@ describe("Gazetteer controller", () => {
 
   it("paginates mobile rows accessibly, persists the page through Folio navigation, and resets when filters reduce results", async () => {
     const user = userEvent.setup();
+    contentQueryState.serverPaging = true;
     render(createElement(GazetteerNavigationHarness));
 
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -369,7 +419,7 @@ describe("Gazetteer controller", () => {
   it("offers bulk kind assignment as an alphabetical combobox without quotation", async () => {
     const user = userEvent.setup();
     layoutState.mobile = false;
-    render(createElement(Gazetteer));
+    render(createElement(Gazetteer, { filters: makeFilters() }));
 
     await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
     await user.click(
@@ -413,7 +463,7 @@ describe("Gazetteer controller", () => {
       },
     );
     const user = userEvent.setup();
-    render(createElement(Gazetteer));
+    render(createElement(Gazetteer, { filters: makeFilters() }));
 
     await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
     expect(screen.getByText("1 selected")).toBeVisible();
