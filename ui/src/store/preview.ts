@@ -3,12 +3,16 @@ import { create } from "zustand";
 // Link-preview window manager. Hovering a wikilink spawns a transient preview;
 // pinning makes it a persistent, draggable window; minimizing parks it in a
 // bottom-left tray. Pinned windows + positions persist across reloads.
+// A hover over a link in the lower half of the viewport opens above it, so
+// the window never runs off the bottom edge.
 
 export type PreviewWindow = {
   id: string;
   path: string;
   x: number;
   y: number;
+  /** When true, `y` is the window's bottom edge, not its top. */
+  above?: boolean;
   pinned: boolean;
   minimized: boolean;
   z: number;
@@ -17,7 +21,7 @@ export type PreviewWindow = {
 const W = 340;
 const PERSIST_KEY = "clp.preview.pinned";
 
-type Persisted = { path: string; x: number; y: number };
+type Persisted = { path: string; x: number; y: number; above?: boolean };
 
 function loadPinned(): PreviewWindow[] {
   if (typeof window === "undefined") return [];
@@ -30,6 +34,7 @@ function loadPinned(): PreviewWindow[] {
       path: p.path,
       x: p.x,
       y: p.y,
+      above: p.above,
       pinned: true,
       minimized: false,
       z: 100 + i,
@@ -43,7 +48,12 @@ function savePinned(windows: PreviewWindow[]) {
   try {
     const pinned: Persisted[] = windows
       .filter((w) => w.pinned)
-      .map((w) => ({ path: w.path, x: w.x, y: w.y }));
+      .map((w) => ({
+        path: w.path,
+        x: w.x,
+        y: w.y,
+        ...(w.above ? { above: true } : {}),
+      }));
     window.localStorage.setItem(PERSIST_KEY, JSON.stringify(pinned));
   } catch {
     // ignore
@@ -83,7 +93,8 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     }
     const vw = window.innerWidth;
     const x = Math.min(Math.max(8, rect.left), vw - W - 8);
-    const y = rect.bottom + 6;
+    const above = (rect.top + rect.bottom) / 2 > window.innerHeight / 2;
+    const y = above ? rect.top - 6 : rect.bottom + 6;
     const z = state.topZ + 1;
     const id = `pv-${nextId++}`;
     // Replace any prior transient hover window.
@@ -93,7 +104,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
     set({
       windows: [
         ...kept,
-        { id, path, x, y, pinned: false, minimized: false, z },
+        { id, path, x, y, above, pinned: false, minimized: false, z },
       ],
       topZ: z,
       hoverId: id,
@@ -165,13 +176,17 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
   move(id, x, y) {
     set((s) => ({
-      windows: s.windows.map((w) => (w.id === id ? { ...w, x, y } : w)),
+      windows: s.windows.map((w) =>
+        w.id === id ? { ...w, x, y, above: false } : w,
+      ),
     }));
   },
 
   commitMove(id, x, y) {
     set((s) => {
-      const windows = s.windows.map((w) => (w.id === id ? { ...w, x, y } : w));
+      const windows = s.windows.map((w) =>
+        w.id === id ? { ...w, x, y, above: false } : w,
+      );
       savePinned(windows);
       return { windows };
     });

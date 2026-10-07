@@ -86,7 +86,12 @@ function PreviewWindow({ win }: { win: PW }) {
 
   const onTitlePointerDown = (e: React.PointerEvent) => {
     raise(win.id);
-    dragRef.current = { ox: e.clientX - win.x, oy: e.clientY - win.y };
+    // An `above` window's `y` is its bottom edge, so measure its rendered
+    // top. Moves then write top-left coordinates and drop `above`.
+    const top = win.above
+      ? (e.currentTarget.parentElement?.getBoundingClientRect().top ?? win.y)
+      : win.y;
+    dragRef.current = { ox: e.clientX - win.x, oy: e.clientY - top };
     setDragging(true);
   };
 
@@ -103,7 +108,7 @@ function PreviewWindow({ win }: { win: PW }) {
       style={{
         left: 0,
         top: 0,
-        transform: `translate3d(${win.x}px, ${win.y}px, 0)`,
+        transform: `translate3d(${win.x}px, ${win.y}px, 0)${win.above ? " translateY(-100%)" : ""}`,
         width: PREVIEW_WIDTH,
         zIndex: win.z,
       }}

@@ -74,3 +74,50 @@ describe("preview movement persistence", () => {
     );
   });
 });
+
+describe("openHover placement", () => {
+  const rectAt = (top: number) =>
+    ({ left: 100, top, bottom: top + 20 }) as DOMRect;
+
+  it("opens below a link in the top half of the viewport", () => {
+    window.innerHeight = 800;
+    usePreviewStore.getState().openHover("notes/a.md", rectAt(200));
+
+    const [win] = usePreviewStore.getState().windows;
+    expect(win.above).toBeFalsy();
+    expect(win.y).toBe(226);
+  });
+
+  it("opens above a link in the bottom half, anchored by its bottom edge", () => {
+    window.innerHeight = 800;
+    usePreviewStore.getState().openHover("notes/a.md", rectAt(600));
+
+    const [win] = usePreviewStore.getState().windows;
+    expect(win.above).toBe(true);
+    expect(win.y).toBe(594);
+  });
+
+  it("drops the above anchor once moved, since moves are top-left", () => {
+    window.innerHeight = 800;
+    const actions = usePreviewStore.getState();
+    actions.openHover("notes/a.md", rectAt(600));
+    const [win] = usePreviewStore.getState().windows;
+
+    actions.move(win.id, 10, 20);
+
+    expect(usePreviewStore.getState().windows[0].above).toBe(false);
+  });
+
+  it("persists the above anchor for a pinned, unmoved window", () => {
+    window.innerHeight = 800;
+    const actions = usePreviewStore.getState();
+    actions.openHover("notes/a.md", rectAt(600));
+    const [win] = usePreviewStore.getState().windows;
+
+    actions.pin(win.id);
+
+    expect(window.localStorage.getItem("clp.preview.pinned")).toBe(
+      JSON.stringify([{ path: "notes/a.md", x: 100, y: 594, above: true }]),
+    );
+  });
+});

@@ -55,6 +55,7 @@ export function CLink({
   resource,
 }: CLinkProps) {
   const [hover, setHover] = useState(false);
+  const [above, setAbove] = useState(false);
   const ref = useRef<HTMLAnchorElement | null>(null);
   const delayRef = useRef<number | null>(null);
   const openTab = useOpenTab();
@@ -73,6 +74,9 @@ export function CLink({
         if (rect) openHover(path, rect);
       }, HOVER_DELAY);
     } else {
+      // Open the inline card above links in the lower half of the viewport.
+      const rect = ref.current?.getBoundingClientRect();
+      setAbove(!!rect && (rect.top + rect.bottom) / 2 > window.innerHeight / 2);
       setHover(true);
     }
   };
@@ -114,7 +118,13 @@ export function CLink({
     >
       {children}
       {hover && note && (
-        <span className="absolute top-full left-0 z-40 mt-1.5 block w-[320px] cursor-default rounded-2xl bg-raise px-4 pt-3.5 pb-4 text-left not-italic text-ink shadow-lg">
+        <span
+          className={cn(
+            "absolute left-0 z-40 block",
+            above ? "bottom-full mb-1.5" : "top-full mt-1.5",
+            "w-[320px] cursor-default rounded-2xl bg-raise px-4 pt-3.5 pb-4 text-left not-italic text-ink shadow-lg",
+          )}
+        >
           <span className="flex items-baseline justify-between gap-3 text-[12.5px] text-mute">
             <span>{note.folio || "Folio"}</span>
             <span>
