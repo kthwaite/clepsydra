@@ -108,7 +108,13 @@ export function TagInput({
           .slice(0, maxSuggestions)
       : [];
   const open = !dismissed && matches.length > 0;
-  const selected = Math.min(highlight, Math.max(matches.length - 1, 0));
+  // Until the author arrows through the list, an exact match is highlighted
+  // so Tab and Enter never swap a typed tag for a longer one.
+  const exactIndex = matches.findIndex((match) => tagsEqual(match, query));
+  const selected =
+    !navigated && exactIndex >= 0
+      ? exactIndex
+      : Math.min(highlight, Math.max(matches.length - 1, 0));
   const inputRef = useRef<HTMLInputElement>(null);
   const floating = useFloating({
     open: floatingSuggestions && open,
@@ -196,9 +202,9 @@ export function TagInput({
         }
       } else if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        addValue(
-          open && (!allowCreate || navigated) ? matches[selected] : query,
-        );
+        // Like Tab: complete the highlighted suggestion. Escape closes the
+        // list first when the raw draft should become a new tag.
+        addValue(open ? matches[selected] : query);
       } else if (e.key === ",") {
         e.preventDefault();
         addValue(query);
@@ -219,8 +225,6 @@ export function TagInput({
       selected,
       matches,
       query,
-      navigated,
-      allowCreate,
       inputValue,
       values,
       addValue,
