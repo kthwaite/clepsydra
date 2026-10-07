@@ -9,6 +9,7 @@
 //! shared across submodules (validation, code allocation, cycle-code scans).
 
 pub(crate) mod blockers;
+pub(crate) mod cycle_patch;
 pub(crate) mod cycles;
 pub(crate) mod description;
 pub(crate) mod read;
@@ -176,7 +177,7 @@ pub enum CycleState {
 }
 
 impl CycleState {
-    const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Planned => "PLANNED",
             Self::Active => "ACTIVE",
@@ -362,49 +363,6 @@ async fn fetch_cycle_codes(state: &AppState) -> Result<Vec<String>, ApiError> {
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .map_err(|e| ApiError::internal(e.to_string()))
-}
-
-pub(crate) use crate::vault::code::CodeLookup;
-
-/// Resolve user input to a canonical stem of `kind`: an exact case-insensitive
-/// match wins; otherwise a unique case-insensitive prefix match; otherwise
-/// `NotFound` (no match) or `Ambiguous` (multiple prefix matches, listed).
-/// Codes are never uppercased or otherwise normalized here — whichever stem
-/// is stored on disk is what comes back.
-pub(crate) fn resolve_code(
-    conn: &rusqlite::Connection,
-    kind: Kind,
-    input: &str,
-) -> Result<CodeLookup, rusqlite::Error> {
-    let stems = code_stems(conn, kind)?;
-    Ok(code::resolve_prefix(
-        stems.iter().map(String::as_str),
-        input,
-    ))
-}
-
-/// Resolve `cycle_code` (exact match or unique case-insensitive prefix)
-/// against existing CYCLE page stems. Returns the canonical stem on success,
-/// or 400 (unknown / ambiguous, candidates listed) otherwise. Shared by the
-/// task POST/PATCH handlers and the cycle-seal carry_to validation.
-async fn ensure_cycle_exists(state: &AppState, cycle_code: &str) -> Result<String, ApiError> {
-    let input = cycle_code.to_string();
-    let lookup = state
-        .index
-        .with_index(move |index, _vault| resolve_code(index.connection(), Kind::Cycle, &input))
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    match lookup {
-        CodeLookup::Found(code) => Ok(code),
-        CodeLookup::NotFound => Err(ApiError::bad_request(format!(
-            "unknown cycle '{cycle_code}'; must match an existing cycle code or a unique prefix of one"
-        ))),
-        CodeLookup::Ambiguous(c) => Err(ApiError::bad_request(format!(
-            "ambiguous cycle prefix '{cycle_code}': candidates {}",
-            c.join(", ")
-        ))),
-    }
 }
 
 /// Mint a code no existing page of the family's kind uses. With 43 bits of

@@ -23,6 +23,7 @@ use crate::vault::mutation_coordinator::{ProjectAssignment, UpdatePageCommand};
 use crate::vault::page::{Page, PageMeta};
 
 use super::blockers::{TaskNodes, blocker_target, find_cycle, load_task_nodes};
+use super::cycle_patch::{CycleTask, load_cycle_tasks};
 use super::{COLUMNS, CreateTaskRequest, PRIORITIES, PatchTaskRequest, TASK_TYPES, code_stems};
 
 /// The Cycle sentinel that means "no Cycle" (Backlog) on any write.
@@ -144,6 +145,49 @@ pub(crate) struct BoardLookups {
     /// Every Task by code, with its status and current `blocked_by`. The
     /// keys are the Task Codes Blocker references resolve against.
     pub tasks: TaskNodes,
+    /// Every Task that is in a Cycle, in path order. A Cycle patch carries
+    /// these over when it closes the Cycle.
+    pub cycle_tasks: Vec<CycleTask>,
+}
+
+impl BoardLookups {
+    /// Resolve a Cycle reference (a Code or a unique prefix of one) to its
+    /// canonical Code.
+    pub(crate) fn resolve_cycle(&self, input: &str) -> Result<String, CycleRefError> {
+        match code::resolve_prefix(self.cycle_stems.iter().map(String::as_str), input) {
+            CodeLookup::Found(canonical) => Ok(canonical),
+            CodeLookup::NotFound => Err(CycleRefError::Unknown(input.to_string())),
+            CodeLookup::Ambiguous(candidates) => Err(CycleRefError::Ambiguous {
+                input: input.to_string(),
+                candidates,
+            }),
+        }
+    }
+}
+
+/// A Cycle reference that names no Cycle, or more than one. Shared by the
+/// Task Patch (`cycle`) and the Cycle patch (`carry_to`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CycleRefError {
+    Unknown(String),
+    Ambiguous {
+        input: String,
+        candidates: Vec<String>,
+    },
+}
+
+impl From<CycleRefError> for ApiError {
+    fn from(error: CycleRefError) -> Self {
+        match error {
+            CycleRefError::Unknown(input) => ApiError::bad_request(format!(
+                "unknown cycle '{input}'; must match an existing cycle code or a unique prefix of one"
+            )),
+            CycleRefError::Ambiguous { input, candidates } => ApiError::bad_request(format!(
+                "ambiguous cycle prefix '{input}': candidates {}",
+                candidates.join(", ")
+            )),
+        }
+    }
 }
 
 impl BoardLookups {
@@ -163,10 +207,12 @@ impl BoardLookups {
                     })?
                     .collect::<Result<BTreeSet<String>, _>>()?;
                 let tasks = load_task_nodes(conn)?;
+                let cycle_tasks = load_cycle_tasks(conn)?;
                 Ok::<_, rusqlite::Error>(BoardLookups {
                     cycle_stems,
                     project_slugs,
                     tasks,
+                    cycle_tasks,
                 })
             })
             .await
@@ -183,11 +229,7 @@ pub(crate) enum TaskPatchError {
     UnknownStatus(String),
     UnknownPriority(String),
     UnknownTaskType(String),
-    UnknownCycle(String),
-    AmbiguousCycle {
-        input: String,
-        candidates: Vec<String>,
-    },
+    Cycle(CycleRefError),
     InvalidProjectSlug {
         slug: String,
         reason: String,
@@ -222,13 +264,7 @@ impl From<TaskPatchError> for ApiError {
                 "unknown task_type: '{task_type}'; valid values: {}",
                 TASK_TYPES.join(", ")
             )),
-            TaskPatchError::UnknownCycle(input) => ApiError::bad_request(format!(
-                "unknown cycle '{input}'; must match an existing cycle code or a unique prefix of one"
-            )),
-            TaskPatchError::AmbiguousCycle { input, candidates } => ApiError::bad_request(format!(
-                "ambiguous cycle prefix '{input}': candidates {}",
-                candidates.join(", ")
-            )),
+            TaskPatchError::Cycle(error) => error.into(),
             TaskPatchError::InvalidProjectSlug { reason, .. } => ApiError::bad_request(reason),
             TaskPatchError::UnknownProject(slug) => crate::api::projects::unknown_project(&slug),
             TaskPatchError::UnknownBlocker(input) => ApiError::bad_request(format!(
@@ -297,18 +333,11 @@ pub(crate) fn apply_task_patch(
     };
     let cycle = match &patch.cycle {
         FieldChange::Set(input) if input == BACKLOG => FieldChange::Clear,
-        FieldChange::Set(input) => {
-            match code::resolve_prefix(lookups.cycle_stems.iter().map(String::as_str), input) {
-                CodeLookup::Found(canonical) => FieldChange::Set(canonical),
-                CodeLookup::NotFound => return Err(TaskPatchError::UnknownCycle(input.clone())),
-                CodeLookup::Ambiguous(candidates) => {
-                    return Err(TaskPatchError::AmbiguousCycle {
-                        input: input.clone(),
-                        candidates,
-                    });
-                }
-            }
-        }
+        FieldChange::Set(input) => FieldChange::Set(
+            lookups
+                .resolve_cycle(input)
+                .map_err(TaskPatchError::Cycle)?,
+        ),
         other => other.clone(),
     };
     let applied = match &patch.project {
@@ -516,6 +545,7 @@ mod tests {
                 )
             })
             .collect(),
+            cycle_tasks: Vec::new(),
         }
     }
 
@@ -930,7 +960,7 @@ mod tests {
         };
         assert_eq!(
             apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
-            Err(TaskPatchError::UnknownCycle("S-99".into()))
+            Err(TaskPatchError::Cycle(CycleRefError::Unknown("S-99".into())))
         );
         let patch = TaskPatch {
             cycle: FieldChange::Set("S-calm".into()),
@@ -938,10 +968,10 @@ mod tests {
         };
         assert_eq!(
             apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
-            Err(TaskPatchError::AmbiguousCycle {
+            Err(TaskPatchError::Cycle(CycleRefError::Ambiguous {
                 input: "S-calm".into(),
                 candidates: vec!["S-calm-heron-2xm9p".into(), "S-calm-otter-9k2ma".into()],
-            })
+            }))
         );
     }
 
@@ -1115,7 +1145,7 @@ mod tests {
         };
         assert_eq!(
             apply_task_patch(&mut meta, None, &patch, &lookups(), now()),
-            Err(TaskPatchError::UnknownCycle("S-99".into()))
+            Err(TaskPatchError::Cycle(CycleRefError::Unknown("S-99".into())))
         );
     }
 
@@ -1189,15 +1219,15 @@ mod tests {
             error.error,
             "unknown task_type: 'BOGUS'; valid values: FEATURE, FIX, TASK, STORY, SPIKE"
         );
-        let error: ApiError = TaskPatchError::UnknownCycle("S-99".into()).into();
+        let error: ApiError = TaskPatchError::Cycle(CycleRefError::Unknown("S-99".into())).into();
         assert_eq!(
             error.error,
             "unknown cycle 'S-99'; must match an existing cycle code or a unique prefix of one"
         );
-        let error: ApiError = TaskPatchError::AmbiguousCycle {
+        let error: ApiError = TaskPatchError::Cycle(CycleRefError::Ambiguous {
             input: "S-calm".into(),
             candidates: vec!["S-calm-heron-2xm9p".into(), "S-calm-otter-9k2ma".into()],
-        }
+        })
         .into();
         assert_eq!(
             error.error,
