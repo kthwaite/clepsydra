@@ -40,7 +40,7 @@
 import { ArrowRight, Check, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FocusScope } from "react-aria";
-import type { BoardCycle, BoardTask, PatchTaskRequest } from "#/api/board";
+import type { BoardCycle, BoardTask } from "#/api/board";
 import { useArchiveTask, usePatchTask } from "#/api/board";
 import { formatApiError } from "#/api/error";
 import { Button } from "#/components/ui/button";
@@ -70,6 +70,7 @@ import {
 import { useStartWarning } from "./StartWarning";
 import { TaskBodyField } from "./TaskBodyField";
 import { diffToPatch, fromTask, type TaskDraft } from "./taskDraft";
+import { useDebounced, usePatchQueue } from "./usePatchQueue";
 
 /** How long the armed "Confirm archive" state persists before auto-disarm. */
 const ARCHIVE_DISARM_MS = 3000;
@@ -93,75 +94,6 @@ type PatchIntentLane =
   | "cycle"
   | "holdToggle"
   | "blockedBy";
-
-// ── useDebounce ───────────────────────────────────────────────────────────────
-
-function useDebounced(
-  value: string,
-  delay: number,
-  onChange: (v: string) => void | Promise<void>,
-): () => Promise<void> {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
-  const pending = useRef<{ value: string; version: number } | null>(null);
-  const version = useRef(0);
-  const queue = useRef<Promise<void>>(Promise.resolve());
-  const active = useRef<Promise<void> | null>(null);
-
-  const deliver = useCallback((): Promise<void> => {
-    clearTimeout(timer.current ?? undefined);
-    timer.current = null;
-    if (pending.current === null) {
-      return active.current ?? Promise.resolve();
-    }
-
-    const next = pending.current;
-    pending.current = null;
-    const delivery = queue.current.then(() => onChangeRef.current(next.value));
-    active.current = delivery;
-    queue.current = delivery.catch(() => {
-      // A failed save remains pending for an explicit retry, unless a newer
-      // value has already superseded it.
-      if (version.current === next.version && pending.current === null) {
-        pending.current = next;
-      }
-      return undefined;
-    });
-    void delivery.then(
-      () => {
-        if (active.current === delivery) active.current = null;
-      },
-      () => {
-        if (active.current === delivery) active.current = null;
-      },
-    );
-    return delivery;
-  }, []);
-
-  useEffect(() => {
-    clearTimeout(timer.current ?? undefined);
-    version.current += 1;
-    pending.current = { value, version: version.current };
-    timer.current = setTimeout(() => {
-      void deliver().catch(() => undefined);
-    }, delay);
-    return () => {
-      clearTimeout(timer.current ?? undefined);
-    };
-  }, [value, delay, deliver]);
-
-  // Flush on unmount: closing the panel or switching tasks within the debounce
-  // window must not silently lose the edit.
-  useEffect(
-    () => () => {
-      void deliver().catch(() => undefined);
-    },
-    [deliver],
-  );
-
-  return deliver;
-}
 
 // ── TaskEditPanel ─────────────────────────────────────────────────────────────
 
@@ -277,71 +209,10 @@ export function TaskEditPanel({
   // Fallback focus target for the non-modal editor.
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Every Tasking PATCH enters one serial queue. `mutateAsync` retains the
-  // mutation hook's optimistic onMutate behavior while giving archive a single
+  // Every Tasking PATCH enters one serial queue, so archive has a single
   // barrier for immediate controls, debounced fields, and earlier failures.
   const patchAsync = patch.mutateAsync;
-  const patchQueue = useRef<Promise<void>>(Promise.resolve());
-  const failedPatchLanes = useRef(new Set<PatchIntentLane>());
-  const laneVersions = useRef<Partial<Record<PatchIntentLane, number>>>({});
-  const coordinatorTaskId = useRef(task.id);
-  const latestTaskPath = useRef(task.path);
-  const enqueuePatch = useCallback(
-    (lane: PatchIntentLane, nextPatch: PatchTaskRequest) => {
-      const requestTaskId = task.id;
-      const intentVersion = (laneVersions.current[lane] ?? 0) + 1;
-      laneVersions.current[lane] = intentVersion;
-      const request = patchQueue.current.then(async () => {
-        try {
-          const savedTask = await patchAsync({
-            id: requestTaskId,
-            patch: nextPatch,
-          });
-          if (coordinatorTaskId.current === requestTaskId) {
-            latestTaskPath.current = savedTask.path;
-            if (laneVersions.current[lane] === intentVersion) {
-              failedPatchLanes.current.delete(lane);
-            }
-          }
-        } catch (error) {
-          if (
-            coordinatorTaskId.current === requestTaskId &&
-            laneVersions.current[lane] === intentVersion
-          ) {
-            failedPatchLanes.current.add(lane);
-          }
-          throw error;
-        }
-      });
-      patchQueue.current = request.catch(() => undefined);
-      return request;
-    },
-    [patchAsync, task.id],
-  );
-  const patchNow = useCallback(
-    (lane: PatchIntentLane, nextPatch: PatchTaskRequest) => {
-      void enqueuePatch(lane, nextPatch).catch(() => undefined);
-    },
-    [enqueuePatch],
-  );
-  const savePatch = enqueuePatch;
-  const clearPatchFailure = useCallback((lane: PatchIntentLane) => {
-    laneVersions.current[lane] = (laneVersions.current[lane] ?? 0) + 1;
-    failedPatchLanes.current.delete(lane);
-  }, []);
-  const awaitPatchBarrier = useCallback(async () => {
-    await patchQueue.current;
-    if (failedPatchLanes.current.size > 0) {
-      throw new Error("One or more task edits failed to save.");
-    }
-  }, []);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only for a new task identity
-  useEffect(() => {
-    coordinatorTaskId.current = task.id;
-    latestTaskPath.current = task.path;
-    laneVersions.current = {};
-    failedPatchLanes.current.clear();
-  }, [task.id]);
+  const queue = usePatchQueue<PatchIntentLane>(task, patchAsync);
 
   // Debounced patches (300ms). Each hook exposes an awaited flush used by
   // archive so no local edit can be discarded or race the DELETE. An edit
@@ -352,8 +223,8 @@ export function TaskEditPanel({
     value: string,
   ) => {
     const next = diffToPatch(task, { [field]: value });
-    if (Object.keys(next).length > 0) return savePatch(lane, next);
-    clearPatchFailure(lane);
+    if (Object.keys(next).length > 0) return queue.enqueue(lane, next);
+    queue.clearFailure(lane);
   };
   const flushes = [
     useDebounced(draft.title, DEBOUNCE_MS, (v) =>
@@ -382,8 +253,8 @@ export function TaskEditPanel({
   const [blocksError, setBlocksError] = useState<string | null>(null);
   const saveBlockedBy = (next: string[]) => {
     setBlockedByError(null);
-    enqueuePatch("blockedBy", { blocked_by: next }).catch((error) => {
-      clearPatchFailure("blockedBy");
+    queue.enqueue("blockedBy", { blocked_by: next }).catch((error) => {
+      queue.clearFailure("blockedBy");
       setBlockedByError(formatApiError(error, "Couldn’t save blockers"));
     });
   };
@@ -444,8 +315,8 @@ export function TaskEditPanel({
       for (const flush of flushes) {
         await flush();
       }
-      await awaitPatchBarrier();
-      await archive.mutateAsync({ path: latestTaskPath.current });
+      await queue.barrier();
+      await archive.mutateAsync({ path: queue.latestPath() });
       setEditTaskId(null);
     } catch {
       // Both mutation hooks surface the specific failure. Keep the task open
@@ -544,7 +415,7 @@ export function TaskEditPanel({
                   value={task.status}
                   onChange={(colId) =>
                     startWarning.guard(task, colId, () =>
-                      patchNow("status", { status: colId }),
+                      queue.patchNow("status", { status: colId }),
                     )
                   }
                   testIdPrefix="edit-panel"
@@ -555,7 +426,7 @@ export function TaskEditPanel({
               <EdField label="Priority">
                 <PriorityRow
                   value={task.priority}
-                  onChange={(p) => patchNow("priority", { priority: p })}
+                  onChange={(p) => queue.patchNow("priority", { priority: p })}
                   testIdPrefix="edit-panel"
                 />
               </EdField>
@@ -563,7 +434,7 @@ export function TaskEditPanel({
               <EdField label="Type">
                 <TypeRow
                   value={task.task_type}
-                  onChange={(t) => patchNow("taskType", { task_type: t })}
+                  onChange={(t) => queue.patchNow("taskType", { task_type: t })}
                   testIdPrefix="edit-panel"
                 />
               </EdField>
@@ -576,7 +447,7 @@ export function TaskEditPanel({
                     value={task.project ?? ""}
                     onChange={(key) =>
                       /* empty string is the sentinel for clear → UNFILED */
-                      patchNow("project", {
+                      queue.patchNow("project", {
                         project: key === null ? "" : String(key),
                       })
                     }
@@ -602,7 +473,7 @@ export function TaskEditPanel({
                     onChange={(key) => {
                       const value = key === null ? "BACKLOG" : String(key);
                       /* BACKLOG → send null to clear cycle */
-                      patchNow("cycle", {
+                      queue.patchNow("cycle", {
                         cycle: value === "BACKLOG" ? null : value,
                       });
                     }}
@@ -720,7 +591,7 @@ export function TaskEditPanel({
                     )}
                     onClick={() => {
                       if (!task.hold) focusReasonOnHold.current = true;
-                      patchNow("holdToggle", {
+                      queue.patchNow("holdToggle", {
                         hold: task.hold ? null : "BLOCKED",
                       });
                     }}
