@@ -1,9 +1,4 @@
-import {
-  Link,
-  useBlocker,
-  useNavigate,
-  useRouter,
-} from "@tanstack/react-router";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -73,12 +68,15 @@ import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useEmbedTocExpander } from "#/components/codex/useEmbedTocExpander";
 import { useFolioMode } from "#/components/codex/useFolioMode";
 import { useFolioRestoration } from "#/components/codex/useFolioRestoration";
+import {
+  RawMarkdownNavigationGuard,
+  useRawMarkdownSession,
+} from "#/components/codex/useRawMarkdownSession";
 import { useReadingColumn } from "#/components/codex/useReadingColumn";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { KindIcon } from "#/components/KindIcon";
 import { OfflineUnavailable } from "#/components/OfflineUnavailable";
 import { Button } from "#/components/ui/button";
-import { Dialog } from "#/components/ui/dialog";
 import { IconButton } from "#/components/ui/icon-button";
 import { TagInput } from "#/components/ui/tag-input";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
@@ -95,7 +93,6 @@ import { usePageEditor } from "#/editor/usePageEditor";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { useDebounce } from "#/hooks/useDebounce";
 import {
-  registerFolioHistoryTraversalGuard,
   replaceFolioHistoryAfterArchive,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
@@ -126,109 +123,12 @@ import {
 } from "#/store/folioRails";
 import { useFooterContext } from "#/store/footerContext";
 import { quireColorVar } from "#/store/quires";
-import {
-  registerWorkspaceTransitionGuard,
-  runWorkspaceTransition,
-  useWorkspaceStore,
-} from "#/store/workspace";
+import { runWorkspaceTransition, useWorkspaceStore } from "#/store/workspace";
 
 type FolioProps = {
   tabId: string;
   path: string;
 };
-
-type RawMarkdownSession = {
-  path: string;
-  entryRevision: string;
-  snapshot: string;
-  value: string;
-  diagnostic: string | null;
-};
-
-function rawMarkdownApplyDiagnostic(error: unknown) {
-  const detail =
-    error instanceof Error && error.message.trim() ? `: ${error.message}` : "";
-  return `Raw Markdown could not be applied${detail}. Fix the Markdown and try again.`;
-}
-
-function RawMarkdownNavigationGuard({
-  dirty,
-  onLeave,
-}: {
-  dirty: boolean;
-  onLeave: () => void;
-}) {
-  const leaveApprovedRef = useRef(false);
-  const blocker = useBlocker({
-    shouldBlockFn: () => dirty && !leaveApprovedRef.current,
-    enableBeforeUnload: dirty,
-    withResolver: true,
-  });
-  const pendingTransitionRef = useRef<{ proceed: () => void } | null>(null);
-  const [pendingTransition, setPendingTransition] = useState<{
-    proceed: () => void;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!dirty) return;
-    const guard = (proceed: () => void) => {
-      if (leaveApprovedRef.current) return false;
-      const pending = { proceed };
-      pendingTransitionRef.current = pending;
-      setPendingTransition(pending);
-      leaveApprovedRef.current = false;
-      return true;
-    };
-    const unregisterWorkspaceGuard = registerWorkspaceTransitionGuard(guard);
-    const unregisterHistoryGuard = registerFolioHistoryTraversalGuard(guard);
-    return () => {
-      unregisterWorkspaceGuard();
-      unregisterHistoryGuard();
-    };
-  }, [dirty]);
-
-  const stay = () => {
-    pendingTransitionRef.current = null;
-    leaveApprovedRef.current = false;
-    setPendingTransition(null);
-    if (blocker.status === "blocked") blocker.reset?.();
-  };
-  const leave = () => {
-    const pending = pendingTransitionRef.current;
-    if (!pending && blocker.status !== "blocked") return;
-    pendingTransitionRef.current = null;
-    leaveApprovedRef.current = true;
-    setPendingTransition(null);
-    onLeave();
-    if (pending) pending.proceed();
-    else blocker.proceed?.();
-  };
-
-  return (
-    <Dialog
-      isOpen={blocker.status === "blocked" || pendingTransition !== null}
-      onOpenChange={(open) => {
-        if (!open) stay();
-      }}
-      title="Unsaved raw Markdown"
-      description="Leaving now will discard the raw Markdown draft."
-      footer={
-        <>
-          <Button variant="secondary" onPress={stay}>
-            Stay
-          </Button>
-          <Button variant="danger" onPress={leave}>
-            Leave
-          </Button>
-        </>
-      }
-    >
-      <p className="text-[13.5px] text-mute">
-        This raw draft exists only in this browser until you Apply it.
-      </p>
-    </Dialog>
-  );
-}
 
 const EMPTY_EDITOR_VALUE: [] = [];
 
@@ -394,20 +294,6 @@ export function Folio({ tabId, path }: FolioProps) {
     projectRecipe,
     projectedRecipe,
   } = useFolioMode(path);
-  const [rawMarkdownSession, setRawMarkdownSession] =
-    useState<RawMarkdownSession | null>(null);
-  useEffect(() => {
-    setRawMarkdownSession((current) => {
-      if (
-        !current ||
-        current.path === path ||
-        current.value !== current.snapshot
-      ) {
-        return current;
-      }
-      return null;
-    });
-  }, [path]);
   const insertionIdRef = useRef(0);
   const [attachmentInsertion, setAttachmentInsertion] = useState<{
     id: number;
@@ -463,6 +349,20 @@ export function Folio({ tabId, path }: FolioProps) {
     projectedRecipe(editor.editorRevision) ?? recipeParse;
   const recipeDocument =
     activeRecipeParse?.ok === true ? activeRecipeParse.value : null;
+  const { session: rawMarkdownSession, ...rawMarkdown } = useRawMarkdownSession(
+    {
+      path,
+      editor,
+      onApplied: (markdown) => {
+        if (isRecipe) {
+          projectRecipe(
+            editor.editorRevision,
+            parseRecipeMarkdown(markdown, editor.title),
+          );
+        }
+      },
+    },
+  );
   const encrypted = editor.encrypted === true;
   const encryptionState = editor.encryptionState ?? {
     status: "plain" as const,
@@ -518,67 +418,6 @@ export function Folio({ tabId, path }: FolioProps) {
       readOnly={folioReadOnly}
     />
   );
-  const rawMarkdownDirty =
-    rawMarkdownSession !== null &&
-    rawMarkdownSession.value !== rawMarkdownSession.snapshot;
-  const openRawMarkdown = () => {
-    if (!rawMarkdownAvailable) return;
-    const snapshot = editor.getPlaintext();
-    setRawMarkdownSession({
-      path,
-      entryRevision: editor.getRevision(),
-      snapshot,
-      value: snapshot,
-      diagnostic: null,
-    });
-  };
-  const applyRawMarkdown = () => {
-    if (!rawMarkdownSession) return;
-    if (!rawMarkdownAvailable) {
-      setRawMarkdownSession((current) =>
-        current
-          ? {
-              ...current,
-              diagnostic:
-                "This Folio is no longer editable. Keep or copy this raw Markdown draft, then return to Edit before applying.",
-            }
-          : current,
-      );
-      return;
-    }
-    if (
-      rawMarkdownSession.path !== path ||
-      editor.getRevision() !== rawMarkdownSession.entryRevision
-    ) {
-      setRawMarkdownSession((current) =>
-        current
-          ? {
-              ...current,
-              diagnostic:
-                "This Folio changed after raw Markdown mode opened. Keep or copy this draft, then reopen raw mode before applying.",
-            }
-          : current,
-      );
-      return;
-    }
-    try {
-      const authoredRaw = rawMarkdownSession.value;
-      const projectedRecipe = isRecipe
-        ? parseRecipeMarkdown(authoredRaw, editor.title)
-        : null;
-      editor.setBodyMarkdown(authoredRaw);
-      if (projectedRecipe) {
-        projectRecipe(editor.editorRevision, projectedRecipe);
-      }
-      setRawMarkdownSession(null);
-    } catch (error) {
-      setRawMarkdownSession((current) =>
-        current
-          ? { ...current, diagnostic: rawMarkdownApplyDiagnostic(error) }
-          : current,
-      );
-    }
-  };
   useEffect(() => {
     if (!focusRequestId || editor.isLoading || !editor.isEditorSynchronized) {
       return;
@@ -836,7 +675,7 @@ export function Folio({ tabId, path }: FolioProps) {
           archiveTagEditor={archiveTagEditor}
           onOpenRawMarkdown={
             rawMarkdownAvailable && !rawMarkdownSession
-              ? openRawMarkdown
+              ? rawMarkdown.open
               : undefined
           }
         />
@@ -864,7 +703,7 @@ export function Folio({ tabId, path }: FolioProps) {
             }
             onOpenRawMarkdown={
               rawMarkdownAvailable && !rawMarkdownSession
-                ? openRawMarkdown
+                ? rawMarkdown.open
                 : undefined
             }
           />
@@ -932,13 +771,9 @@ export function Folio({ tabId, path }: FolioProps) {
         <RawMarkdownEditor
           value={rawMarkdownSession.value}
           diagnostic={rawMarkdownSession.diagnostic}
-          onChange={(value) =>
-            setRawMarkdownSession((current) =>
-              current ? { ...current, value, diagnostic: null } : current,
-            )
-          }
-          onApply={applyRawMarkdown}
-          onCancel={() => setRawMarkdownSession(null)}
+          onChange={rawMarkdown.change}
+          onApply={() => rawMarkdown.apply(rawMarkdownAvailable)}
+          onCancel={rawMarkdown.discard}
         />
       ) : (
         <article
@@ -1364,8 +1199,8 @@ export function Folio({ tabId, path }: FolioProps) {
       {protection}
       {rawMarkdownSession ? (
         <RawMarkdownNavigationGuard
-          dirty={rawMarkdownDirty}
-          onLeave={() => setRawMarkdownSession(null)}
+          dirty={rawMarkdown.dirty}
+          onLeave={rawMarkdown.discard}
         />
       ) : null}
     </>
