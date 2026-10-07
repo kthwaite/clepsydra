@@ -1,7 +1,7 @@
 // One spec per URL-backed filter screen. The facets are defined once, beside
 // the screen; the URL codec and the FilterBar fields both come from them.
 
-import { type SearchSchemaInput, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import type {
   FacetOption,
@@ -38,7 +38,7 @@ export interface FilterRoute<TTo extends string> {
   url: FilterUrlOptions;
   parse: (search: Record<string, unknown>) => FilterState;
   validateSearch: <TSearch extends Record<string, unknown>>(
-    search: TSearch & SearchSchemaInput,
+    search: TSearch,
   ) => TSearch & Record<string, string | string[] | undefined>;
   navigation: (
     next: FilterState,

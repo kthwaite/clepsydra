@@ -6,6 +6,11 @@ import {
   type WorkSummary,
   type WorkType,
 } from "#/api/academic";
+import {
+  ACADEMIC_FACETS,
+  READING_STATUSES,
+  WORK_TYPES,
+} from "#/components/academic/academicFacets";
 import { ImportDialog } from "#/components/academic/ImportDialog";
 import { WorkDetail } from "#/components/academic/WorkDetail";
 import { Tick } from "#/components/codex/Tick";
@@ -17,32 +22,13 @@ import { TextField } from "#/components/ui/text-field";
 import { cn } from "#/lib/cn";
 import {
   EMPTY_FILTER_STATE,
-  type FilterField,
   type FilterState,
   isFilterActive,
 } from "#/lib/filters/model";
+import { facetFields } from "#/lib/filters/route";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
 const PAGE_SIZE = 200;
-
-/** WorkType union values (ui/src/api/schema.d.ts) — drive the work_type
- * facet's options and validate URL-arriving values before they reach the
- * server; `satisfies` fails loudly if the schema's union ever drifts. */
-const WORK_TYPES = [
-  "paper",
-  "book",
-  "thesis",
-  "report",
-  "other",
-] as const satisfies readonly WorkType[];
-
-/** ReadingStatus union values (ui/src/api/schema.d.ts) — same role as
- * WORK_TYPES for the status facet. */
-const READING_STATUSES = [
-  "unread",
-  "reading",
-  "done",
-] as const satisfies readonly ReadingStatus[];
 
 /** Narrow a facet's raw string value against the known vocabulary rather than
  * casting it blindly — an unrecognised value (e.g. a stale/hand-edited URL)
@@ -190,25 +176,10 @@ export function AcademicLibrary({
     [items, query],
   );
 
-  const filterFields: FilterField[] = useMemo(
-    () => [
-      {
-        id: "work_type",
-        kind: "single",
-        label: "Type",
-        options: WORK_TYPES.map((value) => ({ value })),
-      },
-      {
-        id: "status",
-        kind: "single",
-        label: "Status",
-        options: READING_STATUSES.map((value) => ({ value })),
-      },
-      {
-        id: "year",
-        kind: "single",
-        label: "Year",
-        options: [
+  const filterFields = useMemo(
+    () =>
+      facetFields(ACADEMIC_FACETS, {
+        year: [
           ...new Set(
             items
               .map((work) => work.year)
@@ -217,16 +188,10 @@ export function AcademicLibrary({
         ]
           .sort((a, b) => b - a)
           .map((value) => ({ value: String(value) })),
-      },
-      {
-        id: "tag",
-        kind: "single",
-        label: "Tag",
-        options: [...new Set(items.flatMap((work) => work.tags ?? []))]
+        tag: [...new Set(items.flatMap((work) => work.tags ?? []))]
           .sort()
           .map((value) => ({ value })),
-      },
-    ],
+      }),
     [items],
   );
 

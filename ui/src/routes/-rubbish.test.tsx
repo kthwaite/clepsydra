@@ -4,15 +4,11 @@ vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: Record<string, unknown>) => ({ options }),
 }));
 
-import {
-  Route,
-  RUBBISH_FILTER_URL,
-  rubbishFilterNavigation,
-} from "#/routes/rubbish";
+import { Route, RUBBISH_FILTER } from "#/routes/rubbish";
 
 describe("Rubbish route filters", () => {
   it("exposes the kind field id matching the URL codec", () => {
-    expect(RUBBISH_FILTER_URL.fields.map((f) => f.id)).toEqual(["kind"]);
+    expect(RUBBISH_FILTER.url.fields.map((f) => f.id)).toEqual(["kind"]);
   });
 
   it("normalises the shared filter search params, passing through unknown keys", () => {
@@ -44,7 +40,7 @@ describe("Rubbish route filters", () => {
   });
 
   it("builds text-only navigation for the exact route while retaining unrelated search and clearing stale fields", () => {
-    const navigation = rubbishFilterNavigation(
+    const navigation = RUBBISH_FILTER.navigation(
       { text: "trash", facets: { kind: ["NOTE"] } },
       { text: "old", facets: { kind: ["NOTE"] } },
     );
@@ -65,7 +61,7 @@ describe("Rubbish route filters", () => {
   });
 
   it("pushes history when a Rubbish facet changes with the text", () => {
-    const navigation = rubbishFilterNavigation(
+    const navigation = RUBBISH_FILTER.navigation(
       { text: "new", facets: { kind: ["NOTE"] } },
       { text: "old", facets: { kind: ["PROJECT"] } },
     );

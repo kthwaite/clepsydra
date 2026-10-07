@@ -50,12 +50,7 @@ vi.mock("#/lib/useProjects", () => ({
   useProjectValues: () => ["Atlas", "Zephyr"],
 }));
 
-import {
-  AGENDA_FILTER_URL,
-  AgendaScreen,
-  agendaFilterNavigation,
-  Route,
-} from "#/routes/agenda";
+import { AGENDA_FILTER, AgendaScreen, Route } from "#/routes/agenda";
 
 function todo(
   content: string,
@@ -182,7 +177,7 @@ describe("Agenda route filters", () => {
   });
 
   it("exposes the exact URL field order", () => {
-    expect(AGENDA_FILTER_URL.fields.map((field) => field.id)).toEqual([
+    expect(AGENDA_FILTER.url.fields.map((field) => field.id)).toEqual([
       "type",
       "todoStatus",
       "todoPriority",
@@ -194,7 +189,7 @@ describe("Agenda route filters", () => {
   });
 
   it("builds text-only navigation for the exact route while retaining unrelated search and clearing stale fields", () => {
-    const navigation = agendaFilterNavigation(
+    const navigation = AGENDA_FILTER.navigation(
       { text: "ship", facets: { taskStatus: ["FIELD"] } },
       { text: "old", facets: { taskStatus: ["FIELD"] } },
     );
@@ -222,7 +217,7 @@ describe("Agenda route filters", () => {
   });
 
   it("pushes history when an Agenda facet changes with the text", () => {
-    const navigation = agendaFilterNavigation(
+    const navigation = AGENDA_FILTER.navigation(
       { text: "new", facets: { taskPriority: ["P1"] } },
       { text: "old", facets: { taskPriority: ["P2"] } },
     );

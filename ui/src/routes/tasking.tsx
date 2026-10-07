@@ -1,47 +1,17 @@
-import {
-  createFileRoute,
-  type SearchSchemaInput,
-  useNavigate,
-} from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useCallback } from "react";
 import { MobileTasking } from "#/components/mobile/MobileTasking";
 import { TaskingScreen } from "#/components/tasking/TaskingScreen";
+import { TASKING_FACETS } from "#/components/tasking/taskingFacets";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import type { FilterState } from "#/lib/filters/model";
-import {
-  canonicalizeFilterSearch,
-  type FilterUrlOptions,
-  mergeFilterSearch,
-  parseFilterSearch,
-  shouldReplaceFilterHistory,
-} from "#/lib/filters/url";
+import { defineFilterRoute, useFilterRoute } from "#/lib/filters/route";
 
-const TASKING_ROUTE_PATH = "/tasking" as const;
-
-/** Route-level filter field specs for the Tasking board's URL-backed filter. */
-export const TASKING_FILTER_URL: FilterUrlOptions = {
-  fields: [
-    { id: "project", kind: "multi" },
-    { id: "tags", kind: "multi" },
-    { id: "pri", kind: "multi", normalize: (v) => v.toUpperCase() },
-    { id: "type", kind: "multi", normalize: (v) => v.toUpperCase() },
-    { id: "status", kind: "multi", normalize: (v) => v.toUpperCase() },
-    { id: "hold", kind: "flag" },
-  ],
-};
-
-export function taskingFilterNavigation(
-  next: FilterState,
-  previous: FilterState,
-) {
-  return {
-    to: TASKING_ROUTE_PATH,
-    search: <TSearch extends Record<string, unknown>>(current: TSearch) =>
-      mergeFilterSearch(current, next, TASKING_FILTER_URL),
-    replace: shouldReplaceFilterHistory(next, previous),
-  };
-}
+/** The Tasking board's URL-backed filter. */
+export const TASKING_FILTER = defineFilterRoute({
+  to: "/tasking",
+  facets: TASKING_FACETS,
+});
 
 /**
  * Resolve a dossier canonical name to a vault path via the search index, then
@@ -64,19 +34,9 @@ async function resolveDossierPath(name: string): Promise<string | null> {
 function TaskingRoute() {
   const openTab = useOpenTab();
   const mobile = useMobileLayout();
-  const search = Route.useSearch();
-  const navigate = useNavigate();
-
-  const filterState = useMemo(
-    () => parseFilterSearch(search, TASKING_FILTER_URL),
-    [search],
-  );
-
-  const onFilterChange = useCallback(
-    (next: FilterState) => {
-      navigate(taskingFilterNavigation(next, filterState));
-    },
-    [navigate, filterState],
+  const { filterState, onFilterChange } = useFilterRoute(
+    TASKING_FILTER,
+    Route.useSearch(),
   );
 
   const onOpenPage = useCallback(
@@ -109,7 +69,6 @@ function TaskingRoute() {
 
 export const Route = createFileRoute("/tasking")({
   staticData: { codexView: "tasking" },
-  validateSearch: (search: Record<string, unknown> & SearchSchemaInput) =>
-    canonicalizeFilterSearch(search, TASKING_FILTER_URL),
+  validateSearch: TASKING_FILTER.validateSearch,
   component: TaskingRoute,
 });
