@@ -1,9 +1,5 @@
-import {
-  createFileRoute,
-  type SearchSchemaInput,
-  useNavigate,
-} from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useMemo } from "react";
 import type { AgendaItem, AgendaResponse } from "#/api/tasks";
 import { useAgenda } from "#/api/tasks";
 import { AgendaItemList } from "#/components/agenda/AgendaItemList";
@@ -17,47 +13,15 @@ import {
 import { SectionHeading } from "#/components/ui/section-heading";
 import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
+import { type FilterState, isFilterActive } from "#/lib/filters/model";
 import {
-  type FilterField,
-  type FilterState,
-  isFilterActive,
-} from "#/lib/filters/model";
-import {
-  canonicalizeFilterSearch,
-  type FilterUrlOptions,
-  mergeFilterSearch,
-  parseFilterSearch,
-  shouldReplaceFilterHistory,
-} from "#/lib/filters/url";
+  defineFilterRoute,
+  type FacetDef,
+  facetFields,
+  useFilterRoute,
+} from "#/lib/filters/route";
 import { formatDayMonth, localDateKey, parseLocalDate } from "#/lib/time";
 import { useProjectValues } from "#/lib/useProjects";
-
-const AGENDA_ROUTE_PATH = "/agenda" as const;
-
-/** Route-level filter field specs for the Agenda's URL-backed filter. */
-export const AGENDA_FILTER_URL: FilterUrlOptions = {
-  fields: [
-    { id: "type", kind: "single" },
-    { id: "todoStatus", kind: "single" },
-    { id: "todoPriority", kind: "single", normalize: (v) => v.toUpperCase() },
-    { id: "taskStatus", kind: "single", normalize: (v) => v.toUpperCase() },
-    { id: "taskPriority", kind: "single", normalize: (v) => v.toUpperCase() },
-    { id: "project", kind: "single" },
-    { id: "blocked", kind: "flag" },
-  ],
-};
-
-export function agendaFilterNavigation(
-  next: FilterState,
-  previous: FilterState,
-) {
-  return {
-    to: AGENDA_ROUTE_PATH,
-    search: <TSearch extends Record<string, unknown>>(current: TSearch) =>
-      mergeFilterSearch(current, next, AGENDA_FILTER_URL),
-    replace: shouldReplaceFilterHistory(next, previous),
-  };
-}
 
 const TODO_STATUS_VALUES = ["open", "doing"] as const;
 const TODO_PRIORITY_VALUES = ["A", "B", "C"] as const;
@@ -67,6 +31,69 @@ const TODO_PRIORITY_LABELS = {
   B: "Medium",
   C: "Low",
 } as const;
+const upper = (v: string) => v.toUpperCase();
+
+/** The Agenda's facets: one list for its URL and its FilterBar. Project
+ *  options come from the vault at render. */
+const AGENDA_FACETS: readonly FacetDef[] = [
+  {
+    id: "type",
+    kind: "single",
+    label: "Type",
+    options: [
+      { value: "todo", label: "Todo" },
+      { value: "task", label: "Task" },
+    ],
+  },
+  {
+    id: "todoStatus",
+    kind: "single",
+    label: "Todo status",
+    options: TODO_STATUS_VALUES.map((value) => ({
+      value,
+      label: value === "open" ? "Open" : "Doing",
+    })),
+  },
+  {
+    id: "todoPriority",
+    kind: "single",
+    label: "Todo priority",
+    normalize: upper,
+    options: TODO_PRIORITY_VALUES.map((value) => ({
+      value,
+      label: `${TODO_PRIORITY_LABELS[value]} (${value})`,
+    })),
+  },
+  {
+    id: "taskStatus",
+    kind: "single",
+    label: "Task status",
+    normalize: upper,
+    options: TASK_STATUS_VALUES.map((value) => ({
+      value,
+      label: taskStatusLabel(value),
+    })),
+  },
+  {
+    id: "taskPriority",
+    kind: "single",
+    label: "Task priority",
+    normalize: upper,
+    options: PRI_ORDER.map((value) => ({
+      value,
+      label: `${PRI_LABEL[value]} (${value})`,
+    })),
+  },
+  { id: "project", kind: "single", label: "Project" },
+  { id: "blocked", kind: "flag", label: "Blocked" },
+];
+
+/** The Agenda's URL-backed filter. */
+export const AGENDA_FILTER = defineFilterRoute({
+  to: "/agenda",
+  facets: AGENDA_FACETS,
+});
+
 const FILTERED_EMPTY_MESSAGE = "No items match the filter.";
 
 interface AgendaQueryState {
@@ -77,29 +104,18 @@ interface AgendaQueryState {
 
 export const Route = createFileRoute("/agenda")({
   staticData: { codexView: "agenda" },
-  validateSearch: (search: Record<string, unknown> & SearchSchemaInput) =>
-    canonicalizeFilterSearch(search, AGENDA_FILTER_URL),
+  validateSearch: AGENDA_FILTER.validateSearch,
   component: AgendaPage,
 });
 
 function AgendaPage() {
-  const search = Route.useSearch();
-  const navigate = useNavigate();
+  const { filterState, onFilterChange } = useFilterRoute(
+    AGENDA_FILTER,
+    Route.useSearch(),
+  );
   const today = localDateKey(new Date());
   const agenda = useAgenda(today);
   const mobile = useMobileLayout();
-
-  const filterState = useMemo(
-    () => parseFilterSearch(search, AGENDA_FILTER_URL),
-    [search],
-  );
-
-  const onFilterChange = useCallback(
-    (next: FilterState) => {
-      navigate(agendaFilterNavigation(next, filterState));
-    },
-    [navigate, filterState],
-  );
 
   if (mobile) return <MobileAgenda agenda={agenda} today={today} />;
 
@@ -187,66 +203,11 @@ export function AgendaScreen({
 }) {
   const projects = useProjectValues();
 
-  const filterFields: FilterField[] = useMemo(
-    () => [
-      {
-        id: "type",
-        kind: "single",
-        label: "Type",
-        options: [
-          { value: "todo", label: "Todo" },
-          { value: "task", label: "Task" },
-        ],
-      },
-      {
-        id: "todoStatus",
-        kind: "single",
-        label: "Todo status",
-        options: TODO_STATUS_VALUES.map((value) => ({
-          value,
-          label: value === "open" ? "Open" : "Doing",
-        })),
-      },
-      {
-        id: "todoPriority",
-        kind: "single",
-        label: "Todo priority",
-        options: TODO_PRIORITY_VALUES.map((value) => ({
-          value,
-          label: `${TODO_PRIORITY_LABELS[value]} (${value})`,
-        })),
-      },
-      {
-        id: "taskStatus",
-        kind: "single",
-        label: "Task status",
-        options: TASK_STATUS_VALUES.map((value) => ({
-          value,
-          label: taskStatusLabel(value),
-        })),
-      },
-      {
-        id: "taskPriority",
-        kind: "single",
-        label: "Task priority",
-        options: PRI_ORDER.map((value) => ({
-          value,
-          label: `${PRI_LABEL[value]} (${value})`,
-        })),
-      },
-      {
-        id: "project",
-        kind: "single",
-        label: "Project",
-        options: projects.map((value) => ({ value })),
-      },
-      {
-        id: "blocked",
-        kind: "flag",
-        label: "Blocked",
-        options: [],
-      },
-    ],
+  const filterFields = useMemo(
+    () =>
+      facetFields(AGENDA_FACETS, {
+        project: projects.map((value) => ({ value })),
+      }),
     [projects],
   );
 

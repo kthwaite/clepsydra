@@ -23,11 +23,7 @@ vi.mock("#/components/mobile/MobileTasking", () => ({
   MobileTasking: () => <p>Mobile Tasks</p>,
 }));
 
-import {
-  Route,
-  TASKING_FILTER_URL,
-  taskingFilterNavigation,
-} from "#/routes/tasking";
+import { Route, TASKING_FILTER } from "#/routes/tasking";
 
 describe("Tasking route filters", () => {
   it("normalises the shared filter search params, passing through unknown keys", () => {
@@ -43,23 +39,42 @@ describe("Tasking route filters", () => {
       bogus: "x",
       project: undefined,
       tags: undefined,
+      type: undefined,
       status: undefined,
       q: undefined,
     });
   });
 
-  it("exposes project/tags/pri/status/hold field ids matching the URL codec", () => {
-    expect(TASKING_FILTER_URL.fields.map((f) => f.id)).toEqual([
+  it("exposes project/tags/pri/type/status/hold field ids matching the URL codec", () => {
+    expect(TASKING_FILTER.url.fields.map((f) => f.id)).toEqual([
       "project",
       "tags",
       "pri",
+      "type",
       "status",
       "hold",
     ]);
   });
 
+  it("keeps the Type facet in the URL across navigation and validation", () => {
+    const navigation = TASKING_FILTER.navigation(
+      { text: "", facets: { type: ["FIX", "UNTYPED"] } },
+      { text: "", facets: {} },
+    );
+    const next = navigation.search({});
+    expect(next.type).toEqual(["FIX", "UNTYPED"]);
+
+    const validateSearch = Route.options.validateSearch;
+    if (typeof validateSearch !== "function") {
+      throw new Error("Expected a callable search validator");
+    }
+    expect(validateSearch({ type: "fix,untyped" } as never)).toMatchObject({
+      type: ["FIX", "UNTYPED"],
+    });
+  });
+
   it("builds text-only navigation for the exact route while retaining unrelated search and clearing stale fields", () => {
-    const navigation = taskingFilterNavigation(
+    const navigation = TASKING_FILTER.navigation(
       {
         text: "ready",
         facets: { project: ["Clepsydra"], pri: ["P1", "P2"] },
@@ -85,6 +100,7 @@ describe("Tasking route filters", () => {
       project: ["Clepsydra"],
       tags: undefined,
       pri: ["P1", "P2"],
+      type: undefined,
       status: undefined,
       hold: undefined,
       pane: "board",
@@ -92,7 +108,7 @@ describe("Tasking route filters", () => {
   });
 
   it("pushes history when a Tasking facet is reordered with the text", () => {
-    const navigation = taskingFilterNavigation(
+    const navigation = TASKING_FILTER.navigation(
       { text: "new", facets: { tags: ["beta", "alpha"] } },
       { text: "old", facets: { tags: ["alpha", "beta"] } },
     );

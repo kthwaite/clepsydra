@@ -6,18 +6,13 @@ import {
 import { useCallback, useMemo } from "react";
 import { CalendarScreen } from "#/components/calendar/CalendarScreen";
 import {
-  CALENDAR_FILTER_URL,
+  CALENDAR_FILTER,
   type CalendarViewSearch,
   calendarViewToSearch,
-  parseCalendarFilters,
   parseCalendarView,
   validateCalendarSearch,
 } from "#/lib/calendar/search";
-import type { FilterState } from "#/lib/filters/model";
-import {
-  mergeFilterSearch,
-  shouldReplaceFilterHistory,
-} from "#/lib/filters/url";
+import { useFilterRoute } from "#/lib/filters/route";
 
 const CALENDAR_ROUTE_PATH = "/calendar" as const;
 
@@ -33,18 +28,6 @@ export function calendarViewNavigation(patch: Partial<CalendarViewSearch>) {
   };
 }
 
-export function calendarFilterNavigation(
-  next: FilterState,
-  previous: FilterState,
-) {
-  return {
-    to: CALENDAR_ROUTE_PATH,
-    search: <TSearch extends Record<string, unknown>>(current: TSearch) =>
-      mergeFilterSearch(current, next, CALENDAR_FILTER_URL),
-    replace: shouldReplaceFilterHistory(next, previous),
-  };
-}
-
 export const Route = createFileRoute("/calendar")({
   staticData: { codexView: "calendar" },
   validateSearch: (search: Record<string, unknown> & SearchSchemaInput) =>
@@ -56,19 +39,16 @@ function CalendarPage() {
   const search = Route.useSearch();
   const navigate = useNavigate();
   const view = useMemo(() => parseCalendarView(search), [search]);
-  const filterState = useMemo(() => parseCalendarFilters(search), [search]);
+  const { filterState, onFilterChange } = useFilterRoute(
+    CALENDAR_FILTER,
+    search,
+  );
 
   const onViewChange = useCallback(
     (patch: Partial<CalendarViewSearch>) => {
       void navigate(calendarViewNavigation(patch));
     },
     [navigate],
-  );
-  const onFilterChange = useCallback(
-    (next: FilterState) => {
-      void navigate(calendarFilterNavigation(next, filterState));
-    },
-    [navigate, filterState],
   );
 
   return (

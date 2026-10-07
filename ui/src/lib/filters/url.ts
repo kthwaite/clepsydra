@@ -49,7 +49,8 @@ export function parseFilterSearch(
       continue;
     }
     const normalize = field.normalize ?? ((v: string) => v);
-    const values = [...new Set(rawValues(raw).map(normalize))];
+    const accept = field.accept ?? (() => true);
+    const values = [...new Set(rawValues(raw).map(normalize))].filter(accept);
     if (values.length === 0) continue;
     facets[field.id] = field.kind === "single" ? [values[0]] : values;
   }
@@ -86,13 +87,19 @@ export function canonicalizeFilterSearch<
   };
 }
 
+/** Writes `next` over `current`. Alias keys are dropped: once the canonical
+ *  key is cleared, a stale alias would otherwise bring its values back. */
 export function mergeFilterSearch<TSearch extends Record<string, unknown>>(
   current: TSearch,
   next: FilterState,
   opts: FilterUrlOptions,
 ) {
+  const aliases = Object.fromEntries(
+    Object.keys(opts.aliases ?? {}).map((alias) => [alias, undefined]),
+  );
   return {
     ...current,
+    ...aliases,
     ...filterStateToSearch(next, opts),
   };
 }
