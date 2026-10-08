@@ -20,6 +20,7 @@ import {
   tableFeatures,
   useTable,
 } from "@tanstack/react-table";
+import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual";
 import {
   type MouseEvent,
   type ReactNode,
@@ -75,6 +76,16 @@ export interface DataColumn<TRow> {
   cellClassName?: string;
 }
 
+/** Row windowing for long tables; see `DataTableProps.virtualize`. */
+interface DataTableVirtualize {
+  /** Every body row's height in pixels; rows are not measured. */
+  rowHeight: number;
+  /** The scroll box's height cap in pixels, header included. */
+  maxHeight: number;
+  /** Rows rendered past each edge of the view. Default 5. */
+  overscan?: number;
+}
+
 export interface DataTableSelection<TRow> {
   selected: RowSelectionState;
   onChange(next: RowSelectionState): void;
@@ -105,7 +116,18 @@ export interface DataTableProps<TRow extends RowData> {
    *  bare cell. */
   onRowActivate?(row: TRow): void;
   rowClassName?(row: TRow, state: { selected: boolean }): string;
+  /** The row that is the current item (e.g. open in an editor) gets
+   *  `aria-current="true"`. */
+  isRowCurrent?(row: TRow): boolean;
   stickyHeader?: boolean;
+  /** Opt-in: the table scrolls in its own box of at most `maxHeight` under a
+   *  sticky header, and renders only the rows in view (plus overscan).
+   *  Spacer rows keep the full height; `aria-rowcount`/`aria-rowindex` give
+   *  each rendered row its place, and grid navigation reaches rows outside
+   *  the window through them. A focused row scrolled out of the window
+   *  (by wheel or touch) unmounts and focus falls to the body; Tab
+   *  re-enters the grid at its first rendered row. */
+  virtualize?: DataTableVirtualize;
   emptyState?: ReactNode;
   className?: string;
   tableRef?: Ref<HTMLTableElement>;
@@ -118,6 +140,11 @@ const DEFAULT_MIN = 40;
 const DEFAULT_MAX = 640;
 const RESIZE_STEP = 16;
 const DRAG_KIND = "data-table-column";
+const DEFAULT_OVERSCAN = 5;
+/** Header row heights by density; they match the header row's classes. */
+const HEADER_HEIGHT = { compact: 34, comfortable: 40 } as const;
+/** `aria-rowindex` of the first body row: the header row is 1. */
+const FIRST_BODY_ROW_INDEX = 2;
 
 const features = tableFeatures({
   columnSizingFeature,
@@ -232,7 +259,9 @@ export function DataTable<TRow extends RowData>({
   selection,
   onRowActivate,
   rowClassName,
+  isRowCurrent,
   stickyHeader,
+  virtualize,
   emptyState,
   className,
   tableRef,
@@ -337,6 +366,31 @@ export function DataTable<TRow extends RowData>({
     modelRows.length > 0 && modelRows.every((r) => selected[r.id]);
   const someSelected = modelRows.some((r) => selected[r.id]);
 
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const headerHeight = HEADER_HEIGHT[density];
+  const virtualizer = useVirtualizer({
+    count: virtualize ? modelRows.length : 0,
+    enabled: virtualize !== undefined,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => virtualize?.rowHeight ?? 0,
+    overscan: virtualize?.overscan ?? DEFAULT_OVERSCAN,
+    // Body rows start under the header, which also covers the top of the
+    // view when a row is scrolled to.
+    paddingStart: headerHeight,
+    scrollPaddingStart: headerHeight,
+    initialRect: { width: 0, height: virtualize?.maxHeight ?? 0 },
+    // A box with no layout (display:none, or jsdom) measures 0px, and the
+    // virtualiser would render no rows: render the capped window instead.
+    observeElementRect: (instance, cb) =>
+      observeElementRect(instance, (rect) =>
+        cb(
+          rect.height > 0
+            ? rect
+            : { width: rect.width, height: virtualize?.maxHeight ?? 0 },
+        ),
+      ),
+  });
+
   const minWidth =
     (selection ? SELECT_WIDTH : 0) +
     visibleColumns.reduce(
@@ -405,202 +459,247 @@ export function DataTable<TRow extends RowData>({
     onHeaderMove: (th, delta) => {
       if (th.dataset.column) moveByKeyboard(th.dataset.column, delta);
     },
+    revealRow: virtualize
+      ? (rowIndex) => {
+          const box = scrollRef.current;
+          if (!box) return;
+          virtualizer.scrollToIndex(rowIndex - FIRST_BODY_ROW_INDEX);
+          // The virtualiser reads the offset on scroll events and renders
+          // synchronously on them, so the row is in the DOM on return.
+          box.dispatchEvent(new Event("scroll"));
+        }
+      : undefined,
   });
 
   const reorderable = onColumnOrderChange !== undefined;
   const sorted = (id: string): SortDirection | undefined =>
     sort?.column === id ? sort.direction : undefined;
 
-  return (
-    <>
-      <table
-        ref={setGridRef}
-        // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: the ARIA grid pattern on a native table
-        role="grid"
-        aria-label={ariaLabel}
-        data-density={density}
+  const showEmpty = modelRows.length === 0 && emptyState !== undefined;
+  const colSpan = visibleColumns.length + (selection ? 1 : 0);
+  const windowed = virtualize ? virtualizer.getVirtualItems() : null;
+  const padTop = windowed?.length ? windowed[0].start - headerHeight : 0;
+  const padBottom = windowed?.length
+    ? virtualizer.getTotalSize() - (windowed.at(-1)?.end ?? 0)
+    : 0;
+
+  const renderRow = (row: (typeof modelRows)[number], index: number) => {
+    const isSelected = !!selected[row.id];
+    const headerId = visibleColumns.some((c) => c.rowHeader)
+      ? `${tableId}-r${index}`
+      : undefined;
+    return (
+      <tr
+        key={row.id}
+        data-row-id={row.id}
+        aria-labelledby={headerId}
+        aria-selected={selection ? isSelected : undefined}
+        aria-current={isRowCurrent?.(row.original) ? "true" : undefined}
+        aria-rowindex={virtualize ? index + FIRST_BODY_ROW_INDEX : undefined}
+        style={virtualize ? { height: virtualize.rowHeight } : undefined}
+        onClick={(event: MouseEvent<HTMLTableRowElement>) => {
+          if (!onRowActivate) return;
+          if (fromInteractive(event.target, event.currentTarget)) {
+            return;
+          }
+          onRowActivate(row.original);
+        }}
         className={cn(
-          "w-full table-fixed border-collapse text-left",
-          className,
+          "group",
+          KEY_FOCUS,
+          onRowActivate && "cursor-pointer",
+          rowClassName?.(row.original, { selected: isSelected }),
         )}
-        style={{ minWidth }}
       >
-        <colgroup>
-          {selection && (
-            <col
-              data-column={SELECT_COLUMN_ID}
-              style={{ width: SELECT_WIDTH }}
-            />
-          )}
-          {visibleColumns.map((column) => {
-            const width = column.fill ? undefined : widthOf(column);
+        {row.getVisibleCells().map((cell) => {
+          const id = cell.column.id;
+          if (id === SELECT_COLUMN_ID && selection) {
             return (
-              <col
-                key={column.id}
-                data-column={column.id}
-                style={width === undefined ? undefined : { width }}
-              />
-            );
-          })}
-        </colgroup>
-        <thead className={cn(stickyHeader && "sticky top-0 z-[1] bg-ground")}>
-          <tr
-            className={cn(
-              "text-[12.5px] text-mute",
-              density === "compact" ? "h-[34px]" : "h-10",
-            )}
-          >
-            {selection && (
-              <th
-                data-column={SELECT_COLUMN_ID}
-                className={cn("px-3 font-normal", KEY_FOCUS)}
+              // biome-ignore lint/a11y/useKeyWithClickEvents: only stops a checkbox click from activating the row; the checkbox owns its keys
+              // biome-ignore lint/a11y/useFocusableInteractive: useGridNavigation gives every cell its roving tabindex
+              <td
+                key={id}
+                // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: a grid cell; useGridNavigation gives it a roving tabindex
+                role="gridcell"
+                data-column={id}
+                className={cn("px-3", KEY_FOCUS)}
+                // Toggling a row never activates it.
+                onClick={(event) => event.stopPropagation()}
               >
                 <input
                   type="checkbox"
-                  aria-label={selection.allLabel}
-                  checked={allSelected}
-                  ref={(el) => {
-                    if (el) el.indeterminate = someSelected && !allSelected;
-                  }}
-                  onChange={() =>
-                    // Gazetteer's rule: all visible selected clears the whole
-                    // selection; otherwise it becomes exactly the visible rows.
-                    table.setRowSelection(
-                      allSelected
-                        ? {}
-                        : Object.fromEntries(
-                            modelRows.map((r) => [r.id, true]),
-                          ),
-                    )
-                  }
-                  disabled={modelRows.length === 0}
+                  aria-label={selection.rowLabel(row.original)}
+                  checked={isSelected}
+                  onChange={(event) => row.toggleSelected(event.target.checked)}
                   className="cursor-pointer accent-accent"
                 />
-              </th>
-            )}
-            {visibleColumns.map((column) => (
-              <HeaderCell
-                key={column.id}
-                column={column}
-                tableId={tableId}
-                sorted={sorted(column.id)}
-                onSort={onHeaderSort}
-                width={widthOf(column) ?? column.minWidth ?? DEFAULT_MIN}
-                onPreview={(width) =>
-                  setPreview({
-                    id: column.id,
-                    width: clampWidth(column, width),
-                  })
-                }
-                onWidth={(width) => {
-                  setPreview(null);
-                  onColumnWidthChange?.(column.id, clampWidth(column, width));
-                }}
-                onReset={() => {
-                  setPreview(null);
-                  onColumnWidthChange?.(column.id, undefined);
-                }}
-                resizable={
-                  isResizable(column) && onColumnWidthChange !== undefined
-                }
-                reorderable={reorderable}
-                dragging={dragging === column.id}
-                dropEdge={
-                  dropFeedback?.columnId === column.id
-                    ? dropFeedback.edge
-                    : undefined
-                }
-                handlers={reorderHandlers}
-                resizeHintId={`${tableId}-resize-hint`}
-              />
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {modelRows.length === 0 && emptyState !== undefined ? (
-            <tr>
-              <td colSpan={visibleColumns.length + (selection ? 1 : 0)}>
-                {emptyState}
               </td>
-            </tr>
-          ) : (
-            modelRows.map((row, index) => {
-              const isSelected = !!selected[row.id];
-              const headerId = visibleColumns.some((c) => c.rowHeader)
-                ? `${tableId}-r${index}`
-                : undefined;
-              return (
-                <tr
-                  key={row.id}
-                  data-row-id={row.id}
-                  aria-labelledby={headerId}
-                  aria-selected={selection ? isSelected : undefined}
-                  onClick={(event: MouseEvent<HTMLTableRowElement>) => {
-                    if (!onRowActivate) return;
-                    if (fromInteractive(event.target, event.currentTarget)) {
-                      return;
-                    }
-                    onRowActivate(row.original);
-                  }}
-                  className={cn(
-                    "group",
-                    KEY_FOCUS,
-                    onRowActivate && "cursor-pointer",
-                    rowClassName?.(row.original, { selected: isSelected }),
-                  )}
-                >
-                  {row.getVisibleCells().map((cell) => {
-                    const id = cell.column.id;
-                    if (id === SELECT_COLUMN_ID && selection) {
-                      return (
-                        // biome-ignore lint/a11y/useKeyWithClickEvents: only stops a checkbox click from activating the row; the checkbox owns its keys
-                        // biome-ignore lint/a11y/useFocusableInteractive: useGridNavigation gives every cell its roving tabindex
-                        <td
-                          key={id}
-                          // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: a grid cell; useGridNavigation gives it a roving tabindex
-                          role="gridcell"
-                          data-column={id}
-                          className={cn("px-3", KEY_FOCUS)}
-                          // Toggling a row never activates it.
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <input
-                            type="checkbox"
-                            aria-label={selection.rowLabel(row.original)}
-                            checked={isSelected}
-                            onChange={(event) =>
-                              row.toggleSelected(event.target.checked)
-                            }
-                            className="cursor-pointer accent-accent"
-                          />
-                        </td>
-                      );
-                    }
-                    const column = byId.get(id);
-                    if (!column) return null;
-                    return (
-                      <td
-                        key={id}
-                        id={column.rowHeader ? headerId : undefined}
-                        role={column.rowHeader ? "rowheader" : "gridcell"}
-                        data-column={id}
-                        className={cn(
-                          "px-3",
-                          column.align === "end" && "text-right",
-                          KEY_FOCUS,
-                          column.cellClassName,
-                        )}
-                      >
-                        {column.cell(row.original, index)}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })
+            );
+          }
+          const column = byId.get(id);
+          if (!column) return null;
+          return (
+            <td
+              key={id}
+              id={column.rowHeader ? headerId : undefined}
+              role={column.rowHeader ? "rowheader" : "gridcell"}
+              data-column={id}
+              className={cn(
+                "px-3",
+                column.align === "end" && "text-right",
+                KEY_FOCUS,
+                column.cellClassName,
+              )}
+            >
+              {column.cell(row.original, index)}
+            </td>
+          );
+        })}
+      </tr>
+    );
+  };
+
+  const grid = (
+    <table
+      ref={setGridRef}
+      // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: the ARIA grid pattern on a native table
+      role="grid"
+      aria-label={ariaLabel}
+      aria-rowcount={
+        virtualize
+          ? (showEmpty ? 1 : modelRows.length) + 1 // + the header row
+          : undefined
+      }
+      data-density={density}
+      className={cn("w-full table-fixed border-collapse text-left", className)}
+      style={{ minWidth }}
+    >
+      <colgroup>
+        {selection && (
+          <col data-column={SELECT_COLUMN_ID} style={{ width: SELECT_WIDTH }} />
+        )}
+        {visibleColumns.map((column) => {
+          const width = column.fill ? undefined : widthOf(column);
+          return (
+            <col
+              key={column.id}
+              data-column={column.id}
+              style={width === undefined ? undefined : { width }}
+            />
+          );
+        })}
+      </colgroup>
+      <thead
+        className={cn(
+          (stickyHeader || virtualize) && "sticky top-0 z-[1] bg-ground",
+        )}
+      >
+        <tr
+          aria-rowindex={virtualize ? 1 : undefined}
+          className={cn(
+            "text-[12.5px] text-mute",
+            density === "compact" ? "h-[34px]" : "h-10",
           )}
-        </tbody>
-      </table>
+        >
+          {selection && (
+            <th
+              data-column={SELECT_COLUMN_ID}
+              className={cn("px-3 font-normal", KEY_FOCUS)}
+            >
+              <input
+                type="checkbox"
+                aria-label={selection.allLabel}
+                checked={allSelected}
+                ref={(el) => {
+                  if (el) el.indeterminate = someSelected && !allSelected;
+                }}
+                onChange={() =>
+                  // Gazetteer's rule: all visible selected clears the whole
+                  // selection; otherwise it becomes exactly the visible rows.
+                  table.setRowSelection(
+                    allSelected
+                      ? {}
+                      : Object.fromEntries(modelRows.map((r) => [r.id, true])),
+                  )
+                }
+                disabled={modelRows.length === 0}
+                className="cursor-pointer accent-accent"
+              />
+            </th>
+          )}
+          {visibleColumns.map((column) => (
+            <HeaderCell
+              key={column.id}
+              column={column}
+              tableId={tableId}
+              sorted={sorted(column.id)}
+              onSort={onHeaderSort}
+              width={widthOf(column) ?? column.minWidth ?? DEFAULT_MIN}
+              onPreview={(width) =>
+                setPreview({
+                  id: column.id,
+                  width: clampWidth(column, width),
+                })
+              }
+              onWidth={(width) => {
+                setPreview(null);
+                onColumnWidthChange?.(column.id, clampWidth(column, width));
+              }}
+              onReset={() => {
+                setPreview(null);
+                onColumnWidthChange?.(column.id, undefined);
+              }}
+              resizable={
+                isResizable(column) && onColumnWidthChange !== undefined
+              }
+              reorderable={reorderable}
+              dragging={dragging === column.id}
+              dropEdge={
+                dropFeedback?.columnId === column.id
+                  ? dropFeedback.edge
+                  : undefined
+              }
+              handlers={reorderHandlers}
+              resizeHintId={`${tableId}-resize-hint`}
+            />
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {showEmpty ? (
+          <tr aria-rowindex={virtualize ? FIRST_BODY_ROW_INDEX : undefined}>
+            <td colSpan={colSpan}>{emptyState}</td>
+          </tr>
+        ) : windowed ? (
+          <>
+            {padTop > 0 && <SpacerRow height={padTop} colSpan={colSpan} />}
+            {windowed.map((item) =>
+              renderRow(modelRows[item.index], item.index),
+            )}
+            {padBottom > 0 && (
+              <SpacerRow height={padBottom} colSpan={colSpan} />
+            )}
+          </>
+        ) : (
+          modelRows.map((row, index) => renderRow(row, index))
+        )}
+      </tbody>
+    </table>
+  );
+
+  return (
+    <>
+      {virtualize ? (
+        <div
+          ref={scrollRef}
+          className="overflow-auto"
+          style={{ maxHeight: virtualize.maxHeight }}
+        >
+          {grid}
+        </div>
+      ) : (
+        grid
+      )}
       <p id={`${tableId}-resize-hint`} hidden>
         Press Enter to resize
       </p>
@@ -610,6 +709,16 @@ export function DataTable<TRow extends RowData>({
         {announcement}
       </p>
     </>
+  );
+}
+
+/** Keeps a virtualised body at its full height; grid navigation skips it. */
+function SpacerRow({ height, colSpan }: { height: number; colSpan: number }) {
+  return (
+    // biome-ignore lint/a11y/noAriaHiddenOnFocusable: never focusable; grid navigation gives spacers no tabindex
+    <tr aria-hidden="true" data-grid-spacer style={{ height }}>
+      <td colSpan={colSpan} className="p-0" />
+    </tr>
   );
 }
 
