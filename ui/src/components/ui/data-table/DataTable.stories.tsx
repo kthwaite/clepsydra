@@ -214,6 +214,39 @@ function GazetteerLike() {
   );
 }
 
+/** Virtualised: 2,000 rows in a 10-row box; only the rows in view render.
+ *  End and Ctrl+Home reach rows outside the rendered window. */
+function VirtualisedLike() {
+  const rows = Array.from({ length: 2000 }, (_, i): Work => {
+    const work = WORKS[i % WORKS.length];
+    return { ...work, id: `v${i}`, title: `${work.title} (${i + 1})` };
+  });
+  const columns: DataColumn<Work>[] = [
+    {
+      id: "title",
+      label: "Title",
+      fill: true,
+      minWidth: 240,
+      rowHeader: true,
+      cell: (work) => <span className="truncate text-ink">{work.title}</span>,
+    },
+    { id: "author", label: "Author", width: 180, cell: (work) => work.author },
+    { id: "status", label: "Status", width: 120, cell: (work) => work.status },
+  ];
+  return (
+    <DataTable<Work>
+      ariaLabel="Long reading list"
+      rows={rows}
+      columns={columns}
+      getRowId={(work) => work.id}
+      density="comfortable"
+      virtualize={{ rowHeight: 40, maxHeight: 440 }}
+      rowClassName={() => "hover:[&>td]:bg-sink"}
+      {...useColumnState(["title", "author", "status"])}
+    />
+  );
+}
+
 const meta: Meta = {
   title: "UI/DataTable",
 };
@@ -224,3 +257,5 @@ type Story = StoryObj<typeof meta>;
 export const Bases: Story = { render: () => <BasesLike /> };
 
 export const Gazetteer: Story = { render: () => <GazetteerLike /> };
+
+export const Virtualised: Story = { render: () => <VirtualisedLike /> };
