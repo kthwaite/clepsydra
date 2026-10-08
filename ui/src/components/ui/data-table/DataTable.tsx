@@ -121,7 +121,9 @@ export interface DataTableProps<TRow extends RowData> {
    *  sticky header, and renders only the rows in view (plus overscan).
    *  Spacer rows keep the full height; `aria-rowcount`/`aria-rowindex` give
    *  each rendered row its place, and grid navigation reaches rows outside
-   *  the window through them. */
+   *  the window through them. A focused row scrolled out of the window
+   *  (by wheel or touch) unmounts and focus falls to the body; Tab
+   *  re-enters the grid at its first rendered row. */
   virtualize?: DataTableVirtualize;
   emptyState?: ReactNode;
   className?: string;
