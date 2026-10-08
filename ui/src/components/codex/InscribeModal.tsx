@@ -13,7 +13,7 @@ import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { generateShortId, intakePath } from "#/lib/intake";
 import type { Kind } from "#/lib/kind";
-import { localIso, withSeconds } from "#/lib/meeting";
+import { floorToQuarterHour, localIso, withSeconds } from "#/lib/meeting";
 import { useProjects } from "#/lib/useProjects";
 import { useUiStore } from "#/store/ui";
 
@@ -257,11 +257,10 @@ function Field({
   );
 }
 
-/** The current local time, floored to the minute, as a datetime-local value. */
+/** The quarter hour that has already started, as a datetime-local value —
+ * the same default as MeetingMeta's When. */
 function nowLocal(): string {
-  const now = new Date();
-  now.setSeconds(0, 0);
-  return localIso(now).slice(0, 16);
+  return localIso(floorToQuarterHour(new Date())).slice(0, 16);
 }
 
 /** When and Attendees for a MEETING, collected before the page exists and

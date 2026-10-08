@@ -314,12 +314,12 @@ describe("InscribeModal", () => {
       expect(vars.body).not.toHaveProperty("occurred_at");
     });
 
-    it("prefills When with the current minute and sends picked attendees", async () => {
+    it("prefills When with the started quarter hour and sends picked attendees", async () => {
       const user = userEvent.setup();
       render(<InscribeModal />);
       await chooseKind(user, "Meeting");
 
-      expect(screen.getByLabelText("When")).toHaveValue("2026-10-08T14:37");
+      expect(screen.getByLabelText("When")).toHaveValue("2026-10-08T14:30");
       await user.type(screen.getByRole("textbox", { name: "Title" }), "Sync");
       await pickPerson(user, "ad", /^Ada$/);
       await pickPerson(user, "gr", /Grace Hopper/);
@@ -332,7 +332,7 @@ describe("InscribeModal", () => {
       const [vars] = createMutate.mock.calls[0];
       expect(vars.body.kind).toBe("MEETING");
       expect(vars.body.attendees).toEqual(["Ada", "Grace Hopper"]);
-      expect(vars.body.occurred_at).toBe("2026-10-08T14:37:00");
+      expect(vars.body.occurred_at).toBe("2026-10-08T14:30:00");
     });
 
     it("sends an edited When and omits a cleared one", async () => {
