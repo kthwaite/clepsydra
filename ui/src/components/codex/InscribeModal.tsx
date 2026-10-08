@@ -301,7 +301,9 @@ function MeetingFields({
           )}
         />
       </Field>
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5 rounded-[14px] bg-sink px-2 py-1.5 has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-accent">
+      {/* The whole box carries the focus ring, as TagInput's does, so
+          PersonCombo's own inset ring is switched off here. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 rounded-[14px] bg-sink px-2 py-1.5 has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-accent [&_input[data-focus-visible]]:ring-0">
         <span id={attendeesLabelId} className="text-[12.5px] text-mute">
           Attendees:
         </span>
@@ -310,7 +312,7 @@ function MeetingFields({
             {attendees.map((attendee) => (
               <li
                 key={attendee}
-                className="flex h-7 max-w-[16rem] min-w-0 items-center gap-1 rounded-full bg-raise pr-1 pl-2.5 text-[13px] text-ink-2"
+                className="flex h-7 max-w-[16rem] min-w-0 items-center gap-0.5 rounded-full bg-raise pr-0.5 pl-2.5 text-[13px] text-ink-2"
               >
                 <span className="truncate">{attendee}</span>
                 <button
@@ -320,7 +322,7 @@ function MeetingFields({
                     onAttendeesChange(attendees.filter((a) => a !== attendee))
                   }
                   className={cn(
-                    "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-mute hover:text-ink",
+                    "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-mute hover:text-ink",
                     FOCUS_RING_NATIVE,
                   )}
                 >
