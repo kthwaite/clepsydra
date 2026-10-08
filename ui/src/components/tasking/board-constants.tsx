@@ -1,8 +1,15 @@
 /** Shared constants and micro-chips for the Tasking board. */
 
-import type { BoardOperation } from "#/api/board";
+import type { BoardCycle, BoardOperation } from "#/api/board";
 import { formatDayMonth } from "#/lib/time";
 import type { BoardMode } from "#/store/board";
+
+/** The cycle in progress: the one whose state is ACTIVE. */
+export function findActiveCycle(
+  cycles: readonly BoardCycle[],
+): BoardCycle | null {
+  return cycles.find((c) => c.state === "ACTIVE") ?? null;
+}
 
 // ── date formatting ──────────────────────────────────────────────────────────
 

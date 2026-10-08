@@ -10,6 +10,7 @@ import type { FilterField, FilterState } from "#/lib/filters/model";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useBoardStore } from "#/store/board";
 import {
+  findActiveCycle,
   HealthDot,
   healthColor,
   isDone,
@@ -96,7 +97,7 @@ export function BoardHeader({
   const dossier = activeOp?.dossier;
 
   // The running cycle, with progress as sealed of all its tasks.
-  const activeCycle = cycles.find((c) => c.state === "ACTIVE") ?? null;
+  const activeCycle = findActiveCycle(cycles);
   const cycleTasks = activeCycle
     ? scopedTasks.filter((t) => t.cycle === activeCycle.code)
     : [];

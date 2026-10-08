@@ -137,6 +137,15 @@ function renderScreenWithFilter(initial?: FilterState) {
   );
 }
 
+/** A list-mode task row: the DataTable row carrying the task id. */
+const queryBacklogRow = (id: string) =>
+  document.querySelector<HTMLTableRowElement>(`tr[data-row-id="${id}"]`);
+const backlogRow = (id: string) => {
+  const row = queryBacklogRow(id);
+  if (!row) throw new Error(`No list row for ${id}`);
+  return row;
+};
+
 beforeEach(() => {
   useBoardStore.setState({
     mode: "card",
@@ -299,8 +308,10 @@ describe("TaskingScreen smoke", () => {
     stubBoardFetch();
     renderScreen();
     await screen.findByRole("tab", { name: "Board" });
-    // BacklogView's header row is mounted
-    expect(screen.getByText("Code")).toBeInTheDocument();
+    // BacklogView's tables are mounted: the active cycle's and the backlog
+    expect(
+      screen.getAllByRole("grid").map((g) => g.getAttribute("aria-label")),
+    ).toEqual(["Active cycle: Cycle 01", "Backlog"]);
     expect(screen.queryByText(/COMING SOON/)).not.toBeInTheDocument();
   });
 
@@ -783,7 +794,7 @@ describe("TaskingScreen — fixed human-facing status labels", () => {
     renderScreen();
     await screen.findByRole("tab", { name: "Board" });
 
-    const row = screen.getByTestId("bk-row-t1");
+    const row = backlogRow("t1");
     expect(within(row).getByText("In Progress")).toBeInTheDocument();
     expect(within(row).queryByText("DEPLOYED")).not.toBeInTheDocument();
   });
@@ -911,7 +922,7 @@ describe("TaskingScreen — list view completed toggle", () => {
     // t5 is the only SEALED fixture task
     expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
     expect(screen.queryByText("Task Sealed")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("bk-row-t5")).not.toBeInTheDocument();
+    expect(queryBacklogRow("t5")).toBeNull();
 
     const toggle = screen.getByTestId("board-show-completed");
     expect(toggle).toHaveAttribute("aria-pressed", "false");
@@ -927,7 +938,7 @@ describe("TaskingScreen — list view completed toggle", () => {
     await userEvent.click(screen.getByTestId("board-show-completed"));
 
     expect(useBoardStore.getState().showCompleted).toBe(true);
-    expect(await screen.findByTestId("bk-row-t5")).toBeInTheDocument();
+    await waitFor(() => expect(queryBacklogRow("t5")).not.toBeNull());
     expect(screen.getByText("Task Sealed")).toBeInTheDocument();
     const toggle = screen.getByTestId("board-show-completed");
     expect(toggle).toHaveAttribute("aria-pressed", "true");
@@ -936,9 +947,7 @@ describe("TaskingScreen — list view completed toggle", () => {
     // Pressing again hides them once more
     await userEvent.click(toggle);
     expect(useBoardStore.getState().showCompleted).toBe(false);
-    await waitFor(() =>
-      expect(screen.queryByTestId("bk-row-t5")).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(queryBacklogRow("t5")).toBeNull());
   });
 
   it("the FilterBar count strip excludes hidden completed tasks", async () => {

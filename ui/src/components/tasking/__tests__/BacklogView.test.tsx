@@ -1,25 +1,15 @@
 /**
- * BacklogView tests.
- *
- * groupBacklog — pure unit tests for grouping/sorting logic.
- * BacklogView  — render/interaction tests.
+ * BacklogView tests: the active-cycle and backlog tables (splitBacklog's
+ * own rules are in backlog-tables.test.ts).
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import {
-  afterEach,
-  assert,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
-import type { BoardTask } from "#/api/board";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { BoardCycle, BoardTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
-import { BacklogView, groupBacklog } from "../BacklogView";
+import { BacklogView } from "../BacklogView";
 import { BOARD_FIXTURE, FIXTURE_COL_LABEL } from "./fixtures";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -47,13 +37,78 @@ function makePatchStub() {
   });
 }
 
+/** A matchMedia answering `(min-width: Npx)` for a viewport `width` wide. */
+function setViewportWidth(width: number) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((query: string) => ({
+      media: query,
+      matches: (() => {
+        const min = /min-width:\s*(\d+)px/.exec(query);
+        return min ? width >= Number(min[1]) : false;
+      })(),
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })),
+  );
+}
+
+beforeEach(() => {
+  useBoardStore.setState({
+    mode: "backlog",
+    opFilter: "ALL",
+    cycleSel: "",
+    railOpen: true,
+    showCompleted: false,
+    editTaskId: null,
+    taskModal: null,
+    cycleModal: null,
+  });
+  setViewportWidth(1440);
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function view(
+  list: BoardTask[],
+  {
+    activeCycle = null,
+    colLabel = FIXTURE_COL_LABEL,
+  }: {
+    activeCycle?: BoardCycle | null;
+    colLabel?: (id: string) => string;
+  } = {},
+) {
+  return (
+    <BacklogView tasks={list} activeCycle={activeCycle} colLabel={colLabel} />
+  );
+}
+
+const backlogGrid = () => screen.getByRole("grid", { name: "Backlog" });
+const cycleGrid = () =>
+  screen.getByRole("grid", { name: `Active cycle: ${ACTIVE.label}` });
+/** A task's row, by the DataTable's row id. */
+const rowOf = (id: string) => {
+  const row = document.querySelector<HTMLTableRowElement>(
+    `tr[data-row-id="${id}"]`,
+  );
+  if (!row) throw new Error(`No row for ${id}`);
+  return row;
+};
+const rowIdsIn = (grid: HTMLElement) =>
+  Array.from(grid.querySelectorAll<HTMLTableRowElement>("tr[data-row-id]")).map(
+    (row) => row.dataset.rowId,
+  );
+const columnNames = (grid: HTMLElement) =>
+  within(grid)
+    .getAllByRole("columnheader")
+    .map((th) => th.textContent);
+
 // ── shared fixture slices ─────────────────────────────────────────────────────
 
-const { tasks } = BOARD_FIXTURE;
+const ACTIVE: BoardCycle = BOARD_FIXTURE.cycles[0];
 
 // Extra tasks used in BacklogView-specific fixtures
 
@@ -179,381 +234,226 @@ const T_P2_INTAKE: BoardTask = {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// groupBacklog — pure unit tests
+// Tables
 // ══════════════════════════════════════════════════════════════════════════════
 
-describe("groupBacklog", () => {
-  it("groups tasks by priority in P0→P3 order", () => {
-    const groups = groupBacklog([T_P0_DUE, T_P1_HOLD, T_P2_CHECKS]);
-    expect(groups.map((g) => g.pri)).toEqual(["P0", "P1", "P2"]);
+describe("BacklogView — tables", () => {
+  it("shows the active cycle's table above the backlog table", () => {
+    const inCycle = { ...T_P1_HOLD, cycle: ACTIVE.code };
+    wrap(view([T_P0_DUE, inCycle], { activeCycle: ACTIVE }));
+    const grids = screen.getAllByRole("grid");
+    expect(grids.map((g) => g.getAttribute("aria-label"))).toEqual([
+      `Active cycle: ${ACTIVE.label}`,
+      "Backlog",
+    ]);
+    expect(rowIdsIn(cycleGrid())).toEqual(["bk-p1-hold"]);
+    expect(rowIdsIn(backlogGrid())).toEqual(["bk-p0-due"]);
   });
 
-  it("drops empty priority groups", () => {
-    // Only P1 and P3 represented
-    const t_p3: BoardTask = { ...tasks[3], priority: "P3" };
-    const groups = groupBacklog([T_P1_HOLD, t_p3]);
-    expect(groups.map((g) => g.pri)).toEqual(["P1", "P3"]);
+  it("names the cycle, its code, dates and count in the heading", () => {
+    const inCycle = { ...T_P1_HOLD, cycle: ACTIVE.code };
+    wrap(view([inCycle], { activeCycle: ACTIVE }));
+    const heading = screen.getByRole("heading", { name: /Cycle 01/ });
+    expect(heading).toHaveTextContent("Cycle 01");
+    expect(heading).toHaveTextContent("C-01 · 26 May – 8 Jun · 1 task");
+    expect(heading.querySelector("[data-tick]")).not.toBeNull();
+    expect(screen.getByText("Cycle 01")).toHaveClass("font-serif", "italic");
   });
 
-  it("returns empty array when tasks is empty", () => {
-    expect(groupBacklog([])).toEqual([]);
+  it("captions the backlog with its count", () => {
+    wrap(view([T_P0_DUE, T_P1_HOLD]));
+    expect(screen.getByRole("heading", { name: /Backlog/ })).toHaveTextContent(
+      "2 tasks",
+    );
   });
 
-  it("within group: sorts by COL_ORDER index (INTAKE before FIELD)", () => {
-    // T_P2_INTAKE is INTAKE (index 0), T_P2_CHECKS is FIELD (index 2)
-    const groups = groupBacklog([T_P2_CHECKS, T_P2_INTAKE]);
-    const p2 = groups.find((g) => g.pri === "P2");
-    assert(p2);
-    expect(p2.items[0].id).toBe("bk-p2-intake");
-    expect(p2.items[1].id).toBe("bk-p2-checks");
+  it("has only the backlog table without an active cycle", () => {
+    wrap(view([{ ...T_P0_DUE, cycle: "C-01" }]));
+    expect(screen.getAllByRole("grid")).toHaveLength(1);
+    expect(rowIdsIn(backlogGrid())).toEqual(["bk-p0-due"]);
   });
 
-  it("within group (same col): tasks with no due sort after tasks with due", () => {
-    // T_P0_DUE and T_P0_NODUE are both in different columns, but test same-col too
-    // Make both FIELD to isolate due-sort
-    const aDue: BoardTask = {
-      ...T_P0_DUE,
-      id: "a",
-      status: "FIELD",
-      due: "2026-09-01",
-    };
-    const aNodue: BoardTask = {
-      ...T_P0_NODUE,
-      id: "b",
-      status: "FIELD",
-      due: null,
-    };
-    const groups = groupBacklog([aNodue, aDue]);
-    const p0 = groups.find((g) => g.pri === "P0");
-    assert(p0);
-    expect(p0.items[0].id).toBe("a"); // due → first
-    expect(p0.items[1].id).toBe("b"); // no-due → last
+  it("gives each table its own header row", () => {
+    wrap(view([T_P0_DUE], { activeCycle: ACTIVE }));
+    const names = [
+      "Code",
+      "Task",
+      "Project",
+      "Status",
+      "Assignee",
+      "Estimate",
+      "Due",
+      "Checklist",
+    ];
+    expect(columnNames(cycleGrid())).toEqual(names);
+    expect(columnNames(backlogGrid())).toEqual(names);
   });
 
-  it("within group (same col): tasks with earlier due sort before later due", () => {
-    const early: BoardTask = {
-      ...T_P2_CHECKS,
-      id: "early",
-      status: "FIELD",
-      due: "2026-07-01",
-    };
-    const late: BoardTask = {
-      ...T_P2_CHECKS,
-      id: "late",
-      status: "FIELD",
-      due: "2026-09-01",
-    };
-    const groups = groupBacklog([late, early]);
-    const p2 = groups.find((g) => g.pri === "P2");
-    assert(p2);
-    expect(p2.items[0].id).toBe("early");
-    expect(p2.items[1].id).toBe("late");
-  });
-
-  it("primary sort is COL_ORDER; due is tiebreaker within same col", () => {
-    // col INTAKE (index 0) beats FIELD (index 2) regardless of due date
-    const intake: BoardTask = {
+  it("caps each table at ten rows and virtualises the rest", () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({
       ...T_P2_INTAKE,
-      id: "intake-nodue",
-      due: null,
-    };
-    const field: BoardTask = {
-      ...T_P2_CHECKS,
-      id: "field-due",
-      due: "2026-01-01",
-    };
-    const groups = groupBacklog([field, intake]);
-    const p2 = groups.find((g) => g.pri === "P2");
-    assert(p2);
-    expect(p2.items[0].id).toBe("intake-nodue"); // INTAKE wins regardless
-    expect(p2.items[1].id).toBe("field-due");
-  });
-
-  it("item count matches input tasks for that priority", () => {
-    const groups = groupBacklog([T_P0_DUE, T_P0_NODUE, T_P1_HOLD]);
-    const p0 = groups.find((g) => g.pri === "P0");
-    assert(p0);
-    expect(p0.items).toHaveLength(2);
-    const p1 = groups.find((g) => g.pri === "P1");
-    assert(p1);
-    expect(p1.items).toHaveLength(1);
-  });
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// BacklogView — render tests
-// ══════════════════════════════════════════════════════════════════════════════
-
-beforeEach(() => {
-  useBoardStore.setState({
-    mode: "backlog",
-    opFilter: "ALL",
-    cycleSel: "",
-    railOpen: true,
-    editTaskId: null,
-    taskModal: null,
-    cycleModal: null,
-  });
-});
-
-describe("BacklogView — grouping", () => {
-  it("renders a group header for each non-empty priority", () => {
-    wrap(
-      <BacklogView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[T_P0_DUE, T_P1_HOLD]}
-      />,
-    );
-    // Scoped to the group header — rows also carry a PriChip showing "P0"/"P1".
-    expect(screen.getByTestId("bk-grp-hd-P0")).toHaveTextContent("P0");
-    expect(screen.getByTestId("bk-grp-hd-P1")).toHaveTextContent("P1");
-  });
-
-  it("does not render a group header for empty priorities", () => {
-    // Only P0 and P1 tasks; P2 and P3 should not appear as group headers
-    wrap(
-      <BacklogView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[T_P0_DUE, T_P1_HOLD]}
-      />,
-    );
-    // P2 and P3 chips would each appear as a priority group — verify absent
-    // by checking group headers specifically (they have bk-grp-pri role)
-    const allPriTexts = screen
-      .getAllByText(/^P[0-3]$/)
-      .map((el) => el.textContent);
-    expect(allPriTexts).not.toContain("P2");
-    expect(allPriTexts).not.toContain("P3");
-  });
-
-  it("renders canonical priority labels for visible groups", () => {
-    wrap(
-      <BacklogView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[T_P0_DUE, T_P1_HOLD, T_P2_CHECKS, tasks[3]]}
-      />,
-    );
-    expect(screen.getByText("Critical")).toBeInTheDocument();
-    expect(screen.getByText("High")).toBeInTheDocument();
-    expect(screen.getByText("Medium")).toBeInTheDocument();
-    expect(screen.getByText("Low")).toBeInTheDocument();
-  });
-
-  it("captions each group with its priority and task count", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    expect(screen.getByTestId("bk-grp-hd-P0")).toHaveTextContent("P0 · 1 task");
-  });
-
-  it("pluralises the group count", () => {
-    const ten = Array.from({ length: 10 }, (_, i) => ({
-      ...T_P0_DUE,
-      id: `p0-${i}`,
-      code: `TSK-20${String(i).padStart(2, "0")}`,
+      id: `many-${i}`,
+      code: `TSK-${3000 + i}`,
     }));
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={ten} />);
-    expect(screen.getByTestId("bk-grp-hd-P0")).toHaveTextContent(
-      "P0 · 10 tasks",
-    );
+    wrap(view(many));
+    const grid = backlogGrid();
+    expect(grid).toHaveAttribute("aria-rowcount", "41");
+    expect(grid.parentElement?.style.maxHeight).toBe("440px");
+    expect(rowIdsIn(grid).length).toBeLessThan(40);
   });
 
-  it("group headers are headings with a tick and an italic serif label", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P1_HOLD]} />);
-    const hd = screen.getByTestId("bk-grp-hd-P1");
-    expect(hd.tagName).toBe("H2");
-    expect(hd.querySelector("[data-tick]")).not.toBeNull();
-    const label = screen.getByText("High");
-    expect(label).toHaveClass("font-serif", "italic");
+  it("sorts by priority, then status, then due date", () => {
+    const noDue = { ...T_P2_CHECKS, id: "p2-field-nodue", due: null };
+    wrap(view([T_P2_CHECKS, noDue, T_P2_INTAKE, T_P1_HOLD, T_P0_NODUE]));
+    expect(rowIdsIn(backlogGrid())).toEqual([
+      "bk-p0-nodue",
+      "bk-p1-hold",
+      "bk-p2-intake",
+      "bk-p2-checks",
+      "p2-field-nodue",
+    ]);
   });
 
-  it("ticks Critical hot, Low faint and the rest cobalt", () => {
-    const low: BoardTask = { ...T_P2_INTAKE, id: "bk-p3", priority: "P3" };
-    wrap(
-      <BacklogView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[T_P0_DUE, T_P1_HOLD, low]}
-      />,
-    );
-    const tick = (pri: string) =>
-      screen.getByTestId(`bk-grp-hd-${pri}`).querySelector("[data-tick]");
-    expect(tick("P0")).toHaveClass("bg-hot");
-    expect(tick("P1")).toHaveClass("bg-accent");
-    expect(tick("P3")).toHaveClass("bg-faint");
+  it("hides SEALED tasks unless the board shows completed ones", () => {
+    const sealed = { ...T_P0_DUE, id: "bk-sealed", status: "SEALED" };
+    const { unmount } = wrap(view([sealed, T_P1_HOLD]));
+    expect(rowIdsIn(backlogGrid())).toEqual(["bk-p1-hold"]);
+    unmount();
+    useBoardStore.setState({ showCompleted: true });
+    wrap(view([sealed, T_P1_HOLD]));
+    expect(rowIdsIn(backlogGrid())).toEqual(["bk-sealed", "bk-p1-hold"]);
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Rows
+// ══════════════════════════════════════════════════════════════════════════════
 
 describe("BacklogView — row rendering", () => {
-  it("renders the task code in the Code column", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    expect(screen.getByText("TSK-1000")).toBeInTheDocument();
+  it("renders the code, title and project", () => {
+    wrap(view([T_P0_DUE]));
+    const row = rowOf("bk-p0-due");
+    expect(within(row).getByText("TSK-1000")).toBeInTheDocument();
+    expect(within(row).getByText("Critical with due")).toBeInTheDocument();
+    expect(within(row).getByText("alpha")).toBeInTheDocument();
   });
 
-  it("renders the task title", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    expect(screen.getByText("Critical with due")).toBeInTheDocument();
-  });
-
-  it("renders the project in the OP column", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    expect(screen.getByText("alpha")).toBeInTheDocument();
-  });
-
-  it("renders Blocked tag inline in the title cell when task has hold", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P1_HOLD]} />);
-    const blockedTag = screen.getByTestId("bk-hold-tag-bk-p1-hold");
-    expect(blockedTag).toBeInTheDocument();
-    expect(blockedTag).toHaveTextContent("Blocked");
-    // Title text also present
-    expect(screen.getByText("High priority on hold")).toBeInTheDocument();
-  });
-
-  it("renders the task type chip in the row, none for untyped", () => {
-    wrap(
-      <BacklogView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[{ ...T_P0_DUE, task_type: "STORY" }, T_P1_HOLD]}
-      />,
+  it("names each row by its code", () => {
+    wrap(view([T_P0_DUE]));
+    expect(screen.getByRole("row", { name: "TSK-1000" })).toBe(
+      rowOf("bk-p0-due"),
     );
-    expect(
-      within(screen.getByTestId("bk-row-bk-p0-due")).getByText("STORY"),
-    ).toBeInTheDocument();
-    expect(
-      within(screen.getByTestId("bk-row-bk-p1-hold")).queryByText("STORY"),
-    ).not.toBeInTheDocument();
   });
 
-  it("does not render Blocked tag when task has no hold", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
+  it("renders the Blocked pill in the task cell only when blocked", () => {
+    wrap(view([T_P1_HOLD, T_P0_DUE]));
+    expect(screen.getByTestId("bk-hold-tag-bk-p1-hold")).toHaveTextContent(
+      "Blocked",
+    );
     expect(
       screen.queryByTestId("bk-hold-tag-bk-p0-due"),
     ).not.toBeInTheDocument();
   });
 
+  it("renders the task type chip, none for untyped", () => {
+    wrap(view([{ ...T_P0_DUE, task_type: "STORY" }, T_P1_HOLD]));
+    expect(within(rowOf("bk-p0-due")).getByText("STORY")).toBeInTheDocument();
+    expect(
+      within(rowOf("bk-p1-hold")).queryByText("STORY"),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders the due date as day and short month, ISO in its title", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
+    wrap(view([T_P0_DUE]));
     expect(screen.getByText("1 Jul")).toHaveAttribute("title", "2026-07-01");
+  });
+
+  it("renders em-dashes for missing values", () => {
+    wrap(view([T_P0_NODUE]));
+    expect(within(rowOf("bk-p0-nodue")).getAllByText("—").length).toBe(3);
+  });
+
+  it("renders state pip + canonical status label in the Status cell", () => {
+    wrap(
+      view([T_P0_DUE], {
+        colLabel: (id) => (id === "FIELD" ? "In Progress" : id),
+      }),
+    );
+    expect(within(rowOf("bk-p0-due")).getByText("In Progress")).toBeVisible();
   });
 
   // At 1024px the full column set left the title 0px (review I1): narrower
   // widths drop Assignee/Estimate, then Project/Checklist.
   it("drops secondary columns on narrower screens", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    for (const name of ["Assignee", "Estimate"]) {
-      expect(screen.getByText(name).className).toContain("max-[1399px]:hidden");
-    }
-    for (const name of ["Project", "Checklist"]) {
-      expect(screen.getByText(name).className).toContain("max-[1279px]:hidden");
-    }
-  });
-
-  it("renders em-dash when due is not set", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_NODUE]} />);
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
-  });
-
-  it("renders state pip + canonical status label in the Status cell", () => {
-    wrap(
-      <BacklogView
-        colLabel={(id) => (id === "FIELD" ? "In Progress" : id)}
-        tasks={[T_P0_DUE]}
-      />,
-    );
-    expect(screen.getByText("In Progress")).toBeInTheDocument();
+    setViewportWidth(1300);
+    const { unmount } = wrap(view([T_P0_DUE]));
+    expect(columnNames(backlogGrid())).toEqual([
+      "Code",
+      "Task",
+      "Project",
+      "Status",
+      "Due",
+      "Checklist",
+    ]);
+    unmount();
+    setViewportWidth(1024);
+    wrap(view([T_P0_DUE]));
+    expect(columnNames(backlogGrid())).toEqual([
+      "Code",
+      "Task",
+      "Status",
+      "Due",
+    ]);
   });
 });
 
 describe("BacklogView — checklist dots", () => {
-  it("renders total number of dots equal to checklist total", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P2_CHECKS]} />);
-    const row = screen.getByTestId("bk-row-bk-p2-checks");
-    const dots = row.querySelectorAll("[data-testid^='bk-dot-']");
-    expect(dots).toHaveLength(5); // total=5
-  });
+  const dots = (id: string) =>
+    rowOf(id).querySelectorAll("[data-testid^='bk-dot-']");
+  const doneDots = (id: string) =>
+    rowOf(id).querySelectorAll("[data-testid^='bk-dot-'][data-done='true']");
 
-  it("renders done count of dots with 'on' data attribute", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P2_CHECKS]} />);
-    const row = screen.getByTestId("bk-row-bk-p2-checks");
-    const onDots = row.querySelectorAll(
-      "[data-testid^='bk-dot-'][data-done='true']",
-    );
-    expect(onDots).toHaveLength(2); // done=2
-  });
-
-  it("all dots are done when checks=[n,n]", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P2_DONE]} />);
-    const row = screen.getByTestId("bk-row-bk-p2-done");
-    const allDots = row.querySelectorAll("[data-testid^='bk-dot-']");
-    const onDots = row.querySelectorAll(
-      "[data-testid^='bk-dot-'][data-done='true']",
-    );
-    expect(allDots).toHaveLength(3);
-    expect(onDots).toHaveLength(3);
-  });
-
-  it("renders no dots when checks=[]", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    const row = screen.getByTestId("bk-row-bk-p0-due");
-    const dots = row.querySelectorAll("[data-testid^='bk-dot-']");
-    expect(dots).toHaveLength(0);
+  it("renders one dot per item, done ones marked", () => {
+    wrap(view([T_P2_CHECKS, T_P2_DONE, T_P0_DUE]));
+    expect(dots("bk-p2-checks")).toHaveLength(5);
+    expect(doneDots("bk-p2-checks")).toHaveLength(2);
+    expect(dots("bk-p2-done")).toHaveLength(3);
+    expect(doneDots("bk-p2-done")).toHaveLength(3);
+    expect(dots("bk-p0-due")).toHaveLength(0);
   });
 });
 
-describe("BacklogView — row click sets editTaskId", () => {
-  it("clicking a row calls setEditTaskId with the task id", async () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    await userEvent.click(screen.getByTestId("bk-action-bk-p0-due"));
-    expect(useBoardStore.getState().editTaskId).toBe("bk-p0-due");
-  });
+// ══════════════════════════════════════════════════════════════════════════════
+// Interaction
+// ══════════════════════════════════════════════════════════════════════════════
 
-  it("clicking different rows sets the correct id each time", async () => {
-    wrap(
-      <BacklogView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[T_P0_DUE, T_P1_HOLD]}
-      />,
-    );
-    await userEvent.click(screen.getByTestId("bk-action-bk-p1-hold"));
+describe("BacklogView — opening a task", () => {
+  it("clicking a row opens its task", async () => {
+    wrap(view([T_P0_DUE, T_P1_HOLD]));
+    await userEvent.click(within(rowOf("bk-p1-hold")).getByText("alpha"));
     expect(useBoardStore.getState().editTaskId).toBe("bk-p1-hold");
   });
 
-  it("pressing Enter on a focused row opens the task", async () => {
+  it("pressing Enter on a focused row opens its task", async () => {
     const user = userEvent.setup();
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    const action = screen.getByRole("button", {
-      name: "Edit TSK-1000: Critical with due",
-    });
-    action.focus();
-    expect(action).toHaveFocus();
+    wrap(view([T_P0_DUE]));
+    rowOf("bk-p0-due").focus();
     await user.keyboard("{Enter}");
     expect(useBoardStore.getState().editTaskId).toBe("bk-p0-due");
   });
 
-  it("marks the row being edited as selected", () => {
+  it("tints the row being edited", () => {
     useBoardStore.setState({ editTaskId: "bk-p1-hold" });
-    wrap(
-      <BacklogView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[T_P0_DUE, T_P1_HOLD]}
-      />,
-    );
-    const selected = screen.getByTestId("bk-row-bk-p1-hold");
-    expect(selected).toHaveAttribute("data-selected", "true");
-    expect(selected).toHaveClass("bg-accent-tint");
-    expect(screen.getByTestId("bk-action-bk-p1-hold")).toHaveAttribute(
-      "aria-current",
-      "true",
-    );
-    const other = screen.getByTestId("bk-row-bk-p0-due");
-    expect(other).not.toHaveAttribute("data-selected");
-    expect(screen.getByTestId("bk-action-bk-p0-due")).not.toHaveAttribute(
-      "aria-current",
-    );
+    wrap(view([T_P0_DUE, T_P1_HOLD]));
+    expect(rowOf("bk-p1-hold").className).toContain("[&>td]:bg-accent-tint");
+    expect(rowOf("bk-p0-due").className).not.toContain("bg-accent-tint");
   });
 });
 
 describe("BacklogView — inline editing", () => {
   it("status trigger patches status without opening the edit panel", async () => {
     const stub = makePatchStub();
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />, stub);
+    wrap(view([T_P0_DUE]), stub);
 
     const user = userEvent.setup();
     // T_P0_DUE is FIELD — pick REVIEW in the popover
@@ -574,74 +474,46 @@ describe("BacklogView — inline editing", () => {
     // The edit panel must NOT have opened for this click sequence.
     expect(useBoardStore.getState().editTaskId).toBeNull();
   });
-});
 
-describe("BacklogView — within-group sort order in DOM", () => {
-  it("renders rows in COL_ORDER then due order within each group", () => {
-    // T_P2_INTAKE is INTAKE (index 0), T_P2_CHECKS is FIELD (index 2) with due
-    wrap(
-      <BacklogView
-        colLabel={FIXTURE_COL_LABEL}
-        tasks={[T_P2_CHECKS, T_P2_INTAKE]}
-      />,
-    );
-    const rows = screen.getAllByTestId(/^bk-row-/);
-    const ids = rows.map((r) => r.dataset.testid?.replace("bk-row-", ""));
-    const intakeIdx = ids.indexOf("bk-p2-intake");
-    const checksIdx = ids.indexOf("bk-p2-checks");
-    expect(intakeIdx).toBeLessThan(checksIdx);
-  });
-
-  it("within same col, no-due rows appear after due rows", () => {
-    // Both P2 + FIELD: T_P2_CHECKS has due, T_P2_DONE has earlier due
-    const noDue: BoardTask = { ...T_P2_CHECKS, id: "bk-nodue-late", due: null };
-    const withDue: BoardTask = {
-      ...T_P2_CHECKS,
-      id: "bk-withdue-early",
-      due: "2026-06-01",
-    };
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[noDue, withDue]} />);
-    const rows = screen.getAllByTestId(/^bk-row-/);
-    const ids = rows.map((r) => r.dataset.testid?.replace("bk-row-", ""));
-    expect(ids.indexOf("bk-withdue-early")).toBeLessThan(
-      ids.indexOf("bk-nodue-late"),
-    );
+  it("priority trigger opens its popover without opening the edit panel", async () => {
+    const user = userEvent.setup();
+    wrap(view([T_P0_DUE]));
+    await user.click(screen.getByTestId(`bk-inline-priority-${T_P0_DUE.id}`));
+    expect(
+      screen.getByRole("dialog", { name: "Set priority" }),
+    ).toBeInTheDocument();
+    expect(useBoardStore.getState().editTaskId).toBeNull();
   });
 });
 
-describe("BacklogView — empty state", () => {
-  it("renders only the header when no tasks are provided", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[]} />);
-    // Sentence-case column header should be present
-    expect(screen.getByText("Code")).toBeInTheDocument();
-    expect(screen.getByText("Checklist")).toBeInTheDocument();
-    // No group headers
-    expect(screen.queryByText("Critical")).not.toBeInTheDocument();
+describe("BacklogView — empty states", () => {
+  it("says so in each empty table, under its header", () => {
+    wrap(view([], { activeCycle: ACTIVE }));
+    expect(
+      within(cycleGrid()).getByText("No tasks in this cycle"),
+    ).toBeInTheDocument();
+    expect(
+      within(backlogGrid()).getByText("No tasks in the backlog"),
+    ).toBeInTheDocument();
+    expect(columnNames(backlogGrid())).toContain("Code");
   });
 
-  it("renders the No tasks empty state when no tasks are provided", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[]} />);
-    const empty = screen.getByTestId("bk-empty");
-    expect(empty).toBeInTheDocument();
-    expect(empty).toHaveTextContent("No tasks");
-  });
-
-  it("does not render the empty-state block when tasks are present", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    expect(screen.queryByTestId("bk-empty")).not.toBeInTheDocument();
+  it("shows no empty state in a table with tasks", () => {
+    wrap(view([T_P0_DUE]));
+    expect(
+      screen.queryByText("No tasks in the backlog"),
+    ).not.toBeInTheDocument();
   });
 });
 
 describe("BacklogView — QuickAddRow wiring", () => {
-  it("renders a QuickAddRow above the header row", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    // QuickAddRow should be present with the backlog testId
-    expect(screen.getByTestId("qa-backlog")).toBeInTheDocument();
-  });
-
-  it("QuickAddRow has empty preset (no status/project/cycle)", () => {
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
+  it("renders a QuickAddRow with an empty preset above the tables", () => {
+    wrap(view([T_P0_DUE]));
     const row = screen.getByTestId("qa-backlog");
     expect(row).toHaveAttribute("placeholder", "+ New task");
+    expect(
+      row.compareDocumentPosition(backlogGrid()) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

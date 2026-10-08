@@ -1,35 +1,35 @@
 /**
- * BacklogView — priority-grouped register for the TASKING board.
+ * BacklogView — the TASKING board's list mode, two Jira-style tables.
  *
  * - Receives pre-filtered `tasks` from TaskingScreen (same visibleTasks
- *   threading as KanbanView).
- * - Groups by priority P0→P3 (PRI_ORDER), empty groups dropped.
- * - Within each group: sorted by COL_ORDER index, then by due date asc;
- *   tasks with no due date sort last.
- * - Each row uses a native overlay button for click and keyboard activation.
- *   Priority and disposition cells remain independent popover triggers.
+ *   threading as KanbanView) and the active cycle (BoardHeader's rule).
+ * - Active cycle table first (only when a cycle is active), then the
+ *   backlog table with every other task; splitBacklog sorts each by
+ *   priority, status, then due date.
+ * - SEALED tasks show only with the board's "Show completed" toggle.
+ * - Each table is a virtualised DataTable capped at ten 40px rows; its
+ *   rows open the task editor on click or Enter. Priority and status are
+ *   InlineEditPopover buttons inside the cells, so they never open it.
  * - Checklist mini-dots: 6px rounds, done = cobalt, open = faint.
  * - Stone & Lamp dense table (spec §5.6): no cell borders, sentence-case
  *   12.5px mute header, 40px rows, hover sink, the row being edited in
- *   accent-tint, tabular numerals. Group headers: tick + italic serif
- *   priority name + "P0 · n tasks" caption.
- *
- * Design source: TaskingBacklog.dc.html (Stone & Lamp phase 5 mockups).
+ *   accent-tint, tabular numerals. Table headings: tick + italic serif
+ *   name + caption.
  */
 
 import { useMemo } from "react";
-import type { BoardTask } from "#/api/board";
+import type { BoardCycle, BoardTask } from "#/api/board";
 import { Tick, type TickVariant } from "#/components/codex/Tick";
+import { type DataColumn, DataTable } from "#/components/ui/data-table";
+import { useMediaQuery } from "#/hooks/useMediaQuery";
 import { cn } from "#/lib/cn";
-import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { formatDayMonth } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
+import { splitBacklog } from "./backlog-tables";
 import {
-  COL_ORDER,
   type ColLabelFn,
+  fmtCycleWindow,
   isDone,
-  PRI_LABEL,
-  PRI_ORDER,
   PriChip,
   StatePip,
 } from "./board-constants";
@@ -38,66 +38,255 @@ import { checklistProgress } from "./board-stats";
 import { InlineEditPopover } from "./InlineEditPopover";
 import { QuickAddRow } from "./QuickAddRow";
 
-/** Shared grid tracks for the header row and task rows. Narrower screens
- *  drop columns (display:none cells take no track) so the title keeps room:
- *  below 1400px Assignee and Estimate go, below 1280px Project and Checklist.
- *  Arbitrary min-[…] variants only: Tailwind sorts those among themselves by
- *  width, but puts named breakpoints (xl:) after them. */
-const BK_COLS = cn(
-  "grid items-center gap-x-4 px-3",
-  "grid-cols-[168px_minmax(0,1fr)_132px_64px]",
-  "min-[1280px]:grid-cols-[168px_minmax(0,1fr)_110px_132px_64px_86px]",
-  "min-[1400px]:grid-cols-[168px_minmax(0,1fr)_110px_132px_90px_76px_64px_86px]",
-);
+const ROW_HEIGHT = 40;
+/** Ten rows under the 40px (comfortable) header; more rows scroll. */
+const VIRTUALIZE = { rowHeight: ROW_HEIGHT, maxHeight: 11 * ROW_HEIGHT };
 
-/** Cells shown from 1280px (Project, Checklist). */
-const MID_ONLY = "max-[1279px]:hidden";
+const COLUMN_ORDER = [
+  "code",
+  "task",
+  "project",
+  "status",
+  "assignee",
+  "estimate",
+  "due",
+  "checklist",
+];
+const NO_WIDTHS: Record<string, number> = {};
 
-/** Cells shown from 1400px (Assignee, Estimate). */
-const WIDE_ONLY = "max-[1399px]:hidden";
-
-/** Quick-add bar (44px) + 18px gap + column header (40px): where the
- *  sticky group headers dock. */
-const GROUP_TOP = "top-[102px]";
-
-/** Group tick: Critical hot, Low faint, the rest cobalt. */
-function groupTick(pri: string): { variant: TickVariant; className?: string } {
-  if (pri === "P0") return { variant: "live", className: "bg-hot" };
-  if (pri === "P3") return { variant: "faint" };
-  return { variant: "live" };
+/** Narrower screens drop columns so the title keeps room: below 1400px
+ *  Assignee and Estimate go, below 1280px Project and Checklist. */
+function useColumnVisibility(): Record<string, boolean> {
+  const wide = useMediaQuery("(min-width: 1400px)");
+  const mid = useMediaQuery("(min-width: 1280px)");
+  return useMemo(
+    () => ({ assignee: wide, estimate: wide, project: mid, checklist: mid }),
+    [wide, mid],
+  );
 }
 
-// ── groupBacklog — pure helper (unit-testable) ────────────────────────────────
-
-export interface BacklogGroup {
-  pri: string;
-  items: BoardTask[];
+function taskColumns(colLabel: ColLabelFn): DataColumn<BoardTask>[] {
+  return [
+    {
+      id: "code",
+      label: "Code",
+      width: 168,
+      rowHeader: true,
+      cell: (t) => (
+        <span
+          className={cn(
+            "block truncate text-[13px] tabular-nums",
+            isDone(t.status) ? "text-mute" : "text-ink-2",
+          )}
+        >
+          {t.code}
+        </span>
+      ),
+    },
+    {
+      id: "task",
+      label: "Task",
+      fill: true,
+      minWidth: 200,
+      cell: (t) => (
+        // Priority chip · type chip · Blocked pill · title
+        <span className="flex min-w-0 items-center gap-2.5">
+          <InlineEditPopover
+            task={t}
+            field="priority"
+            testIdPrefix="bk"
+            colLabel={colLabel}
+          >
+            <PriChip pri={t.priority} />
+          </InlineEditPopover>
+          <TypeChip type={t.task_type} />
+          {t.blocked && (
+            <span
+              data-testid={`bk-hold-tag-${t.id}`}
+              className="inline-flex h-[22px] flex-shrink-0 items-center rounded-full bg-[color-mix(in_oklab,var(--hot)_10%,transparent)] px-[9px] text-[12px] text-hot"
+            >
+              Blocked
+            </span>
+          )}
+          <span
+            className={cn(
+              "truncate",
+              isDone(t.status) ? "text-mute" : "text-ink",
+            )}
+            title={t.title}
+          >
+            {t.title}
+          </span>
+        </span>
+      ),
+    },
+    {
+      id: "project",
+      label: "Project",
+      width: 110,
+      cell: (t) => (
+        <span className="block truncate text-[13px] text-mute">
+          {t.project ?? "—"}
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      label: "Status",
+      width: 132,
+      cell: (t) => (
+        <span className="flex min-w-0 items-center text-[13px] text-ink-2">
+          <InlineEditPopover
+            task={t}
+            field="status"
+            testIdPrefix="bk"
+            colLabel={colLabel}
+          >
+            <span className="flex items-center gap-2">
+              <StatePip col={t.status} />
+              <span className="truncate">{colLabel(t.status)}</span>
+            </span>
+          </InlineEditPopover>
+        </span>
+      ),
+    },
+    {
+      id: "assignee",
+      label: "Assignee",
+      width: 90,
+      cell: (t) => (
+        <span
+          className={cn(
+            "block truncate text-[13px]",
+            t.assignee ? "text-ink-2" : "text-mute",
+          )}
+        >
+          {t.assignee ?? "—"}
+        </span>
+      ),
+    },
+    {
+      id: "estimate",
+      label: "Estimate",
+      width: 76,
+      cell: (t) => (
+        <span className="block truncate text-[13px] text-mute tabular-nums">
+          {t.estimate ?? "—"}
+        </span>
+      ),
+    },
+    {
+      id: "due",
+      label: "Due",
+      // Cells pad 12px a side, which the old grid's gaps did not: 64px of
+      // text ("14 Oct") needs 88px.
+      width: 88,
+      align: "end",
+      cell: (t) => (
+        <span
+          className={cn(
+            "block truncate text-[13px] tabular-nums",
+            t.due ? "text-ink-2" : "text-mute",
+          )}
+          title={t.due ?? undefined}
+        >
+          {t.due ? formatDayMonth(t.due) : "—"}
+        </span>
+      ),
+    },
+    {
+      id: "checklist",
+      label: "Checklist",
+      width: 86,
+      cell: (t) => {
+        const { done, total } = checklistProgress(t.checks);
+        return (
+          <span className="flex gap-[3px]">
+            {Array.from({ length: total }, (_, position) => position + 1).map(
+              (position) => (
+                <span
+                  key={`${t.id}-check-${position}`}
+                  data-testid={`bk-dot-${t.id}-${position - 1}`}
+                  data-done={position <= done ? "true" : "false"}
+                  className={cn(
+                    "block h-1.5 w-1.5 rounded-full",
+                    position <= done ? "bg-accent" : "bg-faint",
+                  )}
+                />
+              ),
+            )}
+          </span>
+        );
+      },
+    },
+  ];
 }
 
-/**
- * Groups and sorts tasks for the backlog register.
- *
- * Group order: P0 → P1 → P2 → P3 (PRI_ORDER); empty groups dropped.
- * Within each group:
- *   1. Primary: COL_ORDER index (INTAKE < TRIAGE < FIELD < REVIEW < SEALED)
- *   2. Secondary: due date ascending; null/absent due sorts last ("9" sentinel)
- */
-export function groupBacklog(tasks: BoardTask[]): BacklogGroup[] {
-  return PRI_ORDER.map((pri) => ({
-    pri,
-    items: tasks
-      .filter((t) => t.priority === pri)
-      .sort((a, b) => {
-        const colDiff =
-          COL_ORDER.indexOf(a.status as (typeof COL_ORDER)[number]) -
-          COL_ORDER.indexOf(b.status as (typeof COL_ORDER)[number]);
-        if (colDiff !== 0) return colDiff;
-        // Plain string compare — locale-insensitive, correct for ISO dates
-        const aDue = a.due ?? "9";
-        const bDue = b.due ?? "9";
-        return aDue < bDue ? -1 : aDue > bDue ? 1 : 0;
-      }),
-  })).filter((g) => g.items.length > 0);
+const countLabel = (n: number) => (n === 1 ? "1 task" : `${n} tasks`);
+
+function TableHeading({
+  tick,
+  name,
+  caption,
+}: {
+  tick: TickVariant;
+  name: string;
+  caption: string;
+}) {
+  return (
+    // Wraps at phone widths: the caption drops below the name.
+    <h2 className="m-0 flex min-h-[46px] flex-wrap items-center gap-x-2.5 gap-y-1 px-3 pt-2 pb-1 font-normal">
+      <Tick variant={tick} />
+      <span className="whitespace-nowrap font-serif text-[21px] italic leading-none text-ink">
+        {name}
+      </span>
+      <span className="text-[12.5px] text-mute tabular-nums">{caption}</span>
+    </h2>
+  );
+}
+
+function TaskTable({
+  ariaLabel,
+  tasks,
+  columns,
+  columnVisibility,
+  empty,
+}: {
+  ariaLabel: string;
+  tasks: BoardTask[];
+  columns: DataColumn<BoardTask>[];
+  columnVisibility: Record<string, boolean>;
+  empty: string;
+}) {
+  const editTaskId = useBoardStore((s) => s.editTaskId);
+  const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
+  return (
+    <DataTable<BoardTask>
+      ariaLabel={ariaLabel}
+      rows={tasks}
+      columns={columns}
+      getRowId={(t) => t.id}
+      density="comfortable"
+      columnOrder={COLUMN_ORDER}
+      columnVisibility={columnVisibility}
+      columnWidths={NO_WIDTHS}
+      virtualize={VIRTUALIZE}
+      onRowActivate={(t) => setEditTaskId(t.id)}
+      rowClassName={(t) =>
+        cn(
+          "[&>td:first-child]:rounded-l-[10px] [&>td:last-child]:rounded-r-[10px] [&>td]:transition-colors [&>td]:duration-[120ms]",
+          t.id === editTaskId
+            ? "[&>td]:bg-accent-tint"
+            : "hover:[&>td]:bg-sink",
+        )
+      }
+      emptyState={
+        <p className="m-0 rounded-xl bg-sink px-3 py-6 text-center text-[13px] text-mute">
+          {empty}
+        </p>
+      }
+    />
+  );
 }
 
 // ── BacklogView ───────────────────────────────────────────────────────────────
@@ -105,220 +294,66 @@ export function groupBacklog(tasks: BoardTask[]): BacklogGroup[] {
 export interface BacklogViewProps {
   /** Pre-filtered visible tasks (same as KanbanView.tasks). */
   tasks: BoardTask[];
+  /** The cycle in progress (`state === "ACTIVE"`), or null. */
+  activeCycle: BoardCycle | null;
   /** Resolves a column id to its server-supplied display label. */
   colLabel: ColLabelFn;
 }
 
-export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
-  const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
-  const editTaskId = useBoardStore((s) => s.editTaskId);
-
-  const groups = useMemo(() => groupBacklog(tasks), [tasks]);
+export function BacklogView({
+  tasks,
+  activeCycle,
+  colLabel,
+}: BacklogViewProps) {
+  const showDone = useBoardStore((s) => s.showCompleted);
+  const columnVisibility = useColumnVisibility();
+  const columns = useMemo(() => taskColumns(colLabel), [colLabel]);
+  const split = useMemo(
+    () => splitBacklog(tasks, activeCycle, { showDone }),
+    [tasks, activeCycle, showDone],
+  );
 
   return (
     <div className="h-full overflow-auto px-4 pb-6 text-[14px]">
-      {/* Quick add + column header share one sticky block on ground. */}
-      <div className="sticky top-0 z-[4] bg-ground">
-        <div className="flex h-11 items-center rounded-[14px] bg-sink">
-          <QuickAddRow
-            preset={{}}
-            testId="qa-backlog"
-            className="h-full hover:bg-transparent focus:bg-transparent"
-          />
-        </div>
-
-        <div
-          className={cn(
-            BK_COLS,
-            "mt-[18px] h-10 text-[12.5px] text-mute [&>span]:truncate",
-          )}
-        >
-          <span>Code</span>
-          <span>Task</span>
-          <span className={MID_ONLY}>Project</span>
-          <span>Status</span>
-          <span className={WIDE_ONLY}>Assignee</span>
-          <span className={WIDE_ONLY}>Estimate</span>
-          <span className="text-right">Due</span>
-          <span className={MID_ONLY}>Checklist</span>
-        </div>
+      <div className="flex h-11 items-center rounded-[14px] bg-sink">
+        <QuickAddRow
+          preset={{}}
+          testId="qa-backlog"
+          className="h-full hover:bg-transparent focus:bg-transparent"
+        />
       </div>
 
-      {groups.length === 0 && (
-        <div
-          className="mt-2 rounded-xl bg-sink px-3 py-6 text-center text-[13px] text-mute"
-          data-testid="bk-empty"
-        >
-          No tasks
-        </div>
+      {activeCycle && split.cycle && (
+        <section className="mt-[18px]">
+          <TableHeading
+            tick="live"
+            name={activeCycle.label}
+            caption={`${activeCycle.code} · ${fmtCycleWindow(activeCycle.start, activeCycle.end)} · ${countLabel(split.cycle.length)}`}
+          />
+          <TaskTable
+            ariaLabel={`Active cycle: ${activeCycle.label}`}
+            tasks={split.cycle}
+            columns={columns}
+            columnVisibility={columnVisibility}
+            empty="No tasks in this cycle"
+          />
+        </section>
       )}
 
-      {groups.map((g) => {
-        const tick = groupTick(g.pri);
-        const count =
-          g.items.length === 1 ? "1 task" : `${g.items.length} tasks`;
-        return (
-          <section key={g.pri} className="flex flex-col">
-            <h2
-              data-testid={`bk-grp-hd-${g.pri}`}
-              className={cn(
-                "sticky z-[3] m-0 flex h-[46px] items-center gap-2.5 bg-ground px-3 pt-2 font-normal",
-                GROUP_TOP,
-              )}
-            >
-              <Tick variant={tick.variant} className={tick.className} />
-              <span className="font-serif text-[21px] italic leading-none text-ink">
-                {PRI_LABEL[g.pri]}
-              </span>
-              <span className="text-[12.5px] text-mute tabular-nums">
-                {g.pri} · {count}
-              </span>
-            </h2>
-
-            {g.items.map((t) => {
-              const { done, total } = checklistProgress(t.checks);
-              const selected = t.id === editTaskId;
-              const sealed = isDone(t.status);
-
-              return (
-                <div
-                  key={t.id}
-                  data-testid={`bk-row-${t.id}`}
-                  data-selected={selected ? "true" : undefined}
-                  className={cn(
-                    BK_COLS,
-                    "pointer-events-none relative h-10 rounded-[10px] transition-colors duration-[120ms]",
-                    selected ? "bg-accent-tint" : "hover:bg-sink",
-                  )}
-                >
-                  <button
-                    type="button"
-                    aria-label={`Edit ${t.code}: ${t.title}`}
-                    aria-current={selected ? "true" : undefined}
-                    className={cn(
-                      "pointer-events-auto absolute inset-0 z-0 cursor-pointer rounded-[10px] bg-transparent p-0 text-left",
-                      FOCUS_RING_NATIVE,
-                    )}
-                    onClick={() => setEditTaskId(t.id)}
-                    data-testid={`bk-action-${t.id}`}
-                  />
-                  {/* Code */}
-                  <span
-                    className={cn(
-                      "truncate text-[13px] tabular-nums",
-                      sealed ? "text-mute" : "text-ink-2",
-                    )}
-                  >
-                    {t.code}
-                  </span>
-
-                  {/* Task — priority chip · type chip · Blocked pill · title */}
-                  <span className="flex min-w-0 items-center gap-2.5">
-                    <InlineEditPopover
-                      task={t}
-                      field="priority"
-                      testIdPrefix="bk"
-                      colLabel={colLabel}
-                    >
-                      <PriChip pri={t.priority} />
-                    </InlineEditPopover>
-                    <TypeChip type={t.task_type} />
-                    {t.blocked && (
-                      <span
-                        data-testid={`bk-hold-tag-${t.id}`}
-                        className="inline-flex h-[22px] flex-shrink-0 items-center rounded-full bg-[color-mix(in_oklab,var(--hot)_10%,transparent)] px-[9px] text-[12px] text-hot"
-                      >
-                        Blocked
-                      </span>
-                    )}
-                    <span
-                      className={cn(
-                        "truncate",
-                        sealed ? "text-mute" : "text-ink",
-                      )}
-                      title={t.title}
-                    >
-                      {t.title}
-                    </span>
-                  </span>
-
-                  {/* Project */}
-                  <span
-                    className={cn("truncate text-[13px] text-mute", MID_ONLY)}
-                  >
-                    {t.project ?? "—"}
-                  </span>
-
-                  {/* Status */}
-                  <span className="flex min-w-0 items-center text-[13px] text-ink-2">
-                    <InlineEditPopover
-                      task={t}
-                      field="status"
-                      testIdPrefix="bk"
-                      colLabel={colLabel}
-                    >
-                      <span className="flex items-center gap-2">
-                        <StatePip col={t.status} />
-                        <span className="truncate">{colLabel(t.status)}</span>
-                      </span>
-                    </InlineEditPopover>
-                  </span>
-
-                  {/* Assignee */}
-                  <span
-                    className={cn(
-                      "truncate text-[13px]",
-                      t.assignee ? "text-ink-2" : "text-mute",
-                      WIDE_ONLY,
-                    )}
-                  >
-                    {t.assignee ?? "—"}
-                  </span>
-
-                  {/* Estimate */}
-                  <span
-                    className={cn(
-                      "truncate text-[13px] text-mute tabular-nums",
-                      WIDE_ONLY,
-                    )}
-                  >
-                    {t.estimate ?? "—"}
-                  </span>
-
-                  {/* Due */}
-                  <span
-                    className={cn(
-                      "truncate text-right text-[13px] tabular-nums",
-                      t.due ? "text-ink-2" : "text-mute",
-                    )}
-                    title={t.due ?? undefined}
-                  >
-                    {t.due ? formatDayMonth(t.due) : "—"}
-                  </span>
-
-                  {/* Checklist — mini dots */}
-                  <span className={cn("flex gap-[3px]", MID_ONLY)}>
-                    {Array.from(
-                      { length: total },
-                      (_, position) => position + 1,
-                    ).map((position) => (
-                      <span
-                        key={`${t.id}-check-${position}`}
-                        data-testid={`bk-dot-${t.id}-${position - 1}`}
-                        data-done={position <= done ? "true" : "false"}
-                        className={cn(
-                          "block h-1.5 w-1.5 rounded-full",
-                          position <= done ? "bg-accent" : "bg-faint",
-                        )}
-                      />
-                    ))}
-                  </span>
-                </div>
-              );
-            })}
-          </section>
-        );
-      })}
+      <section className="mt-[18px]">
+        <TableHeading
+          tick="faint"
+          name="Backlog"
+          caption={countLabel(split.backlog.length)}
+        />
+        <TaskTable
+          ariaLabel="Backlog"
+          tasks={split.backlog}
+          columns={columns}
+          columnVisibility={columnVisibility}
+          empty="No tasks in the backlog"
+        />
+      </section>
     </div>
   );
 }
