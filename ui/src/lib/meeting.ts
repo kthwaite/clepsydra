@@ -23,6 +23,17 @@ export function localIso(date: Date): string {
   return `${day}T${time}`;
 }
 
+/**
+ * Give a datetime-local value its seconds. Browsers drop `:00` seconds from
+ * `<input type="datetime-local">` even at `step={1}`, and `2026-08-28T09:30`
+ * is not a TOML date-time — the frontmatter splice would silently fall back to
+ * storing a quoted string, and `occurred_at` on create is refused outright.
+ * Anything else is returned unchanged.
+ */
+export function withSeconds(local: string): string {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local) ? `${local}:00` : local;
+}
+
 /** The quarter hour that has already started, as a new Date: 12:00 stays
  * 12:00, 12:01 and 12:14 become 12:00, 12:16 becomes 12:15. Seconds and
  * milliseconds are dropped.

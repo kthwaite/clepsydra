@@ -5,6 +5,7 @@ import {
   localIso,
   readOccurredAt,
   recordsOccurrence,
+  withSeconds,
 } from "#/lib/meeting";
 
 describe("recordsOccurrence", () => {
@@ -90,5 +91,17 @@ describe("readOccurredAt", () => {
     // does not render it.
     expect(readOccurredAt(2026)).toBeNull();
     expect(readOccurredAt({ when: "later" })).toBeNull();
+  });
+});
+
+describe("withSeconds", () => {
+  it("gives a minute-precision datetime-local value its seconds", () => {
+    expect(withSeconds("2026-08-28T09:30")).toBe("2026-08-28T09:30:00");
+  });
+
+  it("leaves a value that already has seconds, or is not a date-time, alone", () => {
+    expect(withSeconds("2026-08-28T09:30:15")).toBe("2026-08-28T09:30:15");
+    expect(withSeconds("2026-08-28")).toBe("2026-08-28");
+    expect(withSeconds("")).toBe("");
   });
 });

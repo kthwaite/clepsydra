@@ -1,14 +1,41 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PageSummary } from "#/api/types";
 
-const { createMutate, openTabMock } = vi.hoisted(() => ({
-  createMutate: vi.fn(),
-  openTabMock: vi.fn(),
-}));
+const { createMutate, createMutateAsync, openTabMock, people } = vi.hoisted(
+  () => {
+    const person = (path: string, title: string) => ({
+      id: path,
+      path,
+      title,
+      aliases: [],
+      canonical_name: title,
+      computed_tags: [],
+      encrypted: false,
+      inferred: false,
+      kind: "PERSON",
+      tags: [],
+    });
+    return {
+      createMutate: vi.fn(),
+      createMutateAsync: vi.fn(),
+      openTabMock: vi.fn(),
+      people: [
+        person("people/ada.md", "Ada"),
+        person("people/grace.md", "Grace Hopper"),
+      ] as PageSummary[],
+    };
+  },
+);
 
 vi.mock("#/api/pages", () => ({
-  useCreatePage: () => ({ mutate: createMutate, isPending: false }),
+  useCreatePage: () => ({
+    mutate: createMutate,
+    mutateAsync: createMutateAsync,
+    isPending: false,
+  }),
+  usePages: () => ({ data: { items: people } }),
 }));
 vi.mock("#/api/index", () => ({
   useTags: () => ({
@@ -232,5 +259,171 @@ describe("InscribeModal", () => {
     await user.click(screen.getByRole("button", { name: "Inscribe" }));
     const [vars] = createMutate.mock.calls[0];
     expect(vars.body.tags).toEqual(["rust"]);
+  });
+
+  describe("MEETING fields", () => {
+    beforeEach(() => {
+      // Only Date is faked so user-event's timers still run.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(2026, 9, 8, 14, 37, 42));
+      // An earlier test gives mutate an onSuccess that closes the modal.
+      createMutate.mockReset();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const attendeeCombo = () =>
+      screen.getByRole("combobox", { name: "Add attendee" });
+
+    async function chooseKind(
+      user: ReturnType<typeof userEvent.setup>,
+      name: string,
+    ) {
+      await user.click(screen.getByRole("combobox", { name: "Kind" }));
+      await user.click(screen.getByRole("option", { name }));
+    }
+
+    async function pickPerson(
+      user: ReturnType<typeof userEvent.setup>,
+      query: string,
+      option: RegExp,
+    ) {
+      await user.type(attendeeCombo(), query);
+      await user.click(await screen.findByRole("option", { name: option }));
+      // PersonCombo refocuses after a pick, which reopens its popover (when
+      // anyone is left to offer) and hides the rest of the form; Escape
+      // closes only the popover.
+      if (screen.queryByRole("listbox")) await user.keyboard("{Escape}");
+      expect(useUiStore.getState().isInscribeOpen).toBe(true);
+    }
+
+    it("hides When and Attendees for other kinds and sends neither", async () => {
+      const user = userEvent.setup();
+      render(<InscribeModal />);
+      expect(screen.queryByLabelText("When")).toBeNull();
+      expect(
+        screen.queryByRole("combobox", { name: "Add attendee" }),
+      ).toBeNull();
+
+      await user.type(screen.getByRole("textbox", { name: "Title" }), "Plain");
+      await user.click(screen.getByRole("button", { name: "Inscribe" }));
+
+      const [vars] = createMutate.mock.calls[0];
+      expect(vars.body).not.toHaveProperty("attendees");
+      expect(vars.body).not.toHaveProperty("occurred_at");
+    });
+
+    it("prefills When with the current minute and sends picked attendees", async () => {
+      const user = userEvent.setup();
+      render(<InscribeModal />);
+      await chooseKind(user, "Meeting");
+
+      expect(screen.getByLabelText("When")).toHaveValue("2026-10-08T14:37");
+      await user.type(screen.getByRole("textbox", { name: "Title" }), "Sync");
+      await pickPerson(user, "ad", /^Ada$/);
+      await pickPerson(user, "gr", /Grace Hopper/);
+      expect(screen.getByRole("list", { name: /Attendees/ })).toHaveTextContent(
+        /Ada.*Grace Hopper/,
+      );
+
+      await user.click(screen.getByRole("button", { name: "Inscribe" }));
+
+      const [vars] = createMutate.mock.calls[0];
+      expect(vars.body.kind).toBe("MEETING");
+      expect(vars.body.attendees).toEqual(["Ada", "Grace Hopper"]);
+      expect(vars.body.occurred_at).toBe("2026-10-08T14:37:00");
+    });
+
+    it("sends an edited When and omits a cleared one", async () => {
+      const user = userEvent.setup();
+      render(<InscribeModal />);
+      await chooseKind(user, "Meeting");
+      await user.type(screen.getByRole("textbox", { name: "Title" }), "Retro");
+
+      fireEvent.change(screen.getByLabelText("When"), {
+        target: { value: "2026-10-07T09:30" },
+      });
+      await user.click(screen.getByRole("button", { name: "Inscribe" }));
+      expect(createMutate.mock.calls[0][0].body.occurred_at).toBe(
+        "2026-10-07T09:30:00",
+      );
+
+      fireEvent.change(screen.getByLabelText("When"), {
+        target: { value: "" },
+      });
+      await user.click(screen.getByRole("button", { name: "Inscribe" }));
+      const body = createMutate.mock.calls[1][0].body;
+      expect(body).not.toHaveProperty("occurred_at");
+      expect(body).not.toHaveProperty("attendees");
+    });
+
+    it("drops a removed chip and ignores a duplicate pick", async () => {
+      const user = userEvent.setup();
+      render(<InscribeModal />);
+      await chooseKind(user, "Meeting");
+      await user.type(screen.getByRole("textbox", { name: "Title" }), "Pair");
+      await pickPerson(user, "gr", /Grace Hopper/);
+      await user.type(attendeeCombo(), "ada{Enter}");
+      await user.type(attendeeCombo(), "ADA{Enter}");
+      expect(screen.getAllByRole("button", { name: /^remove / })).toHaveLength(
+        2,
+      );
+
+      await user.click(
+        screen.getByRole("button", { name: "remove Grace Hopper" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Inscribe" }));
+
+      expect(createMutate).toHaveBeenCalledTimes(1);
+      const [vars] = createMutate.mock.calls[0];
+      expect(vars.body.attendees).toEqual(["Ada"]);
+    });
+
+    it("sends neither field after switching from MEETING to another kind", async () => {
+      const user = userEvent.setup();
+      render(<InscribeModal />);
+      await chooseKind(user, "Meeting");
+      await pickPerson(user, "ad", /^Ada$/);
+      await chooseKind(user, "Note");
+
+      expect(screen.queryByLabelText("When")).toBeNull();
+      await user.type(screen.getByRole("textbox", { name: "Title" }), "Later");
+      await user.click(screen.getByRole("button", { name: "Inscribe" }));
+
+      const [vars] = createMutate.mock.calls[0];
+      expect(vars.body.kind).toBe("NOTE");
+      expect(vars.body).not.toHaveProperty("attendees");
+      expect(vars.body).not.toHaveProperty("occurred_at");
+    });
+
+    it("does not submit on Enter in the attendee combobox", async () => {
+      const user = userEvent.setup();
+      render(<InscribeModal />);
+      await chooseKind(user, "Meeting");
+      await user.type(screen.getByRole("textbox", { name: "Title" }), "Draft");
+
+      // A partial name with the popover closed: nothing in PersonCombo
+      // claims this Enter, so only the form guard stops the submit.
+      await user.type(attendeeCombo(), "gr{Escape}");
+      expect(screen.queryByRole("listbox")).toBeNull();
+      await user.keyboard("{Enter}");
+
+      expect(createMutate).not.toHaveBeenCalled();
+      expect(attendeeCombo()).toHaveValue("gr");
+    });
+
+    it("clears attendees on dismissal", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<InscribeModal />);
+      await chooseKind(user, "Meeting");
+      await pickPerson(user, "ad", /^Ada$/);
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      useUiStore.setState({ isInscribeOpen: true });
+      rerender(<InscribeModal />);
+      await chooseKind(user, "Meeting");
+      expect(screen.queryByRole("button", { name: "remove Ada" })).toBeNull();
+    });
   });
 });

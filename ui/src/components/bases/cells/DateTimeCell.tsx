@@ -1,20 +1,11 @@
 import { useState } from "react";
+import { withSeconds } from "#/lib/meeting";
 import {
   CELL_INPUT_CLASS,
   type CellEditorProps,
   tabCommit,
   useInitialFocus,
 } from "./types";
-
-/**
- * Give a datetime-local value its seconds. Browsers drop `:00` seconds from
- * `<input type="datetime-local">` even at `step={1}`, and `2026-08-28T09:30`
- * is not a TOML date-time — the frontmatter splice would silently fall back to
- * storing a quoted string, which no date filter or sort can see.
- */
-function withSeconds(local: string): string {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local) ? `${local}:00` : local;
-}
 
 /** Split an ISO date-time into a datetime-local value and its zone suffix. */
 function splitIso(value: string): { local: string; suffix: string } {
