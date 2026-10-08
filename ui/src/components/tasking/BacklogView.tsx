@@ -272,6 +272,7 @@ function TaskTable({
       columnWidths={NO_WIDTHS}
       virtualize={VIRTUALIZE}
       onRowActivate={(t) => setEditTaskId(t.id)}
+      isRowCurrent={(t) => t.id === editTaskId}
       rowClassName={(t) =>
         cn(
           "[&>td:first-child]:rounded-l-[10px] [&>td:last-child]:rounded-r-[10px] [&>td]:transition-colors [&>td]:duration-[120ms]",

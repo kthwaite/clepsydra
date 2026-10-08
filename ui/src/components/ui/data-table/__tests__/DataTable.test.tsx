@@ -669,6 +669,20 @@ describe("row selection", () => {
       "is-plain",
     );
   });
+
+  it("marks the current row with aria-current only when asked", () => {
+    const { unmount } = render(<Harness />);
+    expect(grid().querySelector("[aria-current]")).toBeNull();
+    unmount();
+    render(<Harness isRowCurrent={(book) => book.id === "r2"} />);
+    expect(screen.getByRole("row", { name: "Beta" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("row", { name: "Alpha" })).not.toHaveAttribute(
+      "aria-current",
+    );
+  });
 });
 
 describe("row activation", () => {

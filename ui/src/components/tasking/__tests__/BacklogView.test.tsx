@@ -448,6 +448,13 @@ describe("BacklogView — opening a task", () => {
     expect(rowOf("bk-p1-hold").className).toContain("[&>td]:bg-accent-tint");
     expect(rowOf("bk-p0-due").className).not.toContain("bg-accent-tint");
   });
+
+  it("marks the row being edited as current", () => {
+    useBoardStore.setState({ editTaskId: "bk-p1-hold" });
+    wrap(view([T_P0_DUE, T_P1_HOLD]));
+    expect(rowOf("bk-p1-hold")).toHaveAttribute("aria-current", "true");
+    expect(rowOf("bk-p0-due")).not.toHaveAttribute("aria-current");
+  });
 });
 
 describe("BacklogView — inline editing", () => {

@@ -116,6 +116,9 @@ export interface DataTableProps<TRow extends RowData> {
    *  bare cell. */
   onRowActivate?(row: TRow): void;
   rowClassName?(row: TRow, state: { selected: boolean }): string;
+  /** The row that is the current item (e.g. open in an editor) gets
+   *  `aria-current="true"`. */
+  isRowCurrent?(row: TRow): boolean;
   stickyHeader?: boolean;
   /** Opt-in: the table scrolls in its own box of at most `maxHeight` under a
    *  sticky header, and renders only the rows in view (plus overscan).
@@ -256,6 +259,7 @@ export function DataTable<TRow extends RowData>({
   selection,
   onRowActivate,
   rowClassName,
+  isRowCurrent,
   stickyHeader,
   virtualize,
   emptyState,
@@ -490,6 +494,7 @@ export function DataTable<TRow extends RowData>({
         data-row-id={row.id}
         aria-labelledby={headerId}
         aria-selected={selection ? isSelected : undefined}
+        aria-current={isRowCurrent?.(row.original) ? "true" : undefined}
         aria-rowindex={virtualize ? index + FIRST_BODY_ROW_INDEX : undefined}
         style={virtualize ? { height: virtualize.rowHeight } : undefined}
         onClick={(event: MouseEvent<HTMLTableRowElement>) => {
