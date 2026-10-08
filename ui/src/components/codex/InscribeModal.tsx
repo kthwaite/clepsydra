@@ -13,7 +13,7 @@ import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { generateShortId, intakePath } from "#/lib/intake";
 import type { Kind } from "#/lib/kind";
-import { localIso } from "#/lib/meeting";
+import { localIso, withSeconds } from "#/lib/meeting";
 import { useProjects } from "#/lib/useProjects";
 import { useUiStore } from "#/store/ui";
 
@@ -262,12 +262,6 @@ function nowLocal(): string {
   const now = new Date();
   now.setSeconds(0, 0);
   return localIso(now).slice(0, 16);
-}
-
-/** datetime-local drops `:00` seconds, and `2026-10-08T14:37` is not a TOML
- * date-time `occurred_at` accepts. */
-function withSeconds(local: string): string {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local) ? `${local}:00` : local;
 }
 
 /** When and Attendees for a MEETING, collected before the page exists and
