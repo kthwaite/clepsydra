@@ -32,7 +32,9 @@ function compareTasks(a: BoardTask, b: BoardTask): number {
  * Splits the list view's tasks into the active cycle's table and the
  * backlog table, each sorted by `compareTasks`. The active cycle is the
  * one BoardHeader shows (`state === "ACTIVE"`). SEALED tasks are left out
- * unless `showDone`.
+ * unless `showDone`. TaskingScreen already drops them before this runs (so
+ * the FilterBar counts match); the filter here is a deliberate guard that
+ * keeps the helper correct on its own.
  */
 export function splitBacklog(
   tasks: readonly BoardTask[],
