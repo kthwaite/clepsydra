@@ -14,12 +14,20 @@ import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
  * Enter on a header cell focuses its skipped control ("resize mode"), whose
  * keys are its own except Escape/Enter/Tab (back to the cell) and Alt+Arrow
  * (header move).
+ *
+ * A windowed (virtualised) body renders only some of its rows. The table
+ * then carries `aria-rowcount` and each row its `aria-rowindex`; vertical
+ * and Home/End moves follow those indexes, and ask `revealRow` to render a
+ * row outside the window before reading the DOM again. Rows marked
+ * `data-grid-spacer` only hold the window's height and are never keys.
  */
 interface GridNavigationOptions {
   /** Enter on a focused body row, or on a bare cell (not on its controls). */
   onActivateRow?(tr: HTMLTableRowElement): void;
   /** Alt+ArrowLeft/Right on a focused header cell or its control. */
   onHeaderMove?(th: HTMLTableCellElement, delta: -1 | 1): void;
+  /** Windowed bodies: render the row with this `aria-rowindex`, synchronously. */
+  revealRow?(rowIndex: number): void;
 }
 
 const FOCUSABLE = [
@@ -93,9 +101,41 @@ export function isEditorTarget(el: Element): boolean {
 
 type Key = HTMLTableRowElement | HTMLTableCellElement;
 type ChildFocus = "first" | "last";
+type Reveal = (rowIndex: number) => void;
 
 function bodyRows(table: HTMLTableElement): HTMLTableRowElement[] {
-  return Array.from(table.tBodies).flatMap((body) => Array.from(body.rows));
+  return Array.from(table.tBodies)
+    .flatMap((body) => Array.from(body.rows))
+    .filter((row) => !row.hasAttribute("data-grid-spacer"));
+}
+
+/** The row count of a windowed body's table (header rows included), else
+ *  null: the body renders every row. */
+function windowedRowCount(table: HTMLTableElement): number | null {
+  const count = Number(table.getAttribute("aria-rowcount"));
+  return Number.isInteger(count) && count > 0 ? count : null;
+}
+
+function firstBodyIndex(table: HTMLTableElement): number {
+  return (table.tHead?.rows.length ?? 0) + 1;
+}
+
+function rowIndexOf(row: HTMLTableRowElement): number {
+  return Number(row.getAttribute("aria-rowindex"));
+}
+
+/** A windowed body's row by `aria-rowindex`, revealed when not rendered. */
+function rowAtIndex(
+  table: HTMLTableElement,
+  rowIndex: number,
+  reveal: Reveal | undefined,
+): HTMLTableRowElement | null {
+  const find = () =>
+    bodyRows(table).find((row) => rowIndexOf(row) === rowIndex) ?? null;
+  const row = find();
+  if (row || !reveal) return row;
+  reveal(rowIndex);
+  return find();
 }
 
 function headerRow(table: HTMLTableElement): HTMLTableRowElement | null {
@@ -131,23 +171,50 @@ function cellAt(row: HTMLTableRowElement | undefined | null, index: number) {
   return row.cells[Math.min(index, row.cells.length - 1)];
 }
 
-function rowAbove(table: HTMLTableElement, row: HTMLTableRowElement) {
+function rowAbove(
+  table: HTMLTableElement,
+  row: HTMLTableRowElement,
+  reveal: Reveal | undefined,
+) {
   if (isHeaderRow(table, row)) return null;
+  if (windowedRowCount(table) !== null) {
+    const at = rowIndexOf(row) - 1;
+    return at >= firstBodyIndex(table)
+      ? rowAtIndex(table, at, reveal)
+      : headerRow(table);
+  }
   const rows = bodyRows(table);
   const at = rows.indexOf(row);
   return at > 0 ? rows[at - 1] : headerRow(table);
 }
 
-function rowBelow(table: HTMLTableElement, row: HTMLTableRowElement) {
+function rowBelow(
+  table: HTMLTableElement,
+  row: HTMLTableRowElement,
+  reveal: Reveal | undefined,
+) {
+  const count = windowedRowCount(table);
+  if (count !== null) {
+    const at = isHeaderRow(table, row)
+      ? firstBodyIndex(table)
+      : rowIndexOf(row) + 1;
+    return at <= count ? rowAtIndex(table, at, reveal) : null;
+  }
   const rows = bodyRows(table);
   if (isHeaderRow(table, row)) return rows[0] ?? null;
   return rows[rows.indexOf(row) + 1] ?? null;
 }
 
 /** Vertical neighbour: same column for a cell; for a row, the row (or header). */
-function keyVertical(table: HTMLTableElement, key: Key, dir: -1 | 1) {
+function keyVertical(
+  table: HTMLTableElement,
+  key: Key,
+  dir: -1 | 1,
+  reveal: Reveal | undefined,
+) {
   const row = rowOf(key);
-  const next = dir < 0 ? rowAbove(table, row) : rowBelow(table, row);
+  const next =
+    dir < 0 ? rowAbove(table, row, reveal) : rowBelow(table, row, reveal);
   if (!next) return null;
   if (!isRow(key)) return cellAt(next, key.cellIndex);
   return isHeaderRow(table, next) ? cellAt(next, 0) : next;
@@ -169,11 +236,18 @@ function keyHomeEnd(
   key: Key,
   end: boolean,
   global: boolean,
+  reveal: Reveal | undefined,
 ): Key | null {
-  const rows = bodyRows(table);
-  const edgeRow = end ? rows[rows.length - 1] : rows[0];
-  if (isRow(key)) return edgeRow ?? null;
-  const row = global ? edgeRow : rowOf(key);
+  const edgeRow = () => {
+    const count = windowedRowCount(table);
+    if (count !== null) {
+      return rowAtIndex(table, end ? count : firstBodyIndex(table), reveal);
+    }
+    const rows = bodyRows(table);
+    return (end ? rows[rows.length - 1] : rows[0]) ?? null;
+  };
+  if (isRow(key)) return edgeRow();
+  const row = global ? edgeRow() : rowOf(key);
   if (!row) return null;
   return cellAt(row, end ? row.cells.length - 1 : 0);
 }
@@ -189,14 +263,19 @@ function pageHeight(table: HTMLTableElement): number {
 }
 
 /** React Aria's getKeyPageBelow/Above over row rectangles. */
-function keyPage(table: HTMLTableElement, key: Key, dir: -1 | 1) {
+function keyPage(
+  table: HTMLTableElement,
+  key: Key,
+  dir: -1 | 1,
+  reveal: Reveal | undefined,
+) {
   const height = pageHeight(table);
   let rect = rowOf(key).getBoundingClientRect();
   let current: Key = key;
   if (dir > 0) {
     const limit = rect.top + height;
     while (rect.bottom < limit) {
-      const next = keyVertical(table, current, 1);
+      const next = keyVertical(table, current, 1, reveal);
       if (!next) break;
       current = next;
       rect = rowOf(next).getBoundingClientRect();
@@ -204,7 +283,7 @@ function keyPage(table: HTMLTableElement, key: Key, dir: -1 | 1) {
   } else {
     const limit = Math.max(0, rect.bottom - height);
     while (rect.top > limit) {
-      const next = keyVertical(table, current, -1);
+      const next = keyVertical(table, current, -1, reveal);
       if (!next) break;
       current = next;
       rect = rowOf(next).getBoundingClientRect();
@@ -220,6 +299,8 @@ function scrollIntoView(el: HTMLElement) {
 }
 
 function focusKey(key: Key, childFocus: ChildFocus = "first") {
+  // A key revealRow just rendered has no tabindex until the observer syncs.
+  if (!key.hasAttribute("tabindex")) key.tabIndex = -1;
   const children = isRow(key) ? [] : focusableChildren(key);
   const target =
     (childFocus === "last" ? children[children.length - 1] : children[0]) ??
@@ -255,7 +336,9 @@ function attach(
 
   const allKeys = (): Key[] => [
     ...bodyRows(table),
-    ...Array.from(table.rows).flatMap((row) => Array.from(row.cells)),
+    ...Array.from(table.rows)
+      .filter((row) => !row.hasAttribute("data-grid-spacer"))
+      .flatMap((row) => Array.from(row.cells)),
   ];
 
   const syncTabIndexes = () => {
@@ -366,19 +449,20 @@ function attach(
   /** Up/Down, Home/End and PageUp/PageDown; undefined when not a nav key. */
   const keyFor = (event: KeyboardEvent, key: Key): Key | null | undefined => {
     const global = event.ctrlKey || event.metaKey;
+    const reveal = options.current?.revealRow;
     switch (event.key) {
       case "ArrowUp":
-        return keyVertical(table, key, -1);
+        return keyVertical(table, key, -1, reveal);
       case "ArrowDown":
-        return keyVertical(table, key, 1);
+        return keyVertical(table, key, 1, reveal);
       case "Home":
-        return keyHomeEnd(table, key, false, global);
+        return keyHomeEnd(table, key, false, global, reveal);
       case "End":
-        return keyHomeEnd(table, key, true, global);
+        return keyHomeEnd(table, key, true, global, reveal);
       case "PageUp":
-        return keyPage(table, key, -1);
+        return keyPage(table, key, -1, reveal);
       case "PageDown":
-        return keyPage(table, key, 1);
+        return keyPage(table, key, 1, reveal);
       default:
         return undefined;
     }

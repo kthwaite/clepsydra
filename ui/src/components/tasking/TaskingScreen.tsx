@@ -17,6 +17,7 @@ import { BoardHeader } from "./BoardHeader";
 import {
   COL_SUBLABEL,
   type ColLabelFn,
+  findActiveCycle,
   isDone,
   TYPE_NONE,
   taskStatusLabel,
@@ -306,7 +307,11 @@ export function TaskingScreen({
               />
             )}
             {mode === "backlog" && (
-              <BacklogView tasks={visibleTasks} colLabel={colLabel} />
+              <BacklogView
+                tasks={visibleTasks}
+                activeCycle={findActiveCycle(cycles)}
+                colLabel={colLabel}
+              />
             )}
             {mode === "cycle" && (
               <CycleView

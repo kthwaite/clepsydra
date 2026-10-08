@@ -669,6 +669,20 @@ describe("row selection", () => {
       "is-plain",
     );
   });
+
+  it("marks the current row with aria-current only when asked", () => {
+    const { unmount } = render(<Harness />);
+    expect(grid().querySelector("[aria-current]")).toBeNull();
+    unmount();
+    render(<Harness isRowCurrent={(book) => book.id === "r2"} />);
+    expect(screen.getByRole("row", { name: "Beta" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("row", { name: "Alpha" })).not.toHaveAttribute(
+      "aria-current",
+    );
+  });
 });
 
 describe("row activation", () => {
@@ -897,5 +911,151 @@ describe("keyboard reorder", () => {
     await userEvent.keyboard("{Alt>}{ArrowRight}{/Alt}");
     expect(headerTexts()).toEqual(["title", "tags", "author"]);
     expect(announcer()).toHaveTextContent("Moved Author to position 3 of 3.");
+  });
+});
+
+describe("virtualised rows", () => {
+  const MANY: Book[] = Array.from({ length: 100 }, (_, i) => ({
+    id: `v${i + 1}`,
+    title: `Book ${i + 1}`,
+    author: `Author ${i + 1}`,
+    year: 1900 + i,
+  }));
+  // 40px rows in a 400px box under a 34px (compact) header.
+  const VIRTUAL = { rowHeight: 40, maxHeight: 400, overscan: 2 };
+
+  /** jsdom has no layout: every element gets the box's height and the full
+   *  table's scroll height. */
+  function mockLayout() {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(
+      VIRTUAL.maxHeight,
+    );
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(
+      VIRTUAL.maxHeight,
+    );
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(
+      34 + MANY.length * VIRTUAL.rowHeight,
+    );
+  }
+
+  /** The scroll box, with a scrollTop that scrollTo and assignment move. */
+  function scrollBox() {
+    const box = grid().parentElement;
+    if (!(box instanceof HTMLDivElement)) throw new Error("No scroll box");
+    let top = 0;
+    Object.defineProperty(box, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (value: number) => {
+        top = value;
+      },
+    });
+    box.scrollTo = ((options: ScrollToOptions) => {
+      top = options.top ?? top;
+    }) as typeof box.scrollTo;
+    return {
+      box,
+      scroll(to: number) {
+        top = to;
+        fireEvent.scroll(box);
+      },
+    };
+  }
+
+  const table = () =>
+    screen.getByRole<HTMLTableElement>("grid", { name: "Books" });
+  const bodyRows = () =>
+    Array.from(table().tBodies[0].rows).filter(
+      (row) => !row.hasAttribute("data-grid-spacer"),
+    );
+  const rowIds = () => bodyRows().map((row) => row.dataset.rowId);
+
+  it("renders only the rows in view plus overscan, with ARIA row positions", () => {
+    mockLayout();
+    render(<Harness rows={MANY} virtualize={VIRTUAL} />);
+    // Rows 1–10 meet the 400px box; two more of overscan.
+    expect(rowIds()).toEqual(MANY.slice(0, 12).map((book) => book.id));
+    expect(grid()).toHaveAttribute("aria-rowcount", "101");
+    expect(table().tHead?.rows[0]).toHaveAttribute("aria-rowindex", "1");
+    expect(bodyRows()[0]).toHaveAttribute("aria-rowindex", "2");
+    expect(bodyRows()[11]).toHaveAttribute("aria-rowindex", "13");
+    expect(bodyRows()[0].style.height).toBe("40px");
+  });
+
+  it("keeps the full height with hidden spacer rows that are not grid rows", () => {
+    mockLayout();
+    render(<Harness rows={MANY} virtualize={VIRTUAL} />);
+    const spacers = grid().querySelectorAll<HTMLTableRowElement>(
+      "tr[data-grid-spacer]",
+    );
+    // No rows above the window yet: only the bottom spacer, 88 rows tall.
+    expect(spacers).toHaveLength(1);
+    expect(spacers[0]).toHaveAttribute("aria-hidden", "true");
+    expect(spacers[0].style.height).toBe(`${88 * 40}px`);
+    expect(spacers[0].tabIndex).toBe(-1);
+    // One header row and twelve body rows are exposed.
+    expect(screen.getAllByRole("row")).toHaveLength(13);
+  });
+
+  it("scrolls in its own box under a sticky header", () => {
+    mockLayout();
+    render(<Harness rows={MANY} virtualize={VIRTUAL} />);
+    const { box } = scrollBox();
+    expect(box.style.maxHeight).toBe("400px");
+    expect(box.className).toContain("overflow-auto");
+    expect(table().tHead?.className).toContain("sticky");
+  });
+
+  it("moves the window on scroll", () => {
+    mockLayout();
+    render(<Harness rows={MANY} virtualize={VIRTUAL} />);
+    const { scroll } = scrollBox();
+    act(() => scroll(2000));
+    const ids = rowIds();
+    // 2000px down (less the header) is row 50 (0-based 49).
+    expect(ids[0]).toBe("v48");
+    expect(ids).toContain("v50");
+    expect(ids).not.toContain("v1");
+    const top = grid().querySelector<HTMLTableRowElement>(
+      "tr[data-grid-spacer]",
+    );
+    expect(top?.style.height).toBe(`${47 * 40}px`);
+  });
+
+  it("reaches the last row with End and the first with Ctrl+Home", async () => {
+    mockLayout();
+    render(<Harness rows={MANY} virtualize={VIRTUAL} />);
+    scrollBox();
+    screen.getByRole("row", { name: "Book 1" }).focus();
+    await userEvent.keyboard("{End}");
+    expect(screen.getByRole("row", { name: "Book 100" })).toHaveFocus();
+    expect(rowIds()).not.toContain("v1");
+    screen.getByText("Author 100").focus();
+    await userEvent.keyboard("{Control>}{Home}{/Control}");
+    expect(screen.getByRole("button", { name: "Book 1" })).toHaveFocus();
+  });
+
+  it("steps with the arrow keys past the rendered window", async () => {
+    mockLayout();
+    render(<Harness rows={MANY} virtualize={VIRTUAL} />);
+    scrollBox();
+    screen.getByRole("row", { name: "Book 12" }).focus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(screen.getByRole("row", { name: "Book 13" })).toHaveFocus();
+    await userEvent.keyboard("{End}{ArrowUp}");
+    expect(screen.getByRole("row", { name: "Book 99" })).toHaveFocus();
+  });
+
+  it("renders the capped window while the box has no layout", () => {
+    // No layout mock: jsdom (or a display:none ancestor) reports 0px.
+    render(<Harness rows={MANY} virtualize={VIRTUAL} />);
+    expect(rowIds()).toEqual(MANY.slice(0, 12).map((book) => book.id));
+  });
+
+  it("leaves the plain table without row positions or a scroll box", () => {
+    render(<Harness />);
+    expect(grid()).not.toHaveAttribute("aria-rowcount");
+    expect(grid().parentElement).not.toHaveClass("overflow-auto");
+    expect(grid().querySelector("[aria-rowindex]")).toBeNull();
   });
 });
