@@ -1,8 +1,10 @@
-import { type FormEvent, useRef, useState } from "react";
+import { X } from "lucide-react";
+import { type FormEvent, useId, useRef, useState } from "react";
 import { useTags } from "#/api/index";
 import { useCreatePage } from "#/api/pages";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { KindSelect } from "#/components/codex/KindSelect";
+import { PersonCombo } from "#/components/codex/PersonCombo";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { Button } from "#/components/ui/button";
 import { TagInput } from "#/components/ui/tag-input";
@@ -11,6 +13,7 @@ import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { generateShortId, intakePath } from "#/lib/intake";
 import type { Kind } from "#/lib/kind";
+import { localIso } from "#/lib/meeting";
 import { useProjects } from "#/lib/useProjects";
 import { useUiStore } from "#/store/ui";
 
@@ -29,6 +32,11 @@ export function InscribeModal() {
   // handler runs, so reads go through this ref.
   const tagsRef = useRef<string[]>(tags);
   const projectComboRef = useRef<HTMLDivElement | null>(null);
+  const attendeeComboRef = useRef<HTMLDivElement | null>(null);
+  // MEETING-only fields. They outlive a kind switch but are sent only while
+  // the kind is MEETING.
+  const [occurredAt, setOccurredAt] = useState("");
+  const [attendees, setAttendees] = useState<string[]>([]);
   // One id per intake so the path preview is stable across keystrokes.
   const [shortId, setShortId] = useState(generateShortId);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +50,13 @@ export function InscribeModal() {
   const updateTags = (next: string[]) => {
     tagsRef.current = next;
     setTags(next);
+  };
+
+  const isMeeting = kind === "MEETING";
+
+  const assignKind = (next: Kind) => {
+    setKind(next);
+    if (next === "MEETING" && occurredAt === "") setOccurredAt(nowLocal());
   };
 
   const destination = intakePath({
@@ -73,6 +88,12 @@ export function InscribeModal() {
       now: new Date(),
     });
     const finalTags = tagsRef.current;
+    const meeting = isMeeting
+      ? {
+          ...(attendees.length ? { attendees } : {}),
+          ...(occurredAt ? { occurred_at: withSeconds(occurredAt) } : {}),
+        }
+      : {};
     create.mutate(
       {
         params: { path: { path } },
@@ -81,6 +102,7 @@ export function InscribeModal() {
           tags: finalTags.length ? finalTags : undefined,
           kind,
           ...(project ? { project } : {}),
+          ...meeting,
         },
       },
       {
@@ -96,6 +118,8 @@ export function InscribeModal() {
     setProject(null);
     setTitle("");
     updateTags([]);
+    setOccurredAt("");
+    setAttendees([]);
     setShortId(generateShortId());
     setError(null);
   };
@@ -115,9 +139,11 @@ export function InscribeModal() {
       <form
         onSubmit={submit}
         onKeyDown={(event) => {
+          const target = event.target as Node;
           if (
             event.key === "Enter" &&
-            projectComboRef.current?.contains(event.target as Node)
+            (projectComboRef.current?.contains(target) ||
+              attendeeComboRef.current?.contains(target))
           ) {
             event.preventDefault();
           }
@@ -140,7 +166,7 @@ export function InscribeModal() {
 
         <div className="grid grid-cols-2 gap-3.5">
           <Field label="Kind">
-            <KindSelect value={kind} inferred={false} onAssign={setKind} />
+            <KindSelect value={kind} inferred={false} onAssign={assignKind} />
           </Field>
           <Field
             label={
@@ -176,6 +202,15 @@ export function InscribeModal() {
             )}
           />
         </Field>
+        {isMeeting && (
+          <MeetingFields
+            occurredAt={occurredAt}
+            onOccurredAtChange={setOccurredAt}
+            attendees={attendees}
+            onAttendeesChange={setAttendees}
+            comboRef={attendeeComboRef}
+          />
+        )}
         <TagInput
           label="Tags"
           ariaLabel="Tags"
@@ -219,5 +254,98 @@ function Field({
       <span className="text-[13px] text-mute">{label}</span>
       {children}
     </div>
+  );
+}
+
+/** The current local time, floored to the minute, as a datetime-local value. */
+function nowLocal(): string {
+  const now = new Date();
+  now.setSeconds(0, 0);
+  return localIso(now).slice(0, 16);
+}
+
+/** datetime-local drops `:00` seconds, and `2026-10-08T14:37` is not a TOML
+ * date-time `occurred_at` accepts. */
+function withSeconds(local: string): string {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local) ? `${local}:00` : local;
+}
+
+/** When and Attendees for a MEETING, collected before the page exists and
+ * sent with the create request. */
+function MeetingFields({
+  occurredAt,
+  onOccurredAtChange,
+  attendees,
+  onAttendeesChange,
+  comboRef,
+}: {
+  occurredAt: string;
+  onOccurredAtChange: (value: string) => void;
+  attendees: string[];
+  onAttendeesChange: (next: string[]) => void;
+  comboRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const attendeesLabelId = useId();
+
+  const add = (name: string) => {
+    // PersonCombo hides people already listed; this guards a typed Enter.
+    if (attendees.some((a) => a.toLowerCase() === name.toLowerCase())) return;
+    onAttendeesChange([...attendees, name]);
+  };
+
+  return (
+    <>
+      <Field label="When">
+        <input
+          type="datetime-local"
+          aria-label="When"
+          value={occurredAt}
+          onChange={(e) => onOccurredAtChange(e.target.value)}
+          className={cn(
+            "h-8 w-full max-w-[16rem] rounded-lg bg-sink px-2.5 text-[13.5px] text-ink",
+            FOCUS_RING_NATIVE,
+          )}
+        />
+      </Field>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 rounded-[14px] bg-sink px-2 py-1.5 has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-accent">
+        <span id={attendeesLabelId} className="text-[12.5px] text-mute">
+          Attendees:
+        </span>
+        {attendees.length > 0 && (
+          <ul aria-labelledby={attendeesLabelId} className="contents list-none">
+            {attendees.map((attendee) => (
+              <li
+                key={attendee}
+                className="flex h-7 max-w-[16rem] min-w-0 items-center gap-1 rounded-full bg-raise pr-1 pl-2.5 text-[13px] text-ink-2"
+              >
+                <span className="truncate">{attendee}</span>
+                <button
+                  type="button"
+                  aria-label={`remove ${attendee}`}
+                  onClick={() =>
+                    onAttendeesChange(attendees.filter((a) => a !== attendee))
+                  }
+                  className={cn(
+                    "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-mute hover:text-ink",
+                    FOCUS_RING_NATIVE,
+                  )}
+                >
+                  <X className="h-3 w-3" aria-hidden />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {/* Enter commits the combobox draft; the form guard keeps it from
+            also submitting. */}
+        <div ref={comboRef} className="flex min-w-[8ch] flex-1">
+          <PersonCombo
+            onPick={add}
+            exclude={attendees}
+            ariaLabel="Add attendee"
+          />
+        </div>
+      </div>
+    </>
   );
 }
