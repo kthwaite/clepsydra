@@ -231,7 +231,7 @@ interface HarnessOptions {
   value?: Descendant[];
   selection?: BaseRange;
   readOnly?: boolean;
-  pages?: Pick<PageSummary, "title" | "canonical_name" | "path">[];
+  pages?: Pick<PageSummary, "title" | "canonical_name" | "path" | "kind">[];
 }
 
 async function renderBubbleMenu({
@@ -417,6 +417,7 @@ describe("SelectionBubbleMenu", () => {
           title: "Ada Lovelace",
           canonical_name: "ada-lovelace",
           path: "people/ada-lovelace.md",
+          kind: "PERSON",
         },
       ],
     });

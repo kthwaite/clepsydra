@@ -41,6 +41,20 @@ Creation writes the page at the projected path, then declares the selected Kind
 and Project. If that declaration fails, the created page still opens rather
 than being hidden by the intake dialog.
 
+### Link selected text to a page or person
+
+Select text within one paragraph to open the formatting popover:
+
+- **Quick wiki link** searches all pages, prefilled with the selected text.
+- **Quick person link** starts the same search restricted to `PERSON` pages.
+- **Add link** searches pages or accepts an HTTP(S) URL.
+
+Choose a result with the mouse, or use the arrow keys and `Enter`. The
+selected text stays as the label: selecting `Ada` and choosing `Ada Lovelace`
+produces `[[Ada Lovelace|Ada]]`. Edit the search to find a different target,
+or press `Escape` to cancel without changing the text. Quick links choose
+existing pages; they do not create new ones.
+
 ### Use Kind and Project projection
 
 The Folio's left rail opens with **On this page** (the page's headings), then

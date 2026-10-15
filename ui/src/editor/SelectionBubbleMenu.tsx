@@ -7,6 +7,7 @@ import {
 } from "@floating-ui/react";
 import {
   Bold,
+  Brackets,
   Code2,
   Eraser,
   Highlighter,
@@ -20,6 +21,7 @@ import {
   Subscript,
   Superscript,
   Underline,
+  UserRound,
 } from "lucide-react";
 import {
   type ReactNode,
@@ -94,6 +96,7 @@ type BooleanMark = (typeof BOOLEAN_CONTROLS)[number]["mark"];
 type ColourMark = "color" | "backgroundColor";
 type PressedState = boolean | "mixed";
 type OpenPalette = "highlight" | "text" | null;
+type LinkMode = "all" | "wiki" | "person";
 
 interface SelectionInspection {
   textNodes: CustomText[];
@@ -310,7 +313,7 @@ function ColourPanel({
 
 export interface SelectionBubbleMenuProps {
   readOnly: boolean;
-  pages?: Pick<PageSummary, "title" | "canonical_name" | "path">[];
+  pages?: Pick<PageSummary, "title" | "canonical_name" | "path" | "kind">[];
 }
 
 export function SelectionBubbleMenu({
@@ -327,7 +330,8 @@ export function SelectionBubbleMenu({
   const preservedRangeRef = useRef<BaseRange | null>(null);
   const previousSelectionRef = useRef<BaseRange | null>(null);
   const [openPalette, setOpenPalette] = useState<OpenPalette>(null);
-  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkMode, setLinkMode] = useState<LinkMode | null>(null);
+  const linkOpen = linkMode !== null;
   const [linkQuery, setLinkQuery] = useState("");
   const [linkIndex, setLinkIndex] = useState(0);
 
@@ -355,14 +359,14 @@ export function SelectionBubbleMenu({
       : selection !== null;
     if (selectionChanged || !visible) {
       setOpenPalette(null);
-      setLinkOpen(false);
+      setLinkMode(null);
     }
     previousSelectionRef.current = selection ? cloneRange(selection) : null;
   }, [selection, visible]);
 
   useEffect(() => {
-    if (linkOpen) linkInputRef.current?.focus();
-  }, [linkOpen]);
+    if (linkMode !== null) linkInputRef.current?.focus();
+  }, [linkMode]);
 
   const reference = useMemo(
     () =>
@@ -464,15 +468,29 @@ export function SelectionBubbleMenu({
     ? pages
         .filter(
           (page) =>
-            (page.title ?? page.canonical_name).toLowerCase().includes(query) ||
-            page.canonical_name.toLowerCase().includes(query) ||
-            page.path.toLowerCase().includes(query),
+            (linkMode !== "person" || page.kind === "PERSON") &&
+            ((page.title ?? page.canonical_name).toLowerCase().includes(query) ||
+              page.canonical_name.toLowerCase().includes(query) ||
+              page.path.toLowerCase().includes(query)),
         )
         .slice(0, 8)
     : [];
   const url = linkQuery.trim();
   const externalUrl =
-    /^https?:\/\/\S+$/i.test(url) && URL.canParse(url) ? url : null;
+    linkMode === "all" && /^https?:\/\/\S+$/i.test(url) && URL.canParse(url)
+      ? url
+      : null;
+
+  const openLinkPicker = (mode: LinkMode) => {
+    setOpenPalette(null);
+    setLinkQuery(
+      mode === "all" || !preservedRangeRef.current
+        ? ""
+        : Editor.string(editor, preservedRangeRef.current),
+    );
+    setLinkIndex(0);
+    setLinkMode((current) => (current === mode ? null : mode));
+  };
 
   const insertLink = (target: string, kind: "page" | "url") => {
     const range = preservedRangeRef.current;
@@ -481,7 +499,7 @@ export function SelectionBubbleMenu({
     try {
       label = Editor.string(editor, range);
     } catch {
-      setLinkOpen(false);
+      setLinkMode(null);
       return;
     }
     if (!label) return;
@@ -494,7 +512,7 @@ export function SelectionBubbleMenu({
         split: true,
       });
     }
-    setLinkOpen(false);
+    setLinkMode(null);
     ReactEditor.focus(editor);
   };
 
@@ -543,19 +561,32 @@ export function SelectionBubbleMenu({
           <ListOrdered />
         </TooltipIconButton>
         {linkable && (
-          <TooltipIconButton
-            label="Add link"
-            controls={linkPanelId}
-            expanded={linkOpen}
-            onPress={() => {
-              setOpenPalette(null);
-              setLinkQuery("");
-              setLinkIndex(0);
-              setLinkOpen((current) => !current);
-            }}
-          >
-            <Link2 />
-          </TooltipIconButton>
+          <>
+            <TooltipIconButton
+              label="Add link"
+              controls={linkPanelId}
+              expanded={linkMode === "all"}
+              onPress={() => openLinkPicker("all")}
+            >
+              <Link2 />
+            </TooltipIconButton>
+            <TooltipIconButton
+              label="Quick wiki link"
+              controls={linkPanelId}
+              expanded={linkMode === "wiki"}
+              onPress={() => openLinkPicker("wiki")}
+            >
+              <Brackets />
+            </TooltipIconButton>
+            <TooltipIconButton
+              label="Quick person link"
+              controls={linkPanelId}
+              expanded={linkMode === "person"}
+              onPress={() => openLinkPicker("person")}
+            >
+              <UserRound />
+            </TooltipIconButton>
+          </>
         )}
         <span aria-hidden="true" className="mx-1 h-4 w-px bg-sink" />
         <TooltipIconButton
@@ -598,8 +629,20 @@ export function SelectionBubbleMenu({
                 ? `${linkListId}-option-${linkIndex}`
                 : undefined
             }
-            aria-label="Link target"
-            placeholder="Find a page or enter a URL"
+            aria-label={
+              linkMode === "person"
+                ? "Person link target"
+                : linkMode === "wiki"
+                  ? "Wiki link target"
+                  : "Link target"
+            }
+            placeholder={
+              linkMode === "person"
+                ? "Find a person"
+                : linkMode === "wiki"
+                  ? "Find a page"
+                  : "Find a page or enter a URL"
+            }
             value={linkQuery}
             onChange={(event) => {
               setLinkQuery(event.target.value);
@@ -609,7 +652,7 @@ export function SelectionBubbleMenu({
               if (event.key === "Escape") {
                 event.preventDefault();
                 event.stopPropagation();
-                setLinkOpen(false);
+                setLinkMode(null);
                 ReactEditor.focus(editor);
               } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
@@ -686,7 +729,7 @@ export function SelectionBubbleMenu({
             </div>
           ) : (
             <p className="px-3 pt-2 pb-1 text-[13px] text-mute">
-              No matching pages
+              {linkMode === "person" ? "No matching people" : "No matching pages"}
             </p>
           )}
         </div>
