@@ -1346,6 +1346,83 @@ describe("withAutoformat integration", () => {
       expect(list).toHaveProperty("type", "bulleted-list");
       expect(elementChildren(list)).toHaveLength(2);
     });
+
+    it.each<{ name: string; children: Descendant[] }>([
+      { name: "bold", children: [{ text: "Bold", bold: true }] },
+      {
+        name: "mixed marks",
+        children: [
+          { text: "Bold", bold: true },
+          { text: " and " },
+          { text: "italic", italic: true },
+        ],
+      },
+    ])("Enter at the start preserves $name", ({ children }) => {
+      const item: Descendant = {
+        type: "list-item",
+        children: [
+          {
+            type: "paragraph",
+            children,
+          },
+        ],
+      };
+      const editor = makeSchemaEditor([
+        { type: "bulleted-list", children: [item] },
+      ]);
+      Transforms.select(editor, Editor.start(editor, [0, 0]));
+
+      editor.insertBreak();
+
+      expect(Node.string(Node.get(editor, [0, 0]))).toBe("");
+      expect(Node.get(editor, [0, 1])).toEqual(item);
+      expect(editor.selection?.anchor).toEqual(Editor.start(editor, [0, 1]));
+    });
+
+    it("Enter within marked text preserves trailing links and undoes in one step", () => {
+      const trailing: Descendant[] = [
+        { text: " and " },
+        {
+          type: "link",
+          url: "https://example.com",
+          children: [{ text: "link", italic: true }],
+        },
+        { text: "." },
+      ];
+      const item: Descendant = {
+        type: "list-item",
+        children: [
+          {
+            type: "paragraph",
+            children: [{ text: "Bold text", bold: true }, ...trailing],
+          },
+        ],
+      };
+      const editor = makeSchemaEditor([
+        { type: "bulleted-list", children: [item] },
+      ]);
+      const point = { path: [0, 0, 0, 0], offset: 4 };
+      Transforms.select(editor, point);
+
+      editor.insertBreak();
+
+      expect(Node.get(editor, [0, 0, 0])).toEqual({
+        type: "paragraph",
+        children: [{ text: "Bold", bold: true }],
+      });
+      expect(Node.get(editor, [0, 1, 0])).toEqual({
+        type: "paragraph",
+        children: [{ text: " text", bold: true }, ...trailing],
+      });
+      expect(editor.selection?.anchor).toEqual(Editor.start(editor, [0, 1]));
+
+      editor.undo();
+      expect(Node.get(editor, [0])).toEqual({
+        type: "bulleted-list",
+        children: [item],
+      });
+      expect(editor.selection?.anchor).toEqual(point);
+    });
   });
 
   describe("heading exit on Enter", () => {

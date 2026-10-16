@@ -185,8 +185,6 @@ export function tryListContinuation(
   const textNode = Node.get(editor, point.path);
   if (!Text.isText(textNode)) return false;
 
-  const fullText = textNode.text;
-  const offset = point.offset;
   const isAtEnd = Editor.isEnd(editor, point, paragraphPath);
 
   // Check if this is a task item
@@ -224,28 +222,19 @@ export function tryListContinuation(
     return true;
   }
 
-  // LC-05: Cursor mid-text -> split
+  // Split the paragraph structurally so marks and trailing inline nodes move together.
   batchOp(() => {
     Editor.withoutNormalizing(editor, () => {
-      const afterText = fullText.slice(offset);
-
-      // Update current text node to only contain text before cursor
-      Transforms.delete(editor, {
-        at: {
-          anchor: { path: point.path, offset },
-          focus: { path: point.path, offset: fullText.length },
-        },
+      Transforms.splitNodes(editor, {
+        at: point,
+        match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
+        always: true,
       });
 
-      // Create new item with the remaining text
+      // Move the split paragraph into a new sibling without flattening its content.
       const newItem: ListItemElement = {
         type: "list-item",
-        children: [
-          {
-            type: "paragraph",
-            children: [{ text: afterText }],
-          },
-        ],
+        children: [],
       };
       if (isTask) {
         newItem.checked = false;
@@ -255,12 +244,13 @@ export function tryListContinuation(
       Transforms.insertNodes(editor, newItem, {
         at: nextItemPath,
       });
+      Transforms.moveNodes(editor, {
+        at: Path.next(paragraphPath),
+        to: [...nextItemPath, 0],
+      });
 
       // Move cursor to start of new item
-      Transforms.select(editor, {
-        anchor: { path: [...nextItemPath, 0, 0], offset: 0 },
-        focus: { path: [...nextItemPath, 0, 0], offset: 0 },
-      });
+      Transforms.select(editor, Editor.start(editor, nextItemPath));
     });
   });
   return true;

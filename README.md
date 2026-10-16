@@ -14,6 +14,30 @@ and a Vite frontend with HMR at <http://127.0.0.1:5174>. Each invocation
 creates a fresh, representative disposable vault. Press Ctrl-C to stop both
 services and remove all temporary data.
 
+### CI verification
+
+The [CI workflow](.github/workflows/ci.yml) checks frontend types, lint, tests,
+and build, plus Rust formatting, Clippy, and tests on Linux and macOS.
+To reproduce the core gates locally from the repository root:
+
+```sh
+(cd ui && bun run typecheck && bun run lint && bun run test && bun run build)
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --no-fail-fast -- --test-threads=4
+```
+
+Inspect failures with `gh run list` and `gh run view <run-id> --log-failed`.
+For runner-only Clippy failures, compare compiler versions: the runners'
+preinstalled Rust versions can differ by platform and from the local toolchain.
+Use `cargo +<runner-version> clippy --locked --all-targets -- -D warnings`
+to check with the failing runner's version rather than suppressing its lint.
+
+A Git failure with exit status `-1` means the child had no normal exit code.
+Its diagnostic includes the OS termination status (such as `signal: 9`), while
+preserving any Git stderr. Use that signal and the runner's crash/resource logs
+to investigate; do not assume a configuration error or retry a mutation blindly.
+
 ## Documentation
 
 - Frontend guide: [ui/README.md](ui/README.md)
