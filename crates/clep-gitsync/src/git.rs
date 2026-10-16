@@ -124,7 +124,24 @@ impl Git {
     }
 
     fn spawn(cmd: &mut Command) -> Result<Output, GitError> {
-        cmd.output().map_err(GitError::Spawn)
+        let mut output = cmd.output().map_err(GitError::Spawn)?;
+        // Callers retain -1 for termination without an exit code. Preserve
+        // the OS status in their diagnostic too, rather than discarding
+        // the signal (and any core-dump indication) behind that sentinel.
+        if output.status.code().is_none() {
+            use std::io::Write as _;
+
+            if !output.stderr.is_empty() && !output.stderr.ends_with(b"\n") {
+                output.stderr.push(b'\n');
+            }
+            writeln!(
+                &mut output.stderr,
+                "git process terminated: {}",
+                output.status
+            )
+            .expect("writing to a Vec cannot fail");
+        }
+        Ok(output)
     }
 
     /// `git --version`. Does not need a repo root.
@@ -586,8 +603,10 @@ fn driver_path() -> Option<std::ffi::OsString> {
 /// The raw result of a git invocation, exit status included.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawOutput {
+    /// Exit code, or -1 when terminated without one (for example by a signal).
     pub status: i32,
     pub stdout: String,
+    /// Child stderr, with the OS termination status appended when no exit code exists.
     pub stderr: String,
 }
 
@@ -642,6 +661,106 @@ mod tests {
 
     use super::*;
     use crate::testing;
+
+    #[cfg(unix)]
+    fn subprocess_git(root: &Path, script: &str) -> Git {
+        use std::os::unix::fs::PermissionsExt;
+
+        let program = root.join("git-subprocess");
+        std::fs::write(&program, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut git = testing::git(root);
+        git.program = program.to_str().unwrap().to_string();
+        git
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_termination_is_reported_by_raw_invocations() {
+        for (signal, number) in [("TERM", 15), ("KILL", 9)] {
+            let tmp = TempDir::new().unwrap();
+            // Terminate the actual child; an ordinary `exit 128+signal`
+            // would not exercise ExitStatus::code() returning None.
+            let git = subprocess_git(tmp.path(), &format!("kill -{signal} \"$$\""));
+            for raw in [
+                git.run_raw(&["config", "--local", "merge.clep.recursive", "binary"])
+                    .unwrap(),
+                git.merge_no_commit("other", &testing::author()).unwrap(),
+            ] {
+                assert_eq!(raw.status, -1);
+                assert!(raw.stdout.is_empty());
+                assert!(
+                    raw.stderr
+                        .contains(&format!("git process terminated: signal: {number}")),
+                    "{raw:?}"
+                );
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_termination_preserves_stderr_and_failed_command_context() {
+        for stderr in ["", "before termination", "before termination\n"] {
+            let tmp = TempDir::new().unwrap();
+            let git = subprocess_git(
+                tmp.path(),
+                "printf '%s' \"$TEST_STDERR\" >&2\nkill -TERM \"$$\"",
+            )
+            .with_env("TEST_STDERR", stderr);
+            for (error, expected_args) in [
+                (git.run(&["status"]).unwrap_err(), "status"),
+                (git.run_bytes(&["status"]).unwrap_err(), "status"),
+                (
+                    git.commit("private message", &testing::author())
+                        .unwrap_err(),
+                    "commit -q -m <message>",
+                ),
+            ] {
+                let displayed = error.to_string();
+                let GitError::Failed {
+                    args,
+                    status,
+                    stderr: diagnostic,
+                } = error
+                else {
+                    panic!("expected a subprocess failure: {displayed}");
+                };
+                assert_eq!(args, expected_args);
+                assert_eq!(status, -1);
+                let prefix = if stderr.is_empty() || stderr.ends_with('\n') {
+                    stderr.to_string()
+                } else {
+                    format!("{stderr}\n")
+                };
+                assert!(
+                    diagnostic.starts_with(&format!("{prefix}git process terminated: signal: 15")),
+                    "{diagnostic:?}"
+                );
+                assert!(displayed.contains("signal: 15"), "{displayed}");
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ordinary_exits_preserve_status_and_output() {
+        for status in [0, 7] {
+            let tmp = TempDir::new().unwrap();
+            let git = subprocess_git(
+                tmp.path(),
+                &format!("printf 'output\\n'\nprintf 'diagnostic\\n' >&2\nexit {status}"),
+            );
+            assert_eq!(
+                git.run_raw(&["status"]).unwrap(),
+                RawOutput {
+                    status,
+                    stdout: "output\n".to_string(),
+                    stderr: "diagnostic\n".to_string(),
+                }
+            );
+        }
+    }
 
     #[test]
     fn version_reports_git() {
