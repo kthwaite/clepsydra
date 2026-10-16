@@ -66,9 +66,10 @@ const LITERATE_CONFIG_TEMPLATE: &str = r##"# Clepsydra application configuration
 # Allow HTTP(S) requests when hovering or focusing external editor links. Default: false.
 # Previews contact websites anonymously and cache plaintext outside the vault.
 # enabled = false
-# Trusted local Docker image for isolated screenshots; build it from preview-worker/.
-# A missing image/daemon leaves metadata-only previews when HTML can be fetched.
-# worker_image = "clepsydra-preview:1"
+# Install native screenshot support explicitly with: clep previews install
+# Requires Node.js/npm and supported Chromium sandboxing on macOS or Linux.
+# Missing browser support leaves metadata-only previews when HTML can be fetched.
+# The native browser has no container network, filesystem, or hard resource isolation.
 "##;
 
 #[derive(Debug, PartialEq, Eq)]

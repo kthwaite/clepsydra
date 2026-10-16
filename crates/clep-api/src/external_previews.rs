@@ -23,7 +23,7 @@ const POSITIVE_TTL: i64 = 7 * 24 * 60 * 60;
 const NEGATIVE_TTL: i64 = 5 * 60;
 
 type CaptureFuture = Pin<Box<dyn Future<Output = Result<CapturedPreview, String>> + Send>>;
-type Capture = dyn Fn(url::Url, String) -> CaptureFuture + Send + Sync;
+type Capture = dyn Fn(url::Url) -> CaptureFuture + Send + Sync;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -223,7 +223,6 @@ pub enum PreviewError {
 pub struct PreviewRuntime {
     store: Option<Arc<Mutex<Store>>>,
     running: tokio::sync::Mutex<HashSet<String>>,
-    worker_image: String,
     capture: Arc<Capture>,
     cache_error_until: std::sync::atomic::AtomicI64,
 }
@@ -233,12 +232,9 @@ impl Default for PreviewRuntime {
         Self {
             store: None,
             running: tokio::sync::Mutex::new(HashSet::new()),
-            worker_image: String::new(),
             cache_error_until: std::sync::atomic::AtomicI64::new(0),
-            capture: Arc::new(|url, image| {
-                Box::pin(
-                    async move { crate::external_preview_capture::capture(&url, &image).await },
-                )
+            capture: Arc::new(|url| {
+                Box::pin(async move { crate::external_preview_capture::capture(&url, None).await })
             }),
         }
     }
@@ -253,7 +249,7 @@ impl PreviewRuntime {
             return Ok(Arc::new(Self::default()));
         }
         let root = root.to_path_buf();
-        let store = tokio::task::spawn_blocking(move || {
+        let (store, installation) = tokio::task::spawn_blocking(move || {
             let root = std::fs::canonicalize(root)?;
             let cache = dirs::cache_dir()
                 .ok_or_else(|| std::io::Error::other("OS cache directory unavailable"))?
@@ -277,18 +273,37 @@ impl PreviewRuntime {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&cache, std::fs::Permissions::from_mode(0o700))?;
             }
-            Store::open(
+            let store = Store::open(
                 &cache.join("previews.sqlite3"),
                 MAX_ENTRIES,
                 MAX_PAYLOAD_BYTES,
             )
-            .map_err(|_| std::io::Error::other("could not open preview cache"))
+            .map_err(|_| std::io::Error::other("could not open preview cache"))?;
+            let installation = match crate::preview_worker::installed() {
+                Ok(installation) if !installation.root().starts_with(&root) => {
+                    Some(Arc::new(installation))
+                }
+                Ok(_) => {
+                    tracing::warn!("Preview worker installation must be outside the vault");
+                    None
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "Screenshots unavailable; metadata previews remain enabled");
+                    None
+                }
+            };
+            Ok::<_, std::io::Error>((store, installation))
         })
         .await
         .map_err(|_| std::io::Error::other("preview cache task failed"))??;
         Ok(Arc::new(Self {
             store: Some(Arc::new(Mutex::new(store))),
-            worker_image: settings.worker_image.clone(),
+            capture: Arc::new(move |url| {
+                let installation = installation.clone();
+                Box::pin(async move {
+                    crate::external_preview_capture::capture(&url, installation.as_deref()).await
+                })
+            }),
             ..Self::default()
         }))
     }
@@ -341,8 +356,7 @@ impl PreviewRuntime {
             tokio::spawn(async move {
                 // Separate task ensures even a panicking worker releases admission.
                 let capture = Arc::clone(&runtime.capture);
-                let image = runtime.worker_image.clone();
-                let result = tokio::spawn(async move { capture(url, image).await })
+                let result = tokio::spawn(async move { capture(url).await })
                     .await
                     .unwrap_or_else(|_| Err("preview capture failed".into()));
                 let mut running = runtime.running.lock().await;
@@ -433,7 +447,7 @@ mod tests {
             store: Some(Arc::new(Mutex::new(
                 Store::open(Path::new(":memory:"), MAX_ENTRIES, MAX_BYTES).unwrap(),
             ))),
-            capture: Arc::new(move |_, _| {
+            capture: Arc::new(move |_| {
                 let calls = Arc::clone(&capture_calls);
                 let gate = Arc::clone(&capture_gate);
                 Box::pin(async move {

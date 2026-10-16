@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { Readable } from "node:stream";
 import test from "node:test";
-import { allowedUrl, capturePage, messages } from "./worker.mjs";
+import {
+  allowedUrl,
+  browserLaunchOptions,
+  capturePage,
+  messages,
+} from "./worker.mjs";
 
 const response = (body, type = "text/html", status = 200, headers = {}) => ({
   status,
@@ -44,9 +50,9 @@ test("IPC accepts split lines but rejects oversized or truncated input", async (
   });
 });
 
-// Run browser cases inside the built image with --network=none, never as a
-// production host-browser fallback. All response bytes below travel over the
-// same fetchResource seam that the real worker bridges to checked Rust HTTP.
+// These fixtures provide response bytes through the same fetchResource seam
+// that the capture worker bridges to checked Rust HTTP. Browser cases require
+// the pinned Playwright Chromium installation and a working native sandbox.
 test("anonymous capture uses final document URL and never forwards request secrets or POSTs", async () => {
   const requests = [];
   const screenshot = await capturePage(
@@ -240,4 +246,96 @@ test("top-level navigations cannot replace the checked document", async () => {
     },
   );
   assert.ok(!requested.includes("https://other.example/"));
+});
+
+test("capture closes only its own context when the browser belongs to a supervisor", async (t) => {
+  const { chromium } = await import("playwright-core");
+  const browser = await chromium.launch(browserLaunchOptions);
+  t.after(() => browser.close());
+  const existing = await browser.newContext();
+  const page = await existing.newPage();
+  await page.setContent("<h1>Unrelated context</h1>");
+  await capturePage(
+    start("<h1>Borrowed browser</h1>"),
+    async () => ({ error: true }),
+    undefined,
+    browser,
+  );
+  assert.equal(browser.isConnected(), true);
+  assert.deepEqual(browser.contexts(), [existing]);
+  assert.equal(await page.locator("h1").textContent(), "Unrelated context");
+});
+
+test("cross-site subframes cannot bypass the broker onto the host network", async (t) => {
+  const directRequests = [];
+  const child =
+    '<h1>Subframe</h1><img src="/escaped"><script>fetch("/escaped-fetch").catch(() => {})</script>';
+  const server = createServer((request, reply) => {
+    directRequests.push(request.url);
+    reply.writeHead(200, { "content-type": "text/html" });
+    reply.end(
+      request.url === "/child" ? child : "unexpected direct network request",
+    );
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  await capturePage(
+    {
+      url: `http://127.0.0.1:${port}/main`,
+      document: response(
+        `<h1>Checked page</h1><iframe src="http://localhost:${port}/child"></iframe>`,
+      ),
+    },
+    async (request) =>
+      request.url.endsWith("/child") ? response(child) : { error: true },
+  );
+  assert.deepEqual(
+    directRequests,
+    [],
+    "subframe requests escaped checked HTTP mediation",
+  );
+});
+
+test("inline frames, popups, and worker targets cannot acquire unchecked networking", async (t) => {
+  const directRequests = [];
+  const server = createServer((request, reply) => {
+    directRequests.push(request.url);
+    reply.end("unexpected direct network request");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const target = `http://localhost:${server.address().port}`;
+  await capturePage(
+    {
+      url: `http://127.0.0.1:${server.address().port}/main`,
+      document: response(`<h1>Target policy</h1><script>
+      const script = URL.createObjectURL(new Blob([${JSON.stringify(`fetch("${target}/worker").catch(() => {})`)}], {type:"text/javascript"}));
+      const workers = ["Worker", "SharedWorker"].map((name) => new Promise((resolve) => {
+        const timer = setTimeout(() => resolve("no error"), 4000);
+        try {
+          const worker = new window[name](script);
+          worker.onerror = () => { clearTimeout(timer); resolve("blocked"); };
+        } catch {
+          clearTimeout(timer);
+          resolve("blocked");
+        }
+      }));
+      const frame = document.createElement("iframe");
+      document.body.append(frame);
+      window.finished = Promise.all([...workers, frame.contentWindow.fetch("${target}/inline-frame").catch(() => null)]);
+      window.open("${target}/popup");
+    </script>`),
+    },
+    async () => ({ error: true }),
+    async (page) => {
+      const outcome = await page.evaluate(() => window.finished);
+      assert.deepEqual(outcome.slice(0, 2), ["blocked", "blocked"]);
+    },
+  );
+  assert.deepEqual(
+    directRequests,
+    [],
+    "unsupported targets reached the host network",
+  );
 });

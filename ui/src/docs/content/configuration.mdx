@@ -126,7 +126,6 @@ fetch_concurrency = 4
 
 [external_previews]
 enabled = false
-worker_image = "clepsydra-preview:1"
 ```
 
 ### Keys
@@ -150,7 +149,6 @@ worker_image = "clepsydra-preview:1"
 | `feeds` | `max_entry_content_bytes` | integer | `1048576` | Larger entry HTML is omitted rather than truncated |
 | `feeds` | `fetch_concurrency` | integer | `4` | Maximum simultaneous feed fetches |
 | `external_previews` | `enabled` | bool | `false` | Allow anonymous outbound requests when external editor links are hovered or focused; restart required |
-| `external_previews` | `worker_image` | string | `clepsydra-preview:1` | Operator-trusted local Docker image for network-isolated screenshots |
 
 `features.academic` and `features.feeds` are startup feature flags. Both
 default to `true`. Changes take effect only after restarting Clepsydra.
@@ -260,29 +258,70 @@ respectively.
 ### External link previews
 
 External editor links retain **Open** and **Copy** actions with previews disabled.
-To enable screenshots, start a **local Docker engine** and, from the repository
-root, build the worker:
+Native screenshots are supported on **macOS and Linux**. Install Node.js (>=20)
+and npm, then run:
 
 ```bash
-docker build -t clepsydra-preview:1 preview-worker
+clep previews install
 ```
 
+This explicitly downloads the pinned Playwright package and matching Chromium.
+It works from an installed `clep` binary outside the source checkout. No Docker
+engine or image is needed. Linux also needs Chromium's system libraries and an
+OS policy that permits its native sandbox; setup never invokes `sudo` or disables
+the sandbox to work around missing prerequisites.
+
+Ubuntu's restricted unprivileged user namespaces can require an administrator's
+AppArmor rule for the managed Chromium executable. The repository's
+`.github/clep-preview.apparmor` demonstrates a scoped grant used by CI; it does not
+disable AppArmor or the browser sandbox globally.
+
 Then set `[external_previews].enabled = true` in the application config and restart
-`clep serve`. The server never pulls images during a capture. Keep the worker's
-pinned Playwright package and Docker base image versions matched when upgrading,
-and rebuild the image to receive browser security updates.
+`clep serve`. Installation does not enable previews or edit your config. Startup
+and hover captures never download packages or browsers. After a worker/browser
+update, rerun `clep previews install` and restart the server. Rerun setup if the
+recorded Node executable is removed by a Node upgrade.
 
-Opening a preview now makes anonymous requests to the destination and its page
-resources. Chromium runs as an unprivileged user in a disposable, network-disabled
-container. Clepsydra mediates HTTP(S) GETs through its checked fetcher, rejects
-private/non-global destinations and URL credentials, and validates every redirect
-hop. No browser profile, cookies, authorization headers, or host folders are
-shared. Only plain metadata and a JPEG reach the UI, never executable remote HTML.
+Worker packages and browsers live in versioned generations under the OS local
+data directory at `clepsydra/preview-worker`, separate from the preview cache and
+the vault. Setup checks sandboxed browser startup before atomically activating a
+generation; failed setup retains the previous installation. Old generations are
+retained so a running server can finish using them. Stop the server before
+removing old generations or the entire worker directory.
 
-If Docker or the image is unavailable, a successfully fetched HTML page still
-provides a metadata-only card. Login pages, bot challenges, cookie banners, slow
-pages, and unsupported non-HTML resources may produce limited or unavailable
-previews. Captures use a fixed 1200 × 800 viewport, not a full-page screenshot.
+Opening a preview makes anonymous requests to the destination and its page
+resources. Clepsydra mediates captured HTTP(S) GETs through its checked fetcher,
+rejects private/non-global destinations and URL credentials, and validates every
+redirect hop. Chromium uses its native sandbox and a fresh temporary profile.
+No personal browser profile, cookies, or authorization headers are forwarded.
+Only plain metadata and a JPEG reach the UI, never executable remote HTML.
+Subframes, embedded plugin documents, and dedicated/shared workers are blocked;
+pages depending on them may render incompletely. Browser control uses a private
+pipe and a per-capture authenticated loopback connection, not an open debugging
+port.
+
+**Native capture is not container isolation.** Request interception does not
+enforce an OS-wide network ban, Chromium's sandbox is not a separate container
+filesystem, and there are no container-style hard CPU, memory, process-count, or
+temporary-disk limits. Time and transfer budgets remain, but are not hard browser
+memory limits. This mode is intended for personal installations, not a hardened
+multi-user capture service.
+
+An independent supervisor bounds each worker's lifetime to 40 seconds and
+terminates its browser processes on timeout, worker failure, or server death.
+Capture work has a 35-second deadline; temporary browser data is removed during
+supervised shutdown. Deliberately killing the supervisor itself with `SIGKILL`
+bypasses cleanup.
+
+If native support is missing or browser startup fails, a successfully fetched
+HTML page still provides a metadata-only card. The browser is never retried with
+`--no-sandbox`. Login pages, bot challenges, cookie banners, slow pages, and
+unsupported non-HTML resources may produce limited or unavailable previews.
+Captures use a fixed 1200 × 800 viewport, not a full-page screenshot.
+
+Migrating from Docker: remove the obsolete `worker_image` setting, run
+`clep previews install`, and restart the server. Existing preview-cache entries
+remain usable. Setup does not remove Docker images or change your opt-in setting.
 
 The disposable SQLite cache lives under the OS cache directory at
 `clepsydra/external-previews/<vault-root-hash>/previews.sqlite3`, outside the vault.
