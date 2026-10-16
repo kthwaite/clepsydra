@@ -1,9 +1,22 @@
-import { pathToFileURL } from "node:url";
-import { chromium } from "playwright-core";
+import { isMainThread, parentPort, workerData } from "node:worker_threads";
 
 const MAX_LINE_BYTES = 6 * 1024 * 1024;
 const MAX_REQUESTS = 96;
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
+
+export const browserLaunchOptions = {
+  headless: true,
+  channel: "chromium",
+  chromiumSandbox: true,
+  args: [
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-sync",
+    "--no-first-run",
+    "--disable-extensions",
+    "--disable-dev-shm-usage",
+  ],
+};
 
 export function allowedUrl(value) {
   if (typeof value !== "string" || value.length > 8192) return false;
@@ -46,7 +59,8 @@ function withoutFragment(value) {
   return url.href;
 }
 
-export async function capturePage(start, fetchResource, observePage) {
+// A supplied browser is owned by the supervisor; only this capture's context closes.
+export async function capturePage(start, fetchResource, observePage, browser) {
   if (
     !allowedUrl(start.url) ||
     !start.document ||
@@ -54,21 +68,14 @@ export async function capturePage(start, fetchResource, observePage) {
   ) {
     throw new Error("Invalid capture document");
   }
-  const browser = await chromium.launch({
-    headless: true,
-    // The process is unprivileged inside the networkless, capability-free container.
-    chromiumSandbox: false,
-    args: [
-      "--disable-background-networking",
-      "--disable-component-update",
-      "--disable-sync",
-      "--no-first-run",
-      "--disable-extensions",
-      "--disable-dev-shm-usage",
-    ],
-  });
+  const ownsBrowser = !browser;
+  if (!browser) {
+    const { chromium } = await import("playwright-core");
+    browser = await chromium.launch(browserLaunchOptions);
+  }
+  let context;
   try {
-    const context = await browser.newContext({
+    context = await browser.newContext({
       viewport: { width: 1200, height: 800 },
       deviceScaleFactor: 1,
       serviceWorkers: "block",
@@ -82,6 +89,21 @@ export async function capturePage(start, fetchResource, observePage) {
     });
     page.on("dialog", (dialog) => {
       void dialog.dismiss();
+    });
+    // Playwright applies this guard to every target, including out-of-process
+    // frames. The main target still uses CDP below for per-hop mediation.
+    await context.route("**/*", async (route) => {
+      try {
+        if (route.request().frame() !== page.mainFrame()) {
+          await route.abort("blockedbyclient");
+          return;
+        }
+      } catch {
+        // Requests without a page frame belong to unsupported worker targets.
+        await route.abort("blockedbyclient");
+        return;
+      }
+      await route.continue();
     });
     const session = await context.newCDPSession(page);
     const { frameTree } = await session.send("Page.getFrameTree");
@@ -109,7 +131,8 @@ export async function capturePage(start, fetchResource, observePage) {
         if (
           ++requests > MAX_REQUESTS ||
           request.method !== "GET" ||
-          !allowedUrl(request.url)
+          !allowedUrl(request.url) ||
+          (event.resourceType === "Document" && event.frameId !== mainFrameId)
         ) {
           await abort();
           return;
@@ -142,13 +165,23 @@ export async function capturePage(start, fetchResource, observePage) {
         }
         // Keep each 30x intact: Chromium follows it and enforces origin/CORS
         // semantics, then Fetch pauses the next hop for another checked host GET.
-        // Never continue a request onto the container's disabled network.
+        // Never continue a page request onto the host network.
+        const responseHeaders = Object.entries(response.headers).map(
+          ([name, value]) => ({ name, value }),
+        );
+        if (event.resourceType === "Document") {
+          // Add, rather than replace, the publisher's policy. Frames, plugins,
+          // and worker targets are unsupported and must not acquire networking
+          // outside the main page's checked CDP session.
+          responseHeaders.push({
+            name: "content-security-policy",
+            value: "frame-src 'none'; worker-src 'none'; object-src 'none'",
+          });
+        }
         await session.send("Fetch.fulfillRequest", {
           requestId,
           responseCode: response.status,
-          responseHeaders: Object.entries(response.headers).map(
-            ([name, value]) => ({ name, value }),
-          ),
+          responseHeaders,
           body: response.body,
         });
       } catch {
@@ -176,74 +209,65 @@ export async function capturePage(start, fetchResource, observePage) {
       throw new Error("Screenshot limit exceeded");
     return screenshot;
   } finally {
-    await browser.close();
+    if (ownsBrowser) await browser.close();
+    else await context?.close();
   }
 }
 
 async function run() {
+  const { chromium } = await import("playwright-core");
+  const browser = await chromium.connectOverCDP(workerData.endpoint, {
+    headers: { Authorization: `Bearer ${workerData.token}` },
+    timeout: 16000,
+  });
   const pending = new Map();
   let nextId = 0;
   let started = false;
   let finished = false;
-  const send = (message) =>
-    new Promise((resolve, reject) => {
-      const line = `${JSON.stringify(message)}\n`;
-      if (Buffer.byteLength(line) > MAX_LINE_BYTES) {
-        reject(new Error("IPC limit exceeded"));
-        return;
-      }
-      process.stdout.write(line, (error) =>
-        error ? reject(error) : resolve(),
-      );
-    });
+  const finish = (message) => {
+    if (finished) return;
+    finished = true;
+    parentPort.postMessage(message);
+    for (const request of pending.values()) request({ error: true });
+    pending.clear();
+    parentPort.close();
+    void browser.close().catch(() => {});
+  };
   const fetchResource = (request) =>
-    new Promise((resolve, reject) => {
+    new Promise((resolve) => {
       const id = ++nextId;
-      if (id > MAX_REQUESTS) {
+      if (id > MAX_REQUESTS || finished) {
         resolve({ error: true });
         return;
       }
-      pending.set(id, { resolve, reject });
-      void send({ type: "request", id, ...request }).catch(reject);
+      pending.set(id, resolve);
+      parentPort.postMessage({ type: "request", id, ...request });
     });
-  let capture;
-  try {
-    for await (const message of messages(process.stdin)) {
-      if (!started && message.type === "start") {
-        started = true;
-        capture = capturePage(message, fetchResource)
-          .then((screenshot) =>
-            send({ type: "done", screenshot: screenshot.toString("base64") }),
-          )
-          .catch(() => send({ type: "error" }))
-          .finally(() => {
-            finished = true;
-            process.stdin.destroy();
-          });
-      } else if (
-        started &&
-        message.type === "response" &&
-        pending.has(message.id)
-      ) {
-        pending.get(message.id).resolve(message);
-        pending.delete(message.id);
-      } else {
-        throw new Error("Invalid IPC message");
-      }
+  parentPort.on("message", (message) => {
+    if (finished) return;
+    if (!started && message.type === "start") {
+      started = true;
+      void capturePage(message, fetchResource, undefined, browser).then(
+        (screenshot) =>
+          finish({ type: "done", screenshot: screenshot.toString("base64") }),
+        () => finish({ type: "error" }),
+      );
+    } else if (
+      started &&
+      message.type === "response" &&
+      pending.has(message.id)
+    ) {
+      pending.get(message.id)(message);
+      pending.delete(message.id);
+    } else {
+      finish({ type: "error" });
     }
-  } catch (error) {
-    if (!finished) throw error;
-  } finally {
-    for (const request of pending.values()) request.resolve({ error: true });
-    if (capture) await capture;
-  }
+  });
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+if (!isMainThread && parentPort) {
   run().catch(() => {
-    process.exitCode = 1;
+    parentPort.postMessage({ type: "error" });
+    parentPort.close();
   });
 }

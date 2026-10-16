@@ -1,4 +1,4 @@
-//! Anonymous screenshots through a disposable, network-disabled browser container.
+//! Anonymous screenshots through a supervised native browser and checked HTTP broker.
 
 use std::{collections::BTreeMap, process::Stdio, time::Duration};
 
@@ -9,10 +9,11 @@ use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::Command,
-    time::{Instant, timeout, timeout_at},
+    time::{Instant, timeout_at},
 };
 use url::Url;
+
+use crate::preview_worker::Installation;
 
 const CAPTURE_TIME: Duration = Duration::from_secs(35);
 const MAX_RESOURCE_BYTES: usize = 4 * 1024 * 1024;
@@ -315,79 +316,29 @@ async fn read_message(reader: &mut (impl AsyncBufRead + Unpin)) -> Result<Worker
     }
 }
 
-// A detached cleanup also covers cancellation of the owning capture future. The
-// container's PID 1 watchdog is independent of both this process and Docker's CLI.
-struct ContainerGuard(String, bool);
-
-impl Drop for ContainerGuard {
-    fn drop(&mut self) {
-        if self.1 {
-            return;
-        }
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let name = self.0.clone();
-            handle.spawn(async move {
-                remove_container(&name).await;
-            });
-        }
-    }
-}
-
-async fn remove_container(name: &str) {
-    let _ = timeout(
-        Duration::from_secs(5),
-        Command::new("docker")
-            .args(["rm", "--force", name])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .status(),
-    )
-    .await;
-}
-
 async fn screenshot(
     response: &CheckedResponse,
-    image: &str,
+    installation: &Installation,
     client: &CheckedHttpClient,
     budget: &mut Budget,
     deadline: Instant,
 ) -> Result<Vec<u8>, String> {
-    if image.is_empty()
-        || image.starts_with('-')
-        || image.len() > 256
-        || image.chars().any(char::is_whitespace)
-    {
-        return Err(FAILURE.into());
-    }
-    let mut guard = ContainerGuard(format!("clepsydra-preview-{}", uuid::Uuid::now_v7()), false);
-    let mut child = Command::new("docker")
-        .args([
-            "run",
-            "--rm",
-            "--interactive",
-            "--pull=never",
-            "--network=none",
-            "--read-only",
-            "--cap-drop=ALL",
-            "--security-opt=no-new-privileges",
-            "--cpus=1",
-            "--memory=768m",
-            "--memory-swap=768m",
-            "--pids-limit=128",
-            "--shm-size=64m",
-            "--tmpfs=/tmp:rw,nosuid,nodev,size=256m,mode=1777",
-            "--user=pwuser",
-            "--log-driver=none",
-            "--name",
-            &guard.0,
-            image,
-        ])
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    // The supervisor owns Chromium's separate process group. Its independent
+    // watchdog also survives cancellation of this future or death of this server.
+    let mut child = installation
+        .command()
+        .env(
+            "CLEP_PREVIEW_TIMEOUT_MS",
+            remaining
+                .as_millis()
+                .saturating_add(4_000)
+                .min(40_000)
+                .to_string(),
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .kill_on_drop(true)
         .spawn()
         .map_err(|_| FAILURE.to_owned())?;
     let result = timeout_at(deadline, async {
@@ -451,21 +402,23 @@ async fn screenshot(
     })
     .await
     .unwrap_or_else(|_| Err(FAILURE.to_owned()));
-    // Stop the container, not merely the attached Docker CLI.
-    remove_container(&guard.0).await;
-    guard.1 = true;
-    let _ = child.kill().await;
+    // Dropping the protocol pipes requests supervised shutdown. Never SIGKILL
+    // the supervisor: it must terminate Chromium and remove the temporary profile.
+    let _ = timeout_at(deadline + Duration::from_secs(5), child.wait()).await;
     result
 }
 
-pub async fn capture(url: &Url, image: &str) -> Result<CapturedPreview, String> {
+pub async fn capture(
+    url: &Url,
+    installation: Option<&Installation>,
+) -> Result<CapturedPreview, String> {
     let client = CheckedHttpClient::new(MAX_RESOURCE_BYTES).map_err(|_| FAILURE.to_owned())?;
-    capture_with_client(url, image, &client).await
+    capture_with_client(url, installation, &client).await
 }
 
 async fn capture_with_client(
     url: &Url,
-    image: &str,
+    installation: Option<&Installation>,
     client: &CheckedHttpClient,
 ) -> Result<CapturedPreview, String> {
     let deadline = Instant::now() + CAPTURE_TIME;
@@ -485,9 +438,13 @@ async fn capture_with_client(
     .await
     .map_err(|_| FAILURE.to_owned())?
     .map_err(|_| FAILURE.to_owned())?;
-    let screenshot = screenshot(&response, image, client, &mut budget, deadline)
-        .await
-        .ok();
+    let screenshot = if let Some(installation) = installation {
+        screenshot(&response, installation, client, &mut budget, deadline)
+            .await
+            .ok()
+    } else {
+        None
+    };
     Ok(CapturedPreview {
         title,
         description,
@@ -535,9 +492,7 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        // An invalid image fails before touching Docker, exercising the same
-        // metadata-only consumer result as an absent image/daemon.
-        let result = capture_with_client(&url, "-", &client).await.unwrap();
+        let result = capture_with_client(&url, None, &client).await.unwrap();
         assert_eq!(result.title.as_deref(), Some("Alice & Bob"));
         assert_eq!(
             result.description.as_deref(),
@@ -596,7 +551,7 @@ mod tests {
                 .expect(1)
                 .mount(&server)
                 .await;
-            let result = capture_with_client(&url, "-", &client).await.unwrap();
+            let result = capture_with_client(&url, None, &client).await.unwrap();
             assert_eq!(result.title.as_deref(), Some("Café"), "{content_type}");
             assert!(result.screenshot.is_none());
         }
@@ -621,7 +576,7 @@ mod tests {
                 )
                 .mount(&server)
                 .await;
-            let result = capture_with_client(&url, "-", &client).await.unwrap();
+            let result = capture_with_client(&url, None, &client).await.unwrap();
             let final_url = Url::parse(&result.final_url).unwrap();
             assert_eq!(final_url.fragment(), Some(fragment));
             assert_eq!(final_url.query(), Some("q=kept"));
@@ -637,7 +592,7 @@ mod tests {
             "http://user:password@example.com/",
             "file:///etc/passwd",
         ] {
-            let result = capture(&Url::parse(value).unwrap(), "-").await;
+            let result = capture(&Url::parse(value).unwrap(), None).await;
             assert!(matches!(result, Err(error) if error == FAILURE));
         }
     }
@@ -654,7 +609,7 @@ mod tests {
                 .expect(1)
                 .mount(&server)
                 .await;
-            let result = capture_with_client(&url, "-", &client).await;
+            let result = capture_with_client(&url, None, &client).await;
             assert!(matches!(result, Err(error) if error == FAILURE));
             assert_eq!(server.received_requests().await.unwrap().len(), 1);
         }
@@ -763,7 +718,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires the locally built clepsydra-preview:1 Docker image"]
+    #[ignore = "requires clep previews install and a supported native Chromium sandbox"]
     async fn actual_worker_renders_checked_html_and_relative_resources() {
         let (server, client, url) = fixture().await;
         Mock::given(path("/start"))
@@ -785,13 +740,14 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let image_name = std::env::var("CLEPSYDRA_PREVIEW_TEST_IMAGE")
-            .unwrap_or_else(|_| "clepsydra-preview:1".to_owned());
-        let result = capture_with_client(&url, &image_name, &client).await.unwrap();
+        let installation = crate::preview_worker::installed().expect("run clep previews install");
+        let result = capture_with_client(&url, Some(&installation), &client)
+            .await
+            .unwrap();
         assert_eq!(result.title.as_deref(), Some("Worker smoke"));
         let bytes = result
             .screenshot
-            .expect("network-disabled worker must return a real screenshot");
+            .expect("sandboxed native worker must return a real screenshot");
         let image = image::load_from_memory(&bytes).unwrap().to_rgb8();
         assert_eq!((image.width(), image.height()), (1200, 800));
         let pixel = image.get_pixel(1190, 790);

@@ -111,6 +111,15 @@ enum ConfigCommands {
 }
 
 #[derive(Debug, Subcommand)]
+enum PreviewCommands {
+    #[command(
+        about = "Install the pinned native preview worker and Chromium",
+        long_about = "Download the pinned Playwright package and matching Chromium into local application data. Requires Node.js >=20 and npm on PATH. No Docker, vault config, sudo, or source checkout is needed. Existing setup remains active if installation fails."
+    )]
+    Install,
+}
+
+#[derive(Debug, Subcommand)]
 enum Commands {
     #[command(
         about = "Initialize a new vault directory",
@@ -174,6 +183,11 @@ enum Commands {
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
+    },
+    #[command(about = "Set up native external-link screenshots")]
+    Previews {
+        #[command(subcommand)]
+        command: PreviewCommands,
     },
     #[command(
         about = "Show environment/config diagnostics",
@@ -383,6 +397,16 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         Commands::Init { path } => {
             init_vault(&path)?;
             println!("Initialized vault at {}", path.display());
+            Ok(0)
+        }
+        Commands::Previews {
+            command: PreviewCommands::Install,
+        } => {
+            let installation = clep_api::preview_worker::install().await?;
+            println!(
+                "Installed preview worker at {}",
+                installation.root().display()
+            );
             Ok(0)
         }
         Commands::Todo {
@@ -845,6 +869,18 @@ mod cli_tests {
     use clap::{CommandFactory, Parser};
 
     use super::*;
+    #[test]
+    fn previews_requires_explicit_install() {
+        assert!(Cli::try_parse_from(["clep", "previews"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["clep", "previews", "install"])
+                .unwrap()
+                .command,
+            Commands::Previews {
+                command: PreviewCommands::Install
+            }
+        ));
+    }
 
     /// Create a temp vault with a CWD-discoverable `config.toml` pointing at it.
     /// Returns the `TempDir` (keep it alive for the test's duration) and its root.

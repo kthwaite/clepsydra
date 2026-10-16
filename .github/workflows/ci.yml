@@ -97,3 +97,27 @@ jobs:
 
       - name: Test
         run: cargo test --locked --no-fail-fast -- --test-threads=4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install native preview test dependencies
+        run: npm --prefix preview-worker ci --ignore-scripts --no-audit --no-fund
+
+      - name: Allow Chromium's native sandbox on Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          sudo apparmor_parser -r .github/clep-preview.apparmor
+          node preview-worker/node_modules/playwright-core/cli.js install-deps chromium
+
+      - name: Native browser lifecycle regressions
+        run: |
+          node preview-worker/node_modules/playwright-core/cli.js install --no-shell chromium
+          ui/node_modules/.bin/biome check preview-worker/*.mjs preview-worker/package.json
+          npm --prefix preview-worker test
+
+      - name: Installed native preview smoke
+        run: |
+          cargo run --locked -p clep -- previews install
+          cargo test --locked -p clep-api actual_worker_renders_checked_html_and_relative_resources -- --ignored

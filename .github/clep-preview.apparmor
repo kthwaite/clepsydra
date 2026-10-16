@@ -1,0 +1,12 @@
+# Ubuntu's restricted user namespaces need an explicit grant for downloaded Chromium.
+# Test runners only: allow the browser's native sandbox, not a global sysctl bypass.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile clepsydra-preview-ci-cache /home/*/.cache/ms-playwright/**/chrome flags=(unconfined) {
+  userns,
+}
+
+profile clepsydra-preview-ci-managed /home/*/.local/share/clepsydra/preview-worker/**/chrome flags=(unconfined) {
+  userns,
+}

@@ -41,6 +41,8 @@ See [Configuration](/docs/configuration).
 | `clep new` | `<TITLE>`, optional `-b, --body <TEXT>` |
 | `clep backup` | `--destination <DIRECTORY>` |
 | `clep config` | nested `show`, `path`, or `create` command |
+| `clep previews` | nested `install` command |
+| `clep previews install` | provision native screenshot support; requires Node.js and npm |
 | `clep env` | no options; placeholder |
 | `clep doctor` | `--json`, `--strict`, `--full` |
 | `clep serve` | `--tls`, `--port <PORT>` |
@@ -169,6 +171,38 @@ Creates a non-empty, fully commented template at
 `$XDG_CONFIG_HOME/clepsydra/config.toml`, falling back to
 `$HOME/.config/clepsydra/config.toml`. Parent directories are created. The
 command prints the new path and refuses to overwrite any existing file.
+
+## `clep previews`
+
+```text
+clep previews <COMMAND>
+```
+
+Manages native external-link screenshot prerequisites. The `install` subcommand
+is explicit setup; ordinary server startup and hover requests never install or
+download a browser.
+
+## `clep previews install`
+
+```text
+clep previews install
+```
+
+Installs the pinned worker package and matching Chromium under the OS local data
+directory, outside the vault. Requires Node.js >=20 and npm on an absolute PATH
+entry, and supports macOS and Linux. No source checkout, vault configuration,
+Docker engine, or running server is required.
+
+Setup validates sandboxed browser startup before activating a versioned
+installation. Failed setup leaves the previous generation active. Linux system
+libraries and sandbox policy remain operator prerequisites: the command never
+invokes `sudo` or falls back to `--no-sandbox`.
+
+Installation does not enable previews. Set `[external_previews].enabled = true`
+and restart `clep serve` afterward. Rerun setup after a worker/browser update or
+if a Node upgrade removes the recorded executable. See
+[External link previews](/docs/configuration#external-link-previews) for cache,
+upgrade, and native-isolation limitations.
 
 ## `clep env`
 

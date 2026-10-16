@@ -5,6 +5,7 @@ mod external_preview_capture;
 pub mod external_previews;
 pub use clep_feeds as feeds;
 mod page_export;
+pub mod preview_worker;
 pub mod sync_runtime;
 pub mod vault;
 
