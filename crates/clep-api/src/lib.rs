@@ -1,6 +1,7 @@
 pub mod api;
 pub mod backup;
 pub mod deeplink;
+pub mod external_embeds;
 mod external_preview_capture;
 pub mod external_previews;
 pub use clep_feeds as feeds;

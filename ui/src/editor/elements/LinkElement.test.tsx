@@ -4,8 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { type ReactNode, useState } from "react";
 import { createEditor } from "slate";
 import { type RenderElementProps, Slate, withReact } from "slate-react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchClient } from "#/api/client";
+import { PreviewContext } from "#/components/codex/PreviewContext";
+import { ExternalPreviewCard } from "#/editor/elements/ExternalPreviewCard";
 import { LinkElement } from "#/editor/elements/LinkElement";
 import { INLINE_SOURCE_ADAPTERS } from "#/editor/inlineSourceAdapters";
 import {
@@ -13,6 +15,7 @@ import {
   useInlineSourceEditingController,
 } from "#/editor/inlineSourceEditing";
 import type { LinkElement as LinkElementType } from "#/editor/types";
+import { usePreviewStore } from "#/store/preview";
 
 const openTab = vi.hoisted(() => vi.fn());
 
@@ -53,22 +56,32 @@ function EditorContext({ children }: { children: ReactNode }) {
   );
 }
 
-function renderLink(url: string) {
+function renderLink(url: string, parentId?: string) {
   const element: LinkElementType = {
     type: "link",
     url,
     children: [{ text: "Wikipedia" }],
   };
   render(
-    <LinkElement attributes={attributes} element={element}>
-      Wikipedia
-    </LinkElement>,
+    <PreviewContext value={parentId}>
+      <LinkElement attributes={attributes} element={element}>
+        Wikipedia
+      </LinkElement>
+    </PreviewContext>,
     { wrapper: EditorContext },
   );
   return screen.getByText("Wikipedia");
 }
 
-afterEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  usePreviewStore.setState({ windows: [], topZ: 200 });
+});
+
+afterEach(() => {
+  for (const win of usePreviewStore.getState().windows)
+    usePreviewStore.getState().close(win.id);
+  vi.restoreAllMocks();
+});
 
 describe("LinkElement resource marks", () => {
   it("marks a recognized URL without adding editable or accessible text", () => {
@@ -113,15 +126,96 @@ describe("LinkElement previews", () => {
     const post = vi.spyOn(fetchClient, "POST");
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const link = renderLink("https://example.com");
-    fireEvent.click(link);
-    expect(link).toHaveAttribute("data-slate-inline", "true");
+    fireEvent.click(link, { detail: 1 });
+    fireEvent.click(link, { shiftKey: true });
+    fireEvent.click(link, { altKey: true });
+    expect(link.closest("[data-slate-inline]")).toHaveAttribute(
+      "data-slate-inline",
+      "true",
+    );
+    expect(usePreviewStore.getState().windows).toHaveLength(0);
     expect(link).toHaveTextContent("Wikipedia");
     expect(get).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });
 
-  it("opens on hover and displays an opted-in local screenshot and metadata", async () => {
+  it("opens hover and focus previews in the shared parent branch without stealing focus", async () => {
+    const user = userEvent.setup();
+    const parentId = usePreviewStore
+      .getState()
+      .open({ path: "source.md" }, new DOMRect(10, 10, 20, 20), {
+        mode: "reader",
+      });
+    const link = renderLink("https://example.com", parentId);
+    fireEvent.mouseEnter(link);
+    await waitFor(() =>
+      expect(usePreviewStore.getState().windows).toHaveLength(2),
+    );
+    expect(usePreviewStore.getState().windows[1]).toMatchObject({
+      url: "https://example.com",
+      mode: "peek",
+      parentId,
+      focusRequest: 0,
+    });
+    await user.tab();
+    expect(link).toHaveFocus();
+    fireEvent.mouseLeave(link);
+    expect(usePreviewStore.getState().windows[1]).toMatchObject({
+      mode: "peek",
+    });
+    await user.keyboard("{Enter}");
+    expect(usePreviewStore.getState().windows[1]).toMatchObject({
+      mode: "reader",
+      focusRequest: 1,
+    });
+  });
+
+  it("provides an explicit touch Preview action without consuming editing taps", () => {
+    const link = renderLink("https://example.com");
+    fireEvent.pointerDown(link, { pointerType: "touch" });
+    fireEvent.click(link, { detail: 1 });
+    expect(usePreviewStore.getState().windows).toHaveLength(0);
+    const action = screen.getByRole("button", { name: "Preview" });
+    fireEvent.pointerDown(action, { pointerType: "touch" });
+    fireEvent.click(action);
+    expect(usePreviewStore.getState().windows[0]).toMatchObject({
+      url: "https://example.com",
+      mode: "reader",
+    });
+    expect(usePreviewStore.getState().windows[0]?.opener).toBe(action);
+  });
+
+  it("does not reopen a preview on restored focus after Escape", async () => {
+    const user = userEvent.setup();
+    const link = renderLink("https://example.com");
+    await user.tab();
+    expect(usePreviewStore.getState().windows).toHaveLength(1);
+    await user.keyboard("{Escape}");
+    expect(usePreviewStore.getState().windows).toHaveLength(0);
+    fireEvent.blur(link);
+    link.dataset.previewFocusRestore = "true";
+    fireEvent.focus(link);
+    delete link.dataset.previewFocusRestore;
+    expect(usePreviewStore.getState().windows).toHaveLength(0);
+    fireEvent.blur(link);
+    fireEvent.focus(link);
+    expect(usePreviewStore.getState().windows).toHaveLength(1);
+  });
+
+  it("preserves modifier-open without creating a shared preview", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const link = renderLink("https://example.com");
+    fireEvent.click(link, { ctrlKey: true });
+    expect(open).toHaveBeenCalledWith(
+      "https://example.com",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(usePreviewStore.getState().windows).toHaveLength(0);
+  });
+
+  it("retains local screenshot metadata and image failure fallback", async () => {
     vi.spyOn(fetchClient, "GET").mockResolvedValue({
       data: { enabled: true },
       response: new Response(),
@@ -138,8 +232,9 @@ describe("LinkElement previews", () => {
       },
       response: new Response(),
     });
-    const link = renderLink("https://example.com");
-    fireEvent.mouseEnter(link);
+    render(<ExternalPreviewCard url="https://example.com" />, {
+      wrapper: EditorContext,
+    });
     const image = await screen.findByRole("img", {
       name: "Screenshot of example.com",
     });
@@ -152,43 +247,37 @@ describe("LinkElement previews", () => {
     expect(screen.getByText("example.com")).toBeVisible();
     expect(screen.getByText(/Captured/)).toBeVisible();
     expect(screen.getByText("Refreshing preview…")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Open" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Copy" })).toBeEnabled();
     fireEvent.error(image);
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(screen.getByText("Example title")).toBeVisible();
     expect(screen.getByText("Example description")).toBeVisible();
   });
 
-  it("supports focus, panel traversal, Copy and Escape without enabling previews", async () => {
+  it("supports focus, panel traversal, Copy and Escape for non-HTTP links", async () => {
     const user = userEvent.setup();
-    vi.spyOn(fetchClient, "GET").mockResolvedValue({
-      data: { enabled: false },
-      response: new Response(),
-    });
+    const get = vi.spyOn(fetchClient, "GET");
     const post = vi.spyOn(fetchClient, "POST");
     const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
-    const link = renderLink("https://example.com");
-
+    const link = renderLink("mailto:hello@example.com");
     await user.tab();
     expect(link).toHaveFocus();
-    expect(await screen.findByText(/External previews are off/)).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Link preview" })).toBeVisible();
     await user.tab();
     expect(screen.getByRole("button", { name: "Open" })).toHaveFocus();
     await user.tab();
     expect(screen.getByRole("button", { name: "Copy" })).toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(copy).toHaveBeenCalledWith("https://example.com");
+    expect(copy).toHaveBeenCalledWith("mailto:hello@example.com");
     await user.keyboard("{Escape}");
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
     expect(link).toHaveFocus();
+    expect(get).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
   });
 
   it("keeps metadata but rejects remote screenshot URLs", async () => {
-    const user = userEvent.setup();
     vi.spyOn(fetchClient, "GET").mockResolvedValue({
       data: { enabled: true },
       response: new Response(),
@@ -205,8 +294,9 @@ describe("LinkElement previews", () => {
       },
       response: new Response(),
     });
-    renderLink("https://example.com");
-    await user.tab();
+    render(<ExternalPreviewCard url="https://example.com" />, {
+      wrapper: EditorContext,
+    });
     expect(await screen.findByText("Metadata fallback")).toBeVisible();
     expect(screen.getByText("Screenshot unavailable.")).toBeVisible();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();

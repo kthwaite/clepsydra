@@ -128,6 +128,7 @@ it("mounts each overlay from its corresponding UI state", async () => {
           y: 0,
           pinned: false,
           minimized: false,
+          maximized: false,
           z: 1,
         },
       ],

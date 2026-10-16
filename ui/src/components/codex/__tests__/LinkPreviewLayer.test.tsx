@@ -1,3 +1,5 @@
+// These cases exercise reader behavior, not asynchronous bundler startup.
+import "#/components/codex/PreviewReader";
 import {
   act,
   fireEvent,
@@ -305,7 +307,7 @@ it("renders local resources and keeps restricted reader descendants inert", asyn
   expect(
     usePreviewStore
       .getState()
-      .windows.find((win) => win.path === "notes/child.md"),
+      .windows.find((win) => "path" in win && win.path === "notes/child.md"),
   ).toMatchObject({ restricted: true });
 });
 
@@ -418,7 +420,7 @@ it("hover-opens an indexed wikilink inside a reader without leaving its parent",
   act(() => vi.advanceTimersByTime(220));
   const child = usePreviewStore
     .getState()
-    .windows.find((win) => win.path === "notes/child.md");
+    .windows.find((win) => "path" in win && win.path === "notes/child.md");
   expect(child).toMatchObject({ mode: "peek", parentId });
   expect(
     usePreviewStore.getState().windows.find((win) => win.id === parentId),

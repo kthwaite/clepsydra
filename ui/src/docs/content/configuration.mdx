@@ -257,9 +257,46 @@ respectively.
 
 ### External link previews
 
-External editor links retain **Open** and **Copy** actions with previews disabled.
-Native screenshots are supported on **macOS and Linux**. Install Node.js (>=20)
-and npm, then run:
+External links in the editor and rendered Markdown open **HTML reading previews**
+on hover or keyboard focus. Set `[external_previews].enabled = true` in the
+application config and restart `clep serve` to allow fetching. **Open link** and
+**Copy link** remain available when previews are disabled.
+
+Previews prefer a valid, active saved archive for the URL; otherwise they embed
+the live page. The reading window supports pinning, dragging, resizing,
+maximizing/restoring, and minimizing to a tray. Pinning persists the URL and
+window geometry locally. Minimize/restore preserves the embedded page's reading
+position during the session. On touch screens use **Preview** beside an editor
+link; ordinary editing taps still place the caret. Keyboard users can focus the
+link, press Tab into its window controls, or Enter to open a persistent reader.
+Escape closes from the application controls; keys inside a cross-origin frame
+belong to that site, so Tab/Shift-Tab back to the controls to close it.
+
+Live pages use sandboxed iframes with no referrer. Scripts are disabled except
+on the production HTTPS origins `docs.google.com`, `lesswrong.com`,
+`www.lesswrong.com`, and `archive.org/details/…` (default HTTPS port only).
+Saved archives always retain the existing script-free archive sandbox.
+Remote HTML is never inserted into the application DOM. Links inside an
+external iframe follow the site's own navigation; they do not open nested
+Clepsydra previews.
+
+The server checks the initial live page and redirects against public-destination,
+HTML, and publisher framing policies before offering an embed. Resolution is
+bounded to four concurrent requests, ten seconds, ten redirects, and 2 MiB per
+response. Restrictive origin-specific framing policies conservatively fall back.
+An eligible URL is **not** proof that the browser loaded it: policies, browser
+cookies, or later redirects may differ. **Show screenshot** is always available
+for blank, blocked, or broken embeds; **Try embedded page** checks again.
+
+**Direct embeds make requests from your browser**, not from the screenshot
+worker. Browser cookie and third-party storage policies apply; these are not
+guaranteed anonymous requests. Browser-side resources and navigation do not pass
+through the server's checked fetcher or its capture budgets. Enabling previews
+accepts this behavior, including third-party requests merely on hover/focus.
+
+HTML previews do not require Node.js or Chromium installation. The optional
+**screenshot fallback** is supported on **macOS and Linux**. Install Node.js
+(>=20) and npm, then run:
 
 ```bash
 clep previews install
@@ -276,9 +313,9 @@ AppArmor rule for the managed Chromium executable. The repository's
 `.github/clep-preview.apparmor` demonstrates a scoped grant used by CI; it does not
 disable AppArmor or the browser sandbox globally.
 
-Then set `[external_previews].enabled = true` in the application config and restart
-`clep serve`. Installation does not enable previews or edit your config. Startup
-and hover captures never download packages or browsers. After a worker/browser
+Installation does not enable previews or edit your config. Set
+`[external_previews].enabled = true` and restart `clep serve` if not already enabled.
+Startup and hover captures never download packages or browsers. After a worker/browser
 update, rerun `clep previews install` and restart the server. Rerun setup if the
 recorded Node executable is removed by a Node upgrade.
 
@@ -289,12 +326,13 @@ generation; failed setup retains the previous installation. Old generations are
 retained so a running server can finish using them. Stop the server before
 removing old generations or the entire worker directory.
 
-Opening a preview makes anonymous requests to the destination and its page
-resources. Clepsydra mediates captured HTTP(S) GETs through its checked fetcher,
-rejects private/non-global destinations and URL credentials, and validates every
-redirect hop. Chromium uses its native sandbox and a fresh temporary profile.
-No personal browser profile, cookies, or authorization headers are forwarded.
-Only plain metadata and a JPEG reach the UI, never executable remote HTML.
+Screenshot fallback capture makes anonymous requests to the destination and its
+page resources. Clepsydra mediates captured HTTP(S) GETs through its checked
+fetcher, rejects private/non-global destinations and URL credentials, and
+validates every redirect hop. Chromium uses its native sandbox and a fresh
+temporary profile. No personal browser profile, cookies, or authorization
+headers are forwarded. This fallback returns only plain metadata and a JPEG;
+the HTML reader above uses a separate direct-embedding path.
 Subframes, embedded plugin documents, and dedicated/shared workers are blocked;
 pages depending on them may render incompletely. Browser control uses a private
 pipe and a per-capture authenticated loopback connection, not an open debugging
@@ -332,10 +370,10 @@ while refreshing. Failures and metadata-only fallbacks retry after five minutes,
 and at most two captures run at once. No Folio is created, and preview data is not synced or included in
 vault backups. Stop the server before removing this disposable cache directory.
 
-Preview URLs, metadata, and screenshots are plaintext. Query parameters may
-contain sensitive tokens. Enabling previews is permission to contact those
-websites merely by hovering or focusing a link; it does not authenticate to them
-or hide requests from their publishers.
+Cached preview URLs, metadata, and screenshots are plaintext. Query parameters
+may contain sensitive tokens. Screenshot capture does not authenticate to
+publishers or hide requests from them; direct embeds additionally use your
+browser's network and storage policies as described above.
 
 ### Environment overrides
 

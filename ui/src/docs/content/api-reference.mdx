@@ -255,12 +255,28 @@ Open the server-sent events stream. Responses: `200` Server-sent events stream.
 Returns `{"enabled": false}` unless external preview fetching is enabled in the
 server configuration. Never contacts external sites. Responses: `200`.
 
+### `POST /api/vault/external-previews/embed`
+
+Accepts JSON `{"url": "https://example.com/article"}`. Returns `state`
+(`disabled`, `ready`, or `unavailable`), nullable `url` and `source` (`live` or
+`archive`), `scripts`, and nullable `reason`. Only `ready` supplies a URL.
+Prefers a valid active saved archive; otherwise checks public destinations,
+redirects, HTML content type, and publisher framing policy. Script permission
+is limited to explicitly supported production HTTPS sites; archives never
+receive it. Disabled requests do not fetch or return an embed URL.
+
+`ready` means eligible for embedding, not proof of browser loading. Live iframe
+requests originate from the browser, outside the server fetcher's policy and
+budgets. No screenshot capture is started by this endpoint. Responses:
+`200` Resolution state with `no-store`; `403` Cross-site browser request;
+`413` Body limit exceeded; `415` Non-JSON body.
+
 ### `POST /api/vault/external-previews`
 
 Accepts JSON `{"url": "https://example.com/article"}`. Returns `state`
 (`disabled`, `pending`, `ready`, or `unavailable`), nullable `title`,
 `description`, `final_url`, `image_url`, and `captured_at`, plus `refreshing`.
-Only this endpoint can initiate external requests, and only when opted in.
+This endpoint initiates screenshot/metadata capture only when opted in.
 Poll while `pending` or `refreshing`; stale ready data remains usable during
 refresh. A full capture queue returns `unavailable` without admitting work.
 Responses: `200` Preview state; `400` Invalid URL; `403` Cross-site browser

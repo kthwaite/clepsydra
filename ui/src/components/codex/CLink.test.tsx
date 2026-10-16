@@ -23,6 +23,7 @@ const matching: PreviewWindow = {
   y: 20,
   pinned: true,
   minimized: true,
+  maximized: false,
   z: 201,
 };
 const unrelated: PreviewWindow = {
@@ -36,6 +37,7 @@ const unrelated: PreviewWindow = {
   y: 40,
   pinned: true,
   minimized: false,
+  maximized: false,
   z: 202,
 };
 let windowsAtOpen: PreviewWindow[] | undefined;
@@ -79,7 +81,9 @@ describe("CLink navigation", () => {
       expect(
         usePreviewStore
           .getState()
-          .windows.some((win) => win.path === "notes/stale.md"),
+          .windows.some(
+            (win) => "path" in win && win.path === "notes/stale.md",
+          ),
       ).toBe(false);
     } finally {
       vi.useRealTimers();
@@ -170,7 +174,7 @@ describe("CLink navigation", () => {
     await user.click(screen.getByRole("link", { name: "B" }));
     const b = usePreviewStore
       .getState()
-      .windows.find((win) => win.path === "notes/b.md");
+      .windows.find((win) => "path" in win && win.path === "notes/b.md");
     expect(b).toBeDefined();
     rerender(
       <PreviewContext value={b?.id}>
@@ -180,7 +184,7 @@ describe("CLink navigation", () => {
     await user.click(screen.getByRole("link", { name: "C" }));
     const c = usePreviewStore
       .getState()
-      .windows.find((win) => win.path === "notes/c.md");
+      .windows.find((win) => "path" in win && win.path === "notes/c.md");
     expect(c?.parentId).toBe(b?.id);
     rerender(
       <PreviewContext value={c?.id}>
@@ -195,7 +199,9 @@ describe("CLink navigation", () => {
     expect(
       usePreviewStore
         .getState()
-        .windows.filter((win) => win.path === "notes/target.md"),
+        .windows.filter(
+          (win) => "path" in win && win.path === "notes/target.md",
+        ),
     ).toHaveLength(1);
     expect(openTabMock).not.toHaveBeenCalled();
   });

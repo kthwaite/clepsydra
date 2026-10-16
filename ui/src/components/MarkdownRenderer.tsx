@@ -6,8 +6,10 @@ import Markdown, {
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { PluggableList } from "unified";
+import { externalPreviewUrl } from "#/api/externalPreviews";
 import { BlockTransclusion } from "#/components/blocks/BlockTransclusion";
 import { CLink } from "#/components/codex/CLink";
+import { ExternalPreviewLink } from "#/components/codex/ExternalPreviewLink";
 import { PreviewRestrictionsContext } from "#/components/codex/PreviewContext";
 import { MathExpression } from "#/components/MathExpression";
 import { MermaidCodeBlock } from "#/components/MermaidCodeBlock";
@@ -314,6 +316,18 @@ function MarkdownBody({
                 >
                   {children}
                 </a>
+              );
+            }
+            if (href && externalPreviewUrl(href)) {
+              return (
+                <ExternalPreviewLink
+                  {...props}
+                  href={href}
+                  className="underline decoration-1 underline-offset-2 hover:decoration-2"
+                  data-link-resource={resource ?? undefined}
+                >
+                  {children}
+                </ExternalPreviewLink>
               );
             }
             return (

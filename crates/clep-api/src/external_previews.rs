@@ -241,6 +241,19 @@ impl Default for PreviewRuntime {
 }
 
 impl PreviewRuntime {
+    #[cfg(test)]
+    pub(crate) fn enabled_for_test() -> Arc<Self> {
+        Arc::new(Self {
+            store: Some(Arc::new(Mutex::new(
+                Store::open(Path::new(":memory:"), MAX_ENTRIES, MAX_BYTES).unwrap(),
+            ))),
+            capture: Arc::new(|_| {
+                Box::pin(async { panic!("embed resolution must never invoke screenshot capture") })
+            }),
+            ..Self::default()
+        })
+    }
+
     pub async fn for_vault(
         root: &Path,
         settings: &clep_config::ExternalPreviewsSettings,

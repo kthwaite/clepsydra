@@ -345,6 +345,7 @@ describe("SlateEditor wikilink editing integration", () => {
           y: 20,
           pinned: false,
           minimized: false,
+          maximized: false,
           z: 201,
         },
       ],

@@ -3,6 +3,7 @@ import { fetchClient } from "#/api/client";
 import type { components } from "#/api/schema";
 
 export type ExternalPreview = components["schemas"]["ExternalPreviewResponse"];
+export type ExternalEmbed = components["schemas"]["ExternalEmbedResponse"];
 
 const PREVIEW_PATH = "/api/vault/external-previews";
 
@@ -31,8 +32,7 @@ export function externalPreviewImageUrl(value: string | null | undefined) {
     : null;
 }
 
-/** Mount only while the popover is open, so closed links cannot initiate work. */
-export function useExternalPreview(url: string) {
+function usePreviewPermission(url: string) {
   const eligible = externalPreviewUrl(url) !== null;
   const status = useQuery({
     queryKey: ["get", `${PREVIEW_PATH}/status`],
@@ -57,6 +57,34 @@ export function useExternalPreview(url: string) {
     status.isFetchedAfterMount &&
     !status.isError &&
     status.data?.enabled === true;
+  return { status, enabled };
+}
+
+/** Mount only while the preview is visible; cached opt-in is not permission. */
+export function useExternalEmbed(url: string) {
+  const { status, enabled } = usePreviewPermission(url);
+  const embed = useQuery({
+    queryKey: ["post", `${PREVIEW_PATH}/embed`, url],
+    queryFn: async ({ signal }) => {
+      const { data, error } = await fetchClient.POST(
+        "/api/vault/external-previews/embed",
+        { body: { url }, signal },
+      );
+      if (error || !data) throw new Error("Embedded preview is unavailable.");
+      return data;
+    },
+    enabled,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    retry: false,
+    throwOnError: false,
+  });
+  return { status, embed, enabled };
+}
+
+/** Screenshot work starts only when the fallback is mounted. */
+export function useExternalPreview(url: string) {
+  const { status, enabled } = usePreviewPermission(url);
   const queryKey = ["post", PREVIEW_PATH, url] as const;
   const preview = useQuery({
     queryKey,

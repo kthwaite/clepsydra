@@ -91,6 +91,7 @@ impl Modify for SchemaOverrides {
     paths(
         crate::api::external_previews::status,
         crate::api::external_previews::request,
+        crate::api::external_previews::embed,
         crate::api::external_previews::image,
         // Features
         crate::api::features::get_features,
@@ -259,6 +260,9 @@ impl Modify for SchemaOverrides {
             crate::api::external_previews::PreviewStatus,
             crate::external_previews::PreviewResponse,
             crate::external_previews::PreviewState,
+            crate::external_embeds::ExternalEmbedResponse,
+            crate::external_embeds::ExternalEmbedState,
+            crate::external_embeds::ExternalEmbedSource,
             // Shared
             crate::api::error::ApiError,
             crate::api::features::FeatureFlagsResponse,

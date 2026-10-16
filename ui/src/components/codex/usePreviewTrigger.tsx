@@ -1,11 +1,18 @@
-import { type MouseEvent, useContext, useEffect, useRef } from "react";
+import {
+  type FocusEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  useContext,
+  useEffect,
+  useRef,
+} from "react";
 import {
   PreviewContext,
   PreviewRestrictionsContext,
 } from "#/components/codex/PreviewContext";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
-import type { PreviewTarget } from "#/lib/previewTarget";
+import type { LinkPreviewTarget } from "#/lib/previewTarget";
 import { usePreviewStore } from "#/store/preview";
 
 const HOVER_DELAY = 220;
@@ -22,8 +29,9 @@ export function isModifiedLinkActivation(event: MouseEvent) {
 
 /** Resolution is read-only and owned by the caller; this hook owns the gesture. */
 export function usePreviewTrigger(
-  target?: PreviewTarget,
-  resolveTarget?: () => Promise<PreviewTarget | null>,
+  target?: LinkPreviewTarget,
+  resolveTarget?: () => Promise<LinkPreviewTarget | null>,
+  options: { previewOnFocus?: boolean } = {},
 ) {
   const parentId = useContext(PreviewContext);
   const restricted = useContext(PreviewRestrictionsContext);
@@ -62,7 +70,9 @@ export function usePreviewTrigger(
       if (
         !resolved ||
         !mounted.current ||
-        (mode === "peek" && !hovered.current)
+        (mode === "peek" &&
+          !hovered.current &&
+          !(options.previewOnFocus && focused.current))
       )
         return;
       const store = usePreviewStore.getState();
@@ -99,15 +109,50 @@ export function usePreviewTrigger(
       cancelDelay();
       if (opened.current) usePreviewStore.getState().leave(opened.current);
     },
-    onFocus: () => {
+    onFocus: (event: FocusEvent<HTMLElement>) => {
       focused.current = true;
       if (opened.current)
         usePreviewStore.getState().focusWithin(opened.current, true);
+      if (
+        options.previewOnFocus &&
+        target &&
+        !(
+          event.target instanceof HTMLElement &&
+          event.target.dataset.previewFocusRestore === "true"
+        )
+      )
+        void open("peek");
     },
     onBlur: () => {
       focused.current = false;
       if (opened.current)
         usePreviewStore.getState().focusWithin(opened.current, false);
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+      if (!options.previewOnFocus || !opened.current) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        usePreviewStore.getState().close(opened.current);
+      } else if (
+        event.key === "Tab" &&
+        !event.shiftKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        const surface = document.getElementById(
+          `preview-surface-${opened.current}`,
+        );
+        const action = surface?.querySelector<HTMLElement>(
+          "button:not([disabled]), a[href], [tabindex='0']",
+        );
+        if (action) {
+          event.preventDefault();
+          event.stopPropagation();
+          action.focus();
+        }
+      }
     },
   };
 }

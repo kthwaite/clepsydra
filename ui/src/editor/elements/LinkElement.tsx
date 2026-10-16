@@ -29,7 +29,10 @@ import {
 import { toast } from "sonner";
 import { resolveSchemeUrl } from "#/api/deeplink";
 import { externalPreviewUrl } from "#/api/externalPreviews";
-import { ExternalPreviewCard } from "#/editor/elements/ExternalPreviewCard";
+import {
+  PreviewAction,
+  usePreviewTrigger,
+} from "#/components/codex/usePreviewTrigger";
 import { InlineSourceEditor } from "#/editor/InlineSourceInput";
 import {
   isSessionAt,
@@ -86,7 +89,79 @@ export function LinkElement(props: Props) {
   return <LinkAnchor {...props} />;
 }
 
-function LinkAnchor({ attributes, children, element }: Props) {
+function LinkAnchor(props: Props) {
+  const previewUrl = externalPreviewUrl(props.element.url);
+  return previewUrl ? (
+    <ExternalLinkAnchor {...props} url={previewUrl} />
+  ) : (
+    <ActionLinkAnchor {...props} />
+  );
+}
+
+function ExternalLinkAnchor({
+  attributes,
+  children,
+  url,
+}: Props & { url: string }) {
+  const readOnly = useReadOnly();
+  const preview = usePreviewTrigger({ url }, undefined, {
+    previewOnFocus: true,
+  });
+  return (
+    <span {...attributes} className="group/preview">
+      <a
+        ref={(node) => {
+          preview.triggerRef.current = node;
+        }}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        data-link-resource={classifyLinkResource(url) ?? undefined}
+        tabIndex={0}
+        className={cn("cl-link cl-link-underline", FOCUS_RING_NATIVE)}
+        onMouseEnter={preview.onMouseEnter}
+        onMouseLeave={preview.onMouseLeave}
+        onFocus={preview.onFocus}
+        onBlur={preview.onBlur}
+        onClick={(event) => {
+          if (event.metaKey || event.ctrlKey) {
+            event.preventDefault();
+            window.open(url, "_blank", "noopener,noreferrer");
+            return;
+          }
+          event.preventDefault();
+          // Editing keeps native caret placement; touch has the Preview action.
+          if (readOnly) void preview.openReader();
+        }}
+        onKeyDown={(event) => {
+          preview.onKeyDown(event);
+          if (event.defaultPrevented) return;
+          if (event.key === "Enter") {
+            event.stopPropagation();
+            if (
+              event.metaKey ||
+              event.ctrlKey ||
+              event.shiftKey ||
+              event.altKey
+            )
+              return;
+            event.preventDefault();
+            void preview.openReader();
+          } else if (event.key === "Tab" || event.key === "Escape") {
+            event.stopPropagation();
+          }
+        }}
+      >
+        {children}
+      </a>
+      <span contentEditable={false}>
+        <PreviewAction onOpen={preview.openReader} />
+      </span>
+    </span>
+  );
+}
+
+function ActionLinkAnchor({ attributes, children, element }: Props) {
   const url = element.url;
   const openTab = useOpenTab();
   const [open, setOpen] = useState(false);
@@ -187,7 +262,6 @@ function LinkAnchor({ attributes, children, element }: Props) {
   const target = resolveLinkTarget(url);
   const safeHref = target.kind === "browser" ? target.href : undefined;
   const resource = safeHref ? classifyLinkResource(safeHref) : null;
-  const previewUrl = externalPreviewUrl(url);
 
   return (
     <>
@@ -223,10 +297,7 @@ function LinkAnchor({ attributes, children, element }: Props) {
               ref={refs.setFloating}
               style={floatingStyles}
               contentEditable={false}
-              className={cn(
-                "z-50 rounded-xl bg-raise text-[13px] text-ink shadow-lg",
-                previewUrl && "w-[340px] max-w-[calc(100vw-16px)]",
-              )}
+              className="z-50 rounded-xl bg-raise text-[13px] text-ink shadow-lg"
               {...getFloatingProps({
                 "aria-label": "Link preview",
                 onKeyDown(event) {
@@ -234,9 +305,6 @@ function LinkAnchor({ attributes, children, element }: Props) {
                 },
               })}
             >
-              {previewUrl ? (
-                <ExternalPreviewCard key={previewUrl} url={previewUrl} />
-              ) : null}
               <div className="flex items-center gap-1 py-1.5 pl-3.5 pr-1.5">
                 <span
                   className="mr-1 min-w-0 max-w-[260px] flex-1 truncate text-mute"

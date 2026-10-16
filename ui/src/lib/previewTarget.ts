@@ -8,7 +8,21 @@ export interface PreviewTarget {
   blockId?: string;
 }
 
-export function previewTargetKey(target: PreviewTarget): string {
+export interface ExternalPreviewTarget {
+  url: string;
+}
+
+export type LinkPreviewTarget = PreviewTarget | ExternalPreviewTarget;
+
+export function isExternalPreviewTarget(
+  target: LinkPreviewTarget,
+): target is ExternalPreviewTarget {
+  return "url" in target;
+}
+
+export function previewTargetKey(target: LinkPreviewTarget): string {
+  if (isExternalPreviewTarget(target))
+    return JSON.stringify(["external", target.url]);
   return JSON.stringify([
     target.path,
     target.heading ?? null,

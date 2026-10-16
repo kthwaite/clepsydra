@@ -43,7 +43,7 @@ export function ExternalPreviewCard({ url }: { url: string }) {
           key={data?.captured_at}
           src={image}
           alt={`Screenshot of ${domain}`}
-          className="aspect-video w-full rounded-xl bg-sink object-cover object-top"
+          className="h-auto w-full rounded-xl bg-sink"
           referrerPolicy="no-referrer"
           onError={() => setFailedImage(imageVersion)}
         />

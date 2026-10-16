@@ -20,6 +20,35 @@ afterEach(() => {
 });
 
 describe("reader lifecycle", () => {
+  it("opens external peeks at reader size without stealing focus or closing page parents", () => {
+    const actions = store.getState();
+    const parent = actions.open({ path: "source.md" }, rect(), {
+      mode: "reader",
+    });
+    const opener = document.createElement("a");
+    const id = actions.open({ url: "https://example.com" }, rect(), {
+      parentId: parent,
+      opener,
+    });
+    expect(current(id)).toMatchObject({
+      url: "https://example.com",
+      mode: "peek",
+      width: 560,
+      height: 560,
+      parentId: parent,
+      opener,
+      focusRequest: 0,
+    });
+    actions.focusWithin(id, true);
+    actions.leave(id);
+    vi.advanceTimersByTime(1000);
+    expect(current(id)).toBeDefined();
+    actions.closePath("https://example.com");
+    expect(current(id)).toBeDefined();
+    actions.expand(id);
+    expect(current(id)).toMatchObject({ mode: "reader", focusRequest: 1 });
+  });
+
   it("promotes a peek without losing its passage, and unpin leaves a session reader", () => {
     const actions = store.getState();
     const id = actions.open(
@@ -319,6 +348,53 @@ describe("branch ownership", () => {
 });
 
 describe("viewport geometry", () => {
+  it("maximizes and restores exact geometry through minimize and viewport changes", () => {
+    const actions = store.getState();
+    const id = actions.open({ url: "https://example.com" }, rect());
+    actions.resize(id, 640, 500);
+    actions.move(id, 160, 200);
+    const geometry = { x: 160, y: 200, width: 640, height: 500 };
+    actions.toggleMaximize(id);
+    expect(current(id)).toMatchObject({
+      mode: "reader",
+      maximized: true,
+      x: 8,
+      y: 8,
+      width: 1184,
+      height: 884,
+      restoreGeometry: geometry,
+    });
+    actions.move(id, 100, 100);
+    actions.resize(id, 300, 300);
+    actions.minimize(id);
+    actions.restore(id);
+    expect(current(id)).toMatchObject({
+      maximized: true,
+      minimized: false,
+      x: 8,
+      y: 8,
+      width: 1184,
+      height: 884,
+      restoreGeometry: geometry,
+    });
+    actions.toggleMaximize(id);
+    expect(current(id)).toMatchObject({ ...geometry, maximized: false });
+    actions.toggleMaximize(id);
+    window.innerWidth = 320;
+    window.innerHeight = 480;
+    actions.clampAll();
+    expect(current(id)).toMatchObject({ x: 8, y: 8, width: 304, height: 464 });
+    expect(current(id)?.restoreGeometry).toEqual(geometry);
+    actions.toggleMaximize(id);
+    expect(current(id)).toMatchObject({
+      maximized: false,
+      x: 8,
+      y: 8,
+      width: 304,
+      height: 464,
+    });
+  });
+
   it("places peeks below upper links and above lower links using top-left coordinates", () => {
     const actions = store.getState();
     const upper = actions.open(
@@ -366,6 +442,62 @@ describe("viewport geometry", () => {
 describe("pinned reader reloads", () => {
   // A fresh import is intentional: pins are loaded at module initialization,
   // so a static import cannot exercise the reload/migration boundary.
+  it("round-trips URL pins separately from page paths and preserves maximize restoration", async () => {
+    const actions = store.getState();
+    const url = "https://example.com";
+    const page = actions.open({ path: url }, rect());
+    actions.pin(page);
+    const external = actions.open({ url }, rect());
+    actions.pin(external);
+    actions.resize(external, 600, 500);
+    actions.move(external, 160, 180);
+    actions.toggleMaximize(external);
+    vi.resetModules();
+    store = (await import("#/store/preview")).usePreviewStore;
+    expect(store.getState().windows).toHaveLength(2);
+    const restored = store.getState().windows.find((win) => "url" in win);
+    expect(restored).toMatchObject({
+      url,
+      maximized: true,
+      pinned: true,
+      restoreGeometry: { x: 160, y: 180, width: 600, height: 500 },
+    });
+    expect(restored).not.toHaveProperty("path");
+    store.getState().closePath(url);
+    expect(store.getState().windows).toHaveLength(1);
+    if (!restored) throw new Error("Expected restored external preview");
+    store.getState().toggleMaximize(restored.id);
+    expect(current(restored.id)).toMatchObject({
+      maximized: false,
+      x: 160,
+      y: 180,
+      width: 600,
+      height: 500,
+    });
+  });
+
+  it("rejects ambiguous and invalid persisted external targets", async () => {
+    const geometry = { x: 10, y: 20, width: 560, height: 560 };
+    window.localStorage.setItem(
+      "clp.preview.pinned",
+      JSON.stringify({
+        version: 1,
+        windows: [
+          { ...geometry, url: "https://example.com", path: "page.md" },
+          { ...geometry, url: "javascript:alert(1)" },
+          { ...geometry, url: "https://user:password@example.com" },
+          { ...geometry, url: "" },
+          { ...geometry, path: "valid.md" },
+        ],
+      }),
+    );
+    vi.resetModules();
+    store = (await import("#/store/preview")).usePreviewStore;
+    expect(store.getState().windows).toEqual([
+      expect.objectContaining({ path: "valid.md" }),
+    ]);
+  });
+
   it("persists only pinned target and geometry, not transient ancestry or DOM state", async () => {
     const actions = store.getState();
     const parent = actions.open({ path: "parent.md" }, rect(), {
@@ -469,10 +601,11 @@ describe("pinned reader reloads", () => {
     );
     vi.resetModules();
     store = (await import("#/store/preview")).usePreviewStore;
-    expect(store.getState().windows.map((win) => win.path)).toEqual([
-      "a.md",
-      "b.md",
-    ]);
+    expect(
+      store
+        .getState()
+        .windows.map((win) => ("path" in win ? win.path : win.url)),
+    ).toEqual(["a.md", "b.md"]);
   });
 
   it.each(["{broken", "null", "{}", '{"version":1,"windows":{}}'])(

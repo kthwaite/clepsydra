@@ -1073,6 +1073,28 @@ fn load_snapshot(opened: OpenBlob, hash: &str) -> Result<LoadedSnapshot, Snapsho
     })
 }
 
+/// Apply the viewer's bounded validation before offering a saved embed.
+pub(crate) async fn valid_embed_snapshot(state: &AppState, hash: String) -> bool {
+    let Ok(permit) = acquire_archive_view_permit(Arc::clone(&state.archive_view_semaphore)).await
+    else {
+        return false;
+    };
+    let cas = Arc::clone(&state.cas);
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let opened = {
+            let cas = cas.lock();
+            let Ok(opened) = open_snapshot(&cas, &hash) else {
+                return false;
+            };
+            opened
+        };
+        framable_content_type(opened.content_type()) && load_snapshot(opened, &hash).is_ok()
+    })
+    .await
+    .unwrap_or(false)
+}
+
 fn transformation_error_response(error: ApiError) -> Response {
     let diagnostic = error
         .error

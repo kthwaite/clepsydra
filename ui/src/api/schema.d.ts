@@ -816,6 +816,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/vault/external-previews/embed": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["embed"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/vault/external-previews/images/{key}": {
     parameters: {
       query?: never;
@@ -2853,6 +2869,17 @@ export interface components {
     };
     /** @enum {string} */
     EntryViewDto: "all" | "unread" | "saved";
+    ExternalEmbedResponse: {
+      reason: string | null;
+      scripts: boolean;
+      source: null | components["schemas"]["ExternalEmbedSource"];
+      state: components["schemas"]["ExternalEmbedState"];
+      url: string | null;
+    };
+    /** @enum {string} */
+    ExternalEmbedSource: "live" | "archive";
+    /** @enum {string} */
+    ExternalEmbedState: "disabled" | "ready" | "unavailable";
     /** @description External identifiers for an academic work (DOI, ISBN, arXiv). */
     ExternalIds: {
       arxiv?: string | null;
@@ -6879,6 +6906,39 @@ export interface operations {
       };
       /** @description Preview cache unavailable */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  embed: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExternalPreviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Checked embed candidate, not confirmation that a browser loaded it */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalEmbedResponse"];
+        };
+      };
+      /** @description Cross-site request rejected */
+      403: {
         headers: {
           [name: string]: unknown;
         };

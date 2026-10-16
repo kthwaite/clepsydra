@@ -8,6 +8,15 @@ import {
 } from "#/lib/previewTarget";
 
 describe("preview passage targets", () => {
+  it("keeps page keys compatible and external URLs in a separate namespace", () => {
+    expect(previewTargetKey({ path: "https://example.com" })).toBe(
+      '["https://example.com",null,null]',
+    );
+    expect(previewTargetKey({ url: "https://example.com" })).not.toBe(
+      previewTargetKey({ path: "https://example.com" }),
+    );
+  });
+
   it("retains the heading after resolving a wikilink's page name", () => {
     const target = wikilinkPreviewTarget(
       "people/Jane Doe.md",

@@ -1,13 +1,18 @@
 import {
   ArrowLeft,
   ArrowUpRight,
+  Copy,
+  Globe,
   Maximize2,
+  Minimize2,
   Minus,
   Pin,
   X,
 } from "lucide-react";
 import {
   lazy,
+  type ReactNode,
+  type RefObject,
   Suspense,
   useEffect,
   useLayoutEffect,
@@ -19,6 +24,7 @@ import { createPortal } from "react-dom";
 import { usePageBaseProperties } from "#/api/bases";
 import { useBacklinks } from "#/api/index";
 import { usePage } from "#/api/pages";
+import { ExternalPreviewReader } from "#/components/codex/ExternalPreviewReader";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { PreviewBody } from "#/components/codex/PreviewBody";
 import {
@@ -31,7 +37,11 @@ import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { resolveKind } from "#/lib/kind";
-import { previewOpenTarget } from "#/lib/previewTarget";
+import {
+  isExternalPreviewTarget,
+  type PreviewTarget,
+  previewOpenTarget,
+} from "#/lib/previewTarget";
 import { type PreviewWindow as PW, usePreviewStore } from "#/store/preview";
 
 const PreviewReader = lazy(() =>
@@ -67,7 +77,9 @@ function useSheetPresentation() {
 function returnFocus(win: PW, windows: PW[]) {
   const opener = win.opener;
   if (opener?.isConnected && !opener.closest("[hidden], [inert]")) {
+    opener.dataset.previewFocusRestore = "true";
     opener.focus({ preventScroll: true });
+    delete opener.dataset.previewFocusRestore;
     return;
   }
   const parent = windows.find(
@@ -112,6 +124,46 @@ export function LinkPreviewLayer() {
       }),
     [],
   );
+
+  useEffect(() => {
+    let focusedFrame: string | undefined;
+    let pending = 0;
+    const reconcileFrameFocus = () => {
+      pending = 0;
+      const active = document.activeElement;
+      const surface =
+        active instanceof HTMLIFrameElement
+          ? active.closest<HTMLElement>("[id^='preview-surface-']")
+          : null;
+      const id = surface?.id.slice("preview-surface-".length);
+      const state = usePreviewStore.getState();
+      if (focusedFrame && focusedFrame !== id) {
+        const previous = document.getElementById(
+          `preview-surface-${focusedFrame}`,
+        );
+        if (!previous?.contains(active)) state.focusWithin(focusedFrame, false);
+      }
+      if (id && id !== focusedFrame) {
+        state.raise(id);
+        state.focusWithin(id, true);
+      }
+      focusedFrame = id;
+    };
+    const schedule = () => {
+      cancelAnimationFrame(pending);
+      pending = requestAnimationFrame(reconcileFrameFocus);
+    };
+    // Cross-origin frame pointer/key events never bubble into the window shell.
+    window.addEventListener("blur", schedule);
+    window.addEventListener("focus", schedule);
+    document.addEventListener("focusin", schedule);
+    return () => {
+      cancelAnimationFrame(pending);
+      window.removeEventListener("blur", schedule);
+      window.removeEventListener("focus", schedule);
+      document.removeEventListener("focusin", schedule);
+    };
+  }, []);
 
   useEffect(() => {
     const dismissOnEscape = (event: KeyboardEvent) => {
@@ -204,22 +256,139 @@ export function LinkPreviewLayer() {
   );
 }
 
-function PreviewWindow({
-  win,
-  sheet = false,
-  hidden,
-  closeStack,
-}: {
+type WindowProps = {
   win: PW;
   sheet?: boolean;
   hidden: boolean;
   closeStack?: () => void;
-}) {
+};
+
+function windowLabel(win: PW) {
+  return isExternalPreviewTarget(win)
+    ? new URL(win.url).hostname
+    : shortFolio(win.path);
+}
+
+function PreviewWindow(props: WindowProps) {
+  const { win } = props;
+  if (!isExternalPreviewTarget(win)) {
+    return <PagePreviewWindow {...props} win={win} />;
+  }
+  return (
+    <PreviewWindowFrame
+      {...props}
+      title={win.url}
+      icon={<Globe size={14} className="shrink-0" />}
+      onOpen={() => window.open(win.url, "_blank", "noopener,noreferrer")}
+    >
+      {() => <ExternalPreviewReader key={win.url} url={win.url} />}
+    </PreviewWindowFrame>
+  );
+}
+
+function PagePreviewWindow(props: WindowProps & { win: PW & PreviewTarget }) {
+  const { win } = props;
   const query = usePage(win.path);
   const page = query.data;
   const { data: backlinks } = useBacklinks(win.path);
   const projection = usePageBaseProperties(page?.meta.id ?? "");
   const openTab = useOpenTab();
+  const title = page?.meta.title || win.path;
+  const missing =
+    query.isError &&
+    typeof query.error === "object" &&
+    query.error !== null &&
+    "status" in query.error &&
+    query.error.status === 404;
+  const unavailable = query.isError || !page;
+  return (
+    <PreviewWindowFrame
+      {...props}
+      title={title}
+      icon={
+        <KindIcon
+          kind={resolveKind({
+            path: win.path,
+            body: page?.encrypted ? undefined : page?.body,
+          })}
+          size={14}
+          className="shrink-0"
+        />
+      }
+      onOpen={() => openTab("page", win.path, title, previewOpenTarget(win))}
+    >
+      {(scroller) => (
+        <WikilinkResolutionProvider path={win.path}>
+          <PreviewBody
+            path={win.path}
+            page={unavailable ? undefined : page}
+            backlinks={backlinks}
+            preview={projection.data?.preview}
+            previewPending={projection.isPending}
+            previewError={projection.isError}
+            showContent={win.mode === "peek" && !unavailable}
+            showTags
+          />
+          {query.isPending ? (
+            <p role="status" className="px-4 pb-4 text-sm text-mute">
+              Loading page…
+            </p>
+          ) : missing ? (
+            <p role="status" className="px-4 pb-4 text-sm text-mute">
+              This page is unavailable. It may have been moved or deleted.
+            </p>
+          ) : query.isError ? (
+            <div role="alert" className="px-4 pb-4 text-sm text-mute">
+              <p>Could not load this page.</p>
+              <button
+                type="button"
+                className={cn(
+                  "mt-2 rounded-full text-accent",
+                  FOCUS_RING_NATIVE,
+                )}
+                onClick={() => void query.refetch()}
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
+          {page && !unavailable && !page.encrypted && win.mode === "reader" ? (
+            <Suspense
+              fallback={
+                <p role="status" className="px-4 pb-4 text-sm text-mute">
+                  Loading reader…
+                </p>
+              }
+            >
+              <PreviewReader
+                target={win}
+                body={page.body}
+                restricted={win.restricted}
+                scrollRoot={scroller}
+              />
+            </Suspense>
+          ) : null}
+        </WikilinkResolutionProvider>
+      )}
+    </PreviewWindowFrame>
+  );
+}
+
+function PreviewWindowFrame({
+  win,
+  sheet = false,
+  hidden,
+  closeStack,
+  title,
+  icon,
+  onOpen,
+  children,
+}: WindowProps & {
+  title: string;
+  icon: ReactNode;
+  onOpen: () => void;
+  children: (scroller: RefObject<HTMLElement | null>) => ReactNode;
+}) {
   const surface = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLElement>(null);
   const requestedFocus = useRef(0);
@@ -233,7 +402,8 @@ function PreviewWindow({
     top: number;
   } | null>(null);
   const [dragging, setDragging] = useState(false);
-  const title = page?.meta.title || win.path;
+  const [copied, setCopied] = useState(false);
+  const external = isExternalPreviewTarget(win);
   const state = usePreviewStore.getState;
 
   useLayoutEffect(() => {
@@ -288,9 +458,11 @@ function PreviewWindow({
   }, [dragging, win.id]);
 
   const beginDrag = (event: React.PointerEvent, kind: "move" | "resize") => {
-    if (sheet || event.button !== 0) return;
+    if (sheet || win.maximized || event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    if (external && win.mode === "peek") state().expand(win.id);
     state().raise(win.id);
     drag.current = {
       kind,
@@ -303,13 +475,6 @@ function PreviewWindow({
     };
     setDragging(true);
   };
-  const missing =
-    query.isError &&
-    typeof query.error === "object" &&
-    query.error !== null &&
-    "status" in query.error &&
-    query.error.status === 404;
-  const unavailable = query.isError || !page;
 
   return (
     <PreviewContext value={win.id}>
@@ -330,14 +495,18 @@ function PreviewWindow({
                   left: win.x,
                   top: win.y,
                   width: win.width,
-                  height: win.mode === "reader" ? win.height : undefined,
+                  height:
+                    win.mode === "reader" || external ? win.height : undefined,
                   maxHeight: `calc(100dvh - ${win.y + 8}px)`,
                   zIndex: win.z,
                 }
           }
           onMouseEnter={() => state().enter(win.id)}
           onMouseLeave={() => state().leave(win.id)}
-          onFocusCapture={() => state().focusWithin(win.id, true)}
+          onFocusCapture={() => {
+            state().focusWithin(win.id, true);
+            state().raise(win.id);
+          }}
           onBlurCapture={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget))
               state().focusWithin(win.id, false);
@@ -370,23 +539,30 @@ function PreviewWindow({
                 <ArrowLeft size={16} />
               </IconBtn>
             ) : null}
-            <KindIcon
-              kind={resolveKind({
-                path: win.path,
-                body: page?.encrypted ? undefined : page?.body,
-              })}
-              size={14}
-              className="shrink-0"
-            />
+            {icon}
             <span className="min-w-0 flex-1 truncate text-[12.5px] text-mute">
-              {shortFolio(win.path)}
+              {windowLabel(win)}
             </span>
-            {win.mode === "peek" ? (
+            {win.mode === "peek" && !external ? (
               <IconBtn
                 label="Expand preview"
                 onClick={() => state().expand(win.id)}
               >
                 <Maximize2 size={14} />
+              </IconBtn>
+            ) : null}
+            {!sheet ? (
+              <IconBtn
+                label={
+                  win.maximized ? "Restore preview size" : "Maximize preview"
+                }
+                onClick={() => state().toggleMaximize(win.id)}
+              >
+                {win.maximized ? (
+                  <Minimize2 size={14} />
+                ) : (
+                  <Maximize2 size={14} />
+                )}
               </IconBtn>
             ) : null}
             <IconBtn
@@ -405,9 +581,9 @@ function PreviewWindow({
               <Minus size={14} />
             </IconBtn>
             <IconBtn
-              label="Open page"
+              label={external ? "Open link" : "Open page"}
               onClick={() => {
-                openTab("page", win.path, title, previewOpenTarget(win));
+                onOpen();
                 if (sheet) {
                   // Park readers so no modal obscures the destination; pins remain saved.
                   for (const reader of state().windows) {
@@ -419,6 +595,19 @@ function PreviewWindow({
             >
               <ArrowUpRight size={16} />
             </IconBtn>
+            {isExternalPreviewTarget(win) ? (
+              <IconBtn
+                label={copied ? "Copied link" : "Copy link"}
+                onClick={() => {
+                  void navigator.clipboard.writeText(win.url).then(
+                    () => setCopied(true),
+                    () => setCopied(false),
+                  );
+                }}
+              >
+                <Copy size={14} />
+              </IconBtn>
+            ) : null}
             <IconBtn
               label="Close preview"
               onClick={() => (sheet ? closeStack?.() : state().close(win.id))}
@@ -434,66 +623,17 @@ function PreviewWindow({
             // biome-ignore lint/a11y/noNoninteractiveTabindex: A labelled scroll region needs keyboard focus for scrolling.
             tabIndex={0}
             className={cn(
-              "min-h-0 flex-1 overflow-y-auto overscroll-contain",
+              "relative min-h-0 flex-1 overflow-y-auto overscroll-contain",
               FOCUS_RING_NATIVE,
+              external && "flex flex-col",
             )}
           >
-            <WikilinkResolutionProvider path={win.path}>
-              <PreviewBody
-                path={win.path}
-                page={unavailable ? undefined : page}
-                backlinks={backlinks}
-                preview={projection.data?.preview}
-                previewPending={projection.isPending}
-                previewError={projection.isError}
-                showContent={win.mode === "peek" && !unavailable}
-                showTags
-              />
-              {query.isPending ? (
-                <p role="status" className="px-4 pb-4 text-sm text-mute">
-                  Loading page…
-                </p>
-              ) : missing ? (
-                <p role="status" className="px-4 pb-4 text-sm text-mute">
-                  This page is unavailable. It may have been moved or deleted.
-                </p>
-              ) : query.isError ? (
-                <div role="alert" className="px-4 pb-4 text-sm text-mute">
-                  <p>Could not load this page.</p>
-                  <button
-                    type="button"
-                    className={cn(
-                      "mt-2 rounded-full text-accent",
-                      FOCUS_RING_NATIVE,
-                    )}
-                    onClick={() => void query.refetch()}
-                  >
-                    Retry
-                  </button>
-                </div>
-              ) : null}
-              {page &&
-              !unavailable &&
-              !page.encrypted &&
-              win.mode === "reader" ? (
-                <Suspense
-                  fallback={
-                    <p role="status" className="px-4 pb-4 text-sm text-mute">
-                      Loading reader…
-                    </p>
-                  }
-                >
-                  <PreviewReader
-                    target={win}
-                    body={page.body}
-                    restricted={win.restricted}
-                    scrollRoot={scroller}
-                  />
-                </Suspense>
-              ) : null}
-            </WikilinkResolutionProvider>
+            {children(scroller)}
+            {dragging ? (
+              <div className="absolute inset-0 z-10" aria-hidden />
+            ) : null}
           </section>
-          {!sheet && win.mode === "reader" ? (
+          {!sheet && !win.maximized && (win.mode === "reader" || external) ? (
             <button
               type="button"
               aria-label="Resize preview"
@@ -551,10 +691,10 @@ function Tray({ windows }: { windows: PW[] }) {
               FOCUS_RING_NATIVE,
             )}
           >
-            {shortFolio(win.path)}
+            {windowLabel(win)}
           </button>
           <IconBtn
-            label={`Close preview ${shortFolio(win.path)}`}
+            label={`Close preview ${windowLabel(win)}`}
             onClick={() => usePreviewStore.getState().close(win.id)}
           >
             <X size={13} />

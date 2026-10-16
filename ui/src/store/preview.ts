@@ -1,8 +1,8 @@
 import { create } from "zustand";
-import type { PreviewTarget } from "#/lib/previewTarget";
-import { previewTargetKey } from "#/lib/previewTarget";
+import type { LinkPreviewTarget } from "#/lib/previewTarget";
+import { isExternalPreviewTarget, previewTargetKey } from "#/lib/previewTarget";
 
-export interface PreviewWindow extends PreviewTarget {
+export type PreviewWindow = LinkPreviewTarget & {
   id: string;
   mode: "peek" | "reader";
   parentId?: string;
@@ -15,8 +15,10 @@ export interface PreviewWindow extends PreviewTarget {
   height: number;
   pinned: boolean;
   minimized: boolean;
+  maximized: boolean;
+  restoreGeometry?: Geometry;
   z: number;
-}
+};
 
 export const PREVIEW_WIDTH = 340;
 const PEEK_HEIGHT = 280;
@@ -26,7 +28,12 @@ const PERSIST_KEY = "clp.preview.pinned";
 const CLOSE_DELAY = 200;
 
 type Geometry = Pick<PreviewWindow, "x" | "y" | "width" | "height">;
-type Persisted = PreviewTarget & Geometry & { restricted?: boolean };
+type Persisted = LinkPreviewTarget &
+  Geometry & {
+    restricted?: boolean;
+    maximized?: boolean;
+    restoreGeometry?: Geometry;
+  };
 type OpenOptions = {
   mode?: "peek" | "reader";
   parentId?: string;
@@ -37,12 +44,17 @@ type OpenOptions = {
 type PreviewState = {
   windows: PreviewWindow[];
   topZ: number;
-  open: (target: PreviewTarget, rect: DOMRect, options?: OpenOptions) => string;
+  open: (
+    target: LinkPreviewTarget,
+    rect: DOMRect,
+    options?: OpenOptions,
+  ) => string;
   expand: (id: string) => void;
   pin: (id: string) => void;
   unpin: (id: string) => void;
   minimize: (id: string) => void;
   restore: (id: string) => void;
+  toggleMaximize: (id: string) => void;
   close: (id: string) => void;
   closePath: (path: string) => void;
   closePeeks: () => void;
@@ -93,19 +105,59 @@ function clampGeometry(geometry: Geometry): Geometry {
   };
 }
 
+function maximizedGeometry(): Geometry {
+  return clampGeometry({
+    x: 0,
+    y: 0,
+    width: typeof window === "undefined" ? 1200 : window.innerWidth,
+    height: typeof window === "undefined" ? 900 : window.innerHeight,
+  });
+}
+
+function readGeometry(value: unknown): Geometry | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const geometry = value as Record<string, unknown>;
+  if (
+    typeof geometry.x !== "number" ||
+    !Number.isFinite(geometry.x) ||
+    typeof geometry.y !== "number" ||
+    !Number.isFinite(geometry.y) ||
+    typeof geometry.width !== "number" ||
+    !Number.isFinite(geometry.width) ||
+    typeof geometry.height !== "number" ||
+    !Number.isFinite(geometry.height) ||
+    geometry.width <= 0 ||
+    geometry.height <= 0
+  )
+    return undefined;
+  return {
+    x: geometry.x,
+    y: geometry.y,
+    width: geometry.width,
+    height: geometry.height,
+  };
+}
+
 function savePinned(windows: PreviewWindow[]) {
   try {
     const pins: Persisted[] = windows
       .filter((win) => win.pinned)
       .map((win) => ({
-        path: win.path,
-        ...(win.heading !== undefined ? { heading: win.heading } : {}),
-        ...(win.blockId !== undefined ? { blockId: win.blockId } : {}),
+        ...(isExternalPreviewTarget(win)
+          ? { url: win.url }
+          : {
+              path: win.path,
+              ...(win.heading !== undefined ? { heading: win.heading } : {}),
+              ...(win.blockId !== undefined ? { blockId: win.blockId } : {}),
+            }),
         ...(win.restricted ? { restricted: true } : {}),
         x: win.x,
         y: win.y,
         width: win.width,
         height: win.height,
+        ...(win.maximized
+          ? { maximized: true, restoreGeometry: win.restoreGeometry }
+          : {}),
       }));
     window.localStorage.setItem(
       PERSIST_KEY,
@@ -139,8 +191,9 @@ function loadPinned(): PreviewWindow[] {
       if (!entry || typeof entry !== "object") continue;
       const value = entry as Record<string, unknown>;
       if (
-        typeof value.path !== "string" ||
-        !value.path.trim() ||
+        ("url" in value
+          ? typeof value.url !== "string" || "path" in value
+          : typeof value.path !== "string" || !value.path.trim()) ||
         typeof value.x !== "number" ||
         !Number.isFinite(value.x) ||
         typeof value.y !== "number" ||
@@ -161,15 +214,33 @@ function loadPinned(): PreviewWindow[] {
           value.height <= 0)
       )
         continue;
-      const target: PreviewTarget = {
-        path: value.path,
-        ...(typeof value.heading === "string"
-          ? { heading: value.heading }
-          : {}),
-        ...(typeof value.blockId === "string"
-          ? { blockId: value.blockId }
-          : {}),
-      };
+      let target: LinkPreviewTarget;
+      if ("url" in value) {
+        if (typeof value.url !== "string") continue;
+        try {
+          const url = new URL(value.url);
+          if (
+            !["http:", "https:"].includes(url.protocol) ||
+            url.username ||
+            url.password
+          )
+            continue;
+          target = { url: value.url };
+        } catch {
+          continue;
+        }
+      } else {
+        if (typeof value.path !== "string") continue;
+        target = {
+          path: value.path,
+          ...(typeof value.heading === "string"
+            ? { heading: value.heading }
+            : {}),
+          ...(typeof value.blockId === "string"
+            ? { blockId: value.blockId }
+            : {}),
+        };
+      }
       const key = previewTargetKey(target);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -177,6 +248,8 @@ function loadPinned(): PreviewWindow[] {
         typeof value.width === "number" ? value.width : READER_WIDTH;
       const height =
         typeof value.height === "number" ? value.height : READER_HEIGHT;
+      const restoreGeometry = readGeometry(value.restoreGeometry);
+      const maximized = value.maximized === true && !!restoreGeometry;
       windows.push({
         ...target,
         ...clampGeometry({
@@ -191,6 +264,8 @@ function loadPinned(): PreviewWindow[] {
         focusRequest: 0,
         pinned: true,
         minimized: false,
+        maximized,
+        ...(maximized ? { ...maximizedGeometry(), restoreGeometry } : {}),
         z: 100 + windows.length,
       });
     }
@@ -373,8 +448,9 @@ export const usePreviewStore = create<PreviewState>((set, get) => {
         return existing.id;
       }
       const id = `pv-${nextId++}`;
-      const width = mode === "reader" ? READER_WIDTH : PREVIEW_WIDTH;
-      const height = mode === "reader" ? READER_HEIGHT : PEEK_HEIGHT;
+      const readerSize = mode === "reader" || isExternalPreviewTarget(target);
+      const width = readerSize ? READER_WIDTH : PREVIEW_WIDTH;
+      const height = readerSize ? READER_HEIGHT : PEEK_HEIGHT;
       const geometry = clampGeometry({
         x: rect.left,
         y:
@@ -395,6 +471,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => {
         focusRequest: mode === "reader" ? 1 : 0,
         pinned: false,
         minimized: false,
+        maximized: false,
         z,
       };
       set({ windows: [...get().windows, win], topZ: z });
@@ -436,6 +513,36 @@ export const usePreviewStore = create<PreviewState>((set, get) => {
       }));
       get().raise(id);
     },
+    toggleMaximize(id) {
+      cancelBranch(id);
+      update(
+        id,
+        (win) => {
+          if (win.maximized) {
+            return {
+              ...win,
+              ...clampGeometry(win.restoreGeometry ?? win),
+              maximized: false,
+              restoreGeometry: undefined,
+            };
+          }
+          return {
+            ...win,
+            mode: "reader",
+            ...maximizedGeometry(),
+            maximized: true,
+            restoreGeometry: {
+              x: win.x,
+              y: win.y,
+              width: win.width,
+              height: win.height,
+            },
+          };
+        },
+        true,
+      );
+      get().raise(id);
+    },
     close(id) {
       remove(new Set([id]));
     },
@@ -443,7 +550,9 @@ export const usePreviewStore = create<PreviewState>((set, get) => {
       remove(
         new Set(
           get()
-            .windows.filter((win) => win.path === path)
+            .windows.filter(
+              (win) => !isExternalPreviewTarget(win) && win.path === path,
+            )
             .map((win) => win.id),
         ),
       );
@@ -464,26 +573,32 @@ export const usePreviewStore = create<PreviewState>((set, get) => {
       set({ topZ: z });
     },
     move(id, x, y) {
-      update(id, (win) => ({ ...win, ...clampGeometry({ ...win, x, y }) }));
+      update(id, (win) =>
+        win.maximized ? win : { ...win, ...clampGeometry({ ...win, x, y }) },
+      );
     },
     commitMove(id, x, y) {
       update(
         id,
-        (win) => ({ ...win, ...clampGeometry({ ...win, x, y }) }),
+        (win) =>
+          win.maximized ? win : { ...win, ...clampGeometry({ ...win, x, y }) },
         true,
       );
     },
     resize(id, width, height) {
       update(
         id,
-        (win) => ({ ...win, ...clampGeometry({ ...win, width, height }) }),
+        (win) =>
+          win.maximized
+            ? win
+            : { ...win, ...clampGeometry({ ...win, width, height }) },
         true,
       );
     },
     clampAll() {
       const windows = get().windows.map((win) => ({
         ...win,
-        ...clampGeometry(win),
+        ...(win.maximized ? maximizedGeometry() : clampGeometry(win)),
       }));
       set({ windows });
       savePinned(windows);
