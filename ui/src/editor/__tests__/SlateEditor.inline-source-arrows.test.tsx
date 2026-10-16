@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -9,7 +10,15 @@ import {
 import userEvent from "@testing-library/user-event";
 import type { ComponentType } from "react";
 import { type Descendant, type Editor, Transforms } from "slate";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const { editorRef } = vi.hoisted(() => ({
   editorRef: { current: null as Editor | null },
@@ -38,8 +47,34 @@ beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, "isContentEditable", {
     configurable: true,
     get(this: HTMLElement) {
-      return this.closest('[contenteditable="true"]') !== null;
+      return (
+        this.closest("[contenteditable]")?.getAttribute("contenteditable") ===
+        "true"
+      );
     },
+  });
+
+  const focus = HTMLElement.prototype.focus;
+  vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (
+    this: HTMLElement,
+    options?: FocusOptions,
+  ) {
+    const selection = this.ownerDocument.getSelection();
+    // jsdom collapses the document selection to (focusedElement, 0). A browser
+    // keeps a range already inside the editing host, which ReactEditor.focus
+    // installs before calling focus(). Preserve that range, not a test point.
+    const range =
+      this.getAttribute("contenteditable") === "true" &&
+      selection?.rangeCount &&
+      this.contains(selection.anchorNode) &&
+      this.contains(selection.focusNode)
+        ? selection.getRangeAt(0).cloneRange()
+        : null;
+    focus.call(this, options);
+    if (range && this.ownerDocument.activeElement === this) {
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
   });
 });
 
@@ -47,6 +82,17 @@ beforeEach(() => {
   window.getSelection()?.removeAllRanges();
   editorRef.current = null;
 });
+
+afterAll(() => vi.restoreAllMocks());
+
+async function flushSelectionChange() {
+  await act(async () => {
+    fireEvent(document, new Event("selectionchange"));
+    // Wait through Slate's debounce and 100ms DOM-to-model throttle before
+    // asserting the caret. Real timers keep Testing Library's async helpers live.
+    await delay(150);
+  });
+}
 
 function paragraph(children: Descendant[]): Descendant {
   return { type: "paragraph", children } as Descendant;
@@ -72,8 +118,10 @@ async function renderAt(
   const editor = editorRef.current;
   if (!editor) throw new Error("Slate editor is not active");
   const editable = screen.getByRole("textbox");
-  await userEvent.setup().click(editable);
-  act(() => Transforms.select(editor, { path, offset }));
+  await act(async () => {
+    editable.focus();
+    Transforms.select(editor, { path, offset });
+  });
   await waitFor(() =>
     expect(editor.selection?.anchor).toEqual({ path, offset }),
   );
@@ -221,6 +269,7 @@ describe("SlateEditor block-ref source editing", () => {
         screen.queryByRole("textbox", { name: "Edit block reference" }),
       ).toBeNull(),
     );
+    await flushSelectionChange();
     expect(slateToMarkdown(editor.children)).toContain("((abc123DEF0))");
     expect(editor.selection?.anchor).toEqual({ path: [0, 2], offset: 0 });
   });
@@ -306,6 +355,7 @@ describe("SlateEditor link source editing", () => {
     expect(input).toHaveValue("[**b** x](https://e.com)");
     expect(input).toHaveFocus();
     expect(input.selectionStart).toBe(0);
+    await flushSelectionChange();
     // The Slate selection stays in the text before the link.
     expect(editor.selection?.anchor).toEqual({ path: [0, 0], offset: 4 });
   });
