@@ -19,6 +19,7 @@ const NETWORK_ONLY_PREFIXES = [
   "/api/vault/cas/",
   "/api/vault/attachments",
   "/api/vault/pages-export/",
+  "/api/vault/external-previews",
   "/api/docs",
   "/api/openapi.json",
 ];

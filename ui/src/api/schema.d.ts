@@ -800,6 +800,54 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/vault/external-previews": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["request"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/external-previews/images/{key}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["image"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/external-previews/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["status"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/vault/feeds": {
     parameters: {
       query?: never;
@@ -2810,6 +2858,23 @@ export interface components {
       arxiv?: string | null;
       doi?: string | null;
       isbn?: string | null;
+    };
+    ExternalPreviewRequest: {
+      url: string;
+    };
+    ExternalPreviewResponse: {
+      captured_at: string | null;
+      description: string | null;
+      final_url: string | null;
+      image_url: string | null;
+      refreshing: boolean;
+      state: components["schemas"]["ExternalPreviewState"];
+      title: string | null;
+    };
+    /** @enum {string} */
+    ExternalPreviewState: "disabled" | "pending" | "ready" | "unavailable";
+    ExternalPreviewStatus: {
+      enabled: boolean;
     };
     FeatureFlagsResponse: {
       academic: boolean;
@@ -6768,6 +6833,107 @@ export interface operations {
         };
         content: {
           "text/event-stream": string;
+        };
+      };
+    };
+  };
+  request: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExternalPreviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Cached preview or bounded asynchronous capture status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalPreviewResponse"];
+        };
+      };
+      /** @description Invalid URL */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Cross-site request rejected */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Preview cache unavailable */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  image: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description 64 hexadecimal characters */
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Cached JPEG; never fetches */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "image/jpeg": number[];
+        };
+      };
+      /** @description Preview image unavailable */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  status: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description External preview opt-in status; never fetches */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalPreviewStatus"];
         };
       };
     };

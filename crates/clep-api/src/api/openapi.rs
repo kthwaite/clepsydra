@@ -72,6 +72,7 @@ impl Modify for SchemaOverrides {
         (name = "Index", description = "Index, graph, tags and search"),
         (name = "Academic", description = "Academic works, annotations and importers"),
         (name = "Archive", description = "Web archives and content-addressed blobs"),
+        (name = "External previews", description = "Opt-in disposable external-link previews"),
         (name = "Journal", description = "Daily journal retrieval and capture"),
         (name = "AI Journal", description = "Daily AI-assistant journal retrieval and capture"),
         (name = "Conversations", description = "Atomic AI conversation capture"),
@@ -88,6 +89,9 @@ impl Modify for SchemaOverrides {
         (name = "Sync", description = "Git-backed vault synchronisation")
     ),
     paths(
+        crate::api::external_previews::status,
+        crate::api::external_previews::request,
+        crate::api::external_previews::image,
         // Features
         crate::api::features::get_features,
         // Pages
@@ -251,6 +255,10 @@ impl Modify for SchemaOverrides {
     ),
     components(
         schemas(
+            crate::api::external_previews::PreviewRequest,
+            crate::api::external_previews::PreviewStatus,
+            crate::external_previews::PreviewResponse,
+            crate::external_previews::PreviewState,
             // Shared
             crate::api::error::ApiError,
             crate::api::features::FeatureFlagsResponse,

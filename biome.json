@@ -6,6 +6,8 @@
     "includes": [
       "./ui/src/**/*.{js,ts,jsx,tsx}",
       "./ui/*.{json,js,ts}",
+      "./preview-worker/*.mjs",
+      "./preview-worker/package.json",
       "!ui/src/routeTree.gen.ts"
     ]
   },

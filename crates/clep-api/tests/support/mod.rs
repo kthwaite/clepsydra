@@ -143,6 +143,7 @@ impl ApiFixtureBuilder {
         let index = IndexHandle::spawn(index, vault.clone());
         let (change_tx, _) = broadcast::channel(64);
         let state = Arc::new(AppState {
+            external_previews: Default::default(),
             started_at: std::time::Instant::now(),
             features: clep_api::FeatureFlags::default(),
             clock: self.clock,

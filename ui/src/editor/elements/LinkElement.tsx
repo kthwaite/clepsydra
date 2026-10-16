@@ -1,5 +1,6 @@
 import {
   autoUpdate,
+  FloatingFocusManager,
   FloatingPortal,
   flip,
   offset,
@@ -7,6 +8,7 @@ import {
   shift,
   useDismiss,
   useFloating,
+  useFocus,
   useHover,
   useInteractions,
   useRole,
@@ -15,6 +17,7 @@ import { Check, Copy, ExternalLink } from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
   useCallback,
+  useRef,
   useState,
 } from "react";
 import {
@@ -25,6 +28,8 @@ import {
 } from "slate-react";
 import { toast } from "sonner";
 import { resolveSchemeUrl } from "#/api/deeplink";
+import { externalPreviewUrl } from "#/api/externalPreviews";
+import { ExternalPreviewCard } from "#/editor/elements/ExternalPreviewCard";
 import { InlineSourceEditor } from "#/editor/InlineSourceInput";
 import {
   isSessionAt,
@@ -86,10 +91,21 @@ function LinkAnchor({ attributes, children, element }: Props) {
   const openTab = useOpenTab();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const suppressRestoredFocus = useRef(false);
+  const closePopover = useCallback(() => {
+    suppressRestoredFocus.current = true;
+    setOpen(false);
+    window.requestAnimationFrame(() => {
+      suppressRestoredFocus.current = false;
+    });
+  }, []);
 
   const { refs, floatingStyles, context } = useFloating({
     open,
-    onOpenChange: setOpen,
+    onOpenChange(nextOpen) {
+      if (!nextOpen) closePopover();
+      else if (!suppressRestoredFocus.current) setOpen(true);
+    },
     placement: "top-start",
     strategy: "fixed",
     middleware: [offset(6), flip(), shift({ padding: 8 })],
@@ -100,10 +116,12 @@ function LinkAnchor({ attributes, children, element }: Props) {
     delay: { open: 220, close: 80 },
     handleClose: safePolygon(),
   });
+  const focus = useFocus(context);
   const dismiss = useDismiss(context);
   const role = useRole(context, { role: "dialog" });
   const { getReferenceProps, getFloatingProps } = useInteractions([
     hover,
+    focus,
     dismiss,
     role,
   ]);
@@ -138,9 +156,9 @@ function LinkAnchor({ attributes, children, element }: Props) {
           openTab("page", target.path);
         }
       }
-      setOpen(false);
+      closePopover();
     },
-    [url, openTab],
+    [url, openTab, closePopover],
   );
 
   const doCopy = useCallback(
@@ -169,6 +187,7 @@ function LinkAnchor({ attributes, children, element }: Props) {
   const target = resolveLinkTarget(url);
   const safeHref = target.kind === "browser" ? target.href : undefined;
   const resource = safeHref ? classifyLinkResource(safeHref) : null;
+  const previewUrl = externalPreviewUrl(url);
 
   return (
     <>
@@ -177,45 +196,78 @@ function LinkAnchor({ attributes, children, element }: Props) {
         ref={setRef}
         href={safeHref}
         data-link-resource={resource ?? undefined}
-        className="cl-link cl-link-underline"
-        {...getReferenceProps({ onClick })}
+        tabIndex={0}
+        className={cn("cl-link cl-link-underline", FOCUS_RING_NATIVE)}
+        {...getReferenceProps({
+          onClick,
+          onKeyDown(event) {
+            // A focused link uses Tab to visit its panel, not to indent the
+            // enclosing Slate block. Caret key events still target Editable.
+            if (event.key === "Tab" || event.key === "Escape") {
+              event.stopPropagation();
+            }
+          },
+        })}
       >
         {children}
       </a>
       {open && (
         <FloatingPortal>
-          <div
-            ref={refs.setFloating}
-            style={floatingStyles}
-            contentEditable={false}
-            className="z-50 flex items-center gap-1 rounded-[16px] bg-raise py-1.5 pl-3.5 pr-1.5 text-[13px] text-ink shadow-lg"
-            {...getFloatingProps()}
+          <FloatingFocusManager
+            context={context}
+            initialFocus={-1}
+            modal={false}
+            order={["reference", "content"]}
           >
-            <span className="mr-1 max-w-[260px] truncate text-mute" title={url}>
-              {truncate(url)}
-            </span>
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={doOpen}
-              className={LINK_ACTION}
-            >
-              <ExternalLink aria-hidden size={13} /> Open
-            </button>
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={doCopy}
-              className={LINK_ACTION}
-            >
-              {copied ? (
-                <Check aria-hidden size={13} />
-              ) : (
-                <Copy aria-hidden size={13} />
+            <div
+              ref={refs.setFloating}
+              style={floatingStyles}
+              contentEditable={false}
+              className={cn(
+                "z-50 rounded-xl bg-raise text-[13px] text-ink shadow-lg",
+                previewUrl && "w-[340px] max-w-[calc(100vw-16px)]",
               )}
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
+              {...getFloatingProps({
+                "aria-label": "Link preview",
+                onKeyDown(event) {
+                  event.stopPropagation();
+                },
+              })}
+            >
+              {previewUrl ? (
+                <ExternalPreviewCard key={previewUrl} url={previewUrl} />
+              ) : null}
+              <div className="flex items-center gap-1 py-1.5 pl-3.5 pr-1.5">
+                <span
+                  className="mr-1 min-w-0 max-w-[260px] flex-1 truncate text-mute"
+                  title={url}
+                >
+                  {truncate(url)}
+                </span>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={doOpen}
+                  className={LINK_ACTION}
+                >
+                  <ExternalLink aria-hidden size={13} /> Open
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={doCopy}
+                  className={LINK_ACTION}
+                >
+                  {copied ? (
+                    <Check aria-hidden size={13} />
+                  ) : (
+                    <Copy aria-hidden size={13} />
+                  )}
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
+          </FloatingFocusManager>
         </FloatingPortal>
       )}
     </>

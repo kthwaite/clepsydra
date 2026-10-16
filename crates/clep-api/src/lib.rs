@@ -1,6 +1,8 @@
 pub mod api;
 pub mod backup;
 pub mod deeplink;
+mod external_preview_capture;
+pub mod external_previews;
 pub use clep_feeds as feeds;
 mod page_export;
 pub mod sync_runtime;
@@ -352,6 +354,7 @@ pub async fn build_app_state_with_settings(
         sync,
         watcher_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         feed_runtime,
+        external_previews: Arc::new(external_previews::PreviewRuntime::default()),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(
@@ -470,9 +473,17 @@ async fn build_server_state(
         vault_root_config = %settings.vault.root,
         "resolved configuration; opening vault"
     );
-    let state = build_app_state_with_settings(&vault_root, &settings.feeds, settings.features)
+    let mut state = build_app_state_with_settings(&vault_root, &settings.feeds, settings.features)
         .await
         .map_err(|e| explain_startup_error(e, &vault_root))?;
+    let previews = external_previews::PreviewRuntime::for_vault(
+        state.vault.root(),
+        &settings.external_previews,
+    )
+    .await?;
+    Arc::get_mut(&mut state)
+        .expect("startup state is not shared until server construction completes")
+        .external_previews = previews;
     Ok((state, settings))
 }
 

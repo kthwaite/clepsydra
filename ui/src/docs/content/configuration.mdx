@@ -89,7 +89,8 @@ is never styled.
 `$HOME/.config/clepsydra/config.toml` when `XDG_CONFIG_HOME` is unset. It
 creates missing parent directories and refuses to overwrite an existing file.
 The non-empty template documents precedence and defaults in commented
-`[server]`, `[server.tls]`, `[vault]`, `[features]`, and `[feeds]` sections;
+`[server]`, `[server.tls]`, `[vault]`, `[features]`, `[feeds]`, and
+`[external_previews]` sections;
 all example assignments remain commented, so the template parses as an empty
 TOML table.
 The compact active equivalent is shown below.
@@ -122,6 +123,10 @@ unread_retention_days = 90
 max_response_bytes = 10485760
 max_entry_content_bytes = 1048576
 fetch_concurrency = 4
+
+[external_previews]
+enabled = false
+worker_image = "clepsydra-preview:1"
 ```
 
 ### Keys
@@ -144,6 +149,8 @@ fetch_concurrency = 4
 | `feeds` | `max_response_bytes` | integer | `10485760` | Maximum bytes streamed from one response |
 | `feeds` | `max_entry_content_bytes` | integer | `1048576` | Larger entry HTML is omitted rather than truncated |
 | `feeds` | `fetch_concurrency` | integer | `4` | Maximum simultaneous feed fetches |
+| `external_previews` | `enabled` | bool | `false` | Allow anonymous outbound requests when external editor links are hovered or focused; restart required |
+| `external_previews` | `worker_image` | string | `clepsydra-preview:1` | Operator-trusted local Docker image for network-isolated screenshots |
 
 `features.academic` and `features.feeds` are startup feature flags. Both
 default to `true`. Changes take effect only after restarting Clepsydra.
@@ -250,6 +257,47 @@ HTML is sanitized. Bookmarked entries are never pruned. Read and unread
 unbookmarked entries use `retention_days` and `unread_retention_days`
 respectively.
 
+### External link previews
+
+External editor links retain **Open** and **Copy** actions with previews disabled.
+To enable screenshots, start a **local Docker engine** and, from the repository
+root, build the worker:
+
+```bash
+docker build -t clepsydra-preview:1 preview-worker
+```
+
+Then set `[external_previews].enabled = true` in the application config and restart
+`clep serve`. The server never pulls images during a capture. Keep the worker's
+pinned Playwright package and Docker base image versions matched when upgrading,
+and rebuild the image to receive browser security updates.
+
+Opening a preview now makes anonymous requests to the destination and its page
+resources. Chromium runs as an unprivileged user in a disposable, network-disabled
+container. Clepsydra mediates HTTP(S) GETs through its checked fetcher, rejects
+private/non-global destinations and URL credentials, and validates every redirect
+hop. No browser profile, cookies, authorization headers, or host folders are
+shared. Only plain metadata and a JPEG reach the UI, never executable remote HTML.
+
+If Docker or the image is unavailable, a successfully fetched HTML page still
+provides a metadata-only card. Login pages, bot challenges, cookie banners, slow
+pages, and unsupported non-HTML resources may produce limited or unavailable
+previews. Captures use a fixed 1200 × 800 viewport, not a full-page screenshot.
+
+The disposable SQLite cache lives under the OS cache directory at
+`clepsydra/external-previews/<vault-root-hash>/previews.sqlite3`, outside the vault.
+It holds at most 1,000 entries, with a 256 MiB disk envelope including database
+overhead and rollback-journal allowance (approximately 123.5 MiB of payload).
+Screenshot captures are fresh for seven days; stale captures display immediately
+while refreshing. Failures and metadata-only fallbacks retry after five minutes,
+and at most two captures run at once. No Folio is created, and preview data is not synced or included in
+vault backups. Stop the server before removing this disposable cache directory.
+
+Preview URLs, metadata, and screenshots are plaintext. Query parameters may
+contain sensitive tokens. Enabling previews is permission to contact those
+websites merely by hovering or focusing a link; it does not authenticate to them
+or hide requests from their publishers.
+
 ### Environment overrides
 
 Settings-backed commands support env overrides via `CLEPSYDRA__...`:
@@ -264,6 +312,8 @@ Settings-backed commands support env overrides via `CLEPSYDRA__...`:
 - `CLEPSYDRA__FEATURES__ACADEMIC`
 - `CLEPSYDRA__FEATURES__FEEDS`
 - `CLEPSYDRA__FEEDS__FETCH_INTERVAL_MINUTES` (and the same hierarchy for every `[feeds]` key)
+- `CLEPSYDRA__EXTERNAL_PREVIEWS__ENABLED`
+- `CLEPSYDRA__EXTERNAL_PREVIEWS__WORKER_IMAGE`
 
 `clep new` is intentionally narrower: it uses the same file lookup but reads
 only `[vault].root` from the selected file. For that command the key is required;

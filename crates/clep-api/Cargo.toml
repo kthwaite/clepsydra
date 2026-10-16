@@ -31,6 +31,7 @@ clep-mutate = { workspace = true }
 clep-vault = { workspace = true }
 dirs = { workspace = true }
 docx-rs = { workspace = true }
+encoding_rs = { workspace = true }
 image = { workspace = true }
 mime_guess = { workspace = true }
 parking_lot = { workspace = true }
@@ -40,6 +41,7 @@ quick-xml = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
 rustix = { workspace = true }
+scraper = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

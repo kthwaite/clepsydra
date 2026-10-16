@@ -497,6 +497,7 @@ name = "All"
         let (change_tx, _) = broadcast::channel(8);
         let rubbish = crate::vault::rubbish::RubbishStore::for_vault(vault.root());
         let state = Arc::new(AppState {
+            external_previews: Default::default(),
             started_at: std::time::Instant::now(),
             features: crate::FeatureFlags::default(),
             clock: Arc::new(FixedClock(

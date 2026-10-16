@@ -10,6 +10,11 @@ storage (CAS). The feed reader keeps subscriptions in `feeds.md` and fetched
 entry state in a private local SQLite database. Neither workflow publishes a
 website or exposes a public feed.
 
+External editor links also support optional disposable hover previews. Unlike an
+archive capture, a preview creates no Folio and is not a permanent snapshot.
+See [External link previews](/docs/configuration#external-link-previews) for the
+opt-in setting, local Docker worker, cache limits, and privacy implications.
+
 ## Prerequisites
 
 The private feed reader requires the application-config flag `features.feeds`,

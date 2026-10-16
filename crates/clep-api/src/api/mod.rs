@@ -16,6 +16,7 @@ pub mod deeplink;
 pub mod encryption;
 pub mod error;
 pub mod events;
+pub mod external_previews;
 pub mod features;
 pub mod feeds;
 pub mod folders;
@@ -102,6 +103,8 @@ pub struct AppState {
     pub watcher_paused: Arc<std::sync::atomic::AtomicBool>,
     /// Resources allocated only when the Feeds feature is enabled.
     pub feed_runtime: Option<Arc<crate::feeds::runtime::FeedRuntime>>,
+    /// Opt-in, disposable external-link preview cache, separate from the vault.
+    pub external_previews: Arc<crate::external_previews::PreviewRuntime>,
     /// Serializes archive ingest to prevent concurrent race conditions
     /// (duplicate URL check, path collision, file write/index atomicity).
     pub archive_ingest_lock: tokio::sync::Mutex<()>,
@@ -243,6 +246,7 @@ pub fn api_router_with_archive_limit(
 ) -> Router<Arc<AppState>> {
     let mut router = Router::new()
         .route("/events", axum::routing::get(events::event_stream))
+        .merge(external_previews::router())
         .nest("/encryption", encryption::router())
         .nest("/pages", pages::router())
         .nest("/pages-move", pages::move_router())

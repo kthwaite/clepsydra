@@ -49,6 +49,7 @@ fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
 
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
+        external_previews: Default::default(),
         started_at: std::time::Instant::now(),
         features: clep_api::FeatureFlags::default(),
         clock: Arc::new(clep_api::api::SystemClock),

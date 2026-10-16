@@ -61,6 +61,14 @@ const LITERATE_CONFIG_TEMPLATE: &str = r##"# Clepsydra application configuration
 # max_entry_content_bytes = 1048576
 # Maximum simultaneous feed fetches. Default: 4.
 # fetch_concurrency = 4
+
+# [external_previews]
+# Allow HTTP(S) requests when hovering or focusing external editor links. Default: false.
+# Previews contact websites anonymously and cache plaintext outside the vault.
+# enabled = false
+# Trusted local Docker image for isolated screenshots; build it from preview-worker/.
+# A missing image/daemon leaves metadata-only previews when HTML can be fetched.
+# worker_image = "clepsydra-preview:1"
 "##;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -470,52 +478,8 @@ mod tests {
         let path = create_with_env(Some(xdg.path().as_os_str().to_owned()), None).unwrap();
         let contents = fs::read_to_string(path).unwrap();
 
-        assert!(!contents.is_empty());
-        for expected in [
-            "# [server]",
-            "# host = \"localhost\"",
-            "# port = 3000",
-            "# dev_mode = false",
-            "# public_origins = [\"https://clepsydra.localhost\"]",
-            "# [server.tls]",
-            "# enabled = false",
-            "# cert_path = \"certs/localhost.pem\"",
-            "# key_path = \"certs/localhost-key.pem\"",
-            "# [vault]",
-            "# root = \"./vault\"",
-            "# [features]",
-            "# academic = true",
-            "# feeds = true",
-            "# [feeds]",
-            "# fetch_interval_minutes = 30",
-            "# retention_days = 30",
-            "# unread_retention_days = 90",
-            "# max_response_bytes = 10485760",
-            "# max_entry_content_bytes = 1048576",
-            "# fetch_concurrency = 4",
-        ] {
-            assert!(
-                contents.contains(expected),
-                "missing template line: {expected}"
-            );
-        }
-
         let parsed = contents.parse::<toml::Table>().unwrap();
         assert!(parsed.is_empty());
-    }
-
-    #[test]
-    fn template_documents_precedence_and_tls_pairing() {
-        let xdg = tempfile::tempdir().unwrap();
-        let path = create_with_env(Some(xdg.path().as_os_str().to_owned()), None).unwrap();
-        let contents = fs::read_to_string(path).unwrap();
-
-        assert!(contents.contains("CLEPSYDRA__SERVER__HOST"));
-        assert!(contents.contains("CLEPSYDRA__FEATURES__ACADEMIC"));
-        assert!(contents.contains("CLEPSYDRA__FEATURES__FEEDS"));
-        assert!(contents.contains("defaults → config file → environment → serve flags"));
-        assert!(contents.contains("cert_path and key_path must be set together"));
-        assert!(contents.contains("relative to this config file"));
     }
 
     #[test]

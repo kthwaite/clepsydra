@@ -45,6 +45,15 @@ describe("classifyRequest", () => {
     );
   });
 
+  it("does not retain disposable previews or stale opt-in status in the offline cache", () => {
+    expect(classify("/api/vault/external-previews/status")).toBe(
+      "network-only",
+    );
+    expect(classify("/api/vault/external-previews/images/abc123")).toBe(
+      "network-only",
+    );
+  });
+
   it("routes vault GETs and the feature flags through the api cache", () => {
     expect(classify("/api/vault/pages/notes%2Fa.md")).toBe("api");
     expect(classify("/api/vault/index/search?q=x&limit=20")).toBe("api");

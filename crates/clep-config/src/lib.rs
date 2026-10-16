@@ -44,6 +44,26 @@ pub struct Settings {
     pub features: FeatureFlags,
     #[serde(default)]
     pub feeds: FeedsSettings,
+    #[serde(default)]
+    pub external_previews: ExternalPreviewsSettings,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ExternalPreviewsSettings {
+    /// Explicit consent to external network requests when a link preview is opened.
+    pub enabled: bool,
+    /// Locally installed, operator-trusted browser worker image.
+    pub worker_image: String,
+}
+
+impl Default for ExternalPreviewsSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            worker_image: "clepsydra-preview:1".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -582,6 +602,7 @@ mod tests {
             vault: VaultSettings::default(),
             features: FeatureFlags::default(),
             feeds: FeedsSettings::default(),
+            external_previews: ExternalPreviewsSettings::default(),
         }
     }
 

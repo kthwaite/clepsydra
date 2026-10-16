@@ -248,6 +248,30 @@ Replace wrapped identity. Responses: `200` Wrapped identity replaced; `400` Inva
 ### `GET /api/vault/events`
 Open the server-sent events stream. Responses: `200` Server-sent events stream.
 
+## External previews
+
+### `GET /api/vault/external-previews/status`
+
+Returns `{"enabled": false}` unless external preview fetching is enabled in the
+server configuration. Never contacts external sites. Responses: `200`.
+
+### `POST /api/vault/external-previews`
+
+Accepts JSON `{"url": "https://example.com/article"}`. Returns `state`
+(`disabled`, `pending`, `ready`, or `unavailable`), nullable `title`,
+`description`, `final_url`, `image_url`, and `captured_at`, plus `refreshing`.
+Only this endpoint can initiate external requests, and only when opted in.
+Poll while `pending` or `refreshing`; stale ready data remains usable during
+refresh. A full capture queue returns `unavailable` without admitting work.
+Responses: `200` Preview state; `400` Invalid URL; `403` Cross-site browser
+request; `413` Body limit exceeded; `415` Non-JSON body; `500` Cache unavailable.
+
+### `GET /api/vault/external-previews/images/{key}`
+
+Reads a cached JPEG using its 64-character hexadecimal key. Never fetches the
+remote page. Responses: `200` JPEG with `no-store` and `nosniff`; `404` Invalid,
+missing, disabled, or evicted image.
+
 ## Features
 
 ### `GET /api/features`

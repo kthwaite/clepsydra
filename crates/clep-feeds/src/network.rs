@@ -33,6 +33,8 @@ pub enum CheckedHttpError {
     UnsupportedScheme(String),
     #[error("URL has no destination host")]
     MissingHost,
+    #[error("URL credentials are not allowed")]
+    CredentialsNotAllowed,
     #[error("URL has no known destination port")]
     MissingPort,
     #[error("destination address {0} is non-global")]
@@ -205,6 +207,25 @@ impl CheckedHttpClient {
             deadline,
             self.get_until_deadline(url, conditional, deadline),
         )
+        .await
+        .map_err(|_| CheckedHttpError::DeadlineExceeded)?
+    }
+
+    /// Fetch one anonymous response, leaving redirects to the caller. Used when
+    /// replaying responses into a browser must preserve redirect/origin semantics.
+    /// Rejects URL credentials; checks the destination and absolute deadline.
+    pub async fn get_once_before(
+        &self,
+        url: Url,
+        deadline: tokio::time::Instant,
+    ) -> Result<CheckedResponse, CheckedHttpError> {
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(CheckedHttpError::CredentialsNotAllowed);
+        }
+        tokio::time::timeout_at(deadline, async {
+            let response = self.request_once(&url, None, deadline).await?;
+            self.collect_response(response, url).await
+        })
         .await
         .map_err(|_| CheckedHttpError::DeadlineExceeded)?
     }
@@ -573,9 +594,47 @@ mod tests {
         .unwrap()
     }
 
-    #[test]
-    fn builds_the_default_checked_client_with_a_response_limit() {
-        let _client = CheckedHttpClient::new(1024).expect("checked client should build");
+    #[tokio::test]
+    async fn single_hop_preserves_redirect_without_contacting_its_destination() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/redirect"))
+            .respond_with(
+                ResponseTemplate::new(302).insert_header("Location", "http://127.0.0.1/private"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let url = fixture_url(&server, "/redirect");
+        let response = fixture_client(&server, 1024)
+            .get_once_before(
+                url.clone(),
+                tokio::time::Instant::now() + Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status, StatusCode::FOUND);
+        assert_eq!(response.final_url, url);
+        assert_eq!(response.headers[LOCATION], "http://127.0.0.1/private");
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn single_hop_rejects_url_credentials_before_sending_them() {
+        let server = MockServer::start().await;
+        let client = fixture_client(&server, 1024);
+        let mut credential_url = fixture_url(&server, "/secret");
+        credential_url.set_username("user").unwrap();
+        credential_url.set_password(Some("password")).unwrap();
+        let error = client
+            .get_once_before(
+                credential_url,
+                tokio::time::Instant::now() + Duration::from_secs(5),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, CheckedHttpError::CredentialsNotAllowed));
+        assert!(server.received_requests().await.unwrap().is_empty());
     }
 
     #[test]
