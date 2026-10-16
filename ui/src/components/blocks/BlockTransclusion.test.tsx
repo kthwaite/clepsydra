@@ -7,6 +7,7 @@ import {
   BlockTransclusion,
   blockDisplayContent,
 } from "#/components/blocks/BlockTransclusion";
+import { usePreviewStore } from "#/store/preview";
 
 const { useBlockMock } = vi.hoisted(() => ({
   useBlockMock: vi.fn(),
@@ -51,6 +52,7 @@ function mockBlockError(status: number) {
 
 beforeEach(() => {
   useBlockMock.mockReset();
+  usePreviewStore.setState({ windows: [], topZ: 0 });
 });
 
 describe("blockDisplayContent", () => {
@@ -181,6 +183,25 @@ describe("BlockTransclusion", () => {
     expect(onOpenSource).toHaveBeenCalledOnce();
     expect(onOpenSource).toHaveBeenCalledWith(block);
     expect(screen.getByRole("group")).toHaveClass("reference-inline");
+  });
+
+  it("previews the resolved block without navigating or resolving a new page", async () => {
+    mockBlock(block);
+    const onOpenSource = vi.fn();
+    render(
+      <BlockTransclusion blockId="abc123DEF0" onOpenSource={onOpenSource} />,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Preview" }));
+    expect(usePreviewStore.getState().windows).toEqual([
+      expect.objectContaining({
+        path: "source.md",
+        blockId: "abc123DEF0",
+        mode: "reader",
+      }),
+    ]);
+    expect(onOpenSource).not.toHaveBeenCalled();
   });
 
   it("uses the source path in the accessible button name when title is absent", () => {

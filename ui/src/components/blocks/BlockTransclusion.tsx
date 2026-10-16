@@ -1,5 +1,9 @@
 import type { BlockResponse } from "#/api/blocks";
 import { isBlockNotFound, useBlock } from "#/api/blocks";
+import {
+  PreviewAction,
+  usePreviewTrigger,
+} from "#/components/codex/usePreviewTrigger";
 import { cn } from "#/lib/cn";
 
 export interface BlockTransclusionProps {
@@ -50,6 +54,9 @@ export function BlockTransclusion({
   className,
 }: BlockTransclusionProps) {
   const { data, error, isPending, isError, refetch } = useBlock(blockId);
+  const preview = usePreviewTrigger(
+    data ? { path: data.page_path, blockId } : undefined,
+  );
 
   if (isPending) {
     return (
@@ -87,7 +94,17 @@ export function BlockTransclusion({
     <span
       role="group"
       aria-label="Referenced block"
-      className={cn("inline-flex max-w-full items-baseline gap-1", className)}
+      ref={(element) => {
+        preview.triggerRef.current = element;
+      }}
+      onMouseEnter={preview.onMouseEnter}
+      onMouseLeave={preview.onMouseLeave}
+      onFocus={preview.onFocus}
+      onBlur={preview.onBlur}
+      className={cn(
+        "group/preview inline-flex max-w-full items-baseline gap-1",
+        className,
+      )}
     >
       <span className="max-w-full">{content}</span>
       <button
@@ -95,10 +112,18 @@ export function BlockTransclusion({
         contentEditable={false}
         aria-label={`Open referenced block in ${sourceName}`}
         className="shrink-0 cursor-pointer text-mute underline decoration-dotted underline-offset-2 hover:text-ink hover:decoration-solid"
-        onClick={() => onOpenSource(data)}
+        onClick={() => {
+          if (preview.parentId) void preview.openReader();
+          else onOpenSource(data);
+        }}
       >
         Source
       </button>
+      <PreviewAction
+        onOpen={(opener) => {
+          void preview.openReader(opener);
+        }}
+      />
     </span>
   );
 }

@@ -1,6 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
 import { createEditor, type Descendant } from "slate";
 import {
   Editable,
@@ -14,23 +13,15 @@ import { withSchema } from "#/editor/schema/withSchema";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { usePreviewStore } from "#/store/preview";
 
-type CapturedCLinkProps = {
-  path?: string;
-  onClick?: (e: unknown) => void;
-  className?: string;
-  resource?: string;
-  children?: ReactNode;
-};
-
 const {
   lookupMock,
   openTabMock,
   resolveOrCreateMock,
+  resolveOnlyMock,
   beginMock,
   commitMock,
   cancelMock,
   editingController,
-  clinkCalls,
 } = vi.hoisted(() => {
   const begin = vi.fn();
   const commit = vi.fn();
@@ -39,6 +30,7 @@ const {
     lookupMock: vi.fn(),
     openTabMock: vi.fn(),
     resolveOrCreateMock: vi.fn(),
+    resolveOnlyMock: vi.fn(),
     beginMock: begin,
     commitMock: commit,
     cancelMock: cancel,
@@ -53,12 +45,6 @@ const {
       commit,
       cancel,
     },
-    clinkCalls: [] as Array<{
-      path?: string;
-      onClick?: (e: unknown) => void;
-      className?: string;
-      children?: unknown;
-    }>,
   };
 });
 
@@ -70,6 +56,9 @@ vi.mock("#/editor/useResolveOrCreateWikilinkTarget", () => ({
     resolveOrCreate: resolveOrCreateMock,
   }),
 }));
+vi.mock("#/editor/useResolveWikilinkTarget", () => ({
+  useResolveWikilinkTarget: () => ({ resolve: resolveOnlyMock }),
+}));
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
@@ -80,27 +69,6 @@ vi.mock("#/editor/inlineSourceEditing", async (importOriginal) => {
     useInlineSourceEditing: () => editingController,
   };
 });
-vi.mock("#/components/codex/CLink", () => ({
-  CLink: (props: CapturedCLinkProps) => {
-    clinkCalls.push(props);
-    return (
-      <a
-        {...{
-          role: "link" as const,
-          onClick: props.onClick,
-          onKeyDown: (event: { key: string }) => {
-            if (event.key === "Enter") props.onClick?.(event);
-          },
-        }}
-        tabIndex={0}
-        className={props.className}
-        data-link-resource={props.resource}
-      >
-        {props.children}
-      </a>
-    );
-  },
-}));
 
 import { WikilinkElement } from "#/editor/elements/WikilinkElement";
 
@@ -150,12 +118,6 @@ function renderWikilink(
   return { ...result, editor, element };
 }
 
-function lastCLink() {
-  const props = clinkCalls[clinkCalls.length - 1];
-  expect(props).toBeDefined();
-  return props;
-}
-
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -166,9 +128,9 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  clinkCalls.length = 0;
   editingController.active = null;
-  usePreviewStore.setState({ windows: [], hoverId: null, topZ: 200 });
+  usePreviewStore.setState({ windows: [], topZ: 200 });
+  resolveOnlyMock.mockResolvedValue(null);
   lookupMock.mockReturnValue(null);
   resolveOrCreateMock.mockResolvedValue({
     path: "notes/new-topic.md",
@@ -177,14 +139,51 @@ beforeEach(() => {
 });
 
 describe("WikilinkElement resolved", () => {
-  it("passes the resolved vault path to CLink, not the raw target", () => {
+  it("previews without changing the Slate document or selection", () => {
+    lookupMock.mockReturnValue("notes/target.md");
+    const { editor } = renderWikilink("Target#Details");
+    editor.selection = {
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 0 },
+    };
+    const selection = structuredClone(editor.selection);
+    const children = structuredClone(editor.children);
+    const action = screen.getByRole("button", { name: "Preview" });
+    expect(fireEvent.pointerDown(action)).toBe(false);
+    fireEvent.click(action);
+    expect(usePreviewStore.getState().windows).toContainEqual(
+      expect.objectContaining({
+        path: "notes/target.md",
+        heading: "Details",
+        mode: "reader",
+      }),
+    );
+    expect(editor.selection).toEqual(selection);
+    expect(editor.children).toEqual(children);
+    expect(beginMock).not.toHaveBeenCalled();
+    expect(resolveOrCreateMock).not.toHaveBeenCalled();
+    expect(openTabMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the passage on modifier navigation", () => {
+    lookupMock.mockReturnValue("notes/target.md");
+    renderWikilink("Target#Details");
+    fireEvent.click(screen.getByRole("link"), { metaKey: true });
+    expect(openTabMock).toHaveBeenCalledWith(
+      "page",
+      "notes/target.md",
+      undefined,
+      { heading: "Details" },
+    );
+  });
+
+  it("links the resolved vault path rather than the raw target", () => {
     lookupMock.mockReturnValue("notes/clepsydra-design.md");
     renderWikilink("Clepsydra Design Notes");
-
-    expect(lookupMock).toHaveBeenCalledWith("Clepsydra Design Notes");
-    const clink = lastCLink();
-    expect(clink.path).toBe("notes/clepsydra-design.md");
-    expect(typeof clink.onClick).toBe("function");
+    expect(screen.getByRole("link")).toHaveAttribute(
+      "href",
+      "/pages/notes%2Fclepsydra-design.md",
+    );
   });
 
   it("renders the target without brackets and a trailing wikilink mark", () => {
@@ -201,7 +200,7 @@ describe("WikilinkElement resolved", () => {
     lookupMock.mockReturnValue("notes/clepsydra-design.md");
     renderWikilink("Clepsydra Design Notes");
 
-    expect(lastCLink().className).toContain("cl-link-underline");
+    expect(screen.getByRole("link")).toHaveClass("cl-link-underline");
   });
 
   it("shows only the alias when a custom label exists", () => {
@@ -221,10 +220,32 @@ describe("WikilinkElement resolved", () => {
 });
 
 describe("WikilinkElement dangling", () => {
+  it("resolves an explicit preview without creating a page or changing the editor", async () => {
+    resolveOnlyMock.mockResolvedValue({
+      path: "notes/index-lag.md",
+      title: "Index Lag",
+    });
+    const { editor } = renderWikilink("Index Lag#Details");
+    const original = structuredClone(editor.children);
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() =>
+      expect(usePreviewStore.getState().windows).toContainEqual(
+        expect.objectContaining({
+          path: "notes/index-lag.md",
+          heading: "Details",
+          mode: "reader",
+        }),
+      ),
+    );
+    expect(resolveOrCreateMock).not.toHaveBeenCalled();
+    expect(openTabMock).not.toHaveBeenCalled();
+    expect(beginMock).not.toHaveBeenCalled();
+    expect(editor.children).toEqual(original);
+  });
+
   it("renders a muted missing-page trigger instead of CLink", () => {
     renderWikilink("Unwritten Page");
 
-    expect(clinkCalls).toHaveLength(0);
     const link = screen.getByRole("link", { name: "Unwritten Page" });
     expect(link).not.toHaveAttribute("href");
     expect(link).toHaveClass("text-mute", "italic");
@@ -316,27 +337,13 @@ describe("WikilinkElement dangling", () => {
 describe("WikilinkElement editing and navigation", () => {
   it("closes the transient preview and begins inline editing on plain click", () => {
     lookupMock.mockReturnValue("notes/target.md");
-    usePreviewStore.setState({
-      windows: [
-        {
-          id: "hover-target",
-          path: "notes/target.md",
-          x: 8,
-          y: 20,
-          pinned: false,
-          minimized: false,
-          z: 201,
-        },
-      ],
-      hoverId: "hover-target",
-      topZ: 201,
-    });
+    usePreviewStore.getState().open({ path: "notes/target.md" }, new DOMRect());
     renderWikilink("Target");
 
     fireEvent.click(screen.getByRole("link"));
 
     expect(beginMock).toHaveBeenCalledWith([0, 1], "end", "after");
-    expect(usePreviewStore.getState().hoverId).toBeNull();
+    expect(usePreviewStore.getState().windows).toHaveLength(0);
     expect(openTabMock).not.toHaveBeenCalled();
     expect(resolveOrCreateMock).not.toHaveBeenCalled();
   });
@@ -348,26 +355,14 @@ describe("WikilinkElement editing and navigation", () => {
     "closes the transient preview and opens a resolved target on %s-click",
     (_modifier, eventInit) => {
       lookupMock.mockReturnValue("notes/target.md");
-      usePreviewStore.setState({
-        windows: [
-          {
-            id: "hover-target",
-            path: "notes/target.md",
-            x: 8,
-            y: 20,
-            pinned: false,
-            minimized: false,
-            z: 201,
-          },
-        ],
-        hoverId: "hover-target",
-        topZ: 201,
-      });
+      usePreviewStore
+        .getState()
+        .open({ path: "notes/target.md" }, new DOMRect());
       renderWikilink("Target");
 
       fireEvent.click(screen.getByRole("link"), eventInit);
 
-      expect(usePreviewStore.getState().hoverId).toBeNull();
+      expect(usePreviewStore.getState().windows).toHaveLength(0);
       expect(openTabMock).toHaveBeenCalledWith("page", "notes/target.md");
       expect(beginMock).not.toHaveBeenCalled();
       expect(resolveOrCreateMock).not.toHaveBeenCalled();
@@ -376,38 +371,19 @@ describe("WikilinkElement editing and navigation", () => {
 
   it("preserves pinned and minimized previews while closing only the transient preview", () => {
     lookupMock.mockReturnValue("notes/target.md");
-    usePreviewStore.setState({
-      windows: [
-        {
-          id: "pinned-other",
-          path: "notes/other.md",
-          x: 12,
-          y: 16,
-          pinned: true,
-          minimized: true,
-          z: 201,
-        },
-        {
-          id: "hover-target",
-          path: "notes/target.md",
-          x: 8,
-          y: 20,
-          pinned: false,
-          minimized: false,
-          z: 202,
-        },
-      ],
-      hoverId: "hover-target",
-      topZ: 202,
-    });
+    const pinned = usePreviewStore
+      .getState()
+      .open({ path: "notes/other.md" }, new DOMRect());
+    usePreviewStore.getState().pin(pinned);
+    usePreviewStore.getState().minimize(pinned);
+    usePreviewStore.getState().open({ path: "notes/target.md" }, new DOMRect());
     renderWikilink("Target");
 
     fireEvent.click(screen.getByRole("link"), { metaKey: true });
 
-    expect(usePreviewStore.getState().hoverId).toBeNull();
     expect(usePreviewStore.getState().windows).toEqual([
       expect.objectContaining({
-        id: "pinned-other",
+        id: pinned,
         pinned: true,
         minimized: true,
       }),
@@ -489,26 +465,12 @@ describe("WikilinkElement dangling click", () => {
       path: "notes/new-topic.md",
       title: "New Topic",
     });
-    usePreviewStore.setState({
-      windows: [
-        {
-          id: "hover-other",
-          path: "notes/other.md",
-          x: 8,
-          y: 20,
-          pinned: false,
-          minimized: false,
-          z: 201,
-        },
-      ],
-      hoverId: "hover-other",
-      topZ: 201,
-    });
+    usePreviewStore.getState().open({ path: "notes/other.md" }, new DOMRect());
     renderWikilink("New Topic");
 
     fireEvent.click(screen.getByRole("link"), { metaKey: true });
 
-    expect(usePreviewStore.getState().hoverId).toBeNull();
+    expect(usePreviewStore.getState().windows).toHaveLength(0);
     await waitFor(() =>
       expect(openTabMock).toHaveBeenCalledWith("page", "notes/new-topic.md"),
     );

@@ -1,6 +1,16 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  BOARD_FIXTURE,
+  FIXTURE_COL_LABEL,
+  PROJECT_SCOPES,
+} from "#/components/tasking/__tests__/fixtures";
+import { TaskEditPanel } from "#/components/tasking/TaskEditPanel";
+import { useBoardStore } from "#/store/board";
+import type { OpenTabTarget } from "#/store/workspace";
+import { useWorkspaceStore } from "#/store/workspace";
 
 const { pageState } = vi.hoisted(() => ({
   pageState: {
@@ -43,7 +53,17 @@ vi.mock("#/api/pages", () => ({
 
 import { TaskBodyField } from "../TaskBodyField";
 
+function openPage(path: string, label?: string, target?: OpenTabTarget) {
+  useWorkspaceStore.getState().openTab("page", path, label, target);
+}
+
 beforeEach(() => {
+  useWorkspaceStore.setState({
+    tabs: [],
+    activeTabId: null,
+    openHistory: [],
+    navigationMode: "new",
+  });
   usePageMock.mockClear();
   useOutlinksMock.mockClear();
   resolveMock.mockReset().mockResolvedValue(null);
@@ -54,6 +74,54 @@ beforeEach(() => {
 });
 
 describe("TaskBodyField", () => {
+  it.each([
+    ["whole task", "", undefined, undefined],
+    ["heading", "#Details", "Details", undefined],
+    ["block", "#%5Eabc123DEF0", undefined, "abc123DEF0"],
+  ])(
+    "opens a %s body link at the appropriate task or page destination",
+    async (_kind, fragment, heading, blockId) => {
+      const task = BOARD_FIXTURE.tasks[0];
+      assert(task);
+      pageState.data = {
+        path: task.path,
+        encrypted: false,
+        body: `[Linked task](/pages/tasks%2Ft2.md${fragment})`,
+      };
+      useBoardStore.setState({ editTaskId: task.id });
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      render(
+        <QueryClientProvider client={client}>
+          <TaskEditPanel
+            task={task}
+            tasks={BOARD_FIXTURE.tasks}
+            projects={PROJECT_SCOPES}
+            cycles={BOARD_FIXTURE.cycles}
+            colLabel={FIXTURE_COL_LABEL}
+            onClose={() => {}}
+            onOpenPage={openPage}
+          />
+        </QueryClientProvider>,
+      );
+      await userEvent.click(screen.getByRole("link", { name: "Linked task" }));
+      if (!fragment) {
+        expect(useBoardStore.getState().editTaskId).toBe("t2");
+        expect(useWorkspaceStore.getState().tabs).toHaveLength(0);
+      } else {
+        expect(useBoardStore.getState().editTaskId).toBe(task.id);
+        expect(useWorkspaceStore.getState().tabs).toContainEqual(
+          expect.objectContaining({
+            path: "tasks/t2.md",
+            ...(heading ? { focusHeading: heading } : {}),
+            ...(blockId ? { focusBlockId: blockId } : {}),
+          }),
+        );
+      }
+    },
+  );
+
   it("renders the full page body as read-only markdown", () => {
     pageState.data = {
       path: "tasks/t.md",
@@ -74,9 +142,8 @@ describe("TaskBodyField", () => {
     expect(body.querySelector("textarea, [contenteditable='true']")).toBeNull();
   });
 
-  it("opens a linked page through onOpenPage", async () => {
+  it("opens a linked passage in the workspace rather than losing its heading", async () => {
     const user = userEvent.setup();
-    const onOpenPage = vi.fn();
     resolveMock.mockResolvedValue({
       path: "notes/other-page.md",
       title: "Other Page",
@@ -84,20 +151,24 @@ describe("TaskBodyField", () => {
     pageState.data = {
       path: "tasks/t.md",
       encrypted: false,
-      body: "See [[Other Page]].",
+      body: "See [[Other Page#Details|Other Page]].",
     };
 
-    render(<TaskBodyField path="tasks/t.md" onOpenPage={onOpenPage} />);
+    render(<TaskBodyField path="tasks/t.md" onOpenPage={openPage} />);
     await user.click(screen.getByRole("link", { name: "Other Page" }));
 
     await waitFor(() =>
-      expect(onOpenPage).toHaveBeenCalledWith("notes/other-page.md"),
+      expect(useWorkspaceStore.getState().tabs).toContainEqual(
+        expect.objectContaining({
+          path: "notes/other-page.md",
+          focusHeading: "Details",
+        }),
+      ),
     );
   });
 
   it("resolves links through the Task page's indexed outlinks", async () => {
     const user = userEvent.setup();
-    const onOpenPage = vi.fn();
     outlinksState.data = [
       {
         kind: "wiki",
@@ -111,13 +182,30 @@ describe("TaskBodyField", () => {
       body: "Blocked on [[TSK-brave-finch]].",
     };
 
-    render(<TaskBodyField path="tasks/t.md" onOpenPage={onOpenPage} />);
+    render(<TaskBodyField path="tasks/t.md" onOpenPage={openPage} />);
     await user.click(screen.getByRole("link", { name: "TSK-brave-finch" }));
 
-    expect(useOutlinksMock).toHaveBeenCalledWith("tasks/t.md");
-    expect(onOpenPage).toHaveBeenCalledWith("tasks/brave-finch.md");
+    expect(useWorkspaceStore.getState().tabs).toContainEqual(
+      expect.objectContaining({ path: "tasks/brave-finch.md" }),
+    );
     // Indexed resolution answers directly; no title search.
     expect(resolveMock).not.toHaveBeenCalled();
+  });
+
+  it("opens an internal block address with a workspace focus request", async () => {
+    pageState.data = {
+      path: "tasks/t.md",
+      encrypted: false,
+      body: "[Evidence](/pages/notes%2Fevidence.md#%5Eabc123DEF0)",
+    };
+    render(<TaskBodyField path="tasks/t.md" onOpenPage={openPage} />);
+    await userEvent.click(screen.getByRole("link", { name: "Evidence" }));
+    expect(useWorkspaceStore.getState().tabs).toContainEqual(
+      expect.objectContaining({
+        path: "notes/evidence.md",
+        focusBlockId: "abc123DEF0",
+      }),
+    );
   });
 
   it("states an empty body", () => {

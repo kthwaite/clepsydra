@@ -203,7 +203,7 @@ describe("useWorkspaceStore block focus requests", () => {
     assert.isDefined(first.focusRequestId);
     expect(
       useWorkspaceStore.getState().takeTabFocus(first.id, first.focusRequestId),
-    ).toBe("abc123DEF0");
+    ).toEqual({ blockId: "abc123DEF0" });
     expect(
       useWorkspaceStore.getState().takeTabFocus(first.id, first.focusRequestId),
     ).toBeUndefined();
@@ -218,7 +218,34 @@ describe("useWorkspaceStore block focus requests", () => {
       useWorkspaceStore
         .getState()
         .takeTabFocus(second.id, second.focusRequestId),
-    ).toBe("abc123DEF0");
+    ).toEqual({ blockId: "abc123DEF0" });
+  });
+
+  it("replaces a pending block with a heading and claims the passage exactly once", () => {
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      navigationMode: "replace",
+      openHistory: [],
+      quires: {},
+    });
+    const store = useWorkspaceStore.getState();
+    store.openTab("page", "source.md", "Source", { blockId: "abc123DEF0" });
+    store.openTab("page", "source.md", "Source", { heading: "研究-1" });
+    const tab = useWorkspaceStore.getState().tabs[0];
+    expect(tab.focusBlockId).toBeUndefined();
+    expect(tab.focusHeading).toBe("研究-1");
+    assert.isDefined(tab.focusRequestId);
+    expect(store.takeTabFocus(tab.id, tab.focusRequestId)).toEqual({
+      heading: "研究-1",
+    });
+    expect(store.takeTabFocus(tab.id, tab.focusRequestId)).toBeUndefined();
+    expect(useWorkspaceStore.getState().tabs[0].focusHeading).toBeUndefined();
+    store.openTab("page", "source.md", "Source", { heading: "研究-1" });
+    const persisted = JSON.parse(
+      localStorage.getItem("clepsydra.workspace") ?? "{}",
+    );
+    expect(persisted.state.tabs[0].focusHeading).toBeUndefined();
   });
 
   it("cancels a pending request when another tab is activated", () => {

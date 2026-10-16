@@ -1,8 +1,88 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { PreviewContext } from "#/components/codex/PreviewContext";
 import { PreviewMarkdown } from "#/components/codex/PreviewMarkdown";
+import { usePreviewStore } from "#/store/preview";
+
+vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
+vi.mock("#/api/attachments", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useAttachments: () => ({
+    data: [{ vault_path: "media/report.pdf", path: "report.pdf" }],
+  }),
+}));
 
 describe("PreviewMarkdown", () => {
+  it("follows a relative note link from its containing page without opening a browser tab", () => {
+    usePreviewStore.setState({ windows: [], topZ: 200 });
+    const parent = usePreviewStore
+      .getState()
+      .open({ path: "notes/parent.md" }, new DOMRect(), { mode: "reader" });
+    render(
+      <PreviewContext value={parent}>
+        <PreviewMarkdown
+          pagePath="notes/parent.md"
+          content="[Related](./related.md#Details)"
+        />
+      </PreviewContext>,
+    );
+    const link = screen.getByRole("link", { name: "Related" });
+    expect(link).not.toHaveAttribute("target", "_blank");
+    fireEvent.click(link);
+    expect(usePreviewStore.getState().windows).toContainEqual(
+      expect.objectContaining({
+        path: "notes/related.md",
+        heading: "Details",
+        parentId: parent,
+        mode: "reader",
+      }),
+    );
+  });
+
+  it("uses vault attachment and CAS endpoints rather than application-relative URLs", () => {
+    render(
+      <PreviewContext value="parent">
+        <PreviewMarkdown
+          pagePath="notes/parent.md"
+          content="[Report](../media/report.pdf#page=2) and [Snapshot](cas:abcd/file.pdf)"
+        />
+      </PreviewContext>,
+    );
+    expect(screen.getByRole("link", { name: "Report" })).toHaveAttribute(
+      "href",
+      "/api/vault/attachments/report.pdf#page=2",
+    );
+    expect(screen.getByRole("link", { name: "Snapshot" })).toHaveAttribute(
+      "href",
+      "/api/vault/cas/abcd/file.pdf",
+    );
+  });
+
+  it("follows internal links as child readers only inside a preview", () => {
+    usePreviewStore.setState({ windows: [], topZ: 200 });
+    const parent = usePreviewStore
+      .getState()
+      .open({ path: "notes/parent.md" }, new DOMRect(), { mode: "reader" });
+    render(
+      <PreviewContext value={parent}>
+        <PreviewMarkdown content="[Child](/pages/notes%2Fchild.md#Details) and [Outside](https://example.test)" />
+      </PreviewContext>,
+    );
+    fireEvent.click(screen.getByRole("link", { name: "Child" }));
+    expect(usePreviewStore.getState().windows).toContainEqual(
+      expect.objectContaining({
+        path: "notes/child.md",
+        heading: "Details",
+        parentId: parent,
+        mode: "reader",
+      }),
+    );
+    expect(screen.getByRole("link", { name: "Outside" })).toHaveAttribute(
+      "href",
+      "https://example.test",
+    );
+  });
+
   it("marks a recognized resource while keeping preview links non-interactive", () => {
     render(
       <PreviewMarkdown content="[Wikipedia](https://en.wikipedia.org/wiki/Hypertext)" />,

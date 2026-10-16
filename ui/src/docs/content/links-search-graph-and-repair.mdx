@@ -42,6 +42,51 @@ Creating from the missing-page popover or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>-clickin
 
 Creation never rewrites the source wikilink. A later index refresh resolves it through the normal canonical lookup.
 
+## Read links without leaving the page
+
+Hover a resolved internal link for a compact **peek** with its title, kind,
+tags, Base-projected properties, and backlink count. Choose **Expand preview**
+for a scrollable, read-only **reader** containing the full page. Tab hover cards
+remain compact; they are not interactive readers.
+
+The adjacent **Preview** action opens a reader directly. It appears on hover or
+keyboard focus with a mouse and stays visible on touch devices. Keyboard
+activation focuses the reading surface; hover does not move focus. Previewing
+an unresolved link reports the missing target and never creates a page.
+
+| Control | Effect |
+| --- | --- |
+| **Expand preview** | Keep a peek open as a session reader. |
+| **Pin preview** | Keep the reader across reloads. |
+| **Unpin preview** | Stop persistence without closing the reader. |
+| **Minimize preview** | Park the reader in the preview tray. |
+| **Open page** | Use normal workspace navigation, preserving the heading or block target. |
+| **Close preview** | Remove the reader; **Escape** closes the active preview first. |
+
+Desktop readers can be dragged and resized within the viewport. Use arrow keys
+on **Resize preview** for keyboard resizing. Only pinned targets and geometry
+are stored, never page bodies.
+
+Inside a preview, hover an internal link for a child peek or activate it to open
+a child reader. The parent stays in place, including its scroll position.
+Following a link back to an already-open target raises that reader rather than
+creating a cycle. Closing a parent removes transient children, but explicitly
+opened child readers survive independently. External links keep their normal
+link behavior.
+
+On narrow screens and coarse-pointer devices, readers use a viewport-fitting
+sheet. Nested reading has a **Back** control that restores the parent and its
+scroll position. **Close** dismisses the current reading stack. **Open page**
+parks readers and dismisses peeks so the destination is not covered by a sheet.
+
+Heading-qualified links such as `[[Reference#Second section]]` and block
+references retain their passage address through preview and **Open page**.
+**Show full page** returns to the beginning; **Return to passage** restores the
+reading position. If the passage has disappeared, the reader says so and still
+offers the containing page. Protected notes show metadata and an **open to
+unlock** notice, not decrypted content. A failed fetch offers an explicit retry;
+a deleted page is reported as unavailable.
+
 ## Outlinks and backlinks
 
 An **outlink** starts in the current folio. Its index entry retains the raw target, link kind, optional frontmatter source field, and nullable resolved page ID and path. Wikilinks, ordinary Markdown links that point to folios, block references, and configured linkable frontmatter properties can all contribute link entries; their recorded kinds remain distinct.

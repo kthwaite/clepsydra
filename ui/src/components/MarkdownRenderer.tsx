@@ -1,4 +1,4 @@
-import { type ReactNode, useRef } from "react";
+import { type ReactNode, useContext, useRef } from "react";
 import Markdown, {
   type Components,
   defaultUrlTransform,
@@ -7,6 +7,8 @@ import Markdown, {
 import remarkGfm from "remark-gfm";
 import type { PluggableList } from "unified";
 import { BlockTransclusion } from "#/components/blocks/BlockTransclusion";
+import { CLink } from "#/components/codex/CLink";
+import { PreviewRestrictionsContext } from "#/components/codex/PreviewContext";
 import { MathExpression } from "#/components/MathExpression";
 import { MermaidCodeBlock } from "#/components/MermaidCodeBlock";
 import { RenderedWikilink } from "#/components/RenderedWikilink";
@@ -22,6 +24,11 @@ import {
 import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
 import { mermaidFenceSource } from "#/lib/markdown/mermaidFence";
 import { remarkWikilinks, wikilinkTarget } from "#/lib/markdown/wikilinks";
+import {
+  findPreviewPassage,
+  remarkPreviewPassages,
+} from "#/lib/previewPassage";
+import { pagePreviewTarget } from "#/lib/previewTarget";
 import {
   isCasResource,
   resolveResourceUrl,
@@ -45,7 +52,7 @@ interface MarkdownRendererProps {
    * renderer then needs no router. Unresolved wikilinks render as plain links
    * (there is no resolution provider to tell them apart).
    */
-  onOpenPage?: (path: string) => void;
+  onOpenPage?: (path: string, label?: string, target?: OpenTabTarget) => void;
 }
 
 type OpenPage = (path: string, label?: string, target?: OpenTabTarget) => void;
@@ -83,6 +90,7 @@ const remarkPlugins: PluggableList = [
   remarkGfm,
   remarkBlockReferences,
   ...remarkWikilinks,
+  remarkPreviewPassages,
 ];
 
 const transformMarkdownUrl: UrlTransform = (url, key, node) => {
@@ -131,7 +139,7 @@ export function MarkdownRenderer({
   ...props
 }: MarkdownRendererProps) {
   if (onOpenPage) {
-    return <MarkdownBody {...props} openPage={(path) => onOpenPage(path)} />;
+    return <MarkdownBody {...props} openPage={onOpenPage} />;
   }
   return <RoutedMarkdownRenderer {...props} />;
 }
@@ -156,198 +164,261 @@ type MarkdownBodyProps = BaseProps & {
 
 function MarkdownBody({
   content,
-  restricted = false,
+  restricted: suppliedRestriction = false,
   pagePath,
   attachmentPaths,
   compact = false,
   openPage,
   markDangling = false,
 }: MarkdownBodyProps) {
+  const inheritedRestriction = useContext(PreviewRestrictionsContext);
+  const restricted = suppliedRestriction || inheritedRestriction;
   return (
-    <Markdown
-      remarkPlugins={remarkPlugins}
-      skipHtml={restricted}
-      urlTransform={(url, key, node) => {
-        const target =
-          restricted && pagePath
+    <PreviewRestrictionsContext value={restricted}>
+      <Markdown
+        remarkPlugins={remarkPlugins}
+        skipHtml={restricted}
+        urlTransform={(url, key, node) => {
+          const target = pagePath
             ? resolveVaultRelativeResource(url, pagePath)
             : null;
-        if (target) {
-          const attachment = attachmentPaths?.get(target.path);
-          if (attachment) return attachment + target.suffix;
-          if (
-            key === "href" &&
-            node.tagName === "a" &&
-            /\.md$/i.test(target.path)
-          ) {
-            return `/pages/${encodeURIComponent(target.path)}`;
+          if (target) {
+            const attachment = attachmentPaths?.get(target.path);
+            if (attachment) return attachment + target.suffix;
+            if (
+              key === "href" &&
+              node.tagName === "a" &&
+              /\.md$/i.test(target.path)
+            ) {
+              return `/pages/${encodeURIComponent(target.path)}${target.suffix}`;
+            }
           }
-        }
-        return transformMarkdownUrl(url, key, node);
-      }}
-      components={{
-        span: ({ children, node, ...props }) => {
-          const tex = node?.properties["data-tex"];
-          const delimiter = node?.properties["data-delimiter"];
-          if (
-            node?.properties["data-folio-math"] === true &&
-            typeof tex === "string" &&
-            isMathDelimiter(delimiter)
-          ) {
-            return (
-              <MathExpression tex={tex} delimiter={delimiter} display={false} />
-            );
-          }
-          return <span {...props}>{children}</span>;
-        },
-        div: ({ children, node, ...props }) => {
-          const tex = node?.properties["data-tex"];
-          const delimiter = node?.properties["data-delimiter"];
-          if (
-            node?.properties["data-folio-math"] === true &&
-            typeof tex === "string" &&
-            isMathDelimiter(delimiter)
-          ) {
-            return <MathExpression tex={tex} delimiter={delimiter} display />;
-          }
-          return <div {...props}>{children}</div>;
-        },
-        a: ({ href, children, node, ...props }) => {
-          const target = wikilinkTarget(node);
-          if (target !== null) {
-            return (
-              <RenderedWikilink
-                target={target}
-                onOpen={openPage}
-                markDangling={markDangling}
-              >
-                {children}
-              </RenderedWikilink>
-            );
-          }
-          const blockId = href ? blockIdFromHref(href) : null;
-          if (blockId && !restricted) {
-            return (
-              <BlockTransclusion
-                blockId={blockId}
-                onOpenSource={(block) => {
-                  openPage(
-                    block.page_path,
-                    block.page_title || block.page_path,
-                    {
-                      blockId,
-                    },
-                  );
-                }}
-              />
-            );
-          }
-          if (href?.startsWith(BLOCK_REFERENCE_SCHEME)) return children;
+          return transformMarkdownUrl(url, key, node);
+        }}
+        components={{
+          span: ({ children, node, ...props }) => {
+            const tex = node?.properties["data-tex"];
+            const delimiter = node?.properties["data-delimiter"];
+            if (
+              node?.properties["data-folio-math"] === true &&
+              typeof tex === "string" &&
+              isMathDelimiter(delimiter)
+            ) {
+              return (
+                <MathExpression
+                  tex={tex}
+                  delimiter={delimiter}
+                  display={false}
+                />
+              );
+            }
+            return <span {...props}>{children}</span>;
+          },
+          div: ({ children, node, ...props }) => {
+            const tex = node?.properties["data-tex"];
+            const delimiter = node?.properties["data-delimiter"];
+            if (
+              node?.properties["data-folio-math"] === true &&
+              typeof tex === "string" &&
+              isMathDelimiter(delimiter)
+            ) {
+              return <MathExpression tex={tex} delimiter={delimiter} display />;
+            }
+            return <div {...props}>{children}</div>;
+          },
+          a: ({ href, children, node, ...props }) => {
+            const target = wikilinkTarget(node);
+            if (target !== null) {
+              return (
+                <RenderedWikilink
+                  target={target}
+                  onOpen={openPage}
+                  markDangling={markDangling}
+                >
+                  {children}
+                </RenderedWikilink>
+              );
+            }
+            const blockId = href ? blockIdFromHref(href) : null;
+            if (blockId && !restricted) {
+              return (
+                <BlockTransclusion
+                  blockId={blockId}
+                  onOpenSource={(block) => {
+                    openPage(
+                      block.page_path,
+                      block.page_title || block.page_path,
+                      {
+                        blockId,
+                      },
+                    );
+                  }}
+                />
+              );
+            }
+            if (href?.startsWith(BLOCK_REFERENCE_SCHEME)) return children;
 
-          const resource = href ? classifyLinkResource(href) : null;
-          if (href?.startsWith("/pages/")) {
-            const pagePath = decodeURIComponent(href.replace(/^\/pages\//, ""));
+            const resource = href ? classifyLinkResource(href) : null;
+            const pageTarget = href ? pagePreviewTarget(href) : null;
+            if (pageTarget) {
+              return (
+                <CLink
+                  target={pageTarget}
+                  onOpen={openPage}
+                  className="underline decoration-1 underline-offset-2 hover:decoration-2"
+                  resource="wikilink"
+                >
+                  {children}
+                </CLink>
+              );
+            }
+            if (href?.startsWith("#")) {
+              return (
+                <a
+                  {...props}
+                  href={href}
+                  onClick={(event) => {
+                    if (
+                      event.metaKey ||
+                      event.ctrlKey ||
+                      event.shiftKey ||
+                      event.altKey
+                    )
+                      return;
+                    const root = event.currentTarget.closest<HTMLElement>(
+                      "[data-preview-content]",
+                    );
+                    if (!root) return;
+                    event.preventDefault();
+                    let heading: string;
+                    try {
+                      heading = decodeURIComponent(href.slice(1));
+                    } catch {
+                      return;
+                    }
+                    const passage = findPreviewPassage(root, { heading });
+                    const scroller = root.closest<HTMLElement>(
+                      "[data-preview-scroll]",
+                    );
+                    if (passage && scroller) {
+                      const notice = scroller.querySelector<HTMLElement>(
+                        "[data-preview-notice]",
+                      );
+                      scroller.scrollTop +=
+                        passage.getBoundingClientRect().top -
+                        scroller.getBoundingClientRect().top -
+                        (notice?.getBoundingClientRect().height ?? 0);
+                    }
+                  }}
+                  className="underline decoration-1 underline-offset-2 hover:decoration-2"
+                >
+                  {children}
+                </a>
+              );
+            }
             return (
               <a
                 {...props}
                 href={href}
-                onClick={(e) => {
-                  e.preventDefault();
-                  openPage(pagePath);
-                }}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="underline decoration-1 underline-offset-2 hover:decoration-2"
-                data-link-resource="wikilink"
+                data-link-resource={resource ?? undefined}
               >
                 {children}
               </a>
             );
-          }
-          return (
-            <a
+          },
+          table: ({ children, ...props }) => (
+            // Tone and space, not rules (spec decision 5): a raised panel with
+            // the header row on sink and no cell borders — as the Folio table.
+            <table
+              className="w-full border-separate border-spacing-0 rounded-[14px] bg-raise text-[0.9em] leading-[1.5]"
               {...props}
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline decoration-1 underline-offset-2 hover:decoration-2"
-              data-link-resource={resource ?? undefined}
             >
               {children}
-            </a>
-          );
-        },
-        table: ({ children, ...props }) => (
-          // Tone and space, not rules (spec decision 5): a raised panel with
-          // the header row on sink and no cell borders — as the Folio table.
-          <table
-            className="w-full border-separate border-spacing-0 rounded-[14px] bg-raise text-[0.9em] leading-[1.5]"
-            {...props}
-          >
-            {children}
-          </table>
-        ),
-        th: ({ children, ...props }) => (
-          <th
-            className="bg-sink px-4 py-2.5 text-left align-bottom text-[13px] font-normal text-mute first:rounded-tl-[14px] last:rounded-tr-[14px]"
-            {...props}
-          >
-            {children}
-          </th>
-        ),
-        td: ({ children, ...props }) => (
-          <td className="px-4 py-2.5 align-top text-ink-2" {...props}>
-            {children}
-          </td>
-        ),
-        pre: ({ children, node }) => {
-          const mermaid = mermaidFenceSource(node);
-          if (mermaid !== null && !restricted)
-            return <MermaidCodeBlock code={mermaid} />;
-          return <MarkdownCodeBlock>{children}</MarkdownCodeBlock>;
-        },
-        code: ({ children, className: codeClassName, ...props }) => {
-          if (codeClassName) {
+            </table>
+          ),
+          th: ({ children, ...props }) => (
+            <th
+              className="bg-sink px-4 py-2.5 text-left align-bottom text-[13px] font-normal text-mute first:rounded-tl-[14px] last:rounded-tr-[14px]"
+              {...props}
+            >
+              {children}
+            </th>
+          ),
+          td: ({ children, ...props }) => (
+            <td className="px-4 py-2.5 align-top text-ink-2" {...props}>
+              {children}
+            </td>
+          ),
+          pre: ({ children, node }) => {
+            const mermaid = mermaidFenceSource(node);
+            if (mermaid !== null && !restricted) {
+              const code = node?.children.find(
+                (child) => child.type === "element" && child.tagName === "code",
+              );
+              const blockId =
+                code?.type === "element"
+                  ? code.properties["data-block-id"]
+                  : undefined;
+              return (
+                <div
+                  data-block-id={
+                    typeof blockId === "string" ? blockId : undefined
+                  }
+                >
+                  <MermaidCodeBlock code={mermaid} />
+                </div>
+              );
+            }
+            return <MarkdownCodeBlock>{children}</MarkdownCodeBlock>;
+          },
+          code: ({ children, className: codeClassName, ...props }) => {
+            if (codeClassName) {
+              return (
+                <code className={codeClassName} {...props}>
+                  {children}
+                </code>
+              );
+            }
             return (
-              <code className={codeClassName} {...props}>
+              <code
+                className="rounded-[6px] bg-sink px-1 py-0.5 text-[0.88em]"
+                {...props}
+              >
                 {children}
               </code>
             );
-          }
-          return (
-            <code
-              className="rounded-[6px] bg-sink px-1 py-0.5 text-[0.88em]"
+          },
+          h1: ({ children, ...props }) => (
+            <h1 className="mb-4 mt-8 text-2xl font-bold" {...props}>
+              {children}
+            </h1>
+          ),
+          h2: ({ children, ...props }) => (
+            <h2 className="mb-3 mt-6 text-xl font-bold" {...props}>
+              {children}
+            </h2>
+          ),
+          h3: ({ children, ...props }) => (
+            <h3 className="mb-2 mt-4 text-lg font-semibold" {...props}>
+              {children}
+            </h3>
+          ),
+          blockquote: ({ children, ...props }) => (
+            <blockquote
+              className="my-4 pl-5 font-serif text-[1.2em] italic leading-[1.4] text-ink-2"
               {...props}
             >
               {children}
-            </code>
-          );
-        },
-        h1: ({ children, ...props }) => (
-          <h1 className="mb-4 mt-8 text-2xl font-bold" {...props}>
-            {children}
-          </h1>
-        ),
-        h2: ({ children, ...props }) => (
-          <h2 className="mb-3 mt-6 text-xl font-bold" {...props}>
-            {children}
-          </h2>
-        ),
-        h3: ({ children, ...props }) => (
-          <h3 className="mb-2 mt-4 text-lg font-semibold" {...props}>
-            {children}
-          </h3>
-        ),
-        blockquote: ({ children, ...props }) => (
-          <blockquote
-            className="my-4 pl-5 font-serif text-[1.2em] italic leading-[1.4] text-ink-2"
-            {...props}
-          >
-            {children}
-          </blockquote>
-        ),
-        ...(compact ? compactComponents : {}),
-      }}
-    >
-      {content}
-    </Markdown>
+            </blockquote>
+          ),
+          ...(compact ? compactComponents : {}),
+        }}
+      >
+        {content}
+      </Markdown>
+    </PreviewRestrictionsContext>
   );
 }

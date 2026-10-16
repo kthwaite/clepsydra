@@ -6,8 +6,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardTask } from "#/api/board";
+import type { TaskCardProps } from "#/components/tasking/TaskCard";
+import { useWorkspaceStore } from "#/store/workspace";
 import { TaskCard } from "../TaskCard";
 import { BOARD_FIXTURE, FIXTURE_COL_LABEL } from "./fixtures";
 
@@ -27,7 +29,7 @@ const BASE: BoardTask = { ...BOARD_FIXTURE.tasks[0], body_excerpt: null };
 
 function renderCard(
   task: Partial<BoardTask>,
-  props: { onClick?: () => void; onOpenPage?: (path: string) => void } = {},
+  props: { onClick?: () => void } & Pick<TaskCardProps, "onOpenPage"> = {},
 ) {
   const t = { ...BASE, ...task };
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -45,6 +47,15 @@ function renderCard(
   );
   return t;
 }
+
+beforeEach(() => {
+  useWorkspaceStore.setState({
+    tabs: [],
+    activeTabId: null,
+    openHistory: [],
+    navigationMode: "new",
+  });
+});
 
 describe("TaskCard — description", () => {
   it("renders the description as markdown", () => {
@@ -64,21 +75,29 @@ describe("TaskCard — description", () => {
     expect(body.querySelector("img")).toBeNull();
   });
 
-  it("opens a wikilink through onOpenPage, not the card editor", async () => {
+  it("opens a wikilink passage in the workspace, not the card editor", async () => {
     resolveMock.mockResolvedValue({
       path: "notes/design-note.md",
       title: "Design Note",
     });
     const onClick = vi.fn();
-    const onOpenPage = vi.fn();
     const t = renderCard(
-      { description: "Per [[Design Note]]." },
-      { onClick, onOpenPage },
+      { description: "Per [[Design Note#Decisions|Design Note]]." },
+      {
+        onClick,
+        onOpenPage: (path, label, target) =>
+          useWorkspaceStore.getState().openTab("page", path, label, target),
+      },
     );
     const body = screen.getByTestId(`task-excerpt-${t.id}`);
     await userEvent.click(within(body).getByText("Design Note"));
     await waitFor(() =>
-      expect(onOpenPage).toHaveBeenCalledWith("notes/design-note.md"),
+      expect(useWorkspaceStore.getState().tabs).toContainEqual(
+        expect.objectContaining({
+          path: "notes/design-note.md",
+          focusHeading: "Decisions",
+        }),
+      ),
     );
     expect(onClick).not.toHaveBeenCalled();
   });

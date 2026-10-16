@@ -741,6 +741,22 @@ describe("mobile Folio Back", () => {
     });
   });
 
+  it("moves the editable caret to the same duplicate heading addressed by a preview", async () => {
+    pageEditorState.body =
+      "## 研究 Café\n\nEarlier context\n\n## 研究 Café\n\nAddressed context\n";
+    useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
+      heading: "研究-café-1",
+    });
+    renderNavigation("/workspace");
+    await screen.findByText("Addressed context");
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
+    expect(editorCapture.current?.selection).toEqual({
+      anchor: { path: [2, 0], offset: 0 },
+      focus: { path: [2, 0], offset: 0 },
+    });
+    expect(useWorkspaceStore.getState().tabs[0].focusHeading).toBeUndefined();
+  });
+
   it("claims a StrictMode focus request once and accepts a later request for the same block", async () => {
     useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
       blockId: "abc123DEF0",

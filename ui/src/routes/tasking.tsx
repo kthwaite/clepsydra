@@ -6,6 +6,7 @@ import { TASKING_FACETS } from "#/components/tasking/taskingFacets";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { defineFilterRoute, useFilterRoute } from "#/lib/filters/route";
+import type { OpenTabTarget } from "#/store/workspace";
 
 /** The Tasking board's URL-backed filter. */
 export const TASKING_FILTER = defineFilterRoute({
@@ -40,8 +41,8 @@ function TaskingRoute() {
   );
 
   const onOpenPage = useCallback(
-    (path: string) => {
-      openTab("page", path);
+    (path: string, label?: string, target?: OpenTabTarget) => {
+      openTab("page", path, label, target);
     },
     [openTab],
   );

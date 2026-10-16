@@ -6,20 +6,30 @@ import {
 } from "react";
 import { toast } from "sonner";
 import {
+  isModifiedLinkActivation,
+  PreviewAction,
+  usePreviewTrigger,
+} from "#/components/codex/usePreviewTrigger";
+import {
   useResolveWikilinkTarget,
   wikilinkPageName,
 } from "#/editor/useResolveWikilinkTarget";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
-import { pageHref } from "#/lib/markdown/wikilinks";
+import {
+  previewOpenTarget,
+  previewTargetHref,
+  wikilinkPreviewTarget,
+} from "#/lib/previewTarget";
+import type { OpenTabTarget } from "#/store/workspace";
 
 interface RenderedWikilinkProps {
   /** Raw wikilink target, e.g. `Target` or `Target#Heading`. */
   target: string;
   children?: ReactNode;
   /** Opens the resolved page. */
-  onOpen: (path: string, label: string) => void;
+  onOpen: (path: string, label: string, target?: OpenTabTarget) => void;
   /**
    * Style an unresolved link as dangling (mute, italic). Turn off where no
    * WikilinkResolutionProvider surrounds the link, so every lookup misses
@@ -49,20 +59,37 @@ export function RenderedWikilink({
   const resolved = lookup(target);
   const label = wikilinkPageName(target) || target;
 
-  const handleClick = async (event: MouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault();
-    if (resolved) {
-      onOpen(resolved, label);
-      return;
-    }
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
+  const resolveTarget = async () => {
     try {
       const found = await resolve(target);
-      if (found) onOpen(found.path, label);
-      else toast.error(`No page named “${label}”`);
+      if (found) return wikilinkPreviewTarget(found.path, target);
+      toast.error(`No page named “${label}”`);
     } catch {
       toast.error(`Could not look up “${label}”`);
+    }
+    return null;
+  };
+  const previewTarget = resolved
+    ? wikilinkPreviewTarget(resolved, target)
+    : undefined;
+  const preview = usePreviewTrigger(previewTarget, resolveTarget);
+
+  const handleClick = async (event: MouseEvent<HTMLAnchorElement>) => {
+    if (resolved && isModifiedLinkActivation(event)) return;
+    event.preventDefault();
+    if (inFlightRef.current) return;
+    if (preview.parentId && !isModifiedLinkActivation(event)) {
+      await preview.openReader(event.currentTarget);
+      return;
+    }
+    inFlightRef.current = true;
+    try {
+      const found = previewTarget ?? (await resolveTarget());
+      if (found) {
+        if (found.heading || found.blockId)
+          onOpen(found.path, label, previewOpenTarget(found));
+        else onOpen(found.path, label);
+      }
     } finally {
       inFlightRef.current = false;
     }
@@ -77,39 +104,43 @@ export function RenderedWikilink({
     !resolved && markDangling && "italic text-mute",
   );
 
-  if (resolved) {
-    return (
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: Inline link/action groups are phrasing content, not form fieldsets.
+    <span
+      role="group"
+      aria-label="Page reference"
+      className="group/preview inline"
+      onMouseEnter={preview.onMouseEnter}
+      onMouseLeave={preview.onMouseLeave}
+      onFocus={preview.onFocus}
+      onBlur={preview.onBlur}
+    >
       <a
-        href={pageHref(resolved)}
-        onClick={handleClick}
+        {...{
+          role: "link" as const,
+          onClick: handleClick,
+          onKeyDown: (event: KeyboardEvent<HTMLAnchorElement>) => {
+            if (!resolved && event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.click();
+            }
+          },
+        }}
+        ref={(element) => {
+          preview.triggerRef.current = element;
+        }}
+        href={previewTarget ? previewTargetHref(previewTarget) : undefined}
+        tabIndex={0}
         className={className}
         data-link-resource="wikilink"
       >
         {children}
       </a>
-    );
-  }
-
-  // No href until the target resolves, so the anchor is focusable and
-  // keyboard-activated by hand — the same shape as WikilinkElement's dangling
-  // link, including its spread past biome's anchor rule.
-  return (
-    <a
-      {...{
-        role: "link" as const,
-        onClick: handleClick,
-        onKeyDown: (event: KeyboardEvent<HTMLAnchorElement>) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            event.currentTarget.click();
-          }
-        },
-      }}
-      tabIndex={0}
-      className={className}
-      data-link-resource="wikilink"
-    >
-      {children}
-    </a>
+      <PreviewAction
+        onOpen={(opener) => {
+          void preview.openReader(opener);
+        }}
+      />
+    </span>
   );
 }

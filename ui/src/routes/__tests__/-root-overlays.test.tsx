@@ -120,6 +120,10 @@ it("mounts each overlay from its corresponding UI state", async () => {
         {
           id: "preview-test",
           path: "notes/test.md",
+          mode: "peek",
+          focusRequest: 0,
+          width: 340,
+          height: 280,
           x: 0,
           y: 0,
           pinned: false,

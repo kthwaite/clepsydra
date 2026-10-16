@@ -11,6 +11,7 @@ import {
 } from "#/lib/filters/model";
 import { facetFields } from "#/lib/filters/route";
 import { useBoardStore } from "#/store/board";
+import type { OpenTabTarget } from "#/store/workspace";
 import { Button } from "../ui/button";
 import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
@@ -85,7 +86,7 @@ export function TaskingScreen({
   onFilterChange = () => {},
 }: {
   onOpenDossier?: (link: string) => void;
-  onOpenPage?: (path: string) => void;
+  onOpenPage?: (path: string, label?: string, target?: OpenTabTarget) => void;
   filterState?: FilterState;
   onFilterChange?: (next: FilterState) => void;
 } = {}) {

@@ -32,6 +32,7 @@ import {
   KANBAN_COL_MIN,
   useBoardStore,
 } from "#/store/board";
+import type { OpenTabTarget } from "#/store/workspace";
 import { Tick } from "../codex/Tick";
 import { indexByCode } from "./blockers";
 import {
@@ -242,7 +243,7 @@ export interface KanbanViewProps {
   activeProject?: string;
   onOpenDossier?: (link: string) => void;
   /** Opens a page linked from a card description. */
-  onOpenPage?: (path: string) => void;
+  onOpenPage?: (path: string, label?: string, target?: OpenTabTarget) => void;
   /** Resolves a column id to its server-supplied display label. */
   colLabel: ColLabelFn;
 }

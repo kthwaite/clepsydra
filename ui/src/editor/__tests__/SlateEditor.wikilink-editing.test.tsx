@@ -113,7 +113,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   lookupMock.mockReturnValue(null);
-  usePreviewStore.setState({ windows: [], hoverId: null, topZ: 200 });
+  usePreviewStore.setState({ windows: [], topZ: 200 });
   createPageMock.mockResolvedValue(undefined);
   refetchAndLookupMock.mockResolvedValue(null);
   searchGetMock.mockResolvedValue({ data: [] });
@@ -337,6 +337,10 @@ describe("SlateEditor wikilink editing integration", () => {
         {
           id: "hover-my-page",
           path: "notes/my-page.md",
+          mode: "peek",
+          focusRequest: 0,
+          width: 340,
+          height: 280,
           x: 8,
           y: 20,
           pinned: false,
@@ -344,7 +348,6 @@ describe("SlateEditor wikilink editing integration", () => {
           z: 201,
         },
       ],
-      hoverId: "hover-my-page",
       topZ: 201,
     });
     renderEditor(
@@ -358,7 +361,9 @@ describe("SlateEditor wikilink editing integration", () => {
       { showPreviewLayer: true },
     );
 
-    expect(await screen.findByText(/notes\/my-page\.md/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole("dialog", { name: /Preview notes\/my-page\.md/ }),
+    ).toBeVisible();
     await userEvent
       .setup()
       .click(screen.getByRole("link", { name: "My Page" }));
@@ -366,7 +371,9 @@ describe("SlateEditor wikilink editing integration", () => {
     expect(
       screen.getByRole("textbox", { name: "Edit wikilink" }),
     ).toHaveFocus();
-    expect(screen.queryByText(/notes\/my-page\.md/)).toBeNull();
+    expect(
+      screen.queryByRole("dialog", { name: /Preview notes\/my-page\.md/ }),
+    ).toBeNull();
     expect(usePreviewStore.getState().windows).toEqual([]);
   });
 
@@ -389,7 +396,6 @@ describe("SlateEditor wikilink editing integration", () => {
       fireEvent.mouseEnter(link);
       act(() => vi.advanceTimersByTime(220));
 
-      expect(usePreviewStore.getState().hoverId).not.toBeNull();
       expect(usePreviewStore.getState().windows).toEqual([
         expect.objectContaining({
           path: "notes/my-page.md",
@@ -401,7 +407,6 @@ describe("SlateEditor wikilink editing integration", () => {
       fireEvent.mouseLeave(link);
       fireEvent.click(link, { metaKey: true });
 
-      expect(usePreviewStore.getState().hoverId).toBeNull();
       expect(usePreviewStore.getState().windows).toEqual([]);
 
       act(() => vi.advanceTimersByTime(200));

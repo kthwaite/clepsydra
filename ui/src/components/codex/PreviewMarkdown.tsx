@@ -1,23 +1,35 @@
+import { type ComponentProps, useContext, useMemo } from "react";
 import Markdown, {
   type Components,
   defaultUrlTransform,
+  type ExtraProps,
   type UrlTransform,
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { PluggableList } from "unified";
+import { attachmentUrl, useAttachments } from "#/api/attachments";
+import { CLink } from "#/components/codex/CLink";
+import { PreviewContext } from "#/components/codex/PreviewContext";
 import { MathExpression } from "#/components/MathExpression";
+import { RenderedWikilink } from "#/components/RenderedWikilink";
 import { expandPrefixedUrl } from "#/editor/prefixedExternalLinks";
+import { useOpenTab } from "#/hooks/useOpenTab";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { classifyLinkResource } from "#/lib/linkResource";
 import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
 import { remarkWikilinks, wikilinkTarget } from "#/lib/markdown/wikilinks";
+import { pagePreviewTarget } from "#/lib/previewTarget";
+import {
+  isCasResource,
+  resolveResourceUrl,
+  resolveVaultRelativeResource,
+} from "#/lib/resourceUrl";
 
 function isMathDelimiter(value: unknown): value is MathDelimiter {
   return value === "$" || value === "$$" || value === "\\(" || value === "\\[";
 }
 
-// Shared remark config with the full-page MarkdownRenderer, minus the
-// interactive link handling — preview cards are pointer-events:none, so links
-// render as plain styled spans and we avoid pulling in router hooks.
+// Share the compact dialect with tab cards; only window content enables links.
 const remarkPlugins: PluggableList = [
   remarkFolioMath,
   remarkGfm,
@@ -88,22 +100,7 @@ const components: Components = {
     </ol>
   ),
   li: ({ children }) => <li className="my-0.5">{children}</li>,
-  a: ({ href, children, node }) => {
-    const resource =
-      wikilinkTarget(node) !== null || href?.startsWith("/pages/")
-        ? "wikilink"
-        : href
-          ? classifyLinkResource(href)
-          : null;
-    return (
-      <span
-        className="text-accent underline decoration-1 underline-offset-2"
-        data-link-resource={resource ?? undefined}
-      >
-        {children}
-      </span>
-    );
-  },
+  a: PreviewLink,
   strong: ({ children }) => (
     <strong className="font-semibold text-ink">{children}</strong>
   ),
@@ -145,20 +142,145 @@ const components: Components = {
   ),
 };
 
+function InteractivePreviewLink({
+  href,
+  children,
+  node,
+}: ComponentProps<"a"> & ExtraProps) {
+  const openTab = useOpenTab();
+  const rawTarget = wikilinkTarget(node);
+  if (rawTarget !== null) {
+    return (
+      <RenderedWikilink
+        target={rawTarget}
+        onOpen={(path, label, target) => openTab("page", path, label, target)}
+      >
+        {children}
+      </RenderedWikilink>
+    );
+  }
+  const target = href ? pagePreviewTarget(href) : null;
+  if (target)
+    return (
+      <CLink target={target} resource="wikilink">
+        {children}
+      </CLink>
+    );
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`text-accent underline decoration-1 underline-offset-2 ${FOCUS_RING_NATIVE}`}
+      data-link-resource={
+        href ? (classifyLinkResource(href) ?? undefined) : undefined
+      }
+    >
+      {children}
+    </a>
+  );
+}
+
+function PreviewLink(props: ComponentProps<"a"> & ExtraProps) {
+  const parentId = useContext(PreviewContext);
+  if (parentId) return <InteractivePreviewLink {...props} />;
+  const resource =
+    wikilinkTarget(props.node) !== null || props.href?.startsWith("/pages/")
+      ? "wikilink"
+      : props.href
+        ? classifyLinkResource(props.href)
+        : null;
+  return (
+    <span
+      className="text-accent underline decoration-1 underline-offset-2"
+      data-link-resource={resource ?? undefined}
+    >
+      {props.children}
+    </span>
+  );
+}
+
 const transformPreviewUrl: UrlTransform = (url) =>
-  expandPrefixedUrl(url) ?? defaultUrlTransform(url);
+  expandPrefixedUrl(url) ??
+  (isCasResource(url) ? resolveResourceUrl(url) : defaultUrlTransform(url));
 
 /**
- * Compact, non-interactive markdown renderer for the preview card. Render inside
- * a height-clamped container; see PreviewBody.
+ * Compact Markdown: interactive inside a preview window, inert in tab cards.
+ * Render inside a height-clamped container; see PreviewBody.
  */
-export function PreviewMarkdown({ content }: { content: string }) {
+export function PreviewMarkdown({
+  content,
+  pagePath,
+}: {
+  content: string;
+  pagePath?: string;
+}) {
+  const parentId = useContext(PreviewContext);
+  return parentId ? (
+    <InteractivePreviewMarkdown content={content} pagePath={pagePath} />
+  ) : (
+    <PreviewMarkdownBody content={content} pagePath={pagePath} />
+  );
+}
+
+function InteractivePreviewMarkdown({
+  content,
+  pagePath,
+}: {
+  content: string;
+  pagePath?: string;
+}) {
+  const inventory = useAttachments();
+  const attachmentPaths = useMemo(
+    () =>
+      new Map(
+        (inventory.data ?? []).map((item) => [
+          item.vault_path,
+          attachmentUrl(item.path),
+        ]),
+      ),
+    [inventory.data],
+  );
+  return (
+    <PreviewMarkdownBody
+      content={content}
+      pagePath={pagePath}
+      attachmentPaths={attachmentPaths}
+    />
+  );
+}
+
+function PreviewMarkdownBody({
+  content,
+  pagePath,
+  attachmentPaths,
+}: {
+  content: string;
+  pagePath?: string;
+  attachmentPaths?: ReadonlyMap<string, string>;
+}) {
   return (
     <div className="folio-markdown-preview">
       <Markdown
         remarkPlugins={remarkPlugins}
         components={components}
-        urlTransform={transformPreviewUrl}
+        urlTransform={(url, key, node) => {
+          const target = pagePath
+            ? resolveVaultRelativeResource(url, pagePath)
+            : null;
+          if (target) {
+            const attachment = attachmentPaths?.get(target.path);
+            if (attachment) return attachment + target.suffix;
+            if (
+              key === "href" &&
+              node.tagName === "a" &&
+              /\.md$/i.test(target.path)
+            ) {
+              return `/pages/${encodeURIComponent(target.path)}${target.suffix}`;
+            }
+          }
+          return transformPreviewUrl(url, key, node);
+        }}
       >
         {content}
       </Markdown>

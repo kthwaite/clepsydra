@@ -50,6 +50,7 @@ import { Select, SelectItem } from "#/components/ui/select";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useBoardStore } from "#/store/board";
+import type { OpenTabTarget } from "#/store/workspace";
 import { BlockerField } from "./BlockerField";
 import {
   type ColLabelFn,
@@ -106,7 +107,7 @@ export interface TaskEditPanelProps {
   cycles: BoardCycle[];
   colLabel: ColLabelFn;
   onClose: () => void;
-  onOpenPage?: (path: string) => void;
+  onOpenPage?: (path: string, label?: string, target?: OpenTabTarget) => void;
   onOpenDossier?: (link: string) => void;
 }
 
@@ -271,10 +272,16 @@ export function TaskEditPanel({
   };
   const openTask = (other: BoardTask) => setEditTaskId(other.id);
 
-  // A body link to a board task opens its card; anything else opens a page.
-  const openBodyLink = (path: string) => {
+  // Whole-task links open its card; addressed passages need the page reader.
+  const openBodyLink = (
+    path: string,
+    label?: string,
+    target?: OpenTabTarget,
+  ) => {
     const linked = tasks.find((t) => t.path === path);
-    if (linked) openTask(linked);
+    if (linked && !target?.heading && !target?.blockId) openTask(linked);
+    else if (label !== undefined || target !== undefined)
+      onOpenPage?.(path, label, target);
     else onOpenPage?.(path);
   };
 

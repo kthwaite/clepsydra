@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BaseRenderedMarkdown } from "#/components/bases/BaseRenderedMarkdown";
+import { useWorkspaceStore } from "#/store/workspace";
 
 const {
   openTabMock,
@@ -53,6 +54,12 @@ const RESOLVED: Record<string, string> = {
 };
 
 beforeEach(() => {
+  useWorkspaceStore.setState({
+    tabs: [],
+    activeTabId: null,
+    openHistory: [],
+    navigationMode: "new",
+  });
   openTabMock.mockReset();
   vi.clearAllMocks();
   lookupMock.mockReset();
@@ -94,18 +101,19 @@ describe("BaseRenderedMarkdown wikilinks", () => {
     );
   });
 
-  it("resolves a heading-anchored link by its raw target, as the editor does", async () => {
+  it("opens an indexed heading-qualified link with a workspace passage request", async () => {
+    openTabMock.mockImplementation(useWorkspaceStore.getState().openTab);
     const user = userEvent.setup();
     render(<BaseRenderedMarkdown content="[[Target Page#Tasting notes]]" />);
 
     await user.click(
       screen.getByRole("link", { name: "Target Page#Tasting notes" }),
     );
-    expect(lookupMock).toHaveBeenCalledWith("Target Page#Tasting notes");
-    expect(openTabMock).toHaveBeenCalledWith(
-      "page",
-      "notes/target.md",
-      "Target Page",
+    expect(useWorkspaceStore.getState().tabs).toContainEqual(
+      expect.objectContaining({
+        path: "notes/target.md",
+        focusHeading: "Tasting notes",
+      }),
     );
   });
 
@@ -193,17 +201,19 @@ describe("BaseRenderedMarkdown wikilinks", () => {
     ]);
   });
 
-  it("strips a heading anchor before searching and matching", async () => {
+  it("resolves the page name while retaining the heading for workspace navigation", async () => {
+    openTabMock.mockImplementation(useWorkspaceStore.getState().openTab);
     searchReturns([{ path: "notes/real.md", title: "Real Page" }]);
     const user = userEvent.setup();
     render(<BaseRenderedMarkdown content="[[Real Page#Method]]" />);
 
     await user.click(screen.getByRole("link", { name: "Real Page#Method" }));
     await waitFor(() =>
-      expect(openTabMock).toHaveBeenCalledWith(
-        "page",
-        "notes/real.md",
-        "Real Page",
+      expect(useWorkspaceStore.getState().tabs).toContainEqual(
+        expect.objectContaining({
+          path: "notes/real.md",
+          focusHeading: "Method",
+        }),
       ),
     );
     expect(searchGetMock).toHaveBeenCalledWith("/api/vault/index/search", {

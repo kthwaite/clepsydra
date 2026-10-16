@@ -17,6 +17,7 @@ export type NavigationMode = "replace" | "new" | "smart";
 export type TabType = "page" | "graph";
 export interface OpenTabTarget {
   blockId?: string;
+  heading?: string;
   /** `"new"` appends a tab regardless of the navigation mode. */
   mode?: "new";
 }
@@ -118,6 +119,8 @@ export interface TabDescriptor {
   quireId?: string;
   /** One-shot request to reveal a source block. Never persisted. */
   focusBlockId?: string;
+  /** One-shot request to reveal a heading, using shared passage identity. */
+  focusHeading?: string;
   /** Identity used to claim a focus request at most once. Never persisted. */
   focusRequestId?: string;
 }
@@ -164,7 +167,10 @@ interface WorkspaceActions {
   /** Clear all workspace and visit state when the workspace/vault is torn down. */
   clearWorkspace: () => void;
   clearTabFocus: (tabId: string) => void;
-  takeTabFocus: (tabId: string, requestId: string) => string | undefined;
+  takeTabFocus: (
+    tabId: string,
+    requestId: string,
+  ) => Pick<OpenTabTarget, "blockId" | "heading"> | undefined;
   moveTab: (
     sourceTabId: string,
     target:
@@ -191,10 +197,19 @@ function tabKey(type: TabType, path?: string): string {
 }
 
 function withoutTabFocus(tab: TabDescriptor): TabDescriptor {
-  if (tab.focusBlockId === undefined && tab.focusRequestId === undefined) {
+  if (
+    tab.focusBlockId === undefined &&
+    tab.focusHeading === undefined &&
+    tab.focusRequestId === undefined
+  ) {
     return tab;
   }
-  const { focusBlockId: _, focusRequestId: __, ...rest } = tab;
+  const {
+    focusBlockId: _,
+    focusHeading: __,
+    focusRequestId: ___,
+    ...rest
+  } = tab;
   return rest;
 }
 
@@ -272,8 +287,11 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
                     lastActiveAt: Date.now(),
                     focusBlockId:
                       existing.type === "page" ? target?.blockId : undefined,
+                    focusHeading:
+                      existing.type === "page" ? target?.heading : undefined,
                     focusRequestId:
-                      existing.type === "page" && target?.blockId
+                      existing.type === "page" &&
+                      (target?.blockId || target?.heading)
                         ? crypto.randomUUID()
                         : undefined,
                   }
@@ -312,8 +330,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           label: label ?? path ?? "Graph",
           lastActiveAt: Date.now(),
           focusBlockId: type === "page" ? target?.blockId : undefined,
+          focusHeading: type === "page" ? target?.heading : undefined,
           focusRequestId:
-            type === "page" && target?.blockId
+            type === "page" && (target?.blockId || target?.heading)
               ? crypto.randomUUID()
               : undefined,
         };
@@ -532,7 +551,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         const tab = state.tabs.find((candidate) => candidate.id === tabId);
         if (
           tab?.focusRequestId !== requestId ||
-          tab.focusBlockId === undefined
+          (tab.focusBlockId === undefined && tab.focusHeading === undefined)
         ) {
           return undefined;
         }
@@ -541,7 +560,10 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             candidate.id === tabId ? withoutTabFocus(candidate) : candidate,
           ),
         });
-        return tab.focusBlockId;
+        return {
+          ...(tab.focusBlockId ? { blockId: tab.focusBlockId } : {}),
+          ...(tab.focusHeading ? { heading: tab.focusHeading } : {}),
+        };
       },
 
       moveTab(sourceTabId, target) {

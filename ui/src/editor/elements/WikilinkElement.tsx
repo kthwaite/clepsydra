@@ -5,7 +5,12 @@ import {
   useReadOnly,
   useSlateStatic,
 } from "slate-react";
+import { toast } from "sonner";
 import { CLink } from "#/components/codex/CLink";
+import {
+  PreviewAction,
+  usePreviewTrigger,
+} from "#/components/codex/usePreviewTrigger";
 import { InlineSourceEditor } from "#/editor/InlineSourceInput";
 import {
   isSessionAt,
@@ -14,6 +19,7 @@ import {
 import { MissingWikilinkPopover } from "#/editor/MissingWikilinkPopover";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
+import { useResolveWikilinkTarget } from "#/editor/useResolveWikilinkTarget";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
 import {
   parseWikilinkDraft,
@@ -22,6 +28,7 @@ import {
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { previewOpenTarget, wikilinkPreviewTarget } from "#/lib/previewTarget";
 import { usePreviewStore } from "#/store/preview";
 
 type Props = RenderElementProps & { element: WikilinkElementType };
@@ -32,6 +39,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   const controller = useInlineSourceEditing();
   const { lookup } = useWikilinkResolution();
   const { resolveOrCreate } = useResolveOrCreateWikilinkTarget();
+  const { resolve } = useResolveWikilinkTarget();
   const openTab = useOpenTab();
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -41,6 +49,23 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   const path = ReactEditor.findPath(editor, element);
   const activeSession = controller.active;
   const resolved = lookup(element.target);
+  const preview = usePreviewTrigger(undefined, async () => {
+    try {
+      const found = await resolve(element.target);
+      if (found) return wikilinkPreviewTarget(found.path, element.target);
+      toast.error(`No page named “${element.target}”`);
+    } catch {
+      toast.error(`Could not look up “${element.target}”`);
+    }
+    return null;
+  });
+
+  const navigate = (resolvedPath: string, raw: string) => {
+    const target = wikilinkPreviewTarget(resolvedPath, raw);
+    if (target.heading || target.blockId)
+      openTab("page", target.path, undefined, previewOpenTarget(target));
+    else openTab("page", target.path);
+  };
 
   const displayText =
     element.alias && element.alias !== element.target
@@ -48,8 +73,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
       : element.target;
 
   const closeTransientPreview = () => {
-    const { hoverId, close } = usePreviewStore.getState();
-    if (hoverId) close(hoverId);
+    usePreviewStore.getState().closePeeks();
   };
 
   const openTarget = async (target: string): Promise<boolean> => {
@@ -57,7 +81,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
 
     const current = lookup(target);
     if (current) {
-      openTab("page", current);
+      navigate(current, target);
       return true;
     }
 
@@ -66,7 +90,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     setCreateError(null);
     try {
       const resolvedTarget = await resolveOrCreate(target);
-      openTab("page", resolvedTarget.path);
+      navigate(resolvedTarget.path, target);
       return true;
     } catch {
       setCreateError("Creation failed — try again");
@@ -106,7 +130,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     if (readOnly) {
       if (resolved) {
         if (modifierActivation) closeTransientPreview();
-        openTab("page", resolved);
+        navigate(resolved, element.target);
       }
       return;
     }
@@ -130,7 +154,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
       <span contentEditable={false}>
         {resolved ? (
           <CLink
-            path={resolved}
+            target={wikilinkPreviewTarget(resolved, element.target)}
             onClick={handleActivation}
             className={cn("cl-link-underline", linkClassName)}
             resource="wikilink"
@@ -138,30 +162,40 @@ export function WikilinkElement({ attributes, children, element }: Props) {
             {linkContent}
           </CLink>
         ) : (
-          <MissingWikilinkPopover
-            target={element.target}
-            readOnly={readOnly}
-            creating={creating}
-            error={createError}
-            onCreate={() => openTarget(element.target)}
-          >
-            <a
-              {...{
-                role: "link" as const,
-                onClick: handleActivation,
-                onKeyDown: handleKeyDown,
-              }}
-              tabIndex={0}
-              data-link-resource="wikilink"
-              className={cn(
-                "relative cursor-pointer rounded-[3px] hover:text-ink",
-                FOCUS_RING_NATIVE,
-                linkClassName,
-              )}
+          <span className="group/preview inline">
+            <MissingWikilinkPopover
+              target={element.target}
+              readOnly={readOnly}
+              creating={creating}
+              error={createError}
+              onCreate={() => openTarget(element.target)}
             >
-              {linkContent}
-            </a>
-          </MissingWikilinkPopover>
+              <a
+                ref={(element) => {
+                  preview.triggerRef.current = element;
+                }}
+                {...{
+                  role: "link" as const,
+                  onClick: handleActivation,
+                  onKeyDown: handleKeyDown,
+                }}
+                tabIndex={0}
+                data-link-resource="wikilink"
+                className={cn(
+                  "relative cursor-pointer rounded-[3px] hover:text-ink",
+                  FOCUS_RING_NATIVE,
+                  linkClassName,
+                )}
+              >
+                {linkContent}
+              </a>
+            </MissingWikilinkPopover>
+            <PreviewAction
+              onOpen={(opener) => {
+                void preview.openReader(opener);
+              }}
+            />
+          </span>
         )}
       </span>
       {children}

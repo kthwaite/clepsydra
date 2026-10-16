@@ -1,11 +1,13 @@
 import { type RefObject, useEffect } from "react";
 import { Editor, Element as SlateElement, Transforms } from "slate";
 import { ReactEditor } from "slate-react";
+import { toast } from "sonner";
 import { useAiJournalToday } from "#/api/aiJournal";
 import { useJournalToday } from "#/api/journal";
 import type { CustomEditor } from "#/editor/types";
 import type { PageEditorState } from "#/editor/usePageEditor";
 import { todayAiJournalPath, todayJournalPath } from "#/lib/journal";
+import { findPreviewPassage } from "#/lib/previewPassage";
 import { useWorkspaceStore } from "#/store/workspace";
 
 /** The real page behind a today's-journal draft path. */
@@ -100,25 +102,40 @@ export function useFolioTab({
     if (!focusRequestId || editor.isLoading || !editor.isEditorSynchronized) {
       return;
     }
-    const focusBlockId = takeTabFocus(tabId, focusRequestId);
-    if (!focusBlockId) return;
+    const passage = takeTabFocus(tabId, focusRequestId);
+    if (!passage || !bodyRef.current) return;
 
-    const target = Array.from(
-      bodyRef.current?.querySelectorAll<HTMLElement>("[data-block-id]") ?? [],
-    ).find((element) => element.dataset.blockId === focusBlockId);
-    if (!target) return;
+    const target = findPreviewPassage(bodyRef.current, passage);
+    if (!target) {
+      toast.error(
+        passage.heading
+          ? `Heading “${passage.heading}” not found on this page`
+          : "Referenced block not found on this page",
+      );
+      return;
+    }
 
     target.scrollIntoView({ block: "center", inline: "nearest" });
-    if (!conversationReadOnly && folioEditorRef.current) {
+    if (
+      !conversationReadOnly &&
+      folioEditorRef.current &&
+      (!passage.heading ||
+        ReactEditor.hasDOMNode(folioEditorRef.current, target))
+    ) {
       const editorInstance = folioEditorRef.current;
-      const entry = Editor.nodes(editorInstance, {
-        at: [],
-        match: (node) =>
-          SlateElement.isElement(node) &&
-          node.type !== "block-ref" &&
-          "blockId" in node &&
-          node.blockId === focusBlockId,
-      }).next().value;
+      const entry = passage.blockId
+        ? Editor.nodes(editorInstance, {
+            at: [],
+            match: (node) =>
+              SlateElement.isElement(node) &&
+              node.type !== "block-ref" &&
+              "blockId" in node &&
+              node.blockId === passage.blockId,
+          }).next().value
+        : (() => {
+            const node = ReactEditor.toSlateNode(editorInstance, target);
+            return [node, ReactEditor.findPath(editorInstance, node)] as const;
+          })();
       if (entry) {
         Transforms.select(
           editorInstance,

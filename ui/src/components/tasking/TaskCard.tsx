@@ -12,6 +12,7 @@ import { MarkdownRenderer } from "#/components/MarkdownRenderer";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useBoardStore } from "#/store/board";
+import type { OpenTabTarget } from "#/store/workspace";
 import { type CardBlocker, cardBlockers } from "./blockers";
 import { type ColLabelFn, isDone, priColor, StatePip } from "./board-constants";
 import { ChecklistBar, TypeChip } from "./board-presentation";
@@ -28,7 +29,7 @@ export interface TaskCardProps {
   onClick: () => void;
   onOpenDossier?: (link: string) => void;
   /** Opens a page linked from the description. */
-  onOpenPage?: (path: string) => void;
+  onOpenPage?: (path: string, label?: string, target?: OpenTabTarget) => void;
   /** Resolves a column id to its server-supplied display label. */
   colLabel: ColLabelFn;
   /** Every board task by code: resolves blocker chips. */
@@ -289,7 +290,7 @@ function TaskDescription({
 }: {
   id: string;
   markdown: string;
-  onOpenPage?: (path: string) => void;
+  onOpenPage?: (path: string, label?: string, target?: OpenTabTarget) => void;
 }) {
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: only stops link events bubbling to the card

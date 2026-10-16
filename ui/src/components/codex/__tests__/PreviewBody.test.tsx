@@ -36,6 +36,23 @@ function projection(
 }
 
 describe("PreviewBody", () => {
+  it("keeps metadata but omits the compact excerpt in a reader", () => {
+    render(
+      <PreviewBody
+        path="notes/water-clocks.md"
+        page={page}
+        showContent={false}
+        backlinks={[{}, {}]}
+        preview={projection([field("status", { label: "Reading status" })])}
+      />,
+    );
+    expect(screen.getByText("On Water Clocks")).toBeInTheDocument();
+    expect(screen.getByText("Reading status")).toBeInTheDocument();
+    expect(screen.getByText("#history #horology")).toBeInTheDocument();
+    expect(screen.getByText(/2 backlinks/)).toBeInTheDocument();
+    expect(screen.queryByText(page.body)).not.toBeInTheDocument();
+  });
+
   it("retains title, excerpt, counts, and tags around projected fields", async () => {
     render(
       <PreviewBody

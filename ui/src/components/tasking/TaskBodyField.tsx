@@ -1,6 +1,7 @@
 import { usePage } from "#/api/pages";
 import { MarkdownRenderer } from "#/components/MarkdownRenderer";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
+import type { OpenTabTarget } from "#/store/workspace";
 import { EdField } from "./fields";
 
 const IGNORE_PAGE = () => {};
@@ -18,7 +19,7 @@ export function TaskBodyField({
 }: {
   path: string;
   /** Opens a page linked from the body. */
-  onOpenPage?: (path: string) => void;
+  onOpenPage?: (path: string, label?: string, target?: OpenTabTarget) => void;
 }) {
   const page = usePage(path);
   const body = page.data?.encrypted ? null : (page.data?.body.trim() ?? null);

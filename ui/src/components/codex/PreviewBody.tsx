@@ -77,6 +77,8 @@ export type PreviewBodyProps = {
   previewPending?: boolean;
   /** Passive projection failures do not replace the existing preview content. */
   previewError?: boolean;
+  /** Readers share metadata but render the full body separately. */
+  showContent?: boolean;
 };
 
 /**
@@ -91,11 +93,13 @@ export function PreviewBody({
   preview,
   previewError = false,
   showTags = true,
+  showContent = true,
 }: PreviewBodyProps) {
   const title = page?.meta.title || path;
   const encrypted = page?.encrypted === true;
   const kind = resolveKind({ path, body: encrypted ? undefined : page?.body });
-  const markdown = page && !encrypted ? previewMarkdownSource(page.body) : "";
+  const markdown =
+    showContent && page && !encrypted ? previewMarkdownSource(page.body) : "";
   const words = page && !encrypted ? countWords(page.body) : 0;
   const tags = page?.meta.tags ?? [];
   const backlinkCount = count(backlinks?.length ?? 0, "backlink");
@@ -122,7 +126,7 @@ export function PreviewBody({
           style={{ maskImage: FADE, WebkitMaskImage: FADE }}
         >
           <Suspense fallback={null}>
-            <PreviewMarkdown content={markdown} />
+            <PreviewMarkdown content={markdown} pagePath={path} />
           </Suspense>
         </div>
       )}

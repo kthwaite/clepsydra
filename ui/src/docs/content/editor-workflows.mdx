@@ -129,6 +129,19 @@ Clepsydra appends an empty definition when none exists; the old definition is
 kept. A block ID that does not match the ID format is marked invalid and is not
 committed.
 
+### Preview a link without editing it
+
+Use the adjacent **Preview** action to read an internal link without changing
+the document or caret selection. It is keyboard reachable, appears with
+hover/focus on a mouse, and stays visible on touch devices. Ordinary wikilink
+clicks and `Enter` still enter source editing; modifier navigation is unchanged.
+
+The preview reader supports nested links, scrolling, pinning, and a separate
+**Open page** action. `Escape` closes the active reader and returns focus to its
+opener when available. On touch or narrow layouts, nested readers use a sheet
+with **Back**. See [link preview controls](/docs/links-search-graph-and-repair#read-links-without-leaving-the-page)
+for persistence and passage navigation.
+
 ### Use keyboard marks and shortcuts
 
 Marks use `Command` on macOS and `Ctrl` elsewhere.
@@ -379,9 +392,10 @@ literal instead of expanding recursively. This prevents one reference from
 turning into an unbounded document tree.
 
 Choose **Source** beside the transclusion to open its source Folio and focus the
-referenced block. A missing or empty block shows **Referenced block
-unavailable**. A transient request failure adds **Retry**; a definitive 404 does
-not retry automatically.
+referenced block, or **Preview** to read that block in its surrounding page
+context without leaving the current Folio. A missing or empty block shows
+**Referenced block unavailable**. A transient request failure adds **Retry**;
+a definitive 404 does not retry automatically.
 
 ## Failures and conflicts
 

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PageSummary } from "#/api/types";
+import { useWorkspaceStore } from "#/store/workspace";
 
 const { usePageMock, usePagesMock, createMutateAsync, commitMock } = vi.hoisted(
   () => ({
@@ -17,7 +18,9 @@ vi.mock("#/api/pages", () => ({
   useCreatePage: () => ({ mutateAsync: createMutateAsync, isPending: false }),
 }));
 vi.mock("#/api/bases", () => ({ usePropertyCommit: () => commitMock }));
-vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
+vi.mock("#/hooks/useOpenTab", () => ({
+  useOpenTab: () => useWorkspaceStore.getState().openTab,
+}));
 
 import { MeetingMeta } from "../MeetingMeta";
 
@@ -60,6 +63,12 @@ function renderMeta({ isDraft = false }: { isDraft?: boolean } = {}) {
 const combobox = () => screen.getByRole("combobox", { name: "add attendee" });
 
 beforeEach(() => {
+  useWorkspaceStore.setState({
+    tabs: [],
+    activeTabId: null,
+    openHistory: [],
+    navigationMode: "new",
+  });
   vi.clearAllMocks();
   commitMock.mockResolvedValue(undefined);
   usePagesMock.mockReturnValue({ data: { items: people } });
@@ -155,13 +164,13 @@ describe("MeetingMeta", () => {
     );
   });
 
-  it("links an attendee to the page that carries the name", () => {
+  it("opens the attendee page that carries the name", async () => {
     usePageMock.mockReturnValue(page(["[[Ada]]"]));
     renderMeta();
 
-    expect(screen.getByRole("link", { name: "Ada" })).toHaveAttribute(
-      "href",
-      "/pages/people/ada.md",
+    await userEvent.click(screen.getByRole("link", { name: "Ada" }));
+    expect(useWorkspaceStore.getState().tabs).toContainEqual(
+      expect.objectContaining({ path: "people/ada.md" }),
     );
     expect(screen.queryByRole("button", { name: "create Ada" })).toBeNull();
   });

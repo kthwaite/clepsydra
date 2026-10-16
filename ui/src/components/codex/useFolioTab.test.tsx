@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import type { RefObject } from "react";
 import { createEditor, type Descendant } from "slate";
 import { ReactEditor, withReact } from "slate-react";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type TodayJournalTarget,
@@ -171,6 +172,38 @@ describe("useFolioTab", () => {
     expect(block.hasAttribute("tabindex")).toBe(false);
     expect(tab()?.focusRequestId).toBeUndefined();
     body.remove();
+  });
+
+  it("opens the same duplicate Unicode heading within the destination body", () => {
+    const body = document.createElement("div");
+    body.innerHTML =
+      "<h2>研究 Café</h2><p>First</p><h2>研究 Café</h2><p>Second</p>";
+    document.body.append(body);
+    const heading = body.children[2];
+    heading.scrollIntoView = vi.fn();
+    useWorkspaceStore
+      .getState()
+      .openTab("page", PATH, "a", { heading: "研究-café-1" });
+    setup({ conversationReadOnly: true }, body);
+    expect(heading.scrollIntoView).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(heading);
+    expect(tab()?.focusHeading).toBeUndefined();
+    body.remove();
+  });
+
+  it("reports a missing heading instead of silently treating the page as the requested passage", () => {
+    const error = vi.spyOn(toast, "error").mockImplementation(() => "missing");
+    const body = document.createElement("div");
+    body.innerHTML = "<h2>Available section</h2>";
+    useWorkspaceStore
+      .getState()
+      .openTab("page", PATH, "a", { heading: "Missing section" });
+    setup({ conversationReadOnly: true }, body);
+    expect(error).toHaveBeenCalledWith(
+      "Heading “Missing section” not found on this page",
+    );
+    expect(tab()?.focusRequestId).toBeUndefined();
+    error.mockRestore();
   });
 
   it("puts the caret at the requested block in an editable body", () => {

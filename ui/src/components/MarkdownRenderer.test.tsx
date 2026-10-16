@@ -77,6 +77,21 @@ beforeEach(() => {
 });
 
 describe("MarkdownRenderer", () => {
+  it("preserves a heading and encoded filename in custom page navigation", async () => {
+    const user = userEvent.setup();
+    const onOpenPage = vi.fn();
+    render(
+      <MarkdownRenderer
+        content="[Section](/pages/notes%2Fa%23b.md#R%C3%A9sum%C3%A9)"
+        onOpenPage={onOpenPage}
+      />,
+    );
+    await user.click(screen.getByRole("link", { name: "Section" }));
+    expect(onOpenPage).toHaveBeenCalledWith("notes/a#b.md", undefined, {
+      heading: "Résumé",
+    });
+  });
+
   it("renders snapshot prose and links while keeping nested embeds and HTML inert", async () => {
     lookupMock.mockImplementation((target) =>
       target === "source" ? "notes/source.md" : null,
