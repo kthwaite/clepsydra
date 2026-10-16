@@ -835,7 +835,7 @@ fn validate_resource_sizes(
                 .ok()
                 .and_then(|markdown| snapshot.checked_add(markdown))
         })
-        .ok_or_else(&request_size_overflow)?;
+        .ok_or_else(request_size_overflow)?;
     for resource in resources {
         let size = u64::try_from(resource.bytes.len()).map_err(|_| request_size_overflow())?;
         if size > max_blob_bytes {
@@ -846,7 +846,7 @@ fn validate_resource_sizes(
         }
         // The same configured per-blob limit is applied when the CAS resource
         // is served, so every accepted resource remains renderable.
-        total = total.checked_add(size).ok_or_else(&request_size_overflow)?;
+        total = total.checked_add(size).ok_or_else(request_size_overflow)?;
     }
     if total > max_request_bytes {
         return Err(ApiError::bad_request(format!(
