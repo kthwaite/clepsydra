@@ -157,11 +157,15 @@ Get base. Responses: `200`; `400`; `404`; `409`; `500`.
 ### `PUT /api/vault/bases/{slug}`
 Update base. Responses: `200`; `400`; `404`; `409`; `500`.
 ### `POST /api/vault/bases/{slug}/members`
-Create base member. Responses: `201` Base member created; `400` Malformed or unsupported input; `404` Base or view not found; `409` Stale Base revision or exhausted path retries; `422` Candidate does not match Base membership or selected view; `500` Internal server error.
+Create a member against `base_revision` and the selected `view`, optionally with an `embed_filter`, named row `template`, explicit `fields`, and `body`. Absent fields receive membership implications, template values, or property defaults; explicit values and clears are validated against membership. Responses: `201` Base member created; `400` Malformed or unsupported input; `404` Base or view not found; `409` Stale Base revision or exhausted path retries; `422` Candidate does not match Base membership or selected view; `500` Internal server error.
 ### `GET /api/vault/bases/{slug}/views/{view}`
-Evaluate view. Responses: `200`; `404` Unknown base or view.
+Evaluate a view. Optional `q` searches title and eligible `search_columns` (a JSON field array) before windowing; `unfiltered_total` reports the count before search, after other predicates. Responses: `200`; `404` Unknown base or view.
 ### `POST /api/vault/bases/{slug}/views/{view}/evaluate`
-Evaluate embedded view. Responses: `200`; `400`; `404`; `409`; `500`.
+Evaluate an embedded view with request `filter`, `sort`, and window overrides. Optional `q` and `search_columns` have the same search semantics as GET; the response also includes the current Base revision and member-creation capability. Responses: `200`; `400`; `404`; `409`; `500`.
+### `GET /api/vault/bases/{slug}/views/{view}/export.csv`
+Download all matching rows as `text/csv`, ignoring pagination. Honors the current filter, search, sort, and visible `columns`; JSON query parameters carry field arrays and sort keys. Headers use view labels, cells use CSV quoting, and multivalues are semicolon-separated. Protected and conversation content remains redacted. Responses: `200`; `400` Invalid query.
+### `POST /api/vault/bases/{slug}/views/{view}/import/preview`
+Preview `{ base_revision, csv, mappings?, embed_filter? }` without writes. Each mapping names a zero-based `column` and a target `field`, or `null` to skip it. Returns mappings, proposed property declarations, typed rows, diagnostics, and `valid`. After explicit approval, clients save any declarations using the guarded Base update and create valid rows through the member endpoint. Responses: `200` Preview, including invalid rows; `400` Invalid request; `409` Stale Base revision.
 ### `POST /api/vault/bases/preview`
 Preview base. Responses: `200`.
 

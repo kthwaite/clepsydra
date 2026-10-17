@@ -81,6 +81,40 @@ function renderCell(
 }
 
 describe("cell editors", () => {
+  it("bounds a ring while keeping values above the target editable", async () => {
+    const user = userEvent.setup();
+    renderCell(125, { type: "number", display: "ring" });
+    expect(screen.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuemax",
+      "100",
+    );
+    expect(screen.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "100",
+    );
+    await user.click(screen.getByRole("button", { name: /125/ }));
+    expect(screen.getByRole("spinbutton")).toHaveValue(125);
+  });
+
+  it("formats progress without changing the raw numeric editor value", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(0.375, {
+      type: "number",
+      format: "percent",
+      display: "bar",
+      target: 1,
+    });
+    expect(screen.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "0.375",
+    );
+    await user.click(screen.getByRole("button", { name: /37.5/ }));
+    expect(screen.getByRole("spinbutton")).toHaveValue(0.375);
+    await user.clear(screen.getByRole("spinbutton"));
+    await user.type(screen.getByRole("spinbutton"), "0.5{Enter}");
+    expect(onCommit).toHaveBeenCalledWith(0.5, undefined);
+  });
+
   it("number cell uses a native number input and commits a numeric value", async () => {
     const user = userEvent.setup();
     const { onCommit } = renderCell(9, { type: "number" });

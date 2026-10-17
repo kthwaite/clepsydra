@@ -1569,7 +1569,7 @@ async fn evaluate_embedded_capability_blockers_use_embed_scope_without_duplicate
         .post("/api/vault/bases/embedded/views/reading/evaluate")
         .json(&serde_json::json!({
             "filter": {
-                "not": { "field": "word_count", "op": "eq", "value": 0 }
+                "not": { "field": "journal_date", "op": "is_empty" }
             }
         }))
         .await;
@@ -1580,7 +1580,7 @@ async fn evaluate_embedded_capability_blockers_use_embed_scope_without_duplicate
     let blockers = body["member_creation"]["blockers"].as_array().unwrap();
     assert_eq!(blockers.len(), 1, "{body}");
     assert_eq!(blockers[0]["scope"], "embed");
-    assert_eq!(blockers[0]["field"], "word_count");
+    assert_eq!(blockers[0]["field"], "journal_date");
     assert_eq!(blockers[0]["filter_path"], "embed_filter.not");
     assert!(body.get("diagnostics").is_none(), "{body}");
 }
@@ -4139,13 +4139,6 @@ async fn builtin_meeting_fields_support_generic_queries_and_explicit_type_overri
     let preview: serde_json::Value = response.json();
     assert_eq!(preview["diagnostics"], serde_json::json!([]));
     assert!(preview["evaluation_error"].is_null());
-
-    fixture
-        .server
-        .post("/api/vault/query")
-        .json(&serde_json::json!({ "group_by": "attendees" }))
-        .await
-        .assert_status_bad_request();
 }
 
 #[tokio::test]

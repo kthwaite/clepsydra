@@ -35,9 +35,10 @@ const sealed: ViewStateStorage & { removeItem(key: string): void } = {
 };
 
 describe("columnWidthsKey", () => {
-  it("scopes widths to base and case-folded view", () => {
-    expect(columnWidthsKey("reading", "By Status")).toBe(
-      "clepsydra.bases.columns.reading.by status",
+  it("separates base and view segments even when they contain dots", () => {
+    expect(columnWidthsKey("a.b", "c")).not.toBe(columnWidthsKey("a", "b.c"));
+    expect(columnWidthsKey("a", "By Status")).toBe(
+      columnWidthsKey("a", "by status"),
     );
   });
 });

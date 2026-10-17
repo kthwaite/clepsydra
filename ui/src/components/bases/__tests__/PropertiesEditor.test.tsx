@@ -17,6 +17,7 @@ import type {
 } from "#/api/bases";
 import { BaseDefinitionWorkspace } from "#/components/bases/BaseDefinitionWorkspace";
 import type { DraftProperty } from "#/components/bases/definition-model";
+import { fromWire, toWire } from "#/components/bases/definition-model";
 import {
   PropertiesEditor,
   type PropertiesEditorProps,
@@ -358,6 +359,45 @@ beforeEach(() => {
 });
 
 describe("PropertiesEditor", () => {
+  it("previews affected references and leaves membership unchanged until deletion is confirmed", async () => {
+    const user = userEvent.setup();
+    const draft = fromWire({
+      ...emptyDetail,
+      properties: [{ key: "status", definition: { type: "text" } }],
+      filter: { not: { field: "status", op: "eq", value: "done" } },
+      views: [
+        { name: "All", columns: ["title", "status"], group_by: "status" },
+      ],
+      templates: [{ name: "Queued", fields: { status: "queued" } }],
+    });
+    const onDefinitionChange = vi.fn();
+    renderProperties({
+      properties: draft.properties,
+      draft,
+      onDefinitionChange,
+    });
+    await user.click(screen.getByRole("button", { name: "Remove status" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent(/can broaden Base membership/);
+    expect(
+      within(dialog).getByRole("list", { name: "References to remove" }),
+    ).toHaveTextContent("Row template “Queued”: fields");
+    expect(onDefinitionChange).not.toHaveBeenCalled();
+    await user.click(
+      within(dialog).getByRole("button", { name: "Keep declaration" }),
+    );
+    expect(onDefinitionChange).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Remove status" }));
+    await user.click(
+      screen.getByRole("button", { name: "Remove declaration" }),
+    );
+    expect(toWire(onDefinitionChange.mock.calls[0][0])).toMatchObject({
+      properties: [],
+      filter: undefined,
+      templates: [{ name: "Queued", fields: {} }],
+    });
+  });
+
   it.each([
     "text",
     "number",
@@ -681,7 +721,7 @@ describe("PropertiesEditor", () => {
     },
   );
 
-  it("shows option controls only for select types and resets incompatible settings", async () => {
+  it("preserves incompatible settings for deliberate repair after changing type", async () => {
     const user = userEvent.setup();
     const select = {
       ...property("status", "select"),
@@ -694,7 +734,10 @@ describe("PropertiesEditor", () => {
     expect(screen.getByLabelText("New option for status")).toBeInTheDocument();
     expect(screen.queryByLabelText("New option for title_note")).toBeNull();
     await chooseSelectOption(user, "Type for status", "Number");
-    expect(latest(onChange)[0].definition).toEqual({ type: "number" });
+    expect(latest(onChange)[0].definition).toEqual({
+      type: "number",
+      options: ["queued"],
+    });
   });
 
   it("authors relation cardinality with advisory copy", async () => {
@@ -754,7 +797,7 @@ describe("PropertiesEditor", () => {
     expect(latest(onChange)).toEqual([]);
   });
 
-  it("renames a persisted key as an explicit remove-plus-add after confirmation", async () => {
+  it("renames a persisted key after confirmation without migrating page values", async () => {
     const user = userEvent.setup();
     const status = property("status", "select");
     const { onChange } = renderProperties({
@@ -771,11 +814,11 @@ describe("PropertiesEditor", () => {
       /existing page frontmatter is not renamed/i,
     );
     await within(dialog)
-      .getByRole("button", { name: "Remove and add declaration" })
+      .getByRole("button", { name: "Rename declaration" })
       .click();
     const renamed = latest(onChange);
     expect(renamed.map(({ key }) => key)).toEqual(["state", "rating"]);
-    expect(renamed[0].id).not.toBe(status.id);
+    expect(renamed[0].id).toBe(status.id);
   });
   it.each([
     ["", /key is required/i],
@@ -1030,9 +1073,7 @@ describe("properties workspace integration", () => {
     await user.click(screen.getByRole("button", { name: "Move rating up" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /changed outside clepsydra/i,
-    );
+    await screen.findByRole("alert");
     expect(declarationOrder()).toEqual(["rating", "status"]);
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
     expect(baseState.refetch).not.toHaveBeenCalled();

@@ -1,5 +1,13 @@
 import type { FilterOp } from "#/api/bases";
 
+export const RELATIVE_DATE_OPERATORS: readonly FilterOp[] = [
+  "is_today",
+  "is_this_week",
+  "is_past_week",
+  "is_next_week",
+  "is_this_month",
+];
+
 export const VALUELESS_OPERATORS: Partial<Record<FilterOp, true>> = {
   is_empty: true,
   not_empty: true,

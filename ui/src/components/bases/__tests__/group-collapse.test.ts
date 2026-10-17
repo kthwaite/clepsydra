@@ -15,6 +15,9 @@ class MemoryStorage implements ViewStateStorage {
   setItem(key: string, value: string) {
     this.items.set(key, value);
   }
+  removeItem(key: string) {
+    this.items.delete(key);
+  }
 }
 
 const sealed: ViewStateStorage = {
@@ -22,6 +25,9 @@ const sealed: ViewStateStorage = {
     throw new Error("sealed");
   },
   setItem() {
+    throw new Error("sealed");
+  },
+  removeItem() {
     throw new Error("sealed");
   },
 };
@@ -36,14 +42,24 @@ describe("groupIdentity", () => {
 });
 
 describe("groupCollapseKey", () => {
-  it("scopes the fold to base, case-folded view, and grouping field", () => {
-    expect(groupCollapseKey("reading", "By Status", "status")).toBe(
-      "clepsydra.bases.groups.reading.by status.status",
+  it("does not collide when dots occur in different segments", () => {
+    expect(groupCollapseKey("a.b", "c", "d")).not.toBe(
+      groupCollapseKey("a", "b.c", "d"),
+    );
+    expect(groupCollapseKey("a", "B.C", "d")).toBe(
+      groupCollapseKey("a", "b.c", "d"),
     );
   });
 });
 
 describe("collapsed group storage", () => {
+  it("removes the saved state when every group is expanded", () => {
+    const storage = new MemoryStorage();
+    writeCollapsedGroups(storage, "k", new Set(["reading"]));
+    writeCollapsedGroups(storage, "k", new Set());
+    expect(storage.items.has("k")).toBe(false);
+    expect(readCollapsedGroups(storage, "k").size).toBe(0);
+  });
   it("round-trips a set of identities", () => {
     const storage = new MemoryStorage();
     const key = groupCollapseKey("reading", "shelf", "status");

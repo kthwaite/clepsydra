@@ -83,6 +83,8 @@ pub struct BaseFilePayload {
     pub properties: Vec<BasePropertyEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<ViewDefinition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub templates: Vec<clep_bases::base::RowTemplate>,
 }
 
 impl From<BaseFile> for BaseFilePayload {
@@ -100,6 +102,7 @@ impl From<BaseFile> for BaseFilePayload {
                 .map(|(key, definition)| BasePropertyEntry { key, definition })
                 .collect(),
             views: file.views,
+            templates: file.templates,
         }
     }
 }
@@ -119,6 +122,7 @@ impl From<BaseFilePayload> for BaseFile {
                 .map(|entry| (entry.key, entry.definition))
                 .collect(),
             views: payload.views,
+            templates: payload.templates,
         }
     }
 }
@@ -192,10 +196,18 @@ pub struct ViewParams {
     pub offset: Option<u32>,
     /// Override the view's sort with a single field for this request.
     pub sort: Option<String>,
+    /// JSON-encoded full sort override; takes precedence over sort/dir.
+    pub sort_keys: Option<String>,
     /// Direction for the `sort` override: `asc` (default) or `desc`.
     pub dir: Option<String>,
     /// A JSON-encoded filter AND-ed after the base and view filters.
     pub filter: Option<String>,
+    /// Ephemeral search across title and visible text-like fields.
+    pub q: Option<String>,
+    /// JSON-encoded visible search field list; absent uses view columns.
+    pub search_columns: Option<String>,
+    /// JSON-encoded projection override, used by full-view export.
+    pub columns: Option<String>,
     /// Replace the view's `group_by` for this request; the empty string
     /// evaluates the view flat.
     pub group_by: Option<String>,
@@ -219,6 +231,10 @@ pub struct BasePreviewResponse {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BaseViewEvaluateRequest {
     pub filter: Option<Filter>,
+    /// Ephemeral search across title and visible text-like fields.
+    pub q: Option<String>,
+    /// Visible search fields; absent uses the saved view's columns.
+    pub search_columns: Option<Vec<String>>,
     #[schema(max_items = 8)]
     pub sort: Option<Vec<SortKey>>,
     #[schema(minimum = 1, maximum = 200)]
@@ -285,6 +301,9 @@ where
         group_by,
     );
     spec.offset = offset;
+    spec.q = request.q;
+    spec.search_columns = request.search_columns;
+    validate_search_columns(spec.search_columns.as_deref())?;
 
     Ok(PreparedEmbeddedEvaluation {
         base: stored.definition,
@@ -314,7 +333,8 @@ where
         revision,
         member_creation,
     } = prepare_embedded_evaluation(root, slug, view_name, request, today, load)?;
-    let output = evaluate_prepared(base, spec).await?;
+    let mut output = evaluate_prepared(base, spec).await?;
+    redact_conversation_columns(&mut output);
     Ok(BaseViewEvaluateResponse {
         output,
         revision,
@@ -734,6 +754,10 @@ pub async fn preview_base(
         ("sort" = Option<String>, Query, description = "Sort-field override"),
         ("dir" = Option<String>, Query, description = "asc | desc for the sort override"),
         ("filter" = Option<String>, Query, description = "JSON-encoded filter AND-ed after the base and view filters"),
+        ("q" = Option<String>, Query, description = "Ephemeral substring search"),
+        ("search_columns" = Option<String>, Query, description = "JSON-encoded visible search columns; title always participates and body is excluded"),
+        ("columns" = Option<String>, Query, description = "JSON-encoded projection override"),
+        ("sort_keys" = Option<String>, Query, description = "JSON-encoded full sort override; takes precedence over sort/dir"),
         ("group_by" = Option<String>, Query, description = "Group-by override; empty string evaluates the view flat")
     ),
     responses(
@@ -747,30 +771,63 @@ pub async fn evaluate_view(
     Path((slug, view_name)): Path<(String, String)>,
     Query(params): Query<ViewParams>,
 ) -> Result<Json<QueryOutput>, ApiError> {
+    Ok(Json(
+        evaluate_saved_view(&state, &slug, &view_name, params, false).await?,
+    ))
+}
+
+fn validate_search_columns(columns: Option<&[String]>) -> Result<(), ApiError> {
+    for field in columns.unwrap_or_default() {
+        crate::vault::query::resolve_projection_field(field)
+            .map_err(|error| ApiError::bad_request(format!("invalid search column: {error}")))?;
+    }
+    Ok(())
+}
+
+fn decode_query_json<T: serde::de::DeserializeOwned>(
+    raw: Option<&str>,
+    field: &str,
+) -> Result<Option<T>, ApiError> {
+    raw.map(|raw| {
+        serde_json::from_str(raw).map_err(|_| {
+            invalid_view_query(vec![EmbedValidationDiagnostic {
+                field: Some(field.to_owned()),
+                filter_path: None,
+                message: format!("{field} is not valid JSON"),
+            }])
+        })
+    })
+    .transpose()
+}
+
+pub(super) async fn evaluate_saved_view(
+    state: &Arc<AppState>,
+    slug: &str,
+    view_name: &str,
+    params: ViewParams,
+    full: bool,
+) -> Result<QueryOutput, ApiError> {
     let registry = BaseRegistry::load(state.vault.root());
     let base = registry
-        .get(&slug)
+        .get(slug)
         .cloned()
         .ok_or_else(|| ApiError::not_found(format!("no base with slug `{slug}`")))?;
-    let view = base.view(&view_name).cloned().ok_or_else(|| {
+    let view = base.view(view_name).cloned().ok_or_else(|| {
         ApiError::not_found(format!("base `{slug}` has no view named `{view_name}`"))
     })?;
 
-    let filter = match params.filter.as_deref() {
-        None => None,
-        Some(raw) => Some(serde_json::from_str::<Filter>(raw).map_err(|_| {
-            invalid_view_query(vec![EmbedValidationDiagnostic {
-                field: Some("filter".to_owned()),
-                filter_path: None,
-                message: "filter is not valid JSON".to_owned(),
-            }])
-        })?),
-    };
+    let filter = decode_query_json::<Filter>(params.filter.as_deref(), "filter")?;
+    let sort = decode_query_json::<Vec<SortKey>>(params.sort_keys.as_deref(), "sort_keys")?;
+    let search_columns =
+        decode_query_json::<Vec<String>>(params.search_columns.as_deref(), "search_columns")?;
+    let columns = decode_query_json::<Vec<String>>(params.columns.as_deref(), "columns")?;
+    validate_search_columns(search_columns.as_deref())?;
+    validate_search_columns(columns.as_deref())?;
     validate_embed_overrides(
         &base,
         EmbedOverrides {
             filter: filter.as_ref(),
-            sort: None,
+            sort: sort.as_deref(),
             limit: None,
             group_by: params.group_by.as_deref(),
         },
@@ -782,7 +839,7 @@ pub async fn evaluate_view(
     validate_embed_window(&view, group_by.as_ref(), params.offset.unwrap_or(0))
         .map_err(invalid_view_query)?;
 
-    let spec = query_spec(
+    let mut spec = query_spec(
         &base,
         Some(&view),
         params.limit,
@@ -792,6 +849,19 @@ pub async fn evaluate_view(
         filter,
         group_by,
     );
+    spec.q = params.q;
+    spec.search_columns = search_columns;
+    if let Some(columns) = columns {
+        spec.columns = columns;
+    }
+    if let Some(sort) = sort {
+        spec.sort = sort;
+    }
+    if full {
+        spec.limit = None;
+        spec.offset = 0;
+        spec.group_row_limit = GroupRowLimit::Unlimited;
+    }
 
     let today = state.clock.now().date_naive();
     let mut output = state
@@ -804,7 +874,7 @@ pub async fn evaluate_view(
         .map_err(|e| ApiError::internal(format!("index error: {e}")))?
         .map_err(|e| ApiError::bad_request(format!("query error: {e}")))?;
     redact_conversation_columns(&mut output);
-    Ok(Json(output))
+    Ok(output)
 }
 
 /// Evaluate a saved view with request-owned embed overrides.
@@ -872,6 +942,14 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/{slug}/views/{view}", get(evaluate_view))
         .route(
+            "/{slug}/views/{view}/export.csv",
+            get(super::base_csv::export_csv),
+        )
+        .route(
+            "/{slug}/views/{view}/import/preview",
+            post(super::base_csv::preview_import).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
+        .route(
             "/{slug}/views/{view}/evaluate",
             post(evaluate_embedded_view).layer(DefaultBodyLimit::max(64 * 1024)),
         )
@@ -930,6 +1008,7 @@ mod tests {
                     filter: None,
                     properties: Vec::new(),
                     preview: Vec::new(),
+                    templates: Vec::new(),
                     views: vec![ViewDefinition {
                         name: "Configured View".to_string(),
                         labels: Default::default(),
@@ -946,6 +1025,8 @@ mod tests {
             revision: "injected-revision".to_string(),
         };
         let request = BaseViewEvaluateRequest {
+            q: None,
+            search_columns: None,
             filter: Some(Filter::Cmp {
                 field: "title".to_string(),
                 op: Op::Eq,
@@ -985,6 +1066,7 @@ mod tests {
                         columns: serde_json::Map::new(),
                     }],
                     total: 1,
+                    unfiltered_total: None,
                     aggregates: Vec::new(),
                 })
             },

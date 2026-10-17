@@ -32,6 +32,16 @@ export const EMPTY_OVERRIDES: ViewOverridesState = {
   hiddenColumns: [],
 };
 
+/** The shared visibility lock for both column menus and the Fields picker. */
+export function columnHideLock(
+  column: string,
+  visibleCount: number,
+): string | undefined {
+  if (column === "title") return "The title column stays visible";
+  if (visibleCount <= 1) return "The last column stays visible";
+  return undefined;
+}
+
 export function quickFilterIdentity(filter: QuickFilter): string {
   return JSON.stringify({
     field: filter.field,
@@ -243,6 +253,10 @@ export function definitionPayload(
       ? {}
       : { preview: detail.preview }),
     properties: detail.properties ?? [],
+    ...(detail.templates?.length ? { templates: detail.templates } : {}),
+    ...(detail.hide_member_properties == null
+      ? {}
+      : { hide_member_properties: detail.hide_member_properties }),
     views: (detail.views ?? []).map((candidate) =>
       asciiCaseFold(candidate.name) === target ? view : candidate,
     ),

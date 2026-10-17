@@ -16,7 +16,6 @@ import type {
   QueryOutput,
   SortKey,
 } from "#/api/bases";
-import type { BaseMemberDraftValue } from "#/components/bases/member-draft";
 
 const mocks = vi.hoisted(() => ({
   commit: vi.fn(),
@@ -119,9 +118,13 @@ vi.mock("#/hooks/useCopyToClipboard", () => ({
 }));
 vi.mock("#/api/pages", () => ({
   useArchivePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdatePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 vi.mock("#/api/client", () => ({ fetchClient: { GET: mocks.get } }));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
+vi.mock("#/components/bases/BaseCsvActions", () => ({
+  BaseCsvActions: () => null,
+}));
 
 import { BaseTableView } from "#/components/bases/BaseTableView";
 import type { BaseTableReadyModel } from "#/components/bases/base-table-model";
@@ -214,6 +217,9 @@ beforeEach(() => {
   mocks.detailState.error = null;
   mocks.detailState.isLoading = false;
   mocks.commit.mockResolvedValue(undefined);
+  mocks.updateBase
+    .mockReset()
+    .mockResolvedValue({ revision: "r2", diagnostics: [] });
   mocks.evaluationState.data = evaluation();
   mocks.evaluationState.error = null;
   mocks.evaluationState.isLoading = false;
@@ -326,44 +332,6 @@ describe("useBaseTableController embedded mode", () => {
       expect(result.current.members.focusCreatedId).toBe("created"),
     );
     expect(result.current.members.notice).toBeUndefined();
-  });
-
-  it("omits nullish fields and preserves other falsey fields at the create adapter boundary", async () => {
-    const { result } = renderHook(() => useReadyController(options()));
-    const fields = {
-      absentNull: null,
-      absentUndefined: undefined,
-      zero: 0,
-      disabled: false,
-      empty: "",
-      list: [],
-    } as unknown as BaseMemberDraftValue["fields"];
-
-    act(() => result.current.members.onAdd());
-    await act(async () => {
-      result.current.members.onSave({ title: " Falsey values ", fields });
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(mocks.createMember).toHaveBeenCalledWith({
-      params: { path: { slug: "reading" } },
-      body: {
-        base_revision: "evaluation-rev-1",
-        embed_filter: readingFilter,
-        view: "Continues",
-        title: "Falsey values",
-        fields: {
-          zero: 0,
-          disabled: false,
-          empty: "",
-          list: [],
-        },
-      },
-    });
-    expect(mocks.createMember.mock.calls[0][0].body.fields).not.toHaveProperty(
-      "absentUndefined",
-    );
   });
 
   it.each([
@@ -1378,4 +1346,151 @@ describe("view overrides", () => {
     act(() => result.current.overrides.onShowColumn("status"));
     expect(result.current.overrides.state.hiddenColumns).toEqual(["rating"]);
   });
+});
+
+describe("ephemeral table search", () => {
+  it.each(["standalone", "embedded"] as const)(
+    "debounces search and excludes hidden columns in %s mode",
+    async (mode) => {
+      const { result } = renderHook(() =>
+        useReadyController(options({ mode })),
+      );
+      act(() => result.current.query.onSearchChange?.("Wolfe"));
+      expect(result.current.query.searchApplied).toBe("");
+      await waitFor(() => {
+        if (mode === "standalone") {
+          expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+            "reading",
+            "Continues",
+            expect.objectContaining({
+              q: "Wolfe",
+              searchColumns: ["title", "status"],
+            }),
+          );
+        } else {
+          expect(mocks.useBaseViewWindows).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+              q: "Wolfe",
+              searchColumns: ["title", "status"],
+            }),
+          );
+        }
+      });
+      act(() => result.current.overrides.onHideColumn("status"));
+      await waitFor(() => {
+        const call =
+          mode === "standalone"
+            ? mocks.useBaseView.mock.lastCall?.[2]
+            : mocks.useBaseViewWindows.mock.lastCall?.[0];
+        expect(call).toEqual(
+          expect.objectContaining({ q: "Wolfe", searchColumns: ["title"] }),
+        );
+      });
+      act(() => result.current.query.onSearchChange?.(""));
+      await waitFor(() => expect(result.current.query.search).toBe(""));
+    },
+  );
+
+  it("clears ephemeral search when the active saved view changes", async () => {
+    const { result, rerender } = renderHook(
+      (value) => useReadyController(value),
+      { initialProps: options() },
+    );
+    act(() => result.current.query.onSearchChange?.("Wolfe"));
+    await waitFor(() =>
+      expect(result.current.query.searchApplied).toBe("Wolfe"),
+    );
+    rerender(options({ activeView: "Shelf" }));
+    expect(result.current.query.search).toBe("");
+    expect(result.current.query.searchApplied).toBe("");
+    rerender(options());
+    expect(result.current.query.search).toBe("");
+    expect(result.current.query.searchApplied).toBe("");
+  });
+
+  it("saves a hidden column through the real controller and table", async () => {
+    const user = userEvent.setup();
+    render(<ControllerTable value={options()} />);
+    await user.click(
+      screen.getByRole("button", { name: "status column menu" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Hide column" }));
+    await user.click(screen.getByRole("button", { name: "Save to view" }));
+    await waitFor(() =>
+      expect(mocks.updateBase).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            expected_revision: definition.revision,
+            definition: expect.objectContaining({
+              views: expect.arrayContaining([
+                expect.objectContaining({
+                  name: "Continues",
+                  columns: ["title"],
+                }),
+              ]),
+            }),
+          }),
+        }),
+      ),
+    );
+  });
+});
+
+it("captures only this Base's declared fields into a revision-guarded row template", async () => {
+  mocks.detailState.data = {
+    ...definition,
+    templates: [{ name: "Existing", fields: { status: "reading" } }],
+    hide_member_properties: true,
+  };
+  mocks.get.mockImplementation((path: string) =>
+    Promise.resolve(
+      path.endsWith("/properties")
+        ? {
+            data: {
+              encrypted: false,
+              properties: [
+                { key: "status", present: true, value: "finished" },
+                { key: "unrelated", present: true, value: "secret" },
+              ],
+            },
+          }
+        : {
+            data: {
+              encrypted: false,
+              body: "Reusable body",
+              meta: { tags: ["book"] },
+            },
+          },
+    ),
+  );
+  const { result } = renderHook(() => useReadyController(options()));
+  await act(async () => {
+    await result.current.rowActions.onSaveTemplate(
+      createdRow,
+      "Finished book",
+      true,
+    );
+  });
+  expect(mocks.updateBase).toHaveBeenCalledWith(
+    expect.objectContaining({
+      body: expect.objectContaining({
+        expected_revision: definition.revision,
+        definition: expect.objectContaining({
+          hide_member_properties: true,
+          templates: [
+            { name: "Existing", fields: { status: "reading" } },
+            {
+              name: "Finished book",
+              fields: {
+                "prop.status": "finished",
+                kind: "NOTE",
+                tags: ["book"],
+              },
+              body: "Reusable body",
+            },
+          ],
+        }),
+      }),
+    }),
+  );
 });

@@ -3,6 +3,7 @@ pub mod agenda;
 pub mod ai_journal;
 pub mod archive;
 pub mod attachments;
+pub mod base_csv;
 pub mod base_members;
 pub mod base_render;
 pub mod base_templates;

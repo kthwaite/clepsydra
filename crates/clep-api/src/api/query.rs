@@ -47,10 +47,11 @@ pub struct QueryRequest {
 pub(crate) fn redact_conversation_columns(output: &mut QueryOutput) {
     fn redact_row(row: &mut QueryRow) {
         row.columns.remove("conversation");
+        row.columns.remove("prop.conversation");
     }
     match output {
         QueryOutput::Flat { rows, .. } => rows.iter_mut().for_each(redact_row),
-        QueryOutput::Grouped { groups } => groups
+        QueryOutput::Grouped { groups, .. } => groups
             .iter_mut()
             .flat_map(|group| group.rows.iter_mut())
             .for_each(redact_row),
@@ -85,6 +86,8 @@ impl QueryRequest {
                 limit,
                 offset,
                 group_row_limit,
+                q: None,
+                search_columns: None,
             },
             types,
         )

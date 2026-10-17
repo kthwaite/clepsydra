@@ -156,7 +156,7 @@ pub enum ResolvedField {
 }
 
 /// Whether a resolved field may be a `group_by` key: any system field backed
-/// by a `pages` column, or a declared property of a scalar, comparable type.
+/// by a `pages` column, or a declared scalar comparable or relation property.
 pub(crate) fn is_groupable(resolved: &ResolvedField) -> bool {
     match resolved {
         ResolvedField::Sys(sys) => sys.column().is_some(),
@@ -168,6 +168,7 @@ pub(crate) fn is_groupable(resolved: &ResolvedField) -> bool {
                 | PropertyType::Date
                 | PropertyType::Datetime
                 | PropertyType::Url
+                | PropertyType::Relation
         ),
     }
 }
@@ -233,7 +234,7 @@ pub enum QueryError {
     #[error("invalid value for field `{field}`: {reason}")]
     InvalidValue { field: String, reason: String },
     #[error(
-        "`group_by` field `{0}` cannot group (must be a declared select/text/bool/date property)"
+        "`group_by` field `{0}` cannot group (requires a scalar system field or a declared select/text/bool/date/datetime/url/relation property)"
     )]
     Ungroupable(String),
     #[error("aggregate `{0:?}` requires a numeric or date field")]
@@ -897,6 +898,10 @@ pub enum GroupRowLimit {
 #[derive(Debug, Default)]
 pub struct QuerySpec {
     pub filter: Option<Filter>,
+    /// Ephemeral substring search; never part of a saved Base definition.
+    pub q: Option<String>,
+    /// Visible fields to search; absent uses projected columns. Title always participates.
+    pub search_columns: Option<Vec<String>>,
     pub sort: Vec<SortKey>,
     pub group_by: Option<String>,
     pub aggregates: Vec<Aggregate>,
@@ -927,6 +932,11 @@ pub struct GroupResult {
     /// The raw group key; `null` is the empty bucket.
     #[schema(value_type = serde_json::Value)]
     pub key: serde_json::Value,
+    /// Resolved relation target title and vault path; absent for unresolved keys.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_path: Option<String>,
     /// True total row count for the group (rows may be capped).
     pub total: i64,
     /// One value per requested aggregate, in request order.
@@ -941,6 +951,8 @@ pub enum QueryOutput {
     Flat {
         rows: Vec<QueryRow>,
         total: i64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        unfiltered_total: Option<i64>,
         /// One value per requested aggregate, in request order, computed
         /// over the whole predicate (unaffected by `limit`/`offset`).
         #[schema(value_type = Vec<serde_json::Value>)]
@@ -948,6 +960,8 @@ pub enum QueryOutput {
     },
     Grouped {
         groups: Vec<GroupResult>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        unfiltered_total: Option<i64>,
     },
 }
 
@@ -962,14 +976,106 @@ struct PreparedQuery {
     order_params: Vec<SqlValue>,
 }
 
+fn search_clause(
+    spec: &QuerySpec,
+    ctx: &QueryContext,
+) -> Result<Option<(String, Vec<SqlValue>)>, QueryError> {
+    let Some(q) = spec.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) else {
+        return Ok(None);
+    };
+    let needle = bind_literal_contains_value(
+        "q",
+        PropertyType::Text,
+        Op::Contains,
+        &serde_json::Value::String(q.to_owned()),
+    )?;
+    let mut clauses = vec!["p.title LIKE '%' || ? || '%' ESCAPE '\\'".to_string()];
+    let mut params = vec![needle.clone()];
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(ProjectionFieldIdentity::System(SysField::Title));
+    for field in spec.search_columns.as_deref().unwrap_or(&spec.columns) {
+        let identity = resolve_projection_field(field)?;
+        if !seen.insert(identity.clone()) || identity == ProjectionFieldIdentity::Body {
+            continue;
+        }
+        match resolve_field(field, ctx)? {
+            ResolvedField::Sys(SysField::Tags | SysField::Aliases) => {
+                let (table, column, restriction) =
+                    if matches!(identity, ProjectionFieldIdentity::System(SysField::Tags)) {
+                        ("tags", "tag", "")
+                    } else {
+                        (
+                            "canonical_names",
+                            "canonical_name",
+                            " AND s.source = 'alias'",
+                        )
+                    };
+                clauses.push(format!("EXISTS (SELECT 1 FROM {table} s WHERE s.page_id = p.id{restriction} AND s.{column} LIKE '%' || ? || '%' ESCAPE '\\')"));
+                params.push(needle.clone());
+            }
+            ResolvedField::Sys(sys)
+                if matches!(sys, SysField::Path | SysField::Kind | SysField::Project) =>
+            {
+                clauses.push(format!(
+                    "{} LIKE '%' || ? || '%' ESCAPE '\\'",
+                    sys.column().expect("scalar text field")
+                ));
+                params.push(needle.clone());
+            }
+            ResolvedField::Prop { key, ty }
+                if key != "conversation"
+                    && matches!(
+                        ty,
+                        PropertyType::Text
+                            | PropertyType::Url
+                            | PropertyType::Select
+                            | PropertyType::MultiSelect
+                    ) =>
+            {
+                clauses.push("EXISTS (SELECT 1 FROM page_properties s WHERE s.page_id = p.id AND s.key = ? AND s.value_text LIKE '%' || ? || '%' ESCAPE '\\')".into());
+                params.push(SqlValue::Text(key));
+                params.push(needle.clone());
+            }
+            _ => {}
+        }
+    }
+    Ok(Some((format!("({})", clauses.join(" OR ")), params)))
+}
+
+fn unfiltered_total(
+    conn: &Connection,
+    spec: &QuerySpec,
+    ctx: &QueryContext,
+) -> Result<Option<i64>, QueryError> {
+    if !spec.q.as_deref().is_some_and(|q| !q.trim().is_empty()) {
+        return Ok(None);
+    }
+    let (clause, params) = match &spec.filter {
+        Some(filter) => {
+            let compiled = compile_filter(filter, ctx)?;
+            (compiled.clause, compiled.params)
+        }
+        None => ("1=1".into(), Vec::new()),
+    };
+    Ok(Some(conn.query_row(
+        &format!("SELECT COUNT(*) FROM pages p WHERE {clause}"),
+        rusqlite::params_from_iter(params.iter()),
+        |row| row.get(0),
+    )?))
+}
+
 fn prepare(spec: &QuerySpec, ctx: &QueryContext) -> Result<PreparedQuery, QueryError> {
-    let (where_clause, where_params) = match &spec.filter {
+    let (mut where_clause, mut where_params) = match &spec.filter {
         Some(filter) => {
             let compiled = compile_filter(filter, ctx)?;
             (compiled.clause, compiled.params)
         }
         None => ("1=1".to_string(), Vec::new()),
     };
+    if let Some((search, params)) = search_clause(spec, ctx)? {
+        where_clause = format!("({where_clause}) AND {search}");
+        where_params.extend(params);
+    }
 
     // Sort: one LEFT JOIN per property sort key, ordered nulls-last.
     let mut join_clause = String::new();
@@ -999,9 +1105,10 @@ fn prepare(spec: &QuerySpec, ctx: &QueryContext) -> Result<PreparedQuery, QueryE
                 if ty == PropertyType::Relation {
                     // Order by the first target's canonical name. The param
                     // binds inside ORDER BY, textually after the WHERE params.
+                    // Property-link spans encode -(ordinal + 1).
                     order_params.push(SqlValue::Text(key));
                     order_exprs.push(format!(
-                        "(SELECT l.target_canonical FROM links l WHERE l.source_id = p.id AND l.source_field = ? ORDER BY l.span_start LIMIT 1) {dir}"
+                        "(SELECT l.target_canonical FROM links l WHERE l.source_id = p.id AND l.source_field = ? ORDER BY l.span_start DESC, l.rowid LIMIT 1) {dir}"
                     ));
                     continue;
                 }
@@ -1085,18 +1192,7 @@ fn evaluate_flat(
         rusqlite::params_from_iter(header_params.iter()),
         |row| {
             let total: i64 = row.get(0)?;
-            let mut aggregates = Vec::with_capacity(plan.exprs.len());
-            let mut col = 1;
-            for expr in &plan.exprs {
-                if expr.is_some() {
-                    let v: rusqlite::types::Value = row.get(col)?;
-                    aggregates.push(sql_value_to_json(v));
-                    col += 1;
-                } else {
-                    // Median placeholder, filled in below.
-                    aggregates.push(serde_json::Value::Null);
-                }
-            }
+            let aggregates = read_aggregate_values(row, &plan, 1)?;
             Ok((total, aggregates))
         },
     )?;
@@ -1109,6 +1205,7 @@ fn evaluate_flat(
     Ok(QueryOutput::Flat {
         rows,
         total,
+        unfiltered_total: unfiltered_total(conn, spec, ctx)?,
         aggregates,
     })
 }
@@ -1130,6 +1227,10 @@ fn evaluate_grouped(
             sys.column()
                 .expect("is_groupable admits only column-backed system fields"),
         ),
+        ResolvedField::Prop {
+            key,
+            ty: PropertyType::Relation,
+        } => GroupColumn::Relation { key },
         ResolvedField::Prop { key, ty } => GroupColumn::Property {
             key,
             column: typed_column(ty),
@@ -1140,18 +1241,15 @@ fn evaluate_grouped(
     let plan = plan_aggregates(spec, ctx)?;
 
     // The grouped header query: key, total, aggregates.
-    let (group_expr, group_join, group_join_param) = match &group_column {
-        GroupColumn::System(column) => (column.to_string(), String::new(), None),
-        GroupColumn::Property { key, column } => (
-            format!("grp.{column}"),
-            " LEFT JOIN page_properties grp ON grp.page_id = p.id AND grp.key = ? AND grp.ord = 0"
-                .to_string(),
-            Some(SqlValue::Text(key.clone())),
-        ),
+    let (group_expr, group_join, group_join_param) = group_column.sql();
+    let presentation = if matches!(group_column, GroupColumn::Relation { .. }) {
+        "MIN(grp_target.title), MIN(grp_target.path)"
+    } else {
+        "NULL, NULL"
     };
 
     let header_sql = format!(
-        "SELECT {group_expr} AS gkey, COUNT(*) AS total{} FROM pages p{group_join}{} WHERE {} GROUP BY gkey ORDER BY gkey IS NULL, gkey ASC",
+        "SELECT {group_expr} AS gkey, COUNT(*) AS total, {presentation}{} FROM pages p{group_join}{} WHERE {} GROUP BY gkey ORDER BY gkey IS NULL, gkey ASC",
         plan.exprs
             .iter()
             .flatten()
@@ -1168,7 +1266,13 @@ fn evaluate_grouped(
     header_params.extend(prepared.where_params.iter().cloned());
 
     #[allow(clippy::type_complexity)]
-    let headers: Vec<(Option<SqlValue>, i64, Vec<serde_json::Value>)> = {
+    let headers: Vec<(
+        Option<SqlValue>,
+        i64,
+        Option<String>,
+        Option<String>,
+        Vec<serde_json::Value>,
+    )> = {
         let mut stmt = conn.prepare(&header_sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(header_params.iter()), |row| {
             let key: Option<SqlValue> =
@@ -1177,19 +1281,10 @@ fn evaluate_grouped(
                     other => Some(other),
                 })?;
             let total: i64 = row.get(1)?;
-            let mut aggs = Vec::with_capacity(plan.exprs.len());
-            let mut col = 2;
-            for expr in &plan.exprs {
-                if expr.is_some() {
-                    let v: rusqlite::types::Value = row.get(col)?;
-                    aggs.push(sql_value_to_json(v));
-                    col += 1;
-                } else {
-                    // Median placeholder, filled in below.
-                    aggs.push(serde_json::Value::Null);
-                }
-            }
-            Ok((key, total, aggs))
+            let label = row.get(2)?;
+            let path = row.get(3)?;
+            let aggs = read_aggregate_values(row, &plan, 4)?;
+            Ok((key, total, label, path, aggs))
         })?;
         rows.collect::<Result<_, _>>()?
     };
@@ -1200,7 +1295,7 @@ fn evaluate_grouped(
         GroupRowLimit::Limit(limit) => Some(limit),
     };
     let mut groups = Vec::with_capacity(headers.len());
-    for (key, total, mut aggregates) in headers {
+    for (key, total, key_label, key_path, mut aggregates) in headers {
         for median in &plan.medians {
             aggregates[median.index] =
                 median_value(conn, &prepared, median, Some((&group_column, key.as_ref())))?;
@@ -1218,31 +1313,54 @@ fn evaluate_grouped(
             key: key
                 .map(sql_value_to_json)
                 .unwrap_or(serde_json::Value::Null),
+            key_label,
+            key_path,
             total,
             aggregates,
             rows,
         });
     }
 
-    Ok(QueryOutput::Grouped { groups })
+    Ok(QueryOutput::Grouped {
+        groups,
+        unfiltered_total: unfiltered_total(conn, spec, ctx)?,
+    })
 }
 
 enum GroupColumn {
     System(&'static str),
     Property { key: String, column: &'static str },
+    Relation { key: String },
 }
 
-/// `SUM`/`AVG`/`MIN`/`MAX`/`COUNT`: the aggregates that fold straight to one
-/// SQL function call. `median` and `range` build their own SQL shape in
-/// `plan_aggregates`, and never reach this function.
+impl GroupColumn {
+    fn sql(&self) -> (String, String, Option<SqlValue>) {
+        match self {
+            Self::System(column) => (column.to_string(), String::new(), None),
+            Self::Property { key, column } => (
+                format!("grp.{column}"),
+                " LEFT JOIN page_properties grp ON grp.page_id = p.id AND grp.key = ? AND grp.ord = 0".into(),
+                Some(SqlValue::Text(key.clone())),
+            ),
+            // Property-link spans encode -(ordinal + 1), so descending is authored order.
+            Self::Relation { key } => (
+                "COALESCE(grp_target.canonical_name, grp.target_canonical)".into(),
+                " LEFT JOIN links grp ON grp.rowid = (SELECT first_link.rowid FROM links first_link WHERE first_link.source_id = p.id AND first_link.source_field = ? ORDER BY first_link.span_start DESC, first_link.rowid LIMIT 1) LEFT JOIN pages grp_target ON grp_target.id = grp.target_id".into(),
+                Some(SqlValue::Text(key.clone())),
+            ),
+        }
+    }
+}
+
+/// Simple SQL folds; count-family, median and range construct their own SQL.
 fn sql_aggregate(f: AggregateFn) -> &'static str {
     match f {
-        AggregateFn::Count => "COUNT",
         AggregateFn::Sum => "SUM",
         AggregateFn::Avg => "AVG",
         AggregateFn::Min => "MIN",
         AggregateFn::Max => "MAX",
-        AggregateFn::CountEmpty
+        AggregateFn::Count
+        | AggregateFn::CountEmpty
         | AggregateFn::CountFilled
         | AggregateFn::PercentFilled
         | AggregateFn::CountUnique
@@ -1368,6 +1486,24 @@ fn plan_aggregates(spec: &QuerySpec, ctx: &QueryContext) -> Result<AggregatePlan
     Ok(plan)
 }
 
+fn read_aggregate_values(
+    row: &rusqlite::Row<'_>,
+    plan: &AggregatePlan,
+    mut column: usize,
+) -> rusqlite::Result<Vec<serde_json::Value>> {
+    plan.exprs
+        .iter()
+        .map(|expression| {
+            if expression.is_none() {
+                return Ok(serde_json::Value::Null);
+            }
+            let value = row.get(column)?;
+            column += 1;
+            Ok(sql_value_to_json(value))
+        })
+        .collect()
+}
+
 /// The group restriction shared by `fetch_rows` and `median_value`: a
 /// `LEFT JOIN` (for property groups) plus an `AND` predicate pinning one
 /// group's key. The join and predicate params are kept separate because
@@ -1376,34 +1512,15 @@ fn plan_aggregates(spec: &QuerySpec, ctx: &QueryContext) -> Result<AggregatePlan
 fn group_predicate(
     group: Option<(&GroupColumn, Option<&SqlValue>)>,
 ) -> (String, Vec<SqlValue>, String, Vec<SqlValue>) {
-    match group {
-        None => (String::new(), Vec::new(), String::new(), Vec::new()),
-        Some((GroupColumn::System(col), key)) => match key {
-            Some(v) => (
-                String::new(),
-                Vec::new(),
-                format!(" AND {col} = ?"),
-                vec![(*v).clone()],
-            ),
-            None => (
-                String::new(),
-                Vec::new(),
-                format!(" AND {col} IS NULL"),
-                Vec::new(),
-            ),
-        },
-        Some((GroupColumn::Property { key, column }, value)) => {
-            let join =
-                " LEFT JOIN page_properties grp ON grp.page_id = p.id AND grp.key = ? AND grp.ord = 0"
-                    .to_string();
-            let join_params = vec![SqlValue::Text(key.clone())];
-            let (clause, clause_params) = match value {
-                Some(v) => (format!(" AND grp.{column} = ?"), vec![(*v).clone()]),
-                None => (format!(" AND grp.{column} IS NULL"), Vec::new()),
-            };
-            (join, join_params, clause, clause_params)
-        }
-    }
+    let Some((column, value)) = group else {
+        return (String::new(), Vec::new(), String::new(), Vec::new());
+    };
+    let (expression, join, join_param) = column.sql();
+    let (clause, params) = match value {
+        Some(value) => (format!(" AND {expression} = ?"), vec![value.clone()]),
+        None => (format!(" AND {expression} IS NULL"), Vec::new()),
+    };
+    (join, join_param.into_iter().collect(), clause, params)
 }
 
 /// Fetch the present values of a median's column (optionally restricted to
@@ -1439,16 +1556,22 @@ fn median_value(
         return Ok(serde_json::Value::Null);
     }
     if median.numeric {
-        let as_f64 = |v: &rusqlite::types::Value| match v {
-            rusqlite::types::Value::Integer(i) => *i as f64,
-            rusqlite::types::Value::Real(f) => *f,
-            _ => 0.0,
+        let as_f64 = |v: &rusqlite::types::Value| -> rusqlite::Result<f64> {
+            match v {
+                rusqlite::types::Value::Integer(i) => Ok(*i as f64),
+                rusqlite::types::Value::Real(f) => Ok(*f),
+                _ => Err(rusqlite::Error::InvalidColumnType(
+                    0,
+                    column.clone(),
+                    v.data_type(),
+                )),
+            }
         };
         let mid = n / 2;
         let value = if n % 2 == 1 {
-            as_f64(&values[mid])
+            as_f64(&values[mid])?
         } else {
-            (as_f64(&values[mid - 1]) + as_f64(&values[mid])) / 2.0
+            as_f64(&values[mid - 1])? / 2.0 + as_f64(&values[mid])? / 2.0
         };
         Ok(serde_json::Number::from_f64(value)
             .map(serde_json::Value::Number)
@@ -1733,6 +1856,8 @@ mod tests {
     use clep_vault::Vault;
     use clep_vault::page::{Page, PageMeta};
     use clep_vault::path::VaultPath;
+
+    const TEST_TODAY: chrono::NaiveDate = chrono::NaiveDate::from_ymd_opt(2026, 8, 9).unwrap();
 
     // -- Task 3.1: AST + field resolution ---------------------------------
 
@@ -2125,7 +2250,7 @@ moment  = { type = "datetime" }
     }
 
     fn only_group(output: QueryOutput) -> GroupResult {
-        let QueryOutput::Grouped { mut groups } = output else {
+        let QueryOutput::Grouped { mut groups, .. } = output else {
             panic!("expected grouped output");
         };
         assert_eq!(groups.len(), 1);
@@ -2139,12 +2264,378 @@ moment  = { type = "datetime" }
         }
     }
 
-    fn run(index: &VaultIndex, base: &BaseDefinition, filter: serde_json::Value) -> QueryOutput {
+    fn run(
+        index: &VaultIndex,
+        base: &BaseDefinition,
+        filter: serde_json::Value,
+        today: chrono::NaiveDate,
+    ) -> QueryOutput {
         let spec = QuerySpec {
             filter: Some(serde_json::from_value(filter).unwrap()),
             ..Default::default()
         };
-        evaluate(index.connection(), &spec, &QueryContext::for_base(base)).unwrap()
+        evaluate(
+            index.connection(),
+            &spec,
+            &QueryContext::for_base(base).with_today(today),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn relative_timestamp_filters_have_in_memory_parity_with_an_explicit_clock() {
+        let (tmp, mut index, mut base) = fixture();
+        std::fs::write(
+            tmp.path().join("a.md"),
+            page(
+                "0190f8a0-0000-7000-8000-00000000000a",
+                "BOOK",
+                "Book A",
+                "created_at = 2026-08-09T12:00:00Z\nupdated_at = 2026-08-01T23:59:59Z\n",
+            ),
+        )
+        .unwrap();
+        index.build(&Vault::open(tmp.path()).unwrap()).unwrap();
+        let mut meta = PageMeta::new();
+        meta.kind = Some(clep_vault::kind::Kind::Book);
+        meta.created_at = Some("2026-08-09T12:00:00Z".parse().unwrap());
+        meta.updated_at = Some("2026-08-01T23:59:59Z".parse().unwrap());
+        for (field, op, expected) in [
+            ("created_at", "is_today", true),
+            ("created_at", "is_this_month", true),
+            ("created_at", "is_next_week", false),
+            ("updated_at", "is_today", false),
+            ("updated_at", "is_this_month", true),
+            ("updated_at", "is_this_week", false),
+        ] {
+            let filter = serde_json::json!({"field":field, "op":op});
+            base.file.filter = Some(serde_json::from_value(filter.clone()).unwrap());
+            let output = run(&index, &base, filter, TEST_TODAY);
+            assert_eq!(
+                flat_paths(&output).iter().any(|path| path == "a.md"),
+                expected,
+                "{field} {op}"
+            );
+            assert_eq!(
+                crate::base::base_matches_meta_on(&base, &meta, "a.md", TEST_TODAY),
+                expected,
+                "{field} {op}"
+            );
+        }
+    }
+
+    #[test]
+    fn relative_filter_median_and_search_bind_in_sql_order() {
+        let (_tmp, index, base) = aggregate_fixture();
+        let spec = QuerySpec {
+            filter: Some(
+                serde_json::from_value(serde_json::json!({
+                    "field":"started", "op":"is_this_month"
+                }))
+                .unwrap(),
+            ),
+            q: Some("Book".into()),
+            aggregates: vec![
+                agg(AggregateFn::Count, None),
+                agg(AggregateFn::Median, Some("rating")),
+            ],
+            limit: Some(1),
+            offset: 2,
+            ..Default::default()
+        };
+        let QueryOutput::Flat {
+            rows,
+            total,
+            unfiltered_total,
+            aggregates,
+        } = evaluate(
+            index.connection(),
+            &spec,
+            &QueryContext::for_base(&base).with_today(TEST_TODAY),
+        )
+        .unwrap()
+        else {
+            panic!("flat")
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(total, 4);
+        assert_eq!(unfiltered_total, Some(4));
+        assert_eq!(
+            aggregates,
+            vec![serde_json::json!(4), serde_json::json!(3.0)]
+        );
+    }
+
+    #[test]
+    fn boolean_unique_and_system_word_count_aggregates_preserve_counts() {
+        let (tmp, mut index, base) = fixture();
+        std::fs::write(
+            tmp.path().join("b.md"),
+            page(
+                "0190f8a0-0000-7000-8000-00000000000b",
+                "BOOK",
+                "Book B",
+                "done = false\n",
+            ),
+        )
+        .unwrap();
+        index.build(&Vault::open(tmp.path()).unwrap()).unwrap();
+        let spec = QuerySpec {
+            filter: book_filter(),
+            aggregates: vec![
+                agg(AggregateFn::CountUnique, Some("done")),
+                agg(AggregateFn::CountFilled, Some("word_count")),
+                agg(AggregateFn::CountEmpty, Some("word_count")),
+                agg(AggregateFn::CountUnique, Some("word_count")),
+                agg(AggregateFn::PercentFilled, Some("word_count")),
+            ],
+            ..Default::default()
+        };
+        let QueryOutput::Flat { aggregates, .. } =
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
+        else {
+            panic!("flat")
+        };
+        assert_eq!(
+            aggregates,
+            serde_json::json!([2, 4, 0, 1, 100.0])
+                .as_array()
+                .unwrap()
+                .clone()
+        );
+    }
+
+    #[test]
+    fn odd_date_median_and_grouped_date_range_use_calendar_values() {
+        let (_tmp, index, base) = aggregate_fixture();
+        let spec = QuerySpec {
+            group_by: Some("status".into()),
+            aggregates: vec![
+                agg(AggregateFn::Median, Some("started")),
+                agg(AggregateFn::Range, Some("started")),
+            ],
+            ..Default::default()
+        };
+        let QueryOutput::Grouped { groups, .. } =
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
+        else {
+            panic!("grouped")
+        };
+        let reading = groups
+            .iter()
+            .find(|group| group.key == serde_json::json!("reading"))
+            .unwrap();
+        assert_eq!(
+            reading.aggregates,
+            vec![serde_json::json!("2026-08-11"), serde_json::json!(30.0)]
+        );
+        let finished = groups
+            .iter()
+            .find(|group| group.key == serde_json::json!("finished"))
+            .unwrap();
+        assert_eq!(
+            finished.aggregates,
+            vec![serde_json::json!("2026-08-21"), serde_json::json!(0.0)]
+        );
+        let queued = groups
+            .iter()
+            .find(|group| group.key == serde_json::json!("queued"))
+            .unwrap();
+        assert_eq!(
+            queued.aggregates,
+            vec![serde_json::Value::Null, serde_json::Value::Null]
+        );
+    }
+
+    #[test]
+    fn relation_groups_use_one_first_target_and_resolved_presentation() {
+        let (tmp, mut index, base) = fixture();
+        std::fs::write(
+            tmp.path().join("b.md"),
+            page(
+                "0190f8a0-0000-7000-8000-00000000000b",
+                "BOOK",
+                "Book B",
+                "series = [\"[[solar-cycle]]\", \"[[Missing Series]]\"]\nrating = 10\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("c.md"),
+            page(
+                "0190f8a0-0000-7000-8000-00000000000c",
+                "BOOK",
+                "Book C",
+                "series = [\"[[Missing Series]]\", \"[[Solar Cycle]]\"]\n",
+            ),
+        )
+        .unwrap();
+        index.build(&Vault::open(tmp.path()).unwrap()).unwrap();
+        index.resolve_links().unwrap();
+        let spec = QuerySpec {
+            filter: book_filter(),
+            group_by: Some("series".into()),
+            aggregates: vec![
+                agg(AggregateFn::Count, None),
+                agg(AggregateFn::Median, Some("rating")),
+            ],
+            group_row_limit: GroupRowLimit::Limit(1),
+            ..Default::default()
+        };
+        let QueryOutput::Grouped { groups, .. } =
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
+        else {
+            panic!("expected grouped output");
+        };
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups.iter().map(|group| group.total).sum::<i64>(), 4);
+        let solar = groups
+            .iter()
+            .find(|group| group.key == serde_json::json!("solar cycle"))
+            .unwrap();
+        assert_eq!(solar.total, 2);
+        assert_eq!(solar.rows.len(), 1);
+        assert_eq!(
+            solar.aggregates,
+            vec![serde_json::json!(2), serde_json::json!(9.5)]
+        );
+        assert_eq!(solar.key_label.as_deref(), Some("Solar Cycle"));
+        assert_eq!(solar.key_path.as_deref(), Some("solar-cycle.md"));
+        let missing = groups
+            .iter()
+            .find(|group| group.key == serde_json::json!("missing series"))
+            .unwrap();
+        assert_eq!(missing.total, 1);
+        assert!(missing.key_path.is_none());
+        assert_eq!(
+            groups
+                .iter()
+                .find(|group| group.key.is_null())
+                .unwrap()
+                .total,
+            1
+        );
+    }
+
+    #[test]
+    fn search_totals_and_aggregates_precede_the_row_window() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let spec = QuerySpec {
+            filter: book_filter(),
+            q: Some("Book 0".into()),
+            search_columns: Some(vec![]),
+            limit: Some(2),
+            offset: 1,
+            aggregates: vec![agg(AggregateFn::Sum, Some("rating"))],
+            ..Default::default()
+        };
+        let output = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
+        let QueryOutput::Flat {
+            rows,
+            total,
+            unfiltered_total,
+            aggregates,
+        } = output
+        else {
+            panic!("expected flat output");
+        };
+        assert_eq!(rows.len(), 2);
+        assert_eq!(total, 10);
+        assert_eq!(unfiltered_total, Some(55));
+        assert_eq!(aggregates, vec![serde_json::json!(55.0)]);
+    }
+
+    #[test]
+    fn grouped_search_recomputes_group_totals_without_expanding_windows() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let mut spec = grouped_limit_spec(GroupRowLimit::Limit(1));
+        spec.q = Some("Book 0".into());
+        let QueryOutput::Grouped {
+            groups,
+            unfiltered_total,
+        } = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
+        else {
+            panic!("grouped")
+        };
+        assert_eq!(unfiltered_total, Some(55));
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].total, 10);
+        assert_eq!(groups[0].rows.len(), 1);
+        assert_eq!(
+            groups[0].aggregates,
+            vec![serde_json::json!(10), serde_json::json!(55.0)]
+        );
+    }
+
+    #[test]
+    fn search_never_matches_encrypted_body_bytes() {
+        let (_tmp, index, base) = encryption_fixture();
+        let spec = QuerySpec {
+            q: Some("AGE ENCRYPTED".into()),
+            columns: vec!["body".into()],
+            search_columns: Some(vec!["body".into(), "sys.body".into(), "prop.body".into()]),
+            ..Default::default()
+        };
+        let output = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
+        assert!(flat_paths(&output).is_empty());
+    }
+
+    #[test]
+    fn search_only_uses_visible_text_columns_and_never_body() {
+        let (_tmp, index, base) = fixture();
+        let mut spec = QuerySpec {
+            filter: book_filter(),
+            columns: vec!["author".into(), "body".into(), "pattern".into()],
+            q: Some("Wolfe".into()),
+            search_columns: Some(vec!["body".into()]),
+            ..Default::default()
+        };
+        let ctx = QueryContext::for_base(&base);
+        assert!(flat_paths(&evaluate(index.connection(), &spec, &ctx).unwrap()).is_empty());
+        spec.search_columns = Some(vec!["author".into()]);
+        assert_eq!(
+            flat_paths(&evaluate(index.connection(), &spec, &ctx).unwrap()),
+            ["a.md"]
+        );
+        spec.q = Some("body".into());
+        spec.search_columns = None;
+        assert!(flat_paths(&evaluate(index.connection(), &spec, &ctx).unwrap()).is_empty());
+        spec.q = Some("%_".into());
+        assert_eq!(
+            flat_paths(&evaluate(index.connection(), &spec, &ctx).unwrap()),
+            ["a.md"]
+        );
+        spec.q = Some("  ".into());
+        let output =
+            serde_json::to_value(evaluate(index.connection(), &spec, &ctx).unwrap()).unwrap();
+        assert_eq!(output["total"], 4);
+        assert!(output.get("unfiltered_total").is_none());
+    }
+
+    #[test]
+    fn visible_text_sets_match_substrings_without_duplicating_rows() {
+        let (_tmp, index, base) = fixture();
+        for (field, q, expected) in [
+            ("themes", "mem", vec!["a.md", "c.md"]),
+            ("status", "read", vec!["a.md", "b.md"]),
+            ("aliases", "science", vec!["a.md"]),
+            ("tags", "SF", vec!["a.md"]),
+            ("rating", "9", vec![]),
+        ] {
+            let spec = QuerySpec {
+                filter: book_filter(),
+                q: Some(q.into()),
+                search_columns: Some(vec![field.into(), "sys.title".into(), "title".into()]),
+                ..Default::default()
+            };
+            assert_eq!(
+                flat_paths(
+                    &evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
+                ),
+                expected,
+                "{field}"
+            );
+        }
     }
 
     #[test]
@@ -2369,16 +2860,7 @@ moment  = { type = "datetime" }
             let filter: Filter = serde_json::from_value(filter_json.clone()).unwrap();
             base.file.filter = Some(filter);
             let in_memory = crate::base::base_matches_meta_on(&base, &meta, "a.md", today);
-            let spec = QuerySpec {
-                filter: Some(serde_json::from_value(filter_json.clone()).unwrap()),
-                ..Default::default()
-            };
-            let output = evaluate(
-                index.connection(),
-                &spec,
-                &QueryContext::for_base(&base).with_today(today),
-            )
-            .unwrap_or_else(|error| panic!("{filter_json} failed to compile: {error}"));
+            let output = run(&index, &base, filter_json, today);
             let sql = flat_paths(&output).iter().any(|path| path == "a.md");
 
             assert_eq!(sql, expected, "unexpected SQL fixture result");
@@ -2715,6 +3197,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
                 { "field": "kind", "op": "eq", "value": "BOOK" },
                 { "field": "status", "op": "eq", "value": "reading" }
             ]}),
+            TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["a.md", "b.md"]);
     }
@@ -2727,12 +3210,14 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
             &index,
             &base,
             serde_json::json!({ "field": "rating", "op": "gt", "value": 9 }),
+            TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["b.md"]);
         let out = run(
             &index,
             &base,
             serde_json::json!({ "field": "rating", "op": "gte", "value": 9 }),
+            TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["a.md", "b.md"]);
     }
@@ -2747,6 +3232,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
                 { "field": "started", "op": "gte", "value": "2026-07-01" },
                 { "field": "started", "op": "lte", "value": "2026-07-31" }
             ]}),
+            TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["a.md", "b.md"]);
     }
@@ -2758,6 +3244,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
             &index,
             &base,
             serde_json::json!({ "field": "themes", "op": "contains", "value": "memory" }),
+            TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["a.md", "c.md"]);
     }
@@ -2772,6 +3259,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
                 { "field": "kind", "op": "eq", "value": "BOOK" },
                 { "field": "themes", "op": "is_empty" }
             ]}),
+            TEST_TODAY,
         );
         // b has themes = [] (no rows), e has no themes key at all.
         assert_eq!(flat_paths(&out), vec!["b.md", "e.md"]);
@@ -2784,6 +3272,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
             &index,
             &base,
             serde_json::json!({ "field": "series", "op": "links_to", "value": "Solar Cycle" }),
+            TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["a.md"]);
 
@@ -2791,6 +3280,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
             &index,
             &base,
             serde_json::json!({ "field": "series", "op": "links_to", "value": "0190f8a0-0000-7000-8000-0000000000aa" }),
+            TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["a.md"]);
 
@@ -2798,6 +3288,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
             &index,
             &base,
             serde_json::json!({ "field": "series", "op": "links_to", "value": "0190F8A0-0000-7000-8000-0000000000AA" }),
+            TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["a.md"]);
     }
@@ -2826,6 +3317,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
             &index,
             &base,
             serde_json::json!({ "field": "tags", "op": "contains", "value": "sf" }),
+            TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["a.md"]);
     }
@@ -2844,6 +3336,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
                 ]},
                 { "not": { "field": "author", "op": "eq", "value": "Borges" } }
             ]}),
+            TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["b.md"]);
     }
@@ -2957,7 +3450,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
             ..Default::default()
         };
         let out = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
-        let QueryOutput::Grouped { groups } = out else {
+        let QueryOutput::Grouped { groups, .. } = out else {
             panic!("expected grouped output");
         };
         assert_eq!(groups.len(), 3);
@@ -3764,11 +4257,14 @@ started = { type = "date" }
             limit: Some(2),
             offset: 1,
             group_row_limit: GroupRowLimit::Default,
+            q: None,
+            search_columns: None,
         };
         let QueryOutput::Flat {
             rows,
             total,
             aggregates,
+            ..
         } = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
         else {
             panic!("flat")
@@ -3819,6 +4315,7 @@ started = { type = "date" }
             aggregates: vec![
                 agg(AggregateFn::Count, None),
                 agg(AggregateFn::CountFilled, Some("rating")),
+                agg(AggregateFn::CountEmpty, Some("rating")),
                 agg(AggregateFn::PercentFilled, Some("rating")),
                 agg(AggregateFn::Median, Some("rating")),
                 agg(AggregateFn::Range, Some("rating")),
@@ -3830,6 +4327,7 @@ started = { type = "date" }
             rows,
             total,
             aggregates,
+            ..
         } = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
         else {
             panic!("flat")
@@ -3839,6 +4337,7 @@ started = { type = "date" }
         assert_eq!(
             aggregates,
             vec![
+                serde_json::json!(0),
                 serde_json::json!(0),
                 serde_json::json!(0),
                 serde_json::json!(0),
@@ -3860,7 +4359,7 @@ started = { type = "date" }
             ],
             ..Default::default()
         };
-        let QueryOutput::Grouped { groups } =
+        let QueryOutput::Grouped { groups, .. } =
             evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
         else {
             panic!("grouped")
@@ -3896,6 +4395,31 @@ started = { type = "date" }
     }
 
     #[test]
+    fn search_excludes_system_owned_conversation_values_even_when_explicitly_visible() {
+        let (tmp, mut index, _base) = fixture();
+        std::fs::write(
+            tmp.path().join("private.md"),
+            page(
+                "0190f8a0-0000-7000-8000-0000000000f0",
+                "NOTE",
+                "Private Ledger",
+                "conversation = \"Ledger Needle\"\n",
+            ),
+        )
+        .unwrap();
+        index.build(&Vault::open(tmp.path()).unwrap()).unwrap();
+        let spec = QuerySpec {
+            q: Some("Ledger Needle".into()),
+            search_columns: Some(vec!["conversation".into(), "prop.conversation".into()]),
+            ..Default::default()
+        };
+        assert!(
+            flat_paths(&evaluate(index.connection(), &spec, &QueryContext::default()).unwrap())
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn aggregates_reject_multi_valued_system_fields_and_folds_on_text() {
         let (_tmp, index, base) = aggregate_fixture();
         let ctx = QueryContext::for_base(&base);
@@ -3916,6 +4440,15 @@ started = { type = "date" }
         assert!(matches!(
             evaluate(index.connection(), &status_median_spec, &ctx),
             Err(QueryError::InvalidAggregate(AggregateFn::Median))
+        ));
+
+        let timestamp_min_spec = QuerySpec {
+            aggregates: vec![agg(AggregateFn::Min, Some("created_at"))],
+            ..Default::default()
+        };
+        assert!(matches!(
+            evaluate(index.connection(), &timestamp_min_spec, &ctx),
+            Err(QueryError::InvalidAggregate(AggregateFn::Min))
         ));
 
         let no_field_spec = QuerySpec {

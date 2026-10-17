@@ -19,6 +19,7 @@ import {
   canGroup,
   type DraftProperty,
   type DraftView,
+  GROUPABLE_SYSTEM_FIELDS,
   moveItem,
 } from "./definition-model";
 import { diagnosticRows } from "./diagnostic-rows";
@@ -41,7 +42,7 @@ function fieldCapabilities(
   properties: readonly DraftProperty[],
 ): FieldCapability[] {
   return [
-    ...SYSTEM_PROPERTY_FIELDS.filter((key) => key !== "encryption").map(
+    ...SYSTEM_PROPERTY_FIELDS.map(
       (key): FieldCapability => ({
         key,
         type:
@@ -49,7 +50,9 @@ function fieldCapabilities(
             ? "system-multi"
             : key === "word_count"
               ? "word_count"
-              : undefined,
+              : key === "journal_date"
+                ? "date"
+                : "text",
       }),
     ),
     ...effectiveProperties(properties).map((property) => ({
@@ -236,8 +239,11 @@ export function ViewDefinitionEditor({
   const viewPath = `views[${viewIndex}]`;
   const unsupportedLayout = (view.layout as string) !== "table";
   const groupFields = fields.filter(
-    ({ type }) =>
-      type !== "system-multi" && type !== "word_count" && canGroup(type),
+    ({ key, type }) =>
+      type !== "system-multi" &&
+      (SYSTEM_PROPERTY_FIELDS.some((field) => field === key)
+        ? Boolean(GROUPABLE_SYSTEM_FIELDS[key])
+        : type !== "word_count" && canGroup(type)),
   );
   const unselectedColumns = columnFields.filter(
     ({ key }) => !view.columns.includes(key),

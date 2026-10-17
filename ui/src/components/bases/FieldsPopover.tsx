@@ -7,6 +7,7 @@ import { Button } from "#/components/ui/button";
 import { Checkbox } from "#/components/ui/checkbox";
 import { Popover } from "#/components/ui/popover";
 import { PICKER_PILL } from "./BasePickers";
+import { columnHideLock } from "./view-overrides";
 
 export interface FieldsPopoverProps {
   /** The view's columns, with any column-order override applied. */
@@ -17,13 +18,6 @@ export interface FieldsPopoverProps {
   onHideColumn(column: string): void;
   onShowColumn(column: string): void;
   onShowAll(): void;
-}
-
-/** Why a column refuses to hide — the same rule as the header menu. */
-function lockReason(column: string): string {
-  return column === "title"
-    ? "The title column stays visible"
-    : "The last column stays visible";
 }
 
 /** A checklist of the view's columns; unticking hides one as a view override. */
@@ -51,14 +45,15 @@ export function FieldsPopover({
         >
           {columns.map((column) => {
             const visible = !hidden.includes(column);
-            const locked =
-              column === "title" || (visible && visibleCount === 1);
+            const lock = visible
+              ? columnHideLock(column, visibleCount)
+              : undefined;
             return (
               <Checkbox
                 key={column}
                 isSelected={visible}
-                isDisabled={locked}
-                description={locked ? lockReason(column) : undefined}
+                isDisabled={lock !== undefined}
+                description={lock}
                 onChange={(selected) =>
                   selected ? onShowColumn(column) : onHideColumn(column)
                 }

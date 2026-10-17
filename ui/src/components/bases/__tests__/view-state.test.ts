@@ -14,6 +14,9 @@ class MemoryStorage implements ViewStateStorage {
   setItem(key: string, value: string) {
     this.items.set(key, value);
   }
+  removeItem(key: string) {
+    this.items.delete(key);
+  }
 }
 
 const sealed: ViewStateStorage = {
@@ -21,6 +24,9 @@ const sealed: ViewStateStorage = {
     throw new Error("sealed");
   },
   setItem() {
+    throw new Error("sealed");
+  },
+  removeItem() {
     throw new Error("sealed");
   },
 };

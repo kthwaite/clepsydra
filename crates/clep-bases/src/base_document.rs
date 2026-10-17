@@ -26,6 +26,8 @@ const MANAGED_KEYS: &[&str] = &[
     "name",
     "description",
     "hide_member_properties",
+    "title_template",
+    "templates",
     "filter",
     "preview",
     "properties",
@@ -319,6 +321,16 @@ fn merge_document(
         ))
     })?;
     let view_mapping = validate_view_origins(&current_file, desired_file, view_origins)?;
+    let template_mapping: Vec<Option<usize>> = desired_file
+        .templates
+        .iter()
+        .map(|template| {
+            current_file
+                .templates
+                .iter()
+                .position(|current| current.name == template.name)
+        })
+        .collect();
     let mut document = DocumentMut::from_str(raw).map_err(|error| {
         BaseDocumentError::UnsupportedDocument(format!("current TOML cannot be edited: {error}"))
     })?;
@@ -355,6 +367,14 @@ fn merge_document(
         }
         if *key == "preview" {
             merge_preview_key(document.as_table_mut(), key, current_item, desired_item)?;
+        } else if *key == "templates" {
+            merge_views_key(
+                document.as_table_mut(),
+                key,
+                current_item,
+                desired_item,
+                &template_mapping,
+            )?;
         } else if *key == "views" {
             merge_views_key(
                 document.as_table_mut(),
@@ -1086,12 +1106,7 @@ fn merge_array(
         for index in &changed {
             let raw_value = raw.get(*index).expect("length checked");
             let current_value = current.get(*index).expect("length checked");
-            if raw_value.to_string() != current_value.to_string() {
-                return Err(unsupported(
-                    &format!("{path}[{index}]"),
-                    "structural array edits cannot safely retain decorated or unsupported content",
-                ));
-            }
+            ensure_value_removable(raw_value, current_value, &format!("{path}[{index}]"))?;
         }
     }
 
@@ -1111,12 +1126,7 @@ fn merge_array(
     for index in (desired.len()..current.len()).rev() {
         let raw_value = raw.get(index).expect("length checked");
         let current_value = current.get(index).expect("length checked");
-        if raw_value.to_string() != current_value.to_string() {
-            return Err(unsupported(
-                &format!("{path}[{index}]"),
-                "removal would discard decorated or unsupported array content",
-            ));
-        }
+        ensure_value_removable(raw_value, current_value, &format!("{path}[{index}]"))?;
         raw.remove(index);
     }
     for index in current.len()..desired.len() {
@@ -1404,6 +1414,23 @@ fn ensure_value_removable(
         return Err(unsupported(path, "removal would discard a value comment"));
     }
     match (raw, current) {
+        (Value::Array(raw), Value::Array(current)) => {
+            if raw.len() != current.len()
+                || raw
+                    .trailing()
+                    .as_str()
+                    .is_some_and(|text| text.contains('#'))
+            {
+                return Err(unsupported(
+                    path,
+                    "removal would discard unsupported array content or a trailing comment",
+                ));
+            }
+            for (index, (raw_value, current_value)) in raw.iter().zip(current.iter()).enumerate() {
+                ensure_value_removable(raw_value, current_value, &format!("{path}[{index}]"))?;
+            }
+            Ok(())
+        }
         (Value::InlineTable(raw), Value::InlineTable(current)) => {
             for (key, raw_value) in raw.iter() {
                 if raw
@@ -1523,6 +1550,7 @@ mod tests {
             preview: Vec::new(),
             properties: Vec::new(),
             views: Vec::new(),
+            templates: Vec::new(),
         }
     }
 
@@ -2191,6 +2219,49 @@ layout = "table"
     }
 
     #[test]
+    fn reference_cleanup_removes_filter_children_after_lossless_rename() {
+        let tags = r#"{ field = "tags", op = "contains", value = "batch" }"#;
+        let state = r#"{ field = "state", op = "eq", value = "queued" }"#;
+        for children in [format!("{tags}, {state}"), format!("{state}, {tags}")] {
+            let fixture = fixture_base(&format!(
+                "# owner note\nname = \"Reading\"\nplugin_key = \"keep\"\nfilter = {{ all = [{children}] }}\nproperties = {{ state = {{ type = \"select\" }} }}\n"
+            ));
+            let current = load_for_test(fixture.root(), "reading");
+            let mut next = current.definition.file.clone();
+            next.properties.clear();
+            let expected = serde_json::json!({
+                "all": [{"field": "tags", "op": "contains", "value": "batch"}]
+            });
+            next.filter = Some(serde_json::from_value(expected.clone()).unwrap());
+            let stored = update(fixture.root(), "reading", &current.revision, &next, &[]).unwrap();
+            assert_eq!(
+                serde_json::to_value(stored.definition.file.filter).unwrap(),
+                expected
+            );
+            let after = fs::read_to_string(fixture.path()).unwrap();
+            assert!(after.contains("# owner note"));
+            assert!(after.contains("plugin_key = \"keep\""));
+            assert!(!after.contains("\"state\""));
+        }
+    }
+
+    #[test]
+    fn reference_cleanup_preserves_nested_comments_by_refusing_lossy_removal() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\n[filter]\nall = [\n  { field = \"tags\", op = \"contains\", value = \"batch\" }, # required by owner\n]\n",
+        );
+        let current = load_for_test(fixture.root(), "reading");
+        let before = fs::read(fixture.path()).unwrap();
+        let mut next = current.definition.file.clone();
+        next.filter = None;
+        assert!(matches!(
+            update(fixture.root(), "reading", &current.revision, &next, &[]),
+            Err(BaseDocumentError::UnsupportedDocument(_))
+        ));
+        assert_eq!(fs::read(fixture.path()).unwrap(), before);
+    }
+
+    #[test]
     fn changed_arrays_preserve_element_comments() {
         let fixture = fixture_base(
             "name = \"Reading\"\n\n[properties.status]\ntype = \"select\"\noptions = [\n  \"queued\", # keep queued\n]\n",
@@ -2570,6 +2641,12 @@ layout = "table"
                 property_type: PropertyType::Select,
                 options: vec!["queued".into()],
                 many: None,
+                description: None,
+                default: None,
+                format: None,
+                currency: None,
+                display: None,
+                target: None,
             },
         ));
 

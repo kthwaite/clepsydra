@@ -34,6 +34,7 @@ blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.56", features = ["derive"] }
 config = "0.15.19"
+csv = "1"
 dirs = "6"
 docx-rs = { version = "0.4.22", default-features = false }
 encoding_rs = "0.8"

@@ -26,6 +26,7 @@ import { GeneralEditor } from "./GeneralEditor";
 import { asciiCaseFold, validateBaseDraftStructure } from "./local-validation";
 import { PreviewPropertiesEditor } from "./PreviewPropertiesEditor";
 import { PropertiesEditor } from "./PropertiesEditor";
+import { RowTemplatesEditor } from "./RowTemplatesEditor";
 import { ValidationSummary } from "./ValidationSummary";
 import { ViewsEditor } from "./ViewsEditor";
 
@@ -47,7 +48,13 @@ interface BaseDefinitionWorkspaceProps {
   slug: string;
 }
 
-type SectionId = "general" | "filter" | "properties" | "preview" | "views";
+type SectionId =
+  | "general"
+  | "filter"
+  | "properties"
+  | "templates"
+  | "preview"
+  | "views";
 
 interface ViewSelection {
   id?: string;
@@ -74,6 +81,7 @@ const sectionOrder: Array<{ id: SectionId; label: string }> = [
   { id: "general", label: "General" },
   { id: "filter", label: "Filter" },
   { id: "properties", label: "Properties" },
+  { id: "templates", label: "Row templates" },
   { id: "preview", label: "Preview properties" },
   { id: "views", label: "Views" },
 ];
@@ -84,6 +92,7 @@ function sectionForDiagnostic(path: string): SectionId {
     return "properties";
   if (path === "preview" || path.startsWith("preview[")) return "preview";
   if (path === "views" || path.startsWith("views[")) return "views";
+  if (path === "templates" || path.startsWith("templates[")) return "templates";
   return "general";
 }
 
@@ -369,7 +378,7 @@ export function BaseDefinitionWorkspace({
       setLocalDiagnostics([]);
       if (isApiConflict(error)) {
         setConflictMessage(
-          "This base changed outside Clepsydra. Review your draft or deliberately reload the file.",
+          formatApiError(error, "This Base could not be updated safely."),
         );
       } else {
         setSaveError(
@@ -592,6 +601,8 @@ export function BaseDefinitionWorkspace({
             <PropertiesEditor
               slug={slug}
               properties={draft.properties}
+              draft={draft}
+              onDefinitionChange={(next) => changeDraft(() => next)}
               persistedPropertyIds={
                 new Set(baseline?.properties.map((property) => property.id))
               }
@@ -600,6 +611,15 @@ export function BaseDefinitionWorkspace({
               }
               onDiagnosticsChange={setLocalDiagnostics}
               registerFocus={registerFocusTarget}
+            />
+          )}
+          {selectedSection === "templates" && (
+            <RowTemplatesEditor
+              draft={draft}
+              registerFocus={registerFocusTarget}
+              onChange={(templates) =>
+                changeDraft((current) => ({ ...current, templates }))
+              }
             />
           )}
           {selectedSection === "preview" && (

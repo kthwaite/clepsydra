@@ -175,6 +175,16 @@ fn datetime_value(
             }
             DateShape::DateTime => datetime.date.is_some() && datetime.time.is_some(),
         })
+        .filter(|datetime| {
+            datetime.date.is_some_and(|date| {
+                chrono::NaiveDate::from_ymd_opt(
+                    i32::from(date.year),
+                    u32::from(date.month),
+                    u32::from(date.day),
+                )
+                .is_some()
+            })
+        })
         .ok_or_else(|| PropertyValueError::shape(key, expected))?;
     Ok(toml::Value::Datetime(parsed))
 }
@@ -192,6 +202,12 @@ mod tests {
             property_type,
             options: Vec::new(),
             many: None,
+            description: None,
+            default: None,
+            format: None,
+            currency: None,
+            display: None,
+            target: None,
         }
     }
 
@@ -200,6 +216,12 @@ mod tests {
             property_type: PropertyType::Select,
             options: options.iter().map(|option| (*option).to_string()).collect(),
             many: None,
+            description: None,
+            default: None,
+            format: None,
+            currency: None,
+            display: None,
+            target: None,
         }
     }
 
@@ -208,6 +230,12 @@ mod tests {
             property_type: PropertyType::MultiSelect,
             options: options.iter().map(|option| (*option).to_string()).collect(),
             many: None,
+            description: None,
+            default: None,
+            format: None,
+            currency: None,
+            display: None,
+            target: None,
         }
     }
 
@@ -216,6 +244,12 @@ mod tests {
             property_type: PropertyType::Relation,
             options: Vec::new(),
             many,
+            description: None,
+            default: None,
+            format: None,
+            currency: None,
+            display: None,
+            target: None,
         }
     }
 

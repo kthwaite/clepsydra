@@ -232,12 +232,14 @@ describe("MemberCreationSession.submit", () => {
         subtitle: "",
         featured: false,
         rating: 0,
-        omittedNull: null,
+        clearedDefault: null,
         omittedUndefined: undefined,
       },
     ) as unknown as BaseMemberDraftValue["fields"];
     const draft: BaseMemberDraftValue = {
       title: "  Trim me  ",
+      template: "Review",
+      body: "",
       fields,
     };
 
@@ -249,12 +251,15 @@ describe("MemberCreationSession.submit", () => {
       base_revision: "detail-r1",
       view: "Reading",
       title: "Trim me",
+      template: "Review",
+      body: "",
       fields: {
         tags: [],
         metadata: { label: "retained" },
         subtitle: "",
         featured: false,
         rating: 0,
+        clearedDefault: null,
       },
     };
     expect(create.mock.calls[0]).toEqual(["books", expectedRequest]);

@@ -1,5 +1,6 @@
 import type {
   BaseDetailResponse,
+  BaseFilter,
   BaseMemberCapability,
   BaseMemberDiagnostic,
   PropertyType,
@@ -28,6 +29,13 @@ export interface BaseTableQuery {
   error: string | undefined;
   loading: boolean;
   sort: SortKey[] | undefined;
+  search?: string;
+  searchApplied?: string;
+  onSearchChange?(value: string): void;
+  /** Full request context, also used by CSV; no result window. */
+  filter?: BaseFilter;
+  searchColumns?: string[];
+  identity?: string;
   onViewChange(name: string): void;
   onSortChange(sort: SortKey[] | undefined): void;
 }
@@ -82,6 +90,11 @@ export interface BaseTableRowActions {
   onCopyWikilink(row: QueryRow): void;
   onCopyValue(value: CellValue): void;
   onDuplicateRow(row: QueryRow): void;
+  onSaveTemplate(
+    row: QueryRow,
+    name: string,
+    includeBody: boolean,
+  ): Promise<void>;
   /** Resolves once the page is archived; rejects with an Error whose message the dialog shows. */
   onArchiveRow(row: QueryRow): Promise<void>;
   error: string | undefined;
@@ -97,6 +110,20 @@ export interface BaseTableWindow {
   /** Which bound ended the scroll short of the total, if either did. */
   cappedBy: EmbedScrollCap | undefined;
   loadMore(): void;
+}
+
+export type BaseBulkAction =
+  | { kind: "set"; key: string; value: CellValue; type: PropertyType }
+  | { kind: "tag"; tag: string }
+  | { kind: "archive" };
+
+export interface BaseBulkResult {
+  succeeded: string[];
+  failures: { id: string; label: string; message: string }[];
+}
+
+export interface BaseTableBulk {
+  run(rows: QueryRow[], action: BaseBulkAction): Promise<BaseBulkResult>;
 }
 
 /** A Base table that cannot render yet. */
@@ -115,6 +142,7 @@ export interface BaseTableReadyModel {
   members: BaseTableMembers;
   overrides: BaseTableOverrides;
   window: BaseTableWindow | undefined;
+  bulk: BaseTableBulk;
 }
 
 /** What `useBaseTableController` returns. */
@@ -138,6 +166,7 @@ export interface BaseTableViewReady {
   members?: Partial<BaseTableMembers>;
   overrides?: Partial<BaseTableOverrides>;
   window?: BaseTableWindow;
+  bulk?: BaseTableBulk;
 }
 
 export type BaseTableViewModel = BaseTableStatus | BaseTableViewReady;

@@ -6,7 +6,11 @@ import {
   useRef,
   useState,
 } from "react";
-import type { BaseMemberDiagnostic, PropertyDefinition } from "#/api/bases";
+import type {
+  BaseFile,
+  BaseMemberDiagnostic,
+  PropertyDefinition,
+} from "#/api/bases";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { buttonStyles } from "#/components/ui/button";
@@ -20,6 +24,7 @@ import {
   type BaseMemberDraftField,
   type BaseMemberDraftValue,
   initialMemberDraft,
+  SYSTEM_FIELDS,
 } from "./member-draft";
 import { builtInFieldLabel } from "./property-schema";
 
@@ -27,6 +32,8 @@ export interface BaseMemberDraftProps {
   fields: BaseMemberDraftField[];
   /** The Base's `{field}` title template, when it declares one. */
   titleTemplate?: string;
+  templates?: BaseFile["templates"];
+  initialTemplate?: string;
   projects: string[];
   isSaving: boolean;
   isSaveDisabled: boolean;
@@ -70,7 +77,15 @@ export function resolveTitleTemplate(
   const filled = template.replace(
     /\{([^{}]*)\}/g,
     (_match, placeholder: string) => {
-      const value = fields[placeholder.trim()];
+      const key = placeholder.trim();
+      const value =
+        fields[key] ??
+        (key.startsWith("sys.")
+          ? fields[key.slice(4)]
+          : key.startsWith("prop.") &&
+              !Object.hasOwn(SYSTEM_FIELDS, key.slice(5))
+            ? fields[key.slice(5)]
+            : undefined);
       if (Array.isArray(value)) {
         return value.filter((item) => item != null).join(", ");
       }
@@ -110,9 +125,14 @@ function requirementText(field: BaseMemberDraftField): string | undefined {
 }
 
 function fieldDescription(field: BaseMemberDraftField): string | undefined {
-  const parts = [requirementText(field), implicationText(field)].filter(
-    (part): part is string => Boolean(part),
-  );
+  const parts = [
+    field.definition?.description,
+    requirementText(field),
+    implicationText(field),
+    field.definition?.default != null
+      ? `Default: ${formatImplied(field.definition.default)}. Membership rules take precedence over templates and defaults.`
+      : undefined,
+  ].filter((part): part is string => Boolean(part));
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
@@ -230,14 +250,31 @@ export function BaseMemberDraft({
   diagnostics,
   summaryError,
   titleTemplate,
+  templates,
+  initialTemplate,
   onSave,
   onCancel,
   onChange,
 }: BaseMemberDraftProps) {
-  const [draft, setDraft] = useState(() => initialMemberDraft(fields));
+  const [draft, setDraft] = useState(() => {
+    const initial = initialMemberDraft(
+      fields,
+      templates?.find(({ name }) => name === initialTemplate),
+    );
+    if (!initial.title && titleTemplate)
+      initial.title = resolveTitleTemplate(titleTemplate, initial.fields);
+    return initial;
+  });
   const [titleError, setTitleError] = useState<string>();
   // The template proposes a title only while the author has not written one.
-  const [titleAuthored, setTitleAuthored] = useState(false);
+  const [titleAuthored, setTitleAuthored] = useState(() =>
+    Boolean(
+      initialMemberDraft(
+        fields,
+        templates?.find(({ name }) => name === initialTemplate),
+      ).title,
+    ),
+  );
   const draftRef = useRef(draft);
   const fieldNodes = useRef(new Map<string, HTMLElement>());
   const descriptionPrefix = useId();
@@ -345,6 +382,41 @@ export function BaseMemberDraft({
     >
       <fieldset disabled={isSaving} className="m-0 border-0 p-0">
         <legend className="sr-only">New base member</legend>
+        {(templates?.length ?? 0) > 0 && (
+          <label className="block p-2 text-sm text-mute">
+            Row template
+            <select
+              aria-label="Row template"
+              value={draft.template ?? ""}
+              className={cn(
+                "ml-2 rounded-lg bg-raise p-2 text-ink",
+                FOCUS_RING_NATIVE,
+              )}
+              onChange={(event) => {
+                const next = initialMemberDraft(
+                  fields,
+                  templates?.find(({ name }) => name === event.target.value),
+                );
+                setTitleAuthored(Boolean(next.title));
+                if (!next.title && titleTemplate)
+                  next.title = resolveTitleTemplate(titleTemplate, next.fields);
+                setTitleError(undefined);
+                updateDraft(next);
+              }}
+            >
+              <option value="">Defaults only</option>
+              {templates?.map(({ name }) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 block">
+              Choosing a template replaces draft prefills. Membership rules take
+              precedence; you can edit before creating.
+            </span>
+          </label>
+        )}
         <div className="flex flex-wrap items-start gap-2 p-2">
           {fields.map((field) => {
             const key = field.key;
@@ -430,6 +502,20 @@ export function BaseMemberDraft({
               </div>
             );
           })}
+          <label className="basis-full text-sm text-mute">
+            Body (optional)
+            <textarea
+              aria-label="New member — Body"
+              value={draft.body ?? ""}
+              onChange={(event) =>
+                updateDraft({ ...draftRef.current, body: event.target.value })
+              }
+              className={cn(
+                "mt-1 block min-h-20 w-full rounded-lg bg-raise p-2 text-ink",
+                FOCUS_RING_NATIVE,
+              )}
+            />
+          </label>
           <div className="flex items-center gap-1 self-end">
             <button
               type="button"

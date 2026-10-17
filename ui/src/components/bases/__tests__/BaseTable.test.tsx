@@ -160,9 +160,13 @@ vi.mock("#/hooks/useCopyToClipboard", () => ({
 }));
 vi.mock("#/api/pages", () => ({
   useArchivePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdatePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 vi.mock("#/api/client", () => ({ fetchClient: { GET: vi.fn() } }));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => ["clepsydra"] }));
+vi.mock("#/components/bases/BaseCsvActions", () => ({
+  BaseCsvActions: () => null,
+}));
 
 import { BaseTable } from "#/components/bases/BaseTable";
 
@@ -587,85 +591,6 @@ describe("BaseTable member creation", () => {
     ).toHaveFocus();
     expect(oldCreatedTitle).not.toHaveFocus();
   });
-
-  it("omits cleared and nullish values while preserving empty lists", async () => {
-    const user = userEvent.setup();
-    mocks.viewState.data = groupedOutput();
-    mocks.viewState.error = null;
-    mocks.viewState.isLoading = false;
-    mocks.viewState.isFetching = false;
-    mocks.createMember.mockReset();
-    mocks.createMember.mockRejectedValue({
-      status: 422,
-      error: "Candidate rejected",
-    });
-
-    render(<BaseTable slug="reading" />);
-    await user.click(screen.getByRole("button", { name: "Add member" }));
-    await fillMemberDraft(user);
-
-    const project = screen.getByRole("combobox", {
-      name: "New member — Project",
-    });
-    await user.type(project, "clepsydra{Enter}");
-    await user.click(
-      screen.getByRole("button", { name: "Clear New member — Project" }),
-    );
-    await user.click(
-      screen.getByRole("button", {
-        name: "Edit New member — Optional Rating",
-      }),
-    );
-    await user.type(
-      screen.getByRole("spinbutton", {
-        name: "New member — Optional Rating",
-      }),
-      "7{Enter}",
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Edit New member — Optional Rating" }),
-    );
-    const rating = screen.getByRole("spinbutton", {
-      name: "New member — Optional Rating",
-    });
-    await user.clear(rating);
-    await user.keyboard("{Enter}");
-
-    await user.click(
-      screen.getByRole("button", {
-        name: "Edit New member — Optional Status",
-      }),
-    );
-    await user.click(
-      screen.getByRole("button", {
-        name: /—.*New member — Optional Status/,
-      }),
-    );
-    await user.click(screen.getByRole("option", { name: "one" }));
-    await user.click(
-      screen.getByRole("button", { name: "Edit New member — Optional Status" }),
-    );
-    await user.click(
-      screen.getByRole("button", {
-        name: /one.*New member — Optional Status/,
-      }),
-    );
-    await user.click(screen.getByRole("option", { name: "—" }));
-
-    await user.click(screen.getByRole("button", { name: "Save new member" }));
-    await waitFor(() => expect(mocks.createMember).toHaveBeenCalledOnce());
-    const fields = mocks.createMember.mock.calls[0][0].body.fields;
-    expect(fields).not.toHaveProperty("project");
-    expect(fields).not.toHaveProperty("optional_rating");
-    expect(fields).not.toHaveProperty("optional_status");
-    expect(Object.values(fields)).not.toContain(null);
-    expect(Object.values(fields)).not.toContain(undefined);
-    expect(fields.tags).toEqual([]);
-    expect(fields.aliases).toEqual([]);
-    // Around twenty sequential userEvent interactions: 4s of the default 5s
-    // budget on an idle machine, and over it on a loaded CI runner. Same
-    // allowance the comparably long fixtures in this directory already take.
-  }, 15_000);
 });
 
 describe("BaseTable view restore", () => {

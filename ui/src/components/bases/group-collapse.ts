@@ -1,5 +1,5 @@
 import { asciiCaseFold } from "./local-validation";
-import type { ViewStateStorage } from "./view-state";
+import { type ViewStateStorage, viewStateSegment } from "./view-state";
 
 const GROUPS_PREFIX = "clepsydra.bases.groups.";
 
@@ -14,7 +14,7 @@ export function groupCollapseKey(
   view: string,
   groupField: string,
 ): string {
-  return `${GROUPS_PREFIX}${slug}.${asciiCaseFold(view)}.${groupField}`;
+  return `${GROUPS_PREFIX}${[slug, asciiCaseFold(view), groupField].map(viewStateSegment).join(".")}`;
 }
 
 export function readCollapsedGroups(
@@ -40,7 +40,8 @@ export function writeCollapsedGroups(
   collapsed: ReadonlySet<string>,
 ): void {
   try {
-    storage?.setItem(key, JSON.stringify([...collapsed]));
+    if (collapsed.size === 0) storage?.removeItem(key);
+    else storage?.setItem(key, JSON.stringify([...collapsed]));
   } catch {
     // A fold is a convenience; a full or sealed store must not break the table.
   }

@@ -623,9 +623,9 @@ describe("BaseTableView", () => {
         blockers: [
           {
             scope: "membership",
-            field: "word_count",
+            field: "journal_date",
             filter_path: "filter",
-            message: "word_count > 0 requires body content",
+            message: "journal_date requires a dated journal page",
           },
         ],
       },
@@ -633,7 +633,7 @@ describe("BaseTableView", () => {
     const add = screen.getByRole("button", { name: "Add member" });
     expect(add).toBeDisabled();
     expect(add).toHaveAccessibleDescription(
-      "word_count > 0 requires body content",
+      "journal_date requires a dated journal page",
     );
   });
 

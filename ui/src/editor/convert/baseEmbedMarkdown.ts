@@ -9,6 +9,10 @@ import {
   isBaseEmbedDisplay,
 } from "#/components/bases/embed-presentation";
 import type { BaseEmbedConfig } from "#/components/bases/embed-query";
+import {
+  OPERATOR_LABELS,
+  VALUELESS_OPERATORS,
+} from "#/components/bases/operator-labels";
 import type {
   BaseEmbedElement,
   ConfiguredBaseEmbedElement,
@@ -29,36 +33,7 @@ const MAX_SCALAR_STRING_BYTES = 4 * 1024;
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 200;
 const textEncoder = new TextEncoder();
-const VALUELESS_OPERATORS: Record<string, true> = {
-  is_empty: true,
-  not_empty: true,
-  is_today: true,
-  is_this_week: true,
-  is_past_week: true,
-  is_next_week: true,
-  is_this_month: true,
-};
-const FILTER_OPERATORS: Record<string, true> = {
-  eq: true,
-  ne: true,
-  lt: true,
-  lte: true,
-  gt: true,
-  gte: true,
-  contains: true,
-  not_contains: true,
-  starts_with: true,
-  ends_with: true,
-  in: true,
-  links_to: true,
-  is_empty: true,
-  not_empty: true,
-  is_today: true,
-  is_this_week: true,
-  is_past_week: true,
-  is_next_week: true,
-  is_this_month: true,
-};
+// biome-ignore format: Keep character codes aligned with the Unicode escape logic below.
 const TOML_SHORT_ESCAPE_BY_CODE: Record<number, string> = {
   8: "\\b",
   9: "\\t",
@@ -214,7 +189,7 @@ function validateFilter(
 
   if (
     typeof value.op !== "string" ||
-    !Object.hasOwn(FILTER_OPERATORS, value.op)
+    !Object.hasOwn(OPERATOR_LABELS, value.op)
   ) {
     fail("Filter comparison has an unknown operator", `${path}.op`);
   }

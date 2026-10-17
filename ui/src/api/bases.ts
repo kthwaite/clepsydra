@@ -338,6 +338,8 @@ export interface ViewOverrides {
   dir?: "asc" | "desc";
   filter?: BaseFilter;
   groupBy?: GroupOverride;
+  q?: string;
+  searchColumns?: string[];
 }
 
 export function useBaseView(
@@ -359,6 +361,11 @@ export function useBaseView(
               ? undefined
               : JSON.stringify(overrides.filter),
           group_by: groupOverrideParam(overrides.groupBy),
+          q: overrides.q,
+          search_columns:
+            overrides.searchColumns === undefined
+              ? undefined
+              : JSON.stringify(overrides.searchColumns),
         },
       },
     },
@@ -428,6 +435,7 @@ function mergeWindows(
   return {
     ...newest,
     output: {
+      ...newest.output,
       shape: "flat",
       rows,
       total: newest.output.total,
@@ -558,6 +566,7 @@ export function usePropertyCommit() {
       value: unknown,
       hint?: PropertyType,
       expectedRevision?: string,
+      options?: { quiet?: boolean },
     ) => {
       try {
         let revision = expectedRevision;
@@ -567,6 +576,7 @@ export function usePropertyCommit() {
           const pageRes = await fetchClient.GET("/api/vault/pages/{path}", {
             params: { path: { path: page.path } },
           });
+          if (pageRes.error) throw pageRes.error;
           revision = pageRes.data?.revision;
         }
         if (!revision) throw new Error("page revision fetch failed");
@@ -581,7 +591,8 @@ export function usePropertyCommit() {
           },
         });
       } catch (error) {
-        toast.error(`Could not update ${key} — refreshed to current state`);
+        if (!options?.quiet)
+          toast.error(`Could not update ${key} — refreshed to current state`);
         invalidatePropertyCommitFailureQueries(qc);
         throw error;
       }

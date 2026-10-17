@@ -10,8 +10,8 @@ import type {
   BaseDiagnostic,
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
-import type { DraftProperty } from "./definition-model";
-import { moveItem } from "./definition-model";
+import type { BaseDraft, DraftProperty } from "./definition-model";
+import { changePropertyReferences, moveItem } from "./definition-model";
 import {
   PROPERTY_TYPES,
   PropertyDefinitionEditor,
@@ -67,6 +67,8 @@ export interface PropertiesEditorProps {
   slug: string;
   properties: DraftProperty[];
   persistedPropertyIds: ReadonlySet<string>;
+  draft?: BaseDraft;
+  onDefinitionChange?(draft: BaseDraft): void;
   onChange(properties: DraftProperty[]): void;
   onDiagnosticsChange(diagnostics: BaseDiagnostic[]): void;
   registerFocus: RegisterFocusTarget;
@@ -100,6 +102,8 @@ export function PropertiesEditor({
   properties,
   persistedPropertyIds,
   onChange,
+  draft,
+  onDefinitionChange,
   onDiagnosticsChange,
   registerFocus,
 }: PropertiesEditorProps) {
@@ -198,26 +202,11 @@ export function PropertiesEditor({
     }
     setRenameDiagnostic(undefined);
     const key = requestedKey.trim();
-    if (persistedPropertyIds.has(property.id)) {
-      setPendingRename({ property, key });
-      return;
-    }
-    setActiveRenameId(undefined);
-    onChange(
-      properties.map((current) =>
-        current.id === property.id
-          ? { ...current, id: crypto.randomUUID(), key }
-          : current,
-      ),
-    );
+    setPendingRename({ property, key });
   }
 
   function removeProperty(property: DraftProperty) {
-    if (persistedPropertyIds.has(property.id)) {
-      setPendingRemoval(property);
-      return;
-    }
-    onChange(properties.filter((current) => current.id !== property.id));
+    setPendingRemoval(property);
   }
 
   function replaceProperty(property: DraftProperty) {
@@ -260,6 +249,18 @@ export function PropertiesEditor({
       insertionIndex - (sourceIndex < insertionIndex ? 1 : 0);
     moveProperty(sourceIndex, destinationIndex);
   }
+  const removal =
+    draft && pendingRemoval
+      ? changePropertyReferences(draft, pendingRemoval.id)
+      : undefined;
+  const rename =
+    draft && pendingRename
+      ? changePropertyReferences(
+          draft,
+          pendingRename.property.id,
+          pendingRename.key,
+        )
+      : undefined;
 
   return (
     <section aria-labelledby="properties-editor-heading" className="min-w-0">
@@ -472,11 +473,14 @@ export function PropertiesEditor({
               variant="danger"
               onPress={() => {
                 if (!pendingRemoval) return;
-                onChange(
-                  properties.filter(
-                    (property) => property.id !== pendingRemoval.id,
-                  ),
-                );
+                if (removal && onDefinitionChange)
+                  onDefinitionChange(removal.draft);
+                else
+                  onChange(
+                    properties.filter(
+                      (property) => property.id !== pendingRemoval.id,
+                    ),
+                  );
                 setPendingRemoval(undefined);
               }}
             >
@@ -489,6 +493,19 @@ export function PropertiesEditor({
           Removing this declaration does not remove values from pages. Page
           frontmatter remains unchanged.
         </p>
+        {removal?.membershipChanged && (
+          <p role="alert" className="mt-3 text-hot">
+            Removing membership predicates can broaden Base membership. Review
+            the remaining filter before saving.
+          </p>
+        )}
+        {removal && removal.changes.length > 0 && (
+          <ul aria-label="References to remove" className="mt-3 list-disc pl-5">
+            {removal.changes.map((change) => (
+              <li key={change}>{change}</li>
+            ))}
+          </ul>
+        )}
       </Dialog>
 
       <Dialog
@@ -501,7 +518,7 @@ export function PropertiesEditor({
             ? `Rename ${pendingRename.property.key}`
             : "Rename declaration"
         }
-        description="The saved key is immutable; rename removes one declaration and adds another."
+        description="Rename the declaration and all its references in this Base."
         footer={
           <>
             <Button
@@ -514,22 +531,21 @@ export function PropertiesEditor({
               variant="danger"
               onPress={() => {
                 if (!pendingRename) return;
-                onChange(
-                  properties.map((property) =>
-                    property.id === pendingRename.property.id
-                      ? {
-                          ...property,
-                          id: crypto.randomUUID(),
-                          key: pendingRename.key,
-                        }
-                      : property,
-                  ),
-                );
+                if (rename && onDefinitionChange)
+                  onDefinitionChange(rename.draft);
+                else
+                  onChange(
+                    properties.map((property) =>
+                      property.id === pendingRename.property.id
+                        ? { ...property, key: pendingRename.key }
+                        : property,
+                    ),
+                  );
                 setActiveRenameId(undefined);
                 setPendingRename(undefined);
               }}
             >
-              Remove and add declaration
+              Rename declaration
             </Button>
           </>
         }
@@ -538,6 +554,13 @@ export function PropertiesEditor({
           This changes the declaration only. Existing page frontmatter is not
           renamed.
         </p>
+        {rename && rename.changes.length > 0 && (
+          <ul aria-label="References to rename" className="mt-3 list-disc pl-5">
+            {rename.changes.map((change) => (
+              <li key={change}>{change}</li>
+            ))}
+          </ul>
+        )}
       </Dialog>
     </section>
   );

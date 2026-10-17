@@ -32,10 +32,20 @@ const MAX_EMBED_FILTER_BYTES: usize = 64 * 1024;
 pub struct BaseMemberCreateRequest {
     pub base_revision: String,
     pub view: String,
-    pub title: String,
+    #[serde(default, deserialize_with = "deserialize_title")]
+    #[schema(nullable = false)]
+    pub title: Option<String>,
     #[serde(default)]
     pub fields: HashMap<String, serde_json::Value>,
     pub embed_filter: Option<Filter>,
+    pub template: Option<String>,
+    pub body: Option<String>,
+}
+
+fn deserialize_title<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    String::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -80,6 +90,16 @@ fn apply_system_field(
     key: &str,
     value: &serde_json::Value,
 ) -> Result<bool, BaseMemberDiagnostic> {
+    if value.is_null() {
+        match key {
+            "kind" => meta.kind = None,
+            "project" => meta.project = None,
+            "tags" => meta.tags.clear(),
+            "aliases" => meta.aliases.clear(),
+            _ => return Ok(false),
+        }
+        return Ok(true);
+    }
     match key {
         "kind" => {
             let token = value
@@ -122,6 +142,10 @@ fn apply_custom_field(
     let definition = base
         .property(bare)
         .ok_or_else(|| field_diagnostic(key, format!("base has no declared property `{bare}`")))?;
+    if value.is_null() {
+        meta.extra.remove(bare);
+        return Ok(());
+    }
     let value = coerce_property_value(bare, value, definition)
         .map_err(|error| field_diagnostic(key, error.to_string()))?;
     meta.extra.insert(bare.to_owned(), value);
@@ -200,60 +224,181 @@ fn is_reserved_field(key: &str) -> bool {
     )
 }
 
-fn is_unpersistable_custom_shadow(key: &str) -> bool {
-    matches!(
-        key,
-        "id" | "path"
-            | "title"
-            | "project"
-            | "tags"
-            | "aliases"
-            | "created_at"
-            | "updated_at"
-            | "encryption"
-    )
-}
-
-async fn create_base_member_with_ids(
-    state: Arc<AppState>,
-    slug: String,
-    request: BaseMemberCreateRequest,
-    mut short_ids: impl Iterator<Item = String>,
-    fixed_page_id: Option<uuid::Uuid>,
-) -> Result<BaseMemberCreateResponse, ApiError> {
-    let stored = base_document::load(state.vault.root(), &slug).map_err(base_load_error)?;
-    if stored.revision != request.base_revision {
+pub(super) fn check_base_revision(current: &str, expected: &str) -> Result<(), ApiError> {
+    if current != expected {
         return Err(ApiError::conflict_with_detail(
             "base changed since the draft was opened",
             serde_json::json!({
                 "code": "base_revision_conflict",
-                "current_revision": stored.revision,
+                "current_revision": current,
             }),
         ));
     }
-    let view = stored
-        .definition
+    Ok(())
+}
+
+fn canonical_creation_field(field: &str) -> String {
+    if let Some(system) = field.strip_prefix("sys.") {
+        return system.to_owned();
+    }
+    let bare = field.strip_prefix("prop.").unwrap_or(field);
+    if field.starts_with("prop.") || !SYSTEM_FIELDS.contains(&bare) {
+        format!("prop.{bare}")
+    } else {
+        field.to_owned()
+    }
+}
+
+type CreationValues = (HashMap<String, serde_json::Value>, String, String);
+
+fn resolve_creation_values(
+    base: &BaseDefinition,
+    request: &BaseMemberCreateRequest,
+    capability: &crate::vault::base_member::BaseMemberCapability,
+) -> Result<CreationValues, ApiError> {
+    let template = request
+        .template
+        .as_ref()
+        .map(|name| {
+            base.file
+                .templates
+                .iter()
+                .find(|template| &template.name == name)
+                .ok_or_else(|| ApiError::bad_request(format!("unknown row template `{name}`")))
+        })
+        .transpose()?;
+    let mut fields = HashMap::new();
+    for (key, definition) in &base.file.properties {
+        if let Some(value) = &definition.default {
+            fields.insert(format!("prop.{key}"), value.clone());
+        }
+    }
+    if let Some(template) = template {
+        for (field, value) in &template.fields {
+            fields.insert(canonical_creation_field(field), value.clone());
+        }
+    }
+    for requirement in &capability.fields {
+        let field = canonical_creation_field(&requirement.field);
+        if (!field.starts_with("prop.") && is_reserved_field(&field) && field != "title")
+            || field == "prop.conversation"
+            || field == "prop.body"
+        {
+            continue;
+        }
+        if let Some(crate::vault::base_member::BaseMemberImplication::Fixed { value }) =
+            &requirement.implied
+        {
+            let collection = matches!(field.as_str(), "tags" | "aliases")
+                || field
+                    .strip_prefix("prop.")
+                    .and_then(|key| base.property(key))
+                    .is_some_and(|definition| {
+                        definition.property_type == crate::vault::base::PropertyType::MultiSelect
+                    });
+            let value = if collection && !value.is_array() {
+                serde_json::Value::Array(vec![value.clone()])
+            } else {
+                value.clone()
+            };
+            fields.insert(field, value);
+        }
+    }
+    // Explicit edits, including null clears, override all prefills. Membership
+    // validation below rejects edits that contradict the active predicates.
+    let mut explicit = HashSet::new();
+    for (key, value) in &request.fields {
+        if key == "title" || key == "sys.title" {
+            return Err(ApiError::bad_request(
+                "set title through the title field, not fields",
+            ));
+        }
+        let canonical = canonical_creation_field(key);
+        if !explicit.insert(canonical.clone()) {
+            return Err(ApiError::bad_request(format!(
+                "field `{key}` was provided more than once"
+            )));
+        }
+        fields.insert(canonical, value.clone());
+    }
+    let prefilled_title = fields.remove("title");
+    let title = match &request.title {
+        Some(title) => title.clone(),
+        None => match prefilled_title {
+            Some(serde_json::Value::String(title)) => title,
+            Some(_) => return Err(ApiError::bad_request("title must be a string")),
+            None => match &base.file.title_template {
+                Some(template) => render_member_title(template, &fields),
+                None => return Err(ApiError::bad_request("title is required")),
+            },
+        },
+    };
+    let body = request
+        .body
+        .as_ref()
+        .or_else(|| template.and_then(|template| template.body.as_ref()))
+        .cloned()
+        .unwrap_or_default();
+    Ok((fields, title, body))
+}
+
+fn render_member_title(template: &str, fields: &HashMap<String, serde_json::Value>) -> String {
+    use regex::Regex;
+    use std::sync::LazyLock;
+    static PLACEHOLDERS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{([^{}]*)\}").unwrap());
+    static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
+    static EDGE_SEPARATORS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^[\s\p{Pd}:,/|·]+|[\s\p{Pd}:,/|·]+$").unwrap());
+    // Match the interactive title proposal: absent values contribute nothing,
+    // and separators intended to sit between two values are trimmed at edges.
+    let filled = PLACEHOLDERS.replace_all(template, |captures: &regex::Captures<'_>| match fields
+        .get(&canonical_creation_field(captures[1].trim()))
+    {
+        Some(serde_json::Value::String(value)) => value.clone(),
+        Some(serde_json::Value::Array(values)) => {
+            let mut text = String::new();
+            for value in values.iter().filter(|value| !value.is_null()) {
+                if !text.is_empty() {
+                    text.push_str(", ");
+                }
+                match value {
+                    serde_json::Value::String(value) => text.push_str(value),
+                    _ => text.push_str(&value.to_string()),
+                }
+            }
+            text
+        }
+        Some(value @ (serde_json::Value::Bool(_) | serde_json::Value::Number(_))) => {
+            value.to_string()
+        }
+        _ => String::new(),
+    });
+    let collapsed = WHITESPACE.replace_all(&filled, " ");
+    EDGE_SEPARATORS.replace_all(&collapsed, "").into_owned()
+}
+
+/// Prepare and validate a candidate without writing. CSV previews use this same
+/// boundary with their proposed (not yet persisted) property declarations.
+pub(super) async fn prepare_member_candidate(
+    state: &Arc<AppState>,
+    base: &BaseDefinition,
+    request: &BaseMemberCreateRequest,
+    fixed_page_id: Option<uuid::Uuid>,
+    short_id: &str,
+) -> Result<(PageMeta, crate::vault::path::VaultPath, String), ApiError> {
+    let view = base
         .view(&request.view)
         .cloned()
-        .ok_or_else(|| {
-            ApiError::not_found(format!(
-                "base `{slug}` has no view named `{}`",
-                request.view
-            ))
-        })?;
-    validate_create_embed_filter(&stored.definition, request.embed_filter.as_ref())?;
+        .ok_or_else(|| ApiError::not_found(format!("base has no view named `{}`", request.view)))?;
+    validate_create_embed_filter(base, request.embed_filter.as_ref())?;
     let today = state.clock.now().date_naive();
-    let capability = composed_member_capability(
-        &stored.definition,
-        &view,
-        request.embed_filter.as_ref(),
-        today,
-    );
+    let capability = composed_member_capability(base, &view, request.embed_filter.as_ref(), today);
     if !capability.enabled {
         return Err(validation_error(capability.blockers));
     }
 
-    let title = request.title.trim();
+    let (fields, title, body) = resolve_creation_values(base, request, &capability)?;
+    let title = title.trim();
     if title.is_empty() {
         return Err(ApiError::bad_request("title must not be blank"));
     }
@@ -267,9 +412,9 @@ async fn create_base_member_with_ids(
     meta.created_at = Some(created);
     meta.updated_at = Some(created);
 
-    let mut normalized_fields = Vec::with_capacity(request.fields.len());
-    let mut targets = HashSet::with_capacity(request.fields.len());
-    for (key, value) in &request.fields {
+    let mut normalized_fields = Vec::with_capacity(fields.len());
+    let mut targets = HashSet::with_capacity(fields.len());
+    for (key, value) in &fields {
         let explicit_custom = key.starts_with("prop.");
         let logical = key.strip_prefix("prop.").unwrap_or(key);
         let targets_custom_property = explicit_custom || !SYSTEM_FIELDS.contains(&logical);
@@ -278,7 +423,7 @@ async fn create_base_member_with_ids(
                 "field `{logical}` was provided more than once"
             )));
         }
-        if explicit_custom && is_unpersistable_custom_shadow(logical) {
+        if explicit_custom && !crate::vault::base::is_creation_property_writable(logical) {
             return Err(ApiError::bad_request(format!(
                 "custom property `{key}` cannot be persisted without changing its meaning"
             )));
@@ -302,13 +447,12 @@ async fn create_base_member_with_ids(
                 }
             }
         }
-        if stored.definition.property(logical).is_none() {
+        if base.property(logical).is_none() {
             return Err(ApiError::bad_request(format!(
-                "base `{slug}` has no declared property `{logical}`"
+                "base has no declared property `{logical}`"
             )));
         }
-        if let Err(diagnostic) = apply_custom_field(&mut meta, &stored.definition, original, value)
-        {
+        if let Err(diagnostic) = apply_custom_field(&mut meta, base, original, value) {
             diagnostics.push(diagnostic);
         }
     }
@@ -323,9 +467,9 @@ async fn create_base_member_with_ids(
     if let Some(project) = &meta.project
         && meta.kind != Some(Kind::Project)
     {
-        super::projects::ensure_project_exists(&state, project).await?;
+        super::projects::ensure_project_exists(state, project).await?;
     }
-    let link_base = stored.definition.clone();
+    let link_base = base.clone();
     let link_meta = meta.clone();
     let link_targets = state
         .index
@@ -338,35 +482,57 @@ async fn create_base_member_with_ids(
         .map_err(internal_creation_error)?
         .map_err(internal_creation_error)?;
 
-    let notify = super::mutation_notifier(state.as_ref());
+    let path = build_projected_note_path(
+        title,
+        created,
+        meta.kind.expect("defaulted above"),
+        meta.project.as_deref(),
+        short_id,
+    )
+    .map_err(internal_creation_error)?;
+    composed_candidate_matches_with_link_targets(
+        base,
+        &view,
+        request.embed_filter.as_ref(),
+        &meta,
+        path.as_str(),
+        &CandidateDerived {
+            word_count: body
+                .split_whitespace()
+                .count()
+                .try_into()
+                .unwrap_or(u32::MAX),
+            journal_date: None,
+        },
+        &link_targets,
+        today,
+    )
+    .map_err(validation_error)?;
+    Ok((meta, path, body))
+}
 
+async fn create_base_member_with_ids(
+    state: Arc<AppState>,
+    slug: String,
+    request: BaseMemberCreateRequest,
+    mut short_ids: impl Iterator<Item = String>,
+    fixed_page_id: Option<uuid::Uuid>,
+) -> Result<BaseMemberCreateResponse, ApiError> {
+    let stored = base_document::load(state.vault.root(), &slug).map_err(base_load_error)?;
+    check_base_revision(&stored.revision, &request.base_revision)?;
+    let notify = super::mutation_notifier(state.as_ref());
     for _ in 0..MAX_PATH_ATTEMPTS {
         let short_id = short_ids
             .next()
             .ok_or_else(|| internal_creation_error("Base member path ID source was exhausted"))?;
-        let path = build_projected_note_path(
-            title,
-            created,
-            meta.kind.expect("defaulted above"),
-            meta.project.as_deref(),
+        let (meta, path, body) = prepare_member_candidate(
+            &state,
+            &stored.definition,
+            &request,
+            fixed_page_id,
             &short_id,
         )
-        .map_err(internal_creation_error)?;
-
-        composed_candidate_matches_with_link_targets(
-            &stored.definition,
-            &view,
-            request.embed_filter.as_ref(),
-            &meta,
-            path.as_str(),
-            &CandidateDerived {
-                word_count: 0,
-                journal_date: None,
-            },
-            &link_targets,
-            today,
-        )
-        .map_err(validation_error)?;
+        .await?;
 
         let generated_path = path.as_str().to_owned();
         match state
@@ -374,11 +540,7 @@ async fn create_base_member_with_ids(
             .create_page(
                 &state.vault,
                 &state.index,
-                CreatePageCommand {
-                    path,
-                    meta: meta.clone(),
-                    body: String::new(),
-                },
+                CreatePageCommand { path, meta, body },
                 Arc::clone(&notify),
             )
             .await
@@ -591,7 +753,9 @@ name = "All"
             BaseMemberCreateRequest {
                 base_revision: revision,
                 view: "all".to_owned(),
-                title: "Collision".to_owned(),
+                title: Some("Collision".to_owned()),
+                template: None,
+                body: None,
                 fields: HashMap::new(),
                 embed_filter: None,
             },
@@ -632,7 +796,9 @@ name = "All"
                 BaseMemberCreateRequest {
                     base_revision: revision.clone(),
                     view: "All".to_owned(),
-                    title: "Mismatch".to_owned(),
+                    title: Some("Mismatch".to_owned()),
+                    template: None,
+                    body: None,
                     fields: HashMap::new(),
                     embed_filter: Some(Filter::Cmp {
                         field: "title".to_owned(),
@@ -649,7 +815,9 @@ name = "All"
                 BaseMemberCreateRequest {
                     base_revision: revision.clone(),
                     view: "All".to_owned(),
-                    title: "Invalid filter".to_owned(),
+                    title: Some("Invalid filter".to_owned()),
+                    template: None,
+                    body: None,
                     fields: HashMap::new(),
                     embed_filter: Some(Filter::Cmp {
                         field: "missing".to_owned(),
@@ -666,7 +834,9 @@ name = "All"
                 BaseMemberCreateRequest {
                     base_revision: "stale".to_owned(),
                     view: "All".to_owned(),
-                    title: "Stale".to_owned(),
+                    title: Some("Stale".to_owned()),
+                    template: None,
+                    body: None,
                     fields: HashMap::new(),
                     embed_filter: None,
                 },
@@ -777,7 +947,9 @@ name = "All"
                 BaseMemberCreateRequest {
                     base_revision: revision.clone(),
                     view: "All".to_owned(),
-                    title: title.to_owned(),
+                    title: Some(title.to_owned()),
+                    template: None,
+                    body: None,
                     fields: HashMap::new(),
                     embed_filter: Some(embed_filter),
                 },

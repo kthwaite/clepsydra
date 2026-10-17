@@ -7,6 +7,7 @@ import type {
   PropertyType,
   SortKey,
 } from "#/api/bases";
+import { RELATIVE_DATE_OPERATORS } from "./operator-labels";
 
 export type { BaseFilter } from "#/api/bases";
 
@@ -36,12 +37,18 @@ export interface DraftView {
   columns: string[];
 }
 
+export type DraftRowTemplate = NonNullable<BaseFile["templates"]>[number] & {
+  id: string;
+  fields: Record<string, unknown>;
+};
+
 export interface BaseDraft {
   name: string;
   description?: string;
   /** `{field}` template proposing a title for new members. */
   titleTemplate?: string;
   hideMemberProperties?: boolean;
+  templates?: DraftRowTemplate[];
   filter?: BaseFilter;
   properties: DraftProperty[];
   preview: DraftPreviewField[];
@@ -55,12 +62,7 @@ function cloneFilter(filter: BaseFilter | null | undefined) {
 }
 
 function clonePropertyDefinition(definition: PropertyDefinition) {
-  return {
-    ...definition,
-    ...(definition.options === undefined
-      ? {}
-      : { options: [...definition.options] }),
-  };
+  return structuredClone(definition);
 }
 
 export function fromWire(detail: BaseFile): BaseDraft {
@@ -69,6 +71,15 @@ export function fromWire(detail: BaseFile): BaseDraft {
     description: detail.description ?? undefined,
     titleTemplate: detail.title_template ?? undefined,
     hideMemberProperties: detail.hide_member_properties ?? false,
+    ...(detail.templates?.length
+      ? {
+          templates: detail.templates.map((template) => ({
+            ...structuredClone(template),
+            fields: structuredClone(template.fields ?? {}),
+            id: crypto.randomUUID(),
+          })),
+        }
+      : {}),
     filter: cloneFilter(detail.filter),
     preview: (detail.preview ?? []).map((definition) => ({
       id: crypto.randomUUID(),
@@ -105,6 +116,13 @@ export function toWire(draft: BaseDraft): BaseFile {
       ? {}
       : { title_template: draft.titleTemplate }),
     ...(draft.hideMemberProperties ? { hide_member_properties: true } : {}),
+    ...(draft.templates?.length
+      ? {
+          templates: draft.templates.map(({ id: _id, ...template }) =>
+            structuredClone(template),
+          ),
+        }
+      : {}),
     filter: cloneFilter(draft.filter),
     preview: draft.preview.map(({ field, label }) => ({
       field,
@@ -164,13 +182,140 @@ export function createMinimalDraft(
   };
 }
 
-const RELATIVE_DATE_OPERATORS: readonly FilterOp[] = [
-  "is_today",
-  "is_this_week",
-  "is_past_week",
-  "is_next_week",
-  "is_this_month",
-];
+const SYSTEM_REFERENCE_FIELDS: Record<string, true> = {
+  id: true,
+  path: true,
+  title: true,
+  kind: true,
+  project: true,
+  tags: true,
+  aliases: true,
+  created_at: true,
+  updated_at: true,
+  encryption: true,
+  journal_date: true,
+  word_count: true,
+  body: true,
+};
+
+/** Changes schema references only. Existing page values are never migrated. */
+export function changePropertyReferences(
+  source: BaseDraft,
+  propertyId: string,
+  nextKey?: string,
+): { draft: BaseDraft; changes: string[]; membershipChanged: boolean } {
+  const property = source.properties.find(({ id }) => id === propertyId);
+  if (!property)
+    return { draft: source, changes: [], membershipChanged: false };
+  const draft = structuredClone(source);
+  const changes = new Set<string>();
+  const matches = (field: string) =>
+    field.startsWith("prop.")
+      ? field.slice(5) === property.key
+      : field === property.key &&
+        !field.startsWith("sys.") &&
+        !Object.hasOwn(SYSTEM_REFERENCE_FIELDS, field);
+  const reference = (field: string, location: string): string | undefined => {
+    if (!matches(field)) return field;
+    changes.add(location);
+    return nextKey === undefined
+      ? undefined
+      : field.startsWith("prop.") ||
+          nextKey.startsWith("prop.") ||
+          nextKey.startsWith("sys.") ||
+          Object.hasOwn(SYSTEM_REFERENCE_FIELDS, nextKey)
+        ? `prop.${nextKey}`
+        : nextKey;
+  };
+  const filter = (
+    value: BaseFilter | undefined,
+    location: string,
+  ): BaseFilter | undefined => {
+    if (!value) return undefined;
+    if ("field" in value) {
+      const field = reference(value.field, location);
+      return field === undefined ? undefined : { ...value, field };
+    }
+    if ("not" in value) {
+      const child = filter(value.not, location);
+      return child ? { not: child } : undefined;
+    }
+    const original = "all" in value ? value.all : value.any;
+    if (original.length === 0) return value;
+    const children = original.flatMap((child) => {
+      const next = filter(child, location);
+      return next ? [next] : [];
+    });
+    return children.length
+      ? "all" in value
+        ? { all: children }
+        : { any: children }
+      : undefined;
+  };
+  draft.filter = filter(draft.filter, "Base membership filter");
+  draft.preview = draft.preview.flatMap((item) => {
+    const field = reference(item.field, "Preview fields");
+    return field === undefined ? [] : [{ ...item, field }];
+  });
+  for (const view of draft.views) {
+    const location = `View “${view.name}”`;
+    view.filter = filter(view.filter, `${location}: filter`);
+    view.columns = view.columns.flatMap((field) => {
+      const next = reference(field, `${location}: columns`);
+      return next === undefined ? [] : [next];
+    });
+    view.sort = view.sort.flatMap((item) => {
+      const field = reference(item.field, `${location}: sort`);
+      return field === undefined ? [] : [{ ...item, field }];
+    });
+    if (view.group_by)
+      view.group_by = reference(view.group_by, `${location}: group`);
+    view.aggregates = view.aggregates.flatMap((item) => {
+      if (!item.field) return [item];
+      const field = reference(item.field, `${location}: aggregates`);
+      return field === undefined ? [] : [{ ...item, field }];
+    });
+    view.labels = Object.fromEntries(
+      Object.entries(view.labels).flatMap(([key, label]) => {
+        const field = reference(key, `${location}: labels`);
+        return field === undefined ? [] : [[field, label]];
+      }),
+    );
+  }
+  draft.titleTemplate = draft.titleTemplate?.replace(
+    /\{([^{}]*)\}/g,
+    (placeholder, key: string) => {
+      const next = reference(key.trim(), "Title template");
+      return next === undefined
+        ? ""
+        : next === key.trim()
+          ? placeholder
+          : `{${next}}`;
+    },
+  );
+  if (draft.titleTemplate !== undefined && !draft.titleTemplate.trim())
+    draft.titleTemplate = undefined;
+  for (const template of draft.templates ?? []) {
+    template.fields = Object.fromEntries(
+      Object.entries(template.fields).flatMap(([key, value]) => {
+        const field = reference(key, `Row template “${template.name}”: fields`);
+        return field === undefined ? [] : [[field, value]];
+      }),
+    );
+  }
+  draft.properties = draft.properties.flatMap((item) =>
+    item.id !== propertyId
+      ? [item]
+      : nextKey === undefined
+        ? []
+        : [{ ...item, key: nextKey }],
+  );
+  return {
+    draft,
+    changes: [...changes],
+    membershipChanged: changes.has("Base membership filter"),
+  };
+}
 
 export function operatorsFor(
   type: PropertyType | "system-multi" | "system-scalar",
@@ -242,8 +387,21 @@ export function canSort(
 }
 
 export function canGroup(type: PropertyType | undefined) {
-  return !(type === "number" || type === "multi_select" || type === "relation");
+  return !(type === "number" || type === "multi_select");
 }
+
+export const GROUPABLE_SYSTEM_FIELDS: Record<string, true> = {
+  id: true,
+  path: true,
+  title: true,
+  kind: true,
+  project: true,
+  created_at: true,
+  updated_at: true,
+  journal_date: true,
+  encryption: true,
+  word_count: true,
+};
 
 const COUNT_FAMILY: readonly AggregateFunction[] = [
   "count",
@@ -262,9 +420,15 @@ const FOLD_FAMILY: readonly AggregateFunction[] = [
 ];
 
 export function aggregateFunctions(
-  type: PropertyType | "word_count" | undefined,
+  type:
+    | PropertyType
+    | "system-scalar"
+    | "system-multi"
+    | "word_count"
+    | undefined,
 ): AggregateFunction[] {
   if (type === undefined) return ["count"];
+  if (type === "system-multi") return ["count"];
   if (
     type === "number" ||
     type === "date" ||

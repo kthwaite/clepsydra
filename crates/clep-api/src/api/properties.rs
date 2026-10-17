@@ -203,6 +203,12 @@ fn normalized_property_definition(definition: &PropertyDefinition) -> PropertyDe
         property_type: definition.property_type,
         options,
         many,
+        description: definition.description.clone(),
+        default: definition.default.clone(),
+        format: definition.format,
+        currency: definition.currency.clone(),
+        display: definition.display,
+        target: definition.target,
     }
 }
 

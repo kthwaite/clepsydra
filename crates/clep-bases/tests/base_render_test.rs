@@ -178,7 +178,7 @@ sort = [{ field = "rank", dir = "desc" }]
         None,
         None,
     );
-    let clep_bases::query::QueryOutput::Grouped { groups } = clep_bases::query::evaluate(
+    let clep_bases::query::QueryOutput::Grouped { groups, .. } = clep_bases::query::evaluate(
         index.connection(),
         &table,
         &clep_bases::query::QueryContext::for_base(base),

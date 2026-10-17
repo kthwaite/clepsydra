@@ -32,6 +32,25 @@ function config(overrides: Partial<BaseEmbedConfig> = {}): BaseEmbedConfig {
 }
 
 describe("embedded Base configuration identity", () => {
+  it("isolates search text and visible column scopes without changing creation membership", () => {
+    const initial = config({ q: "Wolfe", searchColumns: ["title", "author"] });
+    expect(queryIdentity(initial)).not.toBe(
+      queryIdentity(
+        config({ q: "Le Guin", searchColumns: ["title", "author"] }),
+      ),
+    );
+    expect(queryIdentity(initial)).not.toBe(
+      queryIdentity(config({ q: "Wolfe", searchColumns: ["title"] })),
+    );
+    expect(predicateIdentity(initial)).toBe(predicateIdentity(config()));
+    expect(baseViewEvaluationBody(initial, { limit: 50, offset: 0 })).toEqual({
+      filter: statusIsReading,
+      q: "Wolfe",
+      search_columns: ["title", "author"],
+      limit: 50,
+      offset: 0,
+    });
+  });
   it("recursively canonicalizes object keys without mutating input", () => {
     const leftFilter = {
       all: [

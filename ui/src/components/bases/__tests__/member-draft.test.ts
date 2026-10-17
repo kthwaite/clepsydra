@@ -53,6 +53,51 @@ function makeCapability(
 }
 
 describe("composeMemberDraftFields", () => {
+  it("includes hidden default and template fields and applies fixed implications first", () => {
+    const definition = makeDefinition({
+      properties: [
+        { key: "rating", definition: { type: "number", default: 2 } },
+        { key: "status", definition: { type: "text", default: "queued" } },
+      ],
+      views: [{ name: "Continues", columns: ["title"] }],
+      templates: [
+        {
+          name: "Reading",
+          fields: { rating: 4, status: "reading", "sys.tags": ["book"] },
+          body: "Notes",
+        },
+      ],
+    });
+    const fields = composeMemberDraftFields(
+      definition,
+      "Continues",
+      makeCapability({
+        fields: [
+          {
+            field: "rating",
+            membership: true,
+            view: false,
+            embed: false,
+            implied: { kind: "fixed", value: 5 },
+          },
+        ],
+      }),
+    );
+    expect(fields.map(({ key }) => key)).toEqual([
+      "title",
+      "rating",
+      "status",
+      "tags",
+    ]);
+    expect(initialMemberDraft(fields, definition.templates?.[0])).toEqual({
+      title: "",
+      template: "Reading",
+      body: "Notes",
+      fields: { rating: 5, status: "reading", tags: ["book"] },
+    });
+    expect(initialMemberDraft(fields).fields.status).toBe("queued");
+  });
+
   it("uses built-in editors for undeclared and qualified meeting columns", () => {
     const fields = composeMemberDraftFields(
       makeDefinition({

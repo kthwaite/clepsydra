@@ -52,7 +52,7 @@ function describeDefinition(definition: PropertyDefinition): string {
         ? " (many)"
         : " (one)"
       : "";
-  return `${definition.type}${optionDetail}${relationDetail}`;
+  return `${definition.type}${optionDetail}${relationDetail}${definition.description ? ` — ${definition.description}` : ""}`;
 }
 
 interface PropertyGroup {
@@ -376,13 +376,38 @@ function PageFolioProperties({
                     >
                       <div className="min-w-0">
                         <div className="flex min-w-0 items-baseline gap-2">
-                          <h4 className="m-0 break-all text-[13.5px] font-medium text-ink-2">
+                          <h4
+                            title={
+                              property.declarations
+                                .map(({ base, definition }) =>
+                                  definition.description
+                                    ? `${base.name}: ${definition.description}`
+                                    : "",
+                                )
+                                .filter(Boolean)
+                                .join("\n") || undefined
+                            }
+                            className="m-0 break-all text-[13.5px] font-medium text-ink-2"
+                          >
                             {property.key}
                           </h4>
                           <span className="shrink-0 text-[12px] text-faint">
                             {propertyTypeLabel(property)}
                           </span>
                         </div>
+                        {property.declarations
+                          .filter(({ definition }) => definition.description)
+                          .map(({ base, definition }) => (
+                            <p
+                              key={base.slug}
+                              className="m-0 mt-1 text-[12px] text-mute"
+                            >
+                              {property.declarations.length > 1
+                                ? `${base.name}: `
+                                : ""}
+                              {definition.description}
+                            </p>
+                          ))}
                         <div className="mt-1 flex flex-wrap gap-1">
                           {readOnlyReason ? (
                             <span className="text-[12px] text-mute">

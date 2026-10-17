@@ -25,13 +25,17 @@ import { Button, buttonStyles } from "#/components/ui/button";
 import {
   type DataColumn,
   DataTable,
+  type RowSelectionState,
   type SortDirection,
 } from "#/components/ui/data-table";
+import { Menu, MenuItem, MenuTrigger } from "#/components/ui/menu";
 import { Switch } from "#/components/ui/switch";
 import { useTableCompact } from "#/hooks/useTableCompact";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { ArchiveRowDialog } from "./ArchiveRowDialog";
+import { BaseBulkActions } from "./BaseBulkActions";
+import { BaseCsvActions } from "./BaseCsvActions";
 import { BaseHeaderMenu } from "./BaseHeaderMenu";
 import { BaseMemberDraft } from "./BaseMemberDraft";
 import {
@@ -47,6 +51,7 @@ import {
   type RowMenuActions,
   type RowMenuCell,
 } from "./BaseRowMenu";
+import { BaseTableCell, SYSTEM_COLUMNS } from "./BaseTableCell";
 import type {
   BaseTableMembers,
   BaseTableOverrides,
@@ -54,10 +59,10 @@ import type {
   BaseTableViewModel,
   BaseTableViewReady,
 } from "./base-table-model";
+import { formatNumber } from "./cells/NumberDisplay";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { columnWidthsKey } from "./column-widths";
-import { canGroup, canSort } from "./definition-model";
-import { EditableCell } from "./EditableCell";
+import { canGroup, canSort, GROUPABLE_SYSTEM_FIELDS } from "./definition-model";
 import { FieldsPopover } from "./FieldsPopover";
 import { groupCollapseKey, groupIdentity } from "./group-collapse";
 import { asciiCaseFold, presentationFieldIdentity } from "./local-validation";
@@ -72,6 +77,7 @@ import {
   headerOptionOverflow,
   quickFilterType,
 } from "./quick-filters";
+import { SaveRowTemplateDialog } from "./SaveRowTemplateDialog";
 import { useColumnWidths } from "./useColumnWidths";
 import { useGroupCollapse } from "./useGroupCollapse";
 import type { OverridesSaveState } from "./useViewOverrides";
@@ -122,15 +128,6 @@ interface ReadyBaseTableViewProps extends Omit<BaseTableViewProps, "model"> {
   model: BaseTableViewReady;
 }
 
-/** Which system columns a group-by can key on; the rest are unique per row. */
-const GROUPABLE_SYSTEM: Record<string, true> = {
-  kind: true,
-  project: true,
-  created_at: true,
-  updated_at: true,
-  journal_date: true,
-};
-
 /** The row whose title takes focus once an archived row leaves the output. */
 interface ArchiveFocusRequest {
   removedRowId: string;
@@ -153,56 +150,6 @@ interface ForwardFocusRequest {
 interface CreatedFocusRequest {
   id: string;
   view: string;
-}
-
-/**
- * System fields render read-only — the complete contract, mirroring
- * `SYSTEM_FIELDS` in `crates/clep-bases/src/base.rs`. Built-in and declared properties
- * reach an editor; anything else (system metadata, undeclared keys) is inert.
- */
-const SYSTEM_COLUMNS: Record<string, boolean> = {
-  id: true,
-  path: true,
-  title: true,
-  kind: true,
-  project: true,
-  body: false,
-  tags: false,
-  aliases: false,
-  created_at: true,
-  updated_at: true,
-  journal_date: true,
-  word_count: true,
-};
-
-interface BodyExcerptCellProps {
-  value: CellValue;
-  pageLabel: string;
-  path: string;
-  onOpenPage: (path: string) => void;
-}
-
-function BodyExcerptCell({
-  value,
-  pageLabel,
-  path,
-  onOpenPage,
-}: BodyExcerptCellProps) {
-  if (typeof value !== "string" || value.trim() === "") return null;
-
-  return (
-    <button
-      type="button"
-      aria-label={`Open body excerpt for ${pageLabel} in Folio`}
-      className={cn(
-        "block w-full min-w-0 cursor-pointer truncate rounded-md px-1 py-0.5 text-left text-mute hover:text-accent text-wrap",
-        FOCUS_RING_NATIVE,
-      )}
-      onClick={() => onOpenPage(path)}
-    >
-      {value}
-    </button>
-  );
 }
 
 function aggregateLabel(
@@ -239,12 +186,30 @@ function AggregateChips({
       {values.map((value, index) => {
         const label = aggregateLabel(definition, viewName, index);
         const aggregateRow = rows[index];
+        const aggregate = definition.views?.find(
+          (view) => asciiCaseFold(view.name) === asciiCaseFold(viewName),
+        )?.aggregates?.[index];
+        const property = aggregate?.field
+          ? definition.properties?.find(
+              (entry) =>
+                propertyKey(entry.key) === propertyKey(aggregate.field ?? ""),
+            )?.definition
+          : undefined;
+        const formatted =
+          aggregate?.fn === "percent_filled" && typeof value === "number"
+            ? `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`
+            : typeof value === "number" &&
+                property?.type === "number" &&
+                aggregate &&
+                !aggregate.fn.startsWith("count")
+              ? formatNumber(value, property)
+              : formatCellValue(value as CellValue);
         return (
           <span
-            key={aggregateRow?.id ?? label}
+            key={aggregateRow?.id ?? `aggregate-${index}`}
             className="inline-flex h-6 items-center gap-1.5 rounded-full bg-sink px-2.5 text-[12px] text-ink-2 tabular-nums"
           >
-            {label} {formatCellValue(value as CellValue)}
+            {label} {formatted}
           </span>
         );
       })}
@@ -394,6 +359,9 @@ const ReadyBaseTableView = forwardRef<
       sort,
       onViewChange,
       onSortChange,
+      search = "",
+      searchApplied = "",
+      onSearchChange,
     },
     rowActions: {
       onOpenPage,
@@ -403,6 +371,7 @@ const ReadyBaseTableView = forwardRef<
       onCopyValue,
       onDuplicateRow,
       onArchiveRow,
+      onSaveTemplate,
       error: rowActionError,
     },
     window: rowWindow,
@@ -439,6 +408,9 @@ const ReadyBaseTableView = forwardRef<
     onSave: onSaveOverrides,
     onReloadDefinition,
   } = model.overrides ?? NO_OVERRIDES;
+  const [templateTarget, setTemplateTarget] = useState<QueryRow | null>(null);
+  const [initialTemplate, setInitialTemplate] = useState<string>();
+  const totalsLabelId = useId();
   const compact = chrome === "compact";
   // Embeds are always dense (user ruling); the screen follows its switch.
   const [compactRows, setCompactRows] = useTableCompact("bases", false);
@@ -525,10 +497,13 @@ const ReadyBaseTableView = forwardRef<
     groupCollapseKey(definition.slug, activeView, effectiveGroup ?? ""),
   );
   const groupPanelIdBase = useId();
-  const groupableColumn = (column: string) =>
-    SYSTEM_COLUMNS[column] !== undefined
-      ? GROUPABLE_SYSTEM[column] === true
+  const groupableColumn = (column: string) => {
+    const identity = presentationFieldIdentity(column);
+    if (identity === "body") return false;
+    return identity?.startsWith("system:")
+      ? GROUPABLE_SYSTEM_FIELDS[identity.slice("system:".length)] === true
       : canGroup(properties.get(propertyKey(column))?.type);
+  };
   const columnAllowsSorting = (column: string) => {
     const property = properties.get(propertyKey(column));
     return (
@@ -594,8 +569,10 @@ const ReadyBaseTableView = forwardRef<
     (output?.shape === "flat"
       ? output.rows.some((row) => String(row.id) === activeRowId)
       : output?.shape === "grouped" &&
-        output.groups.some((group) =>
-          group.rows.some((row) => String(row.id) === activeRowId),
+        output.groups.some(
+          (group) =>
+            !groupCollapse.collapsed.has(groupIdentity(group.key)) &&
+            group.rows.some((row) => String(row.id) === activeRowId),
         ));
 
   useEffect(() => {
@@ -888,6 +865,56 @@ const ReadyBaseTableView = forwardRef<
       return output.groups.flatMap((group) => group.rows);
     return [];
   }, [output]);
+  const selectionKey = model.query.identity ?? evaluationIdentity;
+  const [storedSelection, setStoredSelection] = useState<{
+    key: string;
+    version: number;
+    ids: RowSelectionState;
+    anchor?: string;
+  }>({ key: selectionKey, version: 0, ids: {} });
+  if (storedSelection.key !== selectionKey) {
+    setStoredSelection({
+      key: selectionKey,
+      version: storedSelection.version + 1,
+      ids: {},
+    });
+  }
+  const selectionVersion = useRef(storedSelection.version);
+  selectionVersion.current = storedSelection.version;
+  const [bulkPending, setBulkPending] = useState(false);
+  const selectedIds =
+    storedSelection.key === selectionKey ? storedSelection.ids : {};
+  const selectedRows = rowsInOrder.filter((row) => selectedIds[row.id]);
+  const setSelection = (ids: RowSelectionState) =>
+    setStoredSelection((current) =>
+      current.key === selectionKey &&
+      current.version === storedSelection.version
+        ? { key: selectionKey, version: current.version, ids }
+        : current,
+    );
+  const toggleSelection = (row: QueryRow, range: boolean) => {
+    const ids = { ...selectedIds };
+    const index = rowsInOrder.findIndex((candidate) => candidate.id === row.id);
+    const anchor =
+      storedSelection.key === selectionKey ? storedSelection.anchor : undefined;
+    const anchorIndex = rowsInOrder.findIndex(
+      (candidate) => candidate.id === anchor,
+    );
+    if (range && anchorIndex >= 0) {
+      for (const candidate of rowsInOrder.slice(
+        Math.min(index, anchorIndex),
+        Math.max(index, anchorIndex) + 1,
+      ))
+        ids[candidate.id] = true;
+    } else if (ids[row.id]) delete ids[row.id];
+    else ids[row.id] = true;
+    setStoredSelection({
+      version: storedSelection.version,
+      key: selectionKey,
+      ids,
+      anchor: range && anchor ? anchor : row.id,
+    });
+  };
   /** Multi-select editors suggest the values each column already holds. */
   const columnSuggestions = useMemo(() => {
     const result = new Map<string, string[]>();
@@ -911,6 +938,7 @@ const ReadyBaseTableView = forwardRef<
     onOpenPageInNewTab !== undefined ||
     onCopyWikilink !== undefined ||
     onDuplicateRow !== undefined ||
+    onSaveTemplate !== undefined ||
     onArchiveRow !== undefined;
   const rowActions = useMemo<RowMenuActions>(
     () => ({
@@ -918,6 +946,9 @@ const ReadyBaseTableView = forwardRef<
       onOpenPageInNewTab,
       onCopyWikilink,
       onDuplicateRow,
+      onSaveTemplate: onSaveTemplate
+        ? (row: QueryRow) => setTemplateTarget(row)
+        : undefined,
       // Without a handler there is no dialog to open, so the item stays inert.
       onArchiveRow: onArchiveRow
         ? (row: QueryRow) => setArchiveTarget(row)
@@ -927,6 +958,7 @@ const ReadyBaseTableView = forwardRef<
       onArchiveRow,
       onCopyWikilink,
       onDuplicateRow,
+      onSaveTemplate,
       onOpenPage,
       onOpenPageInNewTab,
     ],
@@ -1011,7 +1043,10 @@ const ReadyBaseTableView = forwardRef<
     const capability = pickerColumn(column);
     const label = capability.label;
     const heading = (
-      <span className="inline-flex items-center gap-1">
+      <span
+        title={properties.get(propertyKey(column))?.description ?? undefined}
+        className="inline-flex items-center gap-1"
+      >
         {label}
         {sorted && (
           <span aria-hidden="true">{sorted === "ascending" ? "↑" : "↓"}</span>
@@ -1022,11 +1057,14 @@ const ReadyBaseTableView = forwardRef<
     return (
       <BaseHeaderMenu
         column={column}
+        description={
+          properties.get(propertyKey(column))?.description ?? undefined
+        }
         label={label}
         allowsSorting={capability.allowsSorting}
         groupable={capability.groupable}
         groupedByThis={effectiveGroup === column}
-        hideable={column !== "title" && visibleColumns.length > 1}
+        visibleCount={visibleColumns.length}
         canMoveLeft={
           onReorderColumns !== undefined &&
           movedColumnOrder(columns, hiddenColumns, column, -1) !== undefined
@@ -1063,90 +1101,53 @@ const ReadyBaseTableView = forwardRef<
           column={column}
           onContextTarget={setContextTarget}
         >
-          {column === "title" ? (
-            readOnly || memberDraftOpen ? (
-              <span className="block truncate px-1 py-0.5 text-[length:var(--title)] font-medium text-ink">
-                {row.title ?? row.path}
-              </span>
-            ) : (
-              <button
-                ref={
-                  row.id === focusCreatedId
-                    ? setCreatedTitleRef
-                    : forwardFocusRequest?.view === equivalentActiveView &&
-                        String(row.id) === forwardFocusRequest.rowId
-                      ? forwardFocusRequest.ref
-                      : undefined
-                }
-                type="button"
-                data-row-title={String(row.id)}
-                className={cn(
-                  "cursor-pointer truncate rounded-md text-left text-[length:var(--title)] font-medium text-ink hover:text-accent",
-                  FOCUS_RING_NATIVE,
-                )}
-                onClick={() => onOpenPage(row.path)}
-              >
-                {row.title ?? row.path}
-              </button>
-            )
-          ) : column === "body" ? (
-            <BodyExcerptCell
-              value={(row.columns as Record<string, CellValue>).body ?? null}
-              pageLabel={row.title ?? row.path}
-              path={row.path}
-              onOpenPage={onOpenPage}
-            />
-          ) : !readOnly &&
-            !memberDraftOpen &&
-            SYSTEM_COLUMNS[column] === undefined &&
-            property !== undefined ? (
-            <EditableCell
-              value={(row.columns as Record<string, CellValue>)[column] ?? null}
-              definition={property}
-              suggestions={columnSuggestions.get(column)}
-              isEditing={
-                activeCell?.rowId === String(row.id) &&
-                activeCell.column === column &&
-                asciiCaseFold(activeCell.view) === equivalentActiveView
-              }
-              onEdit={() => {
-                pendingForwardFocus.current = undefined;
-                nextForwardFocusToken.current += 1;
-                setForwardFocusRequest(undefined);
-                setActiveCell({
-                  rowId: String(row.id),
-                  column,
-                  view: activeView,
-                });
-              }}
-              onCancel={() => {
-                if (pendingForwardFocus.current) return;
-                pendingForwardFocus.current = undefined;
-                setForwardFocusRequest(undefined);
-                setActiveCell(null);
-              }}
-              onCommit={(value, hint) => {
-                pendingForwardFocus.current = undefined;
-                nextForwardFocusToken.current += 1;
-                setForwardFocusRequest(undefined);
-                setActiveCell(null);
-                onCommitCell(row, column, value, hint);
-              }}
-              onCommitNext={(value, hint) =>
-                commitAndMove(rows, row, column, value, hint, 1)
-              }
-              onCommitPrevious={(value, hint) =>
-                commitAndMove(rows, row, column, value, hint, -1)
-              }
-            />
-          ) : (
-            // System fields and undeclared keys are read-only.
-            <span className="block truncate px-1 py-0.5 text-mute tabular-nums">
-              {formatCellValue(
-                (row.columns as Record<string, CellValue>)[column] ?? null,
-              )}
-            </span>
-          )}
+          <BaseTableCell
+            row={row}
+            column={column}
+            property={property}
+            readOnly={readOnly}
+            draftOpen={memberDraftOpen}
+            titleRef={
+              row.id === focusCreatedId
+                ? setCreatedTitleRef
+                : forwardFocusRequest?.view === equivalentActiveView &&
+                    String(row.id) === forwardFocusRequest.rowId
+                  ? forwardFocusRequest.ref
+                  : undefined
+            }
+            onOpenPage={onOpenPage}
+            suggestions={columnSuggestions.get(propertyKey(column))}
+            editing={
+              activeCell?.rowId === String(row.id) &&
+              activeCell.column === column &&
+              asciiCaseFold(activeCell.view) === equivalentActiveView
+            }
+            onEdit={() => {
+              pendingForwardFocus.current = undefined;
+              nextForwardFocusToken.current += 1;
+              setForwardFocusRequest(undefined);
+              setActiveCell({
+                rowId: String(row.id),
+                column,
+                view: activeView,
+              });
+            }}
+            onCancel={() => {
+              if (pendingForwardFocus.current) return;
+              setForwardFocusRequest(undefined);
+              setActiveCell(null);
+            }}
+            onCommit={(value, hint) => {
+              pendingForwardFocus.current = undefined;
+              nextForwardFocusToken.current += 1;
+              setForwardFocusRequest(undefined);
+              setActiveCell(null);
+              onCommitCell(row, column, value, hint);
+            }}
+            onMove={(value, hint, step) =>
+              commitAndMove(rows, row, column, value, hint, step)
+            }
+          />
         </CellContextTrigger>
         {column === firstVisibleColumn && hasRowActions ? (
           <RowActionsButton
@@ -1212,6 +1213,29 @@ const ReadyBaseTableView = forwardRef<
         columns={dataColumns(rows)}
         getRowId={(row) => String(row.id)}
         density={dense ? "compact" : "comfortable"}
+        selection={
+          !readOnly && !memberDraftOpen && model.bulk
+            ? {
+                selected: selectedIds,
+                disabled: bulkPending,
+                onChange: setSelection,
+                onToggle: toggleSelection,
+                onSelectAll: (selected) => {
+                  const next = { ...selectedIds };
+                  for (const row of rows) {
+                    if (selected) next[row.id] = true;
+                    else delete next[row.id];
+                  }
+                  setSelection(next);
+                },
+                allLabel:
+                  output?.shape === "grouped"
+                    ? `Select all loaded rows in ${label}`
+                    : "Select all loaded rows",
+                rowLabel: (row) => `Select ${row.title ?? row.path}`,
+              }
+            : undefined
+        }
         sort={readOnly ? undefined : sortDescriptor}
         onHeaderSort={readOnly ? undefined : onHeaderSort}
         columnOrder={columns}
@@ -1223,7 +1247,12 @@ const ReadyBaseTableView = forwardRef<
         columnVisibility={columnVisibility}
         columnWidths={columnWidths.widths}
         onColumnWidthChange={readOnly ? undefined : columnWidths.setWidth}
-        rowClassName={() => cn("hover:*:bg-sink", dense ? "h-8" : "h-[42px]")}
+        rowClassName={(_row, state) =>
+          cn(
+            state.selected ? "*:bg-accent-tint" : "hover:*:bg-sink",
+            dense ? "h-8" : "h-[42px]",
+          )
+        }
         // The scroller moves the rows under the header, not past it.
         stickyHeader={compact}
         className={
@@ -1259,7 +1288,9 @@ const ReadyBaseTableView = forwardRef<
       : groupIdentity(forcedOpenGroup.key);
   const collapsedGroups = groupCollapse.collapsed;
   const isGroupExpanded = (identity: string) =>
-    identity === forcedOpenIdentity || !collapsedGroups.has(identity);
+    readOnly ||
+    identity === forcedOpenIdentity ||
+    !collapsedGroups.has(identity);
   const groupIdentities = (groups ?? []).map((group) =>
     groupIdentity(group.key),
   );
@@ -1380,10 +1411,16 @@ const ReadyBaseTableView = forwardRef<
     </nav>
   );
   const collapseAll =
-    groups && groups.length > 0 ? (
+    !readOnly && groups && groups.length > 0 ? (
       <Button
         variant="ghost"
         size="sm"
+        isDisabled={forcedOpenIdentity !== undefined}
+        aria-description={
+          forcedOpenIdentity !== undefined
+            ? "A group is temporarily kept open to focus its row."
+            : undefined
+        }
         onPress={() =>
           anyGroupExpanded
             ? groupCollapse.collapseAll(groupIdentities)
@@ -1430,10 +1467,39 @@ const ReadyBaseTableView = forwardRef<
           className={screen || configureSlug ? undefined : "ml-auto"}
           isDisabled={memberAddDisabled}
           aria-describedby={memberBlocker ? memberBlockerId : undefined}
-          onPress={onAddMember}
+          onPress={() => {
+            setInitialTemplate(undefined);
+            onAddMember?.();
+          }}
         >
           Add member
         </Button>
+        {(definition.templates?.length ?? 0) > 0 ? (
+          <MenuTrigger>
+            <Button
+              variant="secondary"
+              size="sm"
+              isDisabled={memberAddDisabled}
+              aria-label="New from template"
+            >
+              New from template
+            </Button>
+            <Menu aria-label="Row templates">
+              {(definition.templates ?? []).map((template) => (
+                <MenuItem
+                  key={template.name}
+                  id={template.name}
+                  onAction={() => {
+                    setInitialTemplate(template.name);
+                    onAddMember?.();
+                  }}
+                >
+                  {template.name}
+                </MenuItem>
+              ))}
+            </Menu>
+          </MenuTrigger>
+        ) : null}
         {memberBlocker ? (
           <span id={memberBlockerId} className="sr-only">
             {memberBlocker}
@@ -1554,6 +1620,84 @@ const ReadyBaseTableView = forwardRef<
           {toolbarActions}
         </div>
       )}
+      {!readOnly && onSearchChange ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <search
+            aria-label="Search Base rows"
+            className="flex items-center gap-2"
+          >
+            <input
+              type="search"
+              aria-label="Search rows"
+              placeholder="Search rows"
+              value={search}
+              className={cn(
+                "min-w-32 rounded-full bg-sink px-3 py-1.5 text-sm",
+                FOCUS_RING_NATIVE,
+              )}
+              onChange={(event) => onSearchChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onSearchChange("");
+                }
+              }}
+            />
+            {search ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onPress={() => onSearchChange("")}
+              >
+                Clear search
+              </Button>
+            ) : null}
+          </search>
+          {searchApplied && rowCount !== undefined ? (
+            <span
+              role="status"
+              aria-live="polite"
+              className="text-sm text-mute"
+            >
+              {rowCount.toLocaleString()} of{" "}
+              {(output?.unfiltered_total ?? rowCount).toLocaleString()} rows
+            </span>
+          ) : null}
+          <BaseCsvActions
+            slug={definition.slug}
+            view={activeView}
+            query={{
+              filter: model.query.filter,
+              sort: sort ?? view?.sort ?? undefined,
+              q: searchApplied || undefined,
+              search_columns: visibleColumns,
+              columns: visibleColumns,
+              group_by: effectiveGroup ?? "",
+            }}
+          />
+        </div>
+      ) : null}
+      {!readOnly && model.bulk && selectedRows.length > 0 ? (
+        <BaseBulkActions
+          key={selectionKey}
+          rows={selectedRows}
+          properties={effectiveProperties(definition.properties ?? [])}
+          bulk={model.bulk}
+          onPendingChange={setBulkPending}
+          onClear={() => {
+            setSelection({});
+            focusEntry();
+          }}
+          onComplete={(result) => {
+            if (selectionVersion.current !== storedSelection.version) return;
+            const remaining = { ...selectedIds };
+            for (const id of result.succeeded) delete remaining[id];
+            setSelection(remaining);
+            if (result.failures.length === 0) window.setTimeout(focusEntry, 0);
+          }}
+        />
+      ) : null}
       <ViewOverridesStrip
         sort={sort}
         overrides={overrides}
@@ -1573,6 +1717,8 @@ const ReadyBaseTableView = forwardRef<
         <BaseMemberDraft
           fields={memberDraftFields}
           titleTemplate={memberTitleTemplate}
+          templates={definition.templates}
+          initialTemplate={initialTemplate}
           projects={projects}
           isSaving={memberSaving}
           isSaveDisabled={memberCapability?.enabled !== true}
@@ -1627,13 +1773,15 @@ const ReadyBaseTableView = forwardRef<
           {capStatus}
         </p>
       ) : null}
-      {compact && emptyResult ? (
+      {emptyResult ? (
         <p
           role="status"
           aria-label="Empty view"
           className="rounded-xl bg-sink px-4 py-2.5 text-[13px] text-mute"
         >
-          No pages match this view.
+          {searchApplied
+            ? "No rows match your search."
+            : "No pages match this view."}
         </p>
       ) : null}
       {shouldRenderGrid ? (
@@ -1647,9 +1795,10 @@ const ReadyBaseTableView = forwardRef<
               <div className="flex flex-col gap-1">
                 {groups.map((group, index) => {
                   const key =
-                    group.key == null
+                    group.key_label ??
+                    (group.key == null
                       ? "(empty)"
-                      : formatCellValue(group.key as CellValue);
+                      : formatCellValue(group.key as CellValue));
                   const cacheIdentity = `${evaluationIdentity}:group:${JSON.stringify(group.key)}`;
                   const identity = groupIdentity(group.key);
                   const expanded = isGroupExpanded(identity);
@@ -1666,6 +1815,9 @@ const ReadyBaseTableView = forwardRef<
                           variant="ghost"
                           size="sm"
                           aria-expanded={expanded}
+                          isDisabled={
+                            readOnly || identity === forcedOpenIdentity
+                          }
                           aria-controls={panelId}
                           onPress={() => groupCollapse.toggle(identity)}
                           className={cn(
@@ -1686,6 +1838,16 @@ const ReadyBaseTableView = forwardRef<
                           )}
                           {key}
                         </Button>
+                        {group.key_path ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Open ${key}`}
+                            onPress={() => onOpenPage(group.key_path ?? "")}
+                          >
+                            Open {key}
+                          </Button>
+                        ) : null}
                         <span className="text-[12.5px] text-mute tabular-nums">
                           {group.rows.length < group.total
                             ? `${group.rows.length} of ${group.total} rows`
@@ -1723,10 +1885,12 @@ const ReadyBaseTableView = forwardRef<
             // biome-ignore lint/a11y/useSemanticElements: this is a footer-style totals summary, not a form — a <fieldset> would misrepresent it as a form-control group, so <footer role="group"> keeps footer semantics while role="group" gives it a legitimately nameable ARIA role.
             <footer
               role="group"
-              aria-label="Totals"
+              aria-labelledby={totalsLabelId}
               className="mt-2 flex flex-wrap items-center gap-2"
             >
-              <span className="text-[12.5px] text-mute">Totals</span>
+              <span id={totalsLabelId} className="text-[12.5px] text-mute">
+                Totals
+              </span>
               <AggregateChips
                 values={output.aggregates}
                 definition={definition}
@@ -1746,7 +1910,10 @@ const ReadyBaseTableView = forwardRef<
           className="w-full justify-start rounded-[10px] px-3 text-[13px] text-mute hover:text-ink"
           isDisabled={memberAddDisabled}
           aria-describedby={memberBlocker ? memberBlockerId : undefined}
-          onPress={onAddMember}
+          onPress={() => {
+            setInitialTemplate(undefined);
+            onAddMember?.();
+          }}
         >
           + Add member…
         </Button>
@@ -1766,6 +1933,14 @@ const ReadyBaseTableView = forwardRef<
             });
             setArchiveTarget(null);
           }}
+        />
+      ) : null}
+      {!readOnly && templateTarget && onSaveTemplate ? (
+        <SaveRowTemplateDialog
+          key={templateTarget.id}
+          row={templateTarget}
+          onSave={onSaveTemplate}
+          onClose={() => setTemplateTarget(null)}
         />
       ) : null}
     </section>

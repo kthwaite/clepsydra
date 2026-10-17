@@ -114,6 +114,45 @@ pub struct PropertyDefinition {
     /// enforcement).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub many: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<NumberFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<NumberDisplay>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NumberFormat {
+    Plain,
+    Integer,
+    Decimal,
+    Percent,
+    Currency,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NumberDisplay {
+    Number,
+    Bar,
+    Ring,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RowTemplate {
+    pub name: String,
+    #[serde(default)]
+    pub fields: std::collections::BTreeMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
 }
 
 /// Property defaults available to every Base without persisting declarations.
@@ -125,6 +164,12 @@ static BUILTIN_PROPERTIES: &[(&str, PropertyDefinition)] = &[
             property_type: PropertyType::Datetime,
             options: Vec::new(),
             many: None,
+            description: None,
+            default: None,
+            format: None,
+            currency: None,
+            display: None,
+            target: None,
         },
     ),
     (
@@ -133,6 +178,12 @@ static BUILTIN_PROPERTIES: &[(&str, PropertyDefinition)] = &[
             property_type: PropertyType::Relation,
             options: Vec::new(),
             many: Some(true),
+            description: None,
+            default: None,
+            format: None,
+            currency: None,
+            display: None,
+            target: None,
         },
     ),
 ];
@@ -430,6 +481,8 @@ pub struct BaseFile {
     pub properties: Vec<(String, PropertyDefinition)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<ViewDefinition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub templates: Vec<RowTemplate>,
 }
 
 /// Loose first-stage model: properties stay raw TOML so a single bad
@@ -452,6 +505,8 @@ struct RawBaseFile {
     properties: toml::Table,
     #[serde(default)]
     views: Vec<ViewDefinition>,
+    #[serde(default)]
+    templates: Vec<RowTemplate>,
 }
 
 /// Serialize and deserialize declared properties as a map, keeping input order.
@@ -1303,7 +1358,7 @@ pub fn parse_base(path: &Path, content: &str) -> (Option<BaseDefinition>, Vec<Ba
             Err(e) => diagnostics.push(BaseDiagnostic {
                 slug: slug.clone(),
                 severity: BaseDiagnosticSeverity::Error,
-                path: None,
+                path: Some(format!("properties.{key}")),
                 message: format!("property `{key}`: invalid declaration ({e})"),
             }),
         }
@@ -1318,6 +1373,7 @@ pub fn parse_base(path: &Path, content: &str) -> (Option<BaseDefinition>, Vec<Ba
         preview: raw.preview,
         properties,
         views: raw.views,
+        templates: raw.templates,
     };
     let result = validate_definition(&slug, file);
     diagnostics.extend(result.diagnostics);
@@ -1341,6 +1397,75 @@ pub fn title_template_fields(template: &str) -> Vec<String> {
         rest = &after[close + 1..];
     }
     fields
+}
+
+fn is_currency_code(code: &str) -> bool {
+    // Active ISO 4217 currencies, funds and precious-metal units.
+    const CODES: &str = "AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BOV BRL BSD BTN BWP BYN BZD CAD CDF CHE CHF CHW CLF CLP CNY COP COU CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MXV MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD USN UYI UYU UYW UZS VED VES VND VUV WST XAF XAG XAU XBA XBB XBC XBD XCD XCG XDR XOF XPD XPF XPT XSU XTS XUA XXX YER ZAR ZMW ZWG";
+    CODES.split_ascii_whitespace().any(|known| code == known)
+}
+
+/// Whether a custom frontmatter key can be written by member creation without
+/// changing a system-owned field or bypassing its dedicated mutation path.
+pub fn is_creation_property_writable(key: &str) -> bool {
+    !matches!(
+        key,
+        "id" | "path"
+            | "title"
+            | "project"
+            | "tags"
+            | "aliases"
+            | "created_at"
+            | "updated_at"
+            | "encryption"
+            | "conversation"
+            | "body"
+            | "type"
+            | "readonly"
+    )
+}
+
+fn validate_template_field(
+    base: &BaseDefinition,
+    field: &str,
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    let system = field.strip_prefix("sys.").unwrap_or(field);
+    if !field.starts_with("prop.") && SYSTEM_FIELDS.contains(&system) {
+        let valid = match system {
+            "title" => value.as_str().is_some_and(|value| !value.trim().is_empty()),
+            "kind" => value
+                .as_str()
+                .and_then(clep_vault::kind::Kind::from_token)
+                .is_some(),
+            "project" => value.as_str().is_some(),
+            "tags" | "aliases" => value
+                .as_array()
+                .is_some_and(|values| values.iter().all(serde_json::Value::is_string)),
+            _ => {
+                return Err(format!(
+                    "template field `{field}` is not writable during creation"
+                ));
+            }
+        };
+        return if valid {
+            Ok(())
+        } else {
+            Err(format!("template field `{field}` has an invalid value"))
+        };
+    }
+    let key = field.strip_prefix("prop.").unwrap_or(field);
+    if !is_creation_property_writable(key) {
+        return Err(format!(
+            "template property `{field}` cannot be written during member creation"
+        ));
+    }
+    let definition = base
+        .declared_property(key)
+        .ok_or_else(|| format!("template references undeclared property `{field}`"))?;
+    crate::property_value::coerce_property_value(key, value, definition)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
@@ -1409,6 +1534,83 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                 Some(format!("properties.{key}")),
                 format!("property name `{BODY_COLUMN}` is reserved"),
             );
+        }
+    }
+    for (key, definition) in &base.file.properties {
+        let path = format!("properties.{key}");
+        if definition.default.is_some() && !is_creation_property_writable(key) {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("{path}.default")),
+                format!(
+                    "property `{key}` cannot have a creation default because it is system-owned"
+                ),
+            );
+        }
+        if let Some(value) = &definition.default
+            && let Err(error) = crate::property_value::coerce_property_value(key, value, definition)
+        {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("{path}.default")),
+                error.to_string(),
+            );
+        }
+        let has_presentation = definition.format.is_some()
+            || definition.currency.is_some()
+            || definition.display.is_some()
+            || definition.target.is_some();
+        if has_presentation && definition.property_type != PropertyType::Number {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(path.clone()),
+                "number presentation is only valid for number properties".into(),
+            );
+        }
+        if definition
+            .target
+            .is_some_and(|target| !target.is_finite() || target <= 0.0)
+        {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("{path}.target")),
+                "target must be a positive finite number".into(),
+            );
+        }
+        if definition.format == Some(NumberFormat::Currency) {
+            if !definition.currency.as_deref().is_some_and(is_currency_code) {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    Some(format!("{path}.currency")),
+                    "currency format requires a recognized uppercase ISO 4217 currency code".into(),
+                );
+            }
+        } else if definition.currency.is_some() {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("{path}.currency")),
+                "currency is only valid with currency format".into(),
+            );
+        }
+    }
+    let mut template_names = HashSet::new();
+    for (index, template) in base.file.templates.iter().enumerate() {
+        let path = format!("templates[{index}]");
+        if template.name.trim().is_empty() || !template_names.insert(template.name.as_str()) {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("{path}.name")),
+                "template name must be nonempty and unique".into(),
+            );
+        }
+        for (field, value) in &template.fields {
+            if let Err(message) = validate_template_field(base, field, value) {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    Some(format!("{path}.fields.{field}")),
+                    message,
+                );
+            }
         }
     }
 
@@ -2016,6 +2218,7 @@ name = "All"
             filter: None,
             properties: Vec::new(),
             preview: Vec::new(),
+            templates: Vec::new(),
             views: names
                 .into_iter()
                 .map(|name| ViewDefinition {
@@ -2041,6 +2244,12 @@ name = "All"
                 property_type: PropertyType::Select,
                 options: vec!["queued".to_string(), "reading".to_string()],
                 many: None,
+                description: None,
+                default: None,
+                format: None,
+                currency: None,
+                display: None,
+                target: None,
             },
         )];
         file.views[0].aggregates = vec![Aggregate {
@@ -2093,6 +2302,12 @@ name = "All"
                 property_type: PropertyType::Select,
                 options: vec!["queued".to_string(), "reading".to_string()],
                 many: None,
+                description: None,
+                default: None,
+                format: None,
+                currency: None,
+                display: None,
+                target: None,
             },
         )];
         file.views[0].aggregates = vec![Aggregate {
@@ -2138,6 +2353,12 @@ name = "All"
             property_type: PropertyType::Text,
             options: Vec::new(),
             many: None,
+            description: None,
+            default: None,
+            format: None,
+            currency: None,
+            display: None,
+            target: None,
         };
         let mut file = base_file_with_views(["All"]);
         file.properties = vec![
@@ -2557,7 +2778,6 @@ value = "BOOK"
         assert_eq!(diagnostics[0].slug, "x");
         assert!(diagnostics[0].message.contains("property `rating`"));
         assert_eq!(diagnostics[0].severity, BaseDiagnosticSeverity::Error);
-        assert_eq!(diagnostics[0].path, None);
         // The bad declaration is dropped; the good one survives.
         assert!(base.property("rating").is_none());
         assert!(base.property("author").is_some());

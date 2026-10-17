@@ -32,6 +32,7 @@ export interface RowMenuActions {
   onCopyWikilink?(row: QueryRow): void;
   onDuplicateRow?(row: QueryRow): void;
   onArchiveRow?(row: QueryRow): void;
+  onSaveTemplate?(row: QueryRow): void;
 }
 
 /** Which cell summoned a row's menu, and what to focus when it closes. */
@@ -92,6 +93,14 @@ function RowItems({
       {canDuplicate ? (
         <MenuItem id="duplicate" onAction={() => onDuplicateRow?.(row)}>
           Duplicate
+        </MenuItem>
+      ) : null}
+      {!readOnly && actions.onSaveTemplate ? (
+        <MenuItem
+          id="save-template"
+          onAction={() => actions.onSaveTemplate?.(row)}
+        >
+          Save as template…
         </MenuItem>
       ) : null}
       {canArchive ? (
@@ -263,7 +272,8 @@ export function RowActionsButton({
         // an `opacity-0` button is still a hit target, so a stray click at the
         // first cell's right edge would open a menu from nowhere.
         className="ml-auto shrink-0 px-1 py-0 opacity-0 pointer-events-none aria-expanded:pointer-events-auto aria-expanded:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
-        onPress={() => {
+        onPress={(event) => {
+          if (event.ctrlKey) return;
           const trigger = triggerRef.current;
           if (!trigger) return;
           claimForButton();

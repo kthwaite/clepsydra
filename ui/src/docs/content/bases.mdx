@@ -26,11 +26,12 @@ definition format and each authoring path.
 
 Open `/bases` from the **Bases** header item or run **Open Bases** in the command palette. The index lists saved bases and files that need repair. Choose **Create base**, or run **Create Base** in the command palette, to open guided creation. Enter a name and slug, optionally add membership conditions, and create the base. Clepsydra opens `/bases/<slug>/edit` with an `All` table view and `title` column ready to configure.
 
-The Configure workspace has five sections:
+The Configure workspace has six sections:
 
 - **General** changes the displayed name, description, and default property visibility on member pages.
 - **Filter** builds base membership from comparison, all, any, and not rules.
 - **Properties** declares ordered advisory property schemas and their options.
+- **Row templates** defines named property prefills and optional body content for new members.
 - **Preview properties** chooses the ordered, optionally labelled fields used by generic page previews.
 - **Views** configures ordered table views, their extra filters, columns, display labels, sorts, grouping, and aggregates.
 
@@ -116,7 +117,7 @@ Base definitions live at:
 
 Only files ending in `.base.toml` in that directory are loaded. The filename stem is the API and UI identity: `deep-work.base.toml` has slug `deep-work` and UI path `/bases/deep-work`.
 
-A base requires `name`. `description`, `filter`, `properties`, `preview`, and `views` are optional, although the web UI needs at least one view to display a table. With no membership `filter`, the base matches every indexed page.
+A base requires `name`. `description`, `filter`, `properties`, `templates`, `preview`, and `views` are optional, although the web UI needs at least one view to display a table. With no membership `filter`, the base matches every indexed page.
 
 ## Page properties and advisory schemas
 
@@ -124,14 +125,42 @@ The `[properties]` table describes keys stored in page frontmatter; it does not 
 
 Schemas are advisory. A page whose value disagrees with a declaration still indexes, and the declaration does not rewrite or reject it. Clepsydra reports a warning instead. Likewise, a non-empty `options` list constrains diagnostics and completions rather than blocking an unfamiliar value, and `many = false` on a relation warns about multiple targets rather than enforcing a write constraint. An empty `options` list means an open vocabulary: the LSP can offer values already observed in the vault and does not warn about new ones.
 
+### Descriptions, defaults, and number presentation
+
+Each property may declare `description` and a typed `default`. Descriptions appear
+in property controls, member drafts, column-header tooltips, and LSP completion
+documentation. Defaults prefill **new members only**; they never backfill existing
+pages. Zero and `false` are real defaults, not missing values. Invalid defaults
+produce addressed validation errors rather than being silently discarded.
+
+Number properties also support `format = "plain" | "integer" | "decimal" |
+"percent" | "currency"`. Currency requires a recognized ISO currency code.
+Formatting is locale-aware and changes display only: editors and stored values
+remain numeric. Percent uses fraction semantics (`0.25` displays as `25%`).
+Value aggregates use the property's format; counts stay counts and
+`percent_filled` stays a percentage.
+
+```toml
+[properties]
+cost = { type = "number", description = "Purchase cost", default = 0, format = "currency", currency = "GBP" }
+progress = { type = "number", format = "percent", display = "bar", target = 1 }
+finished = { type = "bool", default = false }
+```
+
+`display = "number" | "bar" | "ring"` selects a number's presentation.
+Progress uses a positive `target` (100 when omitted); its visual fill is clamped,
+but its numeric value is not rewritten. Descriptions and presentation metadata
+do not make otherwise compatible property schemas conflict.
+
+
 ### Built-in meeting properties
 
 Every Base offers **Occurred** (`occurred_at`, `datetime`) and **Attendees**
 (`attendees`, `relation` with `many = true`) without a `[properties]`
 declaration. Add them directly to columns, filters, and preview properties.
 Occurred supports date comparisons, relative-date filters, sorting, and the
-date-time editor. Attendees supports person-link filtering and a multi-value
-relation editor; it is not a sortable or groupable field in saved Base views.
+date-time editor. Attendees supports person-link filtering, a multi-value
+relation editor, and grouping by the first relation target; it is not sortable.
 
 These use the existing meeting frontmatter, not duplicate fields. Missing
 values remain empty, and native date-only occurrence values remain readable.
@@ -358,6 +387,36 @@ to the author. Creation is atomic: a rejected candidate leaves no page and no
 index row, and its diagnostics come back attached to the field or filter at
 fault while the draft stays open with everything already typed.
 
+### Row templates and prefill precedence
+
+Configure **Row templates**, then choose **New from template** in a standalone or
+embedded table, or select **Row template** inside the member draft. These are
+creation templates, not the Jinja templates used to render a Base as Markdown.
+
+```toml
+[[templates]]
+name = "Reading notes"
+fields = { status = "reading", rating = 4, tags = ["book"] }
+body = "## Notes\n\n"
+```
+
+Template names must be unique and nonempty. Fields name declared properties or
+writable creation metadata (`title`, `kind`, `project`, `tags`, `aliases`).
+Use `prop.<key>` to distinguish a custom property from a system field.
+System-owned keys cannot be populated through custom-property defaults or
+templates.
+
+Draft prefills follow **membership implication → selected template → property
+default → empty**. Explicit edits, including clears, override prefills but must
+still satisfy the Base, saved-view, and embed predicates. An explicit body
+overrides the template body. The draft shows the chosen values before creating
+the page; neither selecting nor editing a template changes existing pages.
+
+Use a row's **Save as template…** action to capture this Base's declared fields
+and writable metadata. Including the page body is an explicit choice. The
+definition update is revision-guarded, and protected pages cannot be captured.
+
+
 ## Title templates
 
 A Base may propose titles for the members created through it:
@@ -389,7 +448,7 @@ Each `[[views]]` entry is a saved view. Its fields are:
 - `group_by`: a grouping field.
 - `aggregates`: aggregate calculations shown with grouped results, or as a totals row for a flat view.
 
-Use a property in `group_by` when it is built in or declared. Groupable property types are `select`, `text`, `bool`, `date`, `datetime`, and `url`; scalar system fields such as `kind` are also groupable. `number`, `relation`, and `multi_select` properties are not groupable.
+Use a property in `group_by` when it is built in or declared. Groupable property types are `select`, `text`, `bool`, `date`, `datetime`, `url`, and `relation`; scalar system fields such as `kind` are also groupable. `number` and `multi_select` properties are not groupable. A relation contributes only its first target in stored link order, so a multi-target page never duplicates across groups. Resolved groups show the target's title and an open action; unresolved targets remain readable and absent relations form the empty group.
 
 The aggregate functions are:
 
@@ -399,11 +458,15 @@ The aggregate functions are:
 | `count_filled`, `count_empty` | any built-in or declared property, or scalar system field | rows where the field is present / absent |
 | `percent_filled` | same | `100 × count_filled ÷ count`, one decimal |
 | `count_unique` | same | distinct present values (the first element of an array) |
-| `sum`, `avg`, `min`, `max` | `number`, `date`, `datetime`, or `word_count` | the usual folds |
+| `sum`, `avg`, `min`, `max` | `number`, `date`, `datetime`, `word_count`, or `journal_date` | the usual folds |
 | `median` | same | the middle value; the mean of the two middle values for numbers |
 | `range` | same | `max − min`; for dates, the number of days between them |
 
 `tags` and `aliases` cannot be aggregated. Aggregates are computed over the whole result — a `limit` or scroll window never changes them. A grouped view returns one set per group; a flat view returns one set for the view, shown as a totals row beneath the table. For example:
+
+System `created_at` and `updated_at` support presence and uniqueness aggregates,
+not numeric/date folds. Declare a typed date or datetime property for those
+calculations instead.
 
 ```toml
 [[views]]
@@ -434,11 +497,61 @@ Each commit fetches the page's current revision, sends only the changed property
 
 Every column header has a `⋯` menu — also reachable by right-clicking the header, and the first thing keyboard focus lands on in a header (Enter opens it): **Sort ascending**, **Sort descending**, **Filter ▸** presets (is empty / is not empty, checked / unchecked, the relative-date presets, and up to twelve declared select options), **Group by** / **Ungroup**, **Hide column**, **Move left** / **Move right**, and **Resize column**. The title column and the last visible column cannot be hidden; the title column always stays first and fills the remaining width.
 
-Right-click any cell (or press <kbd>Shift</kbd>+<kbd>F10</kbd> / <kbd>⌃</kbd><kbd>Enter</kbd> on a focused cell control) for a quick filter derived from the cell's value — `Status is reading`, `Tags has fiction`, `Due is 2026-08-28`, `Done is checked`, `Author is empty` — a **Filter by date ▸** submenu on date columns, **Copy value**, and the row actions: **Open**, **Open in new tab**, **Copy wikilink**, **Duplicate**, and **Archive…**. A ghost `⋯` button in the first cell opens the row actions alone.
+Right-click any cell (or press <kbd>Shift</kbd>+<kbd>F10</kbd> / <kbd>⌃</kbd><kbd>Enter</kbd> on a focused cell control) for a quick filter derived from the cell's value — `status is reading`, `tags has fiction`, `due is 2026-08-28`, `done is checked`, `author is empty` — a **Filter by date ▸** submenu on date columns, **Copy value**, and the row actions: **Open**, **Open in new tab**, **Copy wikilink**, **Duplicate**, **Save as template…**, and **Archive…**. Filter labels follow the column's display label, which is its key unless the view declares a label. A ghost `⋯` button in the first cell opens the row actions alone.
 
 Sort, quick filters, grouping, hidden columns, and column order are **view overrides**: they apply to the table you are looking at and appear as removable chips in a strip under the view bar. **Clear** drops them all; **Save to view** writes them into the saved view (`filter`, `sort`, `group_by`, `columns`) through the revision-guarded definition update, so a base edited elsewhere in the meantime is reported instead of overwritten. Switching views drops the overrides.
 
 **Duplicate** creates a new page through the member endpoint with the same declared properties, kind, project, and tags, titled `<title> (copy)`; the body is not copied, and the new page must still match the view. **Archive…** asks for confirmation and moves the page to the Rubbish Bin; focus returns to the next row.
+
+### Search rows
+
+**Search rows** searches title and visible text-like fields on the server, after
+the Base, saved-view, embed, and quick filters. It searches the full matching
+set, not only loaded rows. Hidden columns, numeric fields, bodies, and conversation
+payloads are not search sources. The table reports **N of M rows**: N matches the
+search and M matches the other predicates. Group counts and aggregates describe
+the searched result.
+
+Search pauses briefly while typing, clears with <kbd>Escape</kbd>, and resets on
+view changes. It is ephemeral: neither **Save to view** nor the Folio fence
+persists it.
+
+### Select and change multiple rows
+
+Use row checkboxes, <kbd>Shift</kbd>+click for a range, or <kbd>Space</kbd> /
+<kbd>Shift</kbd>+<kbd>Space</kbd> on a focused row control. <kbd>Escape</kbd> clears
+selection when an editor or menu has not already handled it. **Select all loaded
+rows** means exactly that; it does not select unloaded query results. Changing
+the query clears selection.
+
+The selection toolbar can set select, boolean, multi-select, or relation values,
+add a tag, or **Archive selected…** after confirmation. Property and tag writes
+use each page's revision. Results are per page: successful rows leave the
+selection; conflicts, protected pages, and other refusals remain selected with
+their errors. Archive uses the Rubbish Bin rather than permanent deletion.
+
+### CSV export and import
+
+**Export CSV** downloads the full current result, not its loaded window. It honors
+filters, search, sorts, and visible columns, uses column labels as headers, quotes
+CSV cells, and joins multivalues with semicolons. Protected and conversation
+content remains redacted.
+
+**Import CSV** accepts a file or pasted text. Preview suggests case-insensitive
+header mappings, permits explicit mappings or skipped columns, and shows typed
+rows and diagnostics without writing pages or declarations. Inference tries
+boolean, number, date, URL, email-as-text, multi-select, select, then text; it does
+not introduce new property types. Existing declarations remain authoritative.
+Read-only system columns are skipped by automatic mapping.
+
+Approve the proposed declarations and valid rows before importing. New
+declarations are saved with a revision guard, then rows use the normal
+member-creation endpoint, including defaults and membership validation.
+Import creates pages; it does not update existing ones or import bodies or
+row-template definitions. Outcomes identify created, failed, and uncertain rows.
+After another preview, only confirmed failures can be retried; successful and
+uncertain rows are not blindly recreated.
+
 
 ### Column width and order
 
@@ -460,15 +573,15 @@ Choose **Add member** in a saved table view to open one temporary row. This crea
 
 After a successful save, the new title link receives focus and the row moves from its temporary position to its authoritative sort and group position.
 
-Press <kbd>Escape</kbd> to cancel after any open field editor has closed. Derived filters that an empty page cannot satisfy—for example, `word_count > 0`—disable **Add member** and explain the blocking constraint. Create the page in Folio when initial body content is required.
+Press <kbd>Escape</kbd> to cancel after any open field editor has closed. The draft's optional body participates in validation, including `word_count` filters. Constraints a newly created page cannot satisfy still disable **Add member** and explain the blocker.
 
-Renaming or removing a property declaration changes only the base schema. It does not rename or remove that key in existing page frontmatter. Deleting a base removes only its `.base.toml` definition: all matching Markdown pages and all of their properties remain.
+Renaming a property previews and rewrites its references throughout the Base: membership and view filters, columns, sorts, grouping, aggregates, labels, preview fields, title templates, and row-template fields. Removing a declaration previews the references to remove and requires confirmation; removing membership predicates can broaden membership, so review the remaining filter before Save. Cancelling leaves the draft unchanged. These operations never rename or remove keys in existing page frontmatter. If a lossless save would discard comments or unsupported TOML content, it refuses the change rather than deleting that content silently. Deleting a Base removes only its `.base.toml` definition: all matching Markdown pages and properties remain.
 
 ## Embed a Base in a Folio
 
 A Base embed is a live, non-owning view of the same pages as its saved Base. The Folio stores only the Base/view reference and document-local filter, sort, and limit. It does not copy the Base definition, table rows, or member pages into the Folio.
 
-Embedded tables carry the same menus; overrides are yours as a reader and are not written into the fence, while **Save to view** still updates the base definition.
+Embedded tables carry the same search, selection, bulk actions, CSV controls, row templates, and menus. Search and reader overrides are not written into the fence, while **Save to view** still updates the Base definition.
 
 In a Folio editor, open the slash-command menu and choose **Base embed**. The structured **Edit Base embed** inspector opens immediately. The inspector docks to the right of the page rather than covering it, so the embed stays in view and the page stays editable while it is open. Select a Base and one of its saved views, then optionally build an additional nested filter, arrange ordered sort keys, and set a row limit. Choose **Save** to replace the new block with the configured live table; **Cancel** removes a new unconfigured block or leaves an existing configured block unchanged.
 
@@ -688,6 +801,15 @@ rather than frontmatter. Do not place secrets in Base definitions or
 frontmatter and assume body protection hides them.
 
 Protected-page frontmatter can still participate in Base membership and saved tables, but the generic link/tab Base projection is suppressed in full. This prevents even otherwise plaintext projected frontmatter from appearing in a protected page's passive preview card.
+
+## Operators and aggregates release notes
+
+- Filter controls use prose operator names, such as **is** and **is not**, while
+  TOML retains `eq` and `ne`.
+- A Base embed with a stray `value` on `is_empty` or `not_empty` reports that the
+  operator does not accept a value, rather than an unknown-key error.
+- Flat views evaluate their aggregates. An incompatible calculation such as
+  `median(status)` now fails evaluation rather than being ignored.
 
 ## Related
 

@@ -26,6 +26,40 @@ function draft(overrides: Partial<BaseDraft> = {}): BaseDraft {
 }
 
 describe("validateBaseDraftStructure", () => {
+  it("reports retained incompatible defaults, presentation, and template values after a type change", () => {
+    const value = draft({
+      properties: [
+        {
+          id: "score",
+          key: "score",
+          definition: {
+            type: "bool",
+            default: 3,
+            format: "currency",
+            currency: "ZZZ",
+          },
+        },
+      ],
+      templates: [
+        { id: "one", name: "Example", fields: { score: 5 } },
+        { id: "two", name: "Example", fields: { missing: true } },
+      ],
+    });
+    const diagnostics = validateBaseDraftStructure("books", value);
+    expect(diagnostics.map(({ path }) => path)).toEqual(
+      expect.arrayContaining([
+        "properties.score.default",
+        "properties.score.format",
+        "properties.score.currency",
+        "templates[0].fields.score",
+        "templates[1].name",
+        "templates[1].fields.missing",
+      ]),
+    );
+    expect(value.properties[0].definition.default).toBe(3);
+    expect(value.templates?.[0].fields.score).toBe(5);
+  });
+
   it("locates incomplete nested rules without rejecting zero, false, or valueless operators", () => {
     const diagnostics = validateBaseDraftStructure(
       "meetings",

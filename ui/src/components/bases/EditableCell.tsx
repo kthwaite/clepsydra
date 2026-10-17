@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PropertyDefinition, PropertyType } from "#/api/bases";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { formatNumber, NumberDisplay } from "./cells/NumberDisplay";
 import { CELL_EDITORS } from "./cells/registry";
 import { type CellValue, formatCellValue } from "./cells/types";
 
@@ -138,7 +139,10 @@ export function EditableCell({
     );
   }
 
-  const text = formatCellValue(value);
+  const text =
+    definition.type === "number" && typeof value === "number"
+      ? formatNumber(value, definition)
+      : formatCellValue(value);
   return (
     <button
       ref={displayButtonRef}
@@ -157,7 +161,13 @@ export function EditableCell({
         else setLocalEditing(true);
       }}
     >
-      {text === "" ? "—" : text}
+      {definition.type === "number" && typeof value === "number" ? (
+        <NumberDisplay value={value} definition={definition} />
+      ) : text === "" ? (
+        "—"
+      ) : (
+        text
+      )}
     </button>
   );
 }

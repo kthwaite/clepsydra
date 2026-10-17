@@ -87,7 +87,7 @@ function createSession(source: ResolvedSource): MemberCreationSession {
       for (const key in draft.fields) {
         if (!Object.hasOwn(draft.fields, key)) continue;
         const value = draft.fields[key];
-        if (value !== null && value !== undefined) fields[key] = value;
+        if (value !== undefined) fields[key] = value;
       }
 
       const request: BaseMemberCreateRequest = {
@@ -95,6 +95,8 @@ function createSession(source: ResolvedSource): MemberCreationSession {
         view: source.view,
         title: draft.title.trim(),
         fields,
+        ...(draft.template === undefined ? {} : { template: draft.template }),
+        ...(draft.body === undefined ? {} : { body: draft.body }),
       };
       if (source.evaluation) request.embed_filter = source.embedFilter;
 

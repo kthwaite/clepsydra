@@ -1440,6 +1440,7 @@ impl LspBackend {
                         label: key.to_owned(),
                         kind: Some(CompletionItemKind::FIELD),
                         detail: Some(format!("{:?} — {}", def.property_type, base.file.name)),
+                        documentation: def.description.clone().map(Documentation::String),
                         insert_text: Some(format!("{key} = ")),
                         sort_text: Some(format!("{rank}{key}")),
                         ..Default::default()
@@ -2412,6 +2413,25 @@ mod tests {
         let cadence = items.iter().find(|i| i.label == "cadence").unwrap();
         assert!(author.sort_text < cadence.sort_text);
         assert_eq!(author.insert_text.as_deref(), Some("author = "));
+    }
+
+    #[tokio::test]
+    async fn frontmatter_key_completion_includes_property_description() {
+        let text = "+++\nid = \"0190f8a0-0000-7000-8000-000000000071\"\n\n+++\nbody\n";
+        let (backend, _tmp) = make_backend(&[
+            (
+                "bases/described.base.toml",
+                "name = 'Described'\n[properties.amount]\ntype = 'number'\ndescription = 'Amount due before tax'\n",
+            ),
+            ("note.md", text),
+        ]);
+        let uri = uri_for(&backend, "note.md");
+        open_doc(&backend, &uri, text).await;
+        let items = complete_at(&backend, &uri, 2, 0).await.expect("items");
+        let amount = items.iter().find(|item| item.label == "amount").unwrap();
+        assert!(
+            matches!(&amount.documentation, Some(Documentation::String(text)) if text == "Amount due before tax")
+        );
     }
 
     #[tokio::test]

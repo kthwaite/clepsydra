@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useBaseViewWindows } from "#/api/bases";
+import { type BaseViewEvaluateResponse, useBaseViewWindows } from "#/api/bases";
 import { fetchClient } from "#/api/client";
 import {
   type BaseEmbedConfig,
@@ -61,6 +61,46 @@ function requestedBodies(post: PostSpy) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("useBaseViewWindows", () => {
+  it("starts a fresh search window and preserves the authoritative pre-search total", async () => {
+    const initial: BaseViewEvaluateResponse = {
+      revision: "r1",
+      member_creation: capability,
+      output: { shape: "flat", rows: [row(1)], total: 100, aggregates: [] },
+    };
+    const searched: BaseViewEvaluateResponse = {
+      revision: "r1",
+      member_creation: capability,
+      output: {
+        shape: "flat",
+        rows: [row(9)],
+        total: 1,
+        unfiltered_total: 100,
+        aggregates: [],
+      },
+    };
+    const post = vi
+      .spyOn(fetchClient, "POST")
+      .mockResolvedValueOnce({ data: initial, response: new Response() })
+      .mockResolvedValueOnce({ data: searched, response: new Response() });
+    const { result, rerender } = renderHook(
+      (value: BaseEmbedConfig) => useBaseViewWindows(value),
+      { initialProps: config, wrapper: wrapper(freshClient()) },
+    );
+    await waitFor(() => expect(result.current.loaded).toBe(1));
+    rerender({ ...config, q: "Wolfe", searchColumns: ["title", "author"] });
+    await waitFor(() => expect(result.current.total).toBe(1));
+    expect(result.current.data?.output.unfiltered_total).toBe(100);
+    expect(
+      result.current.data?.output.shape === "flat" &&
+        result.current.data.output.rows.map((row) => row.id),
+    ).toEqual(["row-9"]);
+    expect(requestedBodies(post)[1]).toEqual({
+      q: "Wolfe",
+      search_columns: ["title", "author"],
+      limit: 50,
+      offset: 0,
+    });
+  });
   it("asks for one window and reports the authoritative total", async () => {
     const post = vi
       .spyOn(fetchClient, "POST")

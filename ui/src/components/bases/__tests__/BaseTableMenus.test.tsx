@@ -204,6 +204,24 @@ const overrideSpies = () => ({
 });
 
 describe("column header menu", () => {
+  it("sorts from the keyboard menu and returns focus on Escape", async () => {
+    const user = userEvent.setup();
+    const view = renderView({});
+    const trigger = screen.getByRole("button", { name: "author column menu" });
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    expect(
+      await screen.findByRole("menuitem", { name: "Sort ascending" }),
+    ).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await user.keyboard("{Enter}");
+    screen.getByRole("menuitem", { name: "Sort descending" }).focus();
+    await user.keyboard("{Enter}");
+    expect(view.onSortChange).toHaveBeenCalledWith([
+      { field: "author", dir: "desc" },
+    ]);
+  });
   it("opens from the ⋯ button and dispatches sort, group and hide", async () => {
     const user = userEvent.setup();
     const spies = overrideSpies();

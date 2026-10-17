@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -97,6 +97,100 @@ beforeEach(() => {
 });
 
 describe("group collapse", () => {
+  it("opens a folded successor group after archiving the focused row", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(GROUPS_KEY, '["\\"queued\\""]');
+    function ArchiveTable() {
+      const [output, setOutput] = useState<QueryOutput>(grouped);
+      return (
+        <BaseTableView
+          {...viewProps({
+            definition,
+            activeView: "Shelf",
+            output,
+            sort: undefined,
+            onViewChange: vi.fn(),
+            onSortChange: vi.fn(),
+            onOpenPage: vi.fn(),
+            onCommitCell: vi.fn(),
+            onArchiveRow: async () => {
+              setOutput({
+                shape: "grouped",
+                groups: [
+                  {
+                    key: "queued",
+                    total: 1,
+                    rows: [queuedRow],
+                    aggregates: [],
+                  },
+                ],
+              });
+            },
+          })}
+        />
+      );
+    }
+    render(<ArchiveTable />);
+    await user.click(
+      screen.getByRole("button", {
+        name: "Row actions for Always Coming Home",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Archive…" }));
+    await user.click(screen.getByRole("button", { name: "Confirm archive" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "The Dispossessed" }),
+      ).toHaveFocus(),
+    );
+    expect(screen.getByRole("button", { name: "queued" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+  it("closes the active editor when its group collapses", async () => {
+    const user = userEvent.setup();
+    renderView();
+    await user.click(screen.getByRole("button", { name: "8" }));
+    expect(screen.getByRole("spinbutton")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "reading" }));
+    await user.click(screen.getByRole("button", { name: "reading" }));
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "8" })).toBeInTheDocument();
+  });
+
+  it("ignores saved collapse state in a read-only definition preview", () => {
+    window.localStorage.setItem(GROUPS_KEY, '["\\"reading\\""]');
+    renderView({ readOnly: true });
+    expect(screen.getAllByRole("grid")).toHaveLength(2);
+    expect(
+      screen.queryByRole("button", { name: /Collapse all|Expand all/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "reading" })).toBeDisabled();
+  });
+
+  it("renders non-string group keys with distinct identities", async () => {
+    const user = userEvent.setup();
+    renderView({
+      output: {
+        shape: "grouped",
+        groups: [null, 0, false].map((key, index) => ({
+          key,
+          rows: [{ ...readingRow, id: String(index) }],
+          total: 1,
+          aggregates: [],
+        })),
+      },
+    });
+    expect(screen.getByRole("button", { name: "(empty)" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "0" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "false" }));
+    expect(screen.getAllByRole("grid")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "(empty)" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
   it("folds one group, keeping its count, and remembers the fold", async () => {
     const user = userEvent.setup();
     const { unmount } = renderView();
@@ -137,7 +231,7 @@ describe("group collapse", () => {
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Expand all" }));
     expect(screen.getAllByRole("grid")).toHaveLength(2);
-    expect(window.localStorage.getItem(GROUPS_KEY)).toBe("[]");
+    expect(window.localStorage.getItem(GROUPS_KEY)).toBeNull();
   });
 
   it("offers no toggle for a flat view", () => {
@@ -180,7 +274,7 @@ describe("group collapse", () => {
       screen.getByRole("grid", { name: "Reading Log — queued" }),
     ).toBeInTheDocument();
     await waitFor(() =>
-      expect(window.localStorage.getItem(GROUPS_KEY)).toBe("[]"),
+      expect(window.localStorage.getItem(GROUPS_KEY)).toBeNull(),
     );
   });
 

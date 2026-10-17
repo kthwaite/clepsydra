@@ -359,7 +359,7 @@ describe("ViewsEditor", () => {
     expect(visibleOptionNames()).not.toContain("Attendees");
     await user.keyboard("{Escape}");
     await openSelect(user, "Group by");
-    expect(visibleOptionNames()).not.toContain("Attendees");
+    expect(visibleOptionNames()).toContain("Attendees");
     await user.keyboard("{Escape}");
     await openSelect(user, "Aggregate field 1");
     expect(visibleOptionNames()).toEqual(
@@ -921,7 +921,7 @@ describe("ViewsEditor", () => {
     expect(options).not.toContain("related");
   });
 
-  it("offers grouping only for fields accepted by canGroup", async () => {
+  it("offers scalar system and relation grouping but rejects multi-valued system and numeric property fields", async () => {
     const user = userEvent.setup();
     renderViews({
       properties: [
@@ -934,11 +934,25 @@ describe("ViewsEditor", () => {
     const options = visibleOptionNames();
     expect(options).toContain("status");
     expect(options).not.toContain("rating");
-    expect(options).not.toContain("related");
+    expect(options).toContain("related");
     expect(options).not.toContain("tags");
+    expect(options).toEqual(
+      expect.arrayContaining([
+        "id",
+        "path",
+        "title",
+        "encryption",
+        "word_count",
+        "kind",
+        "project",
+        "created_at",
+        "updated_at",
+        "journal_date",
+      ]),
+    );
   });
 
-  it("exposes only query-engine system fields in view controls", async () => {
+  it("offers query-engine system fields as columns", async () => {
     const user = userEvent.setup();
     renderViews();
     await openSelect(user, "Column to add");
@@ -955,9 +969,28 @@ describe("ViewsEditor", () => {
         "updated_at",
         "journal_date",
         "word_count",
+        "encryption",
       ]),
     );
-    expect(columnOptions).not.toContain("encryption");
+  });
+
+  it("offers scalar system fields for unique and filled counts without treating them as numeric folds", async () => {
+    const user = userEvent.setup();
+    renderViews({
+      views: [view({ aggregates: [{ fn: "count_unique", field: "title" }] })],
+    });
+    await openSelect(user, "Aggregate field 1");
+    expect(visibleOptionNames()).toEqual(
+      expect.arrayContaining(["title", "kind", "project", "path", "id"]),
+    );
+    expect(visibleOptionNames()).not.toContain("tags");
+    await user.keyboard("{Escape}");
+    await chooseSelectOption(user, "Aggregate function 1", "sum");
+    await openSelect(user, "Aggregate field 1");
+    expect(visibleOptionNames()).not.toContain("title");
+    expect(visibleOptionNames()).not.toContain("created_at");
+    expect(visibleOptionNames()).not.toContain("updated_at");
+    expect(visibleOptionNames()).toContain("journal_date");
   });
 
   it("uses aggregateFunctions and omits the field for count", async () => {

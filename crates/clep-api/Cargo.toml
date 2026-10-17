@@ -29,6 +29,7 @@ clep-gitsync = { workspace = true }
 clep-index = { workspace = true }
 clep-mutate = { workspace = true }
 clep-vault = { workspace = true }
+csv = { workspace = true }
 dirs = { workspace = true }
 docx-rs = { workspace = true }
 encoding_rs = { workspace = true }
@@ -38,6 +39,7 @@ parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
 pulldown-cmark = { workspace = true }
 quick-xml = { workspace = true }
+regex = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
 rustix = { workspace = true }

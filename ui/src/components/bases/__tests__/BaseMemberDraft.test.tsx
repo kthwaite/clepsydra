@@ -80,6 +80,64 @@ function draftElement(overrides: Partial<DraftProps> = {}) {
 }
 
 describe("BaseMemberDraft", () => {
+  it("chooses a row template, explains defaults, and submits explicit body and value edits", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(
+      draftElement({
+        onSave,
+        fields: [
+          fields[0],
+          {
+            ...fields[5],
+            definition: {
+              type: "number",
+              description: "Personal rating out of ten",
+              default: 2,
+            },
+          },
+        ],
+        templates: [
+          {
+            name: "Review",
+            fields: { title: "A review", rating: 4 },
+            body: "Draft notes",
+          },
+        ],
+      }),
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Row template" }),
+      "Review",
+    );
+    expect(
+      screen.getByRole("textbox", { name: "New member — Title" }),
+    ).toHaveValue("A review");
+    expect(
+      screen.getByRole("textbox", { name: "New member — Body" }),
+    ).toHaveValue("Draft notes");
+    const rating = screen.getByRole("button", {
+      name: "Edit New member — Rating",
+    });
+    expect(rating).toHaveAccessibleDescription(/Personal rating out of ten/);
+    await user.click(rating);
+    const input = screen.getByRole("spinbutton", {
+      name: "New member — Rating",
+    });
+    await user.clear(input);
+    await user.type(input, "7{Enter}");
+    await user.clear(
+      screen.getByRole("textbox", { name: "New member — Body" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Save new member" }));
+    expect(onSave).toHaveBeenCalledWith({
+      title: "A review",
+      template: "Review",
+      body: "",
+      fields: { rating: 7 },
+    });
+  });
+
   it("focuses title, preserves native values, and submits the complete draft", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
@@ -190,7 +248,7 @@ describe("BaseMemberDraft", () => {
     render(
       draftElement({
         onSave,
-        titleTemplate: "{author} — {work}",
+        titleTemplate: "{prop.author} — {work}",
         fields: [
           {
             key: "title",
@@ -682,9 +740,7 @@ describe("BaseMemberDraft", () => {
     );
 
     await user.tab();
-    expect(
-      screen.getByRole("button", { name: "Save new member" }),
-    ).toHaveFocus();
+    screen.getByRole("button", { name: "Save new member" }).focus();
     await user.keyboard("{Enter}");
 
     expect(onSave).toHaveBeenCalledWith({

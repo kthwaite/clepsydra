@@ -1,5 +1,5 @@
 import { asciiCaseFold } from "./local-validation";
-import type { ViewStateStorage } from "./view-state";
+import { type ViewStateStorage, viewStateSegment } from "./view-state";
 
 const COLUMNS_PREFIX = "clepsydra.bases.columns.";
 
@@ -9,9 +9,6 @@ export const BASE_COLUMN_MAX = 640;
 /** Column id → width in pixels. */
 export type ColumnWidths = Readonly<Record<string, number>>;
 
-/** `ViewStateStorage`, plus `removeItem` when the store has one. */
-type WidthStorage = ViewStateStorage & { removeItem?(key: string): void };
-
 export function clampBaseColumnWidth(width: number): number {
   return Math.round(
     Math.min(BASE_COLUMN_MAX, Math.max(BASE_COLUMN_MIN, width)),
@@ -20,7 +17,7 @@ export function clampBaseColumnWidth(width: number): number {
 
 /** Widths are remembered per base and view. */
 export function columnWidthsKey(slug: string, view: string): string {
-  return `${COLUMNS_PREFIX}${slug}.${asciiCaseFold(view)}`;
+  return `${COLUMNS_PREFIX}${viewStateSegment(slug)}.${viewStateSegment(asciiCaseFold(view))}`;
 }
 
 export function readColumnWidths(
@@ -45,17 +42,15 @@ export function readColumnWidths(
 }
 
 export function writeColumnWidths(
-  storage: WidthStorage | undefined,
+  storage: ViewStateStorage | undefined,
   key: string,
   widths: ColumnWidths,
 ): void {
   try {
     if (Object.keys(widths).length > 0) {
       storage?.setItem(key, JSON.stringify(widths));
-    } else if (storage?.removeItem) {
-      storage.removeItem(key);
     } else {
-      storage?.setItem(key, "{}");
+      storage?.removeItem(key);
     }
   } catch {
     // A width is a convenience; a full or sealed store must not break the table.

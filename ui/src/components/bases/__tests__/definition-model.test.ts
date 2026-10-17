@@ -3,6 +3,7 @@ import type { BaseDetailResponse, BaseFile } from "#/api/bases";
 import {
   aggregateFunctions,
   canGroup,
+  changePropertyReferences,
   createMinimalDraft,
   fromWire,
   isValidBaseSlug,
@@ -40,6 +41,120 @@ function stripResponseFields(detail: BaseDetailFixture): BaseFile {
 }
 
 describe("base definition model", () => {
+  it("round-trips typed defaults, number presentation and independent row templates", () => {
+    const file: BaseFile = {
+      name: "Budget",
+      title_template: "{amount}",
+      properties: [
+        {
+          key: "amount",
+          definition: {
+            type: "number",
+            description: "Budget in euros",
+            default: 25,
+            format: "currency",
+            currency: "EUR",
+            display: "bar",
+            target: 100,
+          },
+        },
+      ],
+      templates: [{ name: "Small", fields: { amount: 10 }, body: "Notes" }],
+      views: [],
+    };
+    expect(toWire(fromWire(file))).toMatchObject(file);
+    expect(aggregateFunctions("system-scalar")).toEqual([
+      "count",
+      "count_filled",
+      "count_empty",
+      "percent_filled",
+      "count_unique",
+    ]);
+  });
+
+  it("rewrites or removes every property reference without touching shadowed system fields", () => {
+    const draft = fromWire(
+      baseDetail({
+        properties: [
+          {
+            key: "title",
+            definition: {
+              type: "text",
+              description: "Subtitle",
+              default: "Draft",
+            },
+          },
+        ],
+        filter: {
+          not: { any: [{ field: "prop.title", op: "eq", value: "A" }] },
+        },
+        title_template: "{title} — {prop.title}",
+        preview: [{ field: "title" }, { field: "prop.title" }],
+        templates: [
+          {
+            name: "Example",
+            fields: { title: "System title", "prop.title": "A" },
+            body: "Body",
+          },
+        ],
+        views: [
+          {
+            name: "All",
+            columns: ["title", "prop.title"],
+            sort: [{ field: "prop.title", dir: "asc" }],
+            group_by: "prop.title",
+            labels: { "prop.title": "Subtitle" },
+            aggregates: [{ fn: "count_unique", field: "prop.title" }],
+          },
+        ],
+      }),
+    );
+    const renamed = changePropertyReferences(
+      draft,
+      draft.properties[0].id,
+      "subtitle",
+    );
+    expect(renamed.changes).toContain("Base membership filter");
+    expect(renamed.draft.filter).toEqual({
+      not: { any: [{ field: "prop.subtitle", op: "eq", value: "A" }] },
+    });
+    expect(renamed.draft.titleTemplate).toBe("{title} — {prop.subtitle}");
+    expect(renamed.draft.templates?.[0].fields).toEqual({
+      title: "System title",
+      "prop.subtitle": "A",
+    });
+    expect(toWire(renamed.draft).properties?.[0].definition.default).toBe(
+      "Draft",
+    );
+    const removed = changePropertyReferences(draft, draft.properties[0].id);
+    expect(removed.membershipChanged).toBe(true);
+    expect(removed.draft.filter).toBeUndefined();
+    expect(removed.draft.views[0]).toMatchObject({
+      columns: ["title"],
+      sort: [],
+      aggregates: [],
+      labels: {},
+      group_by: undefined,
+    });
+    expect(removed.draft.preview.map(({ field }) => field)).toEqual(["title"]);
+    expect(removed.draft.templates?.[0].fields).toEqual({
+      title: "System title",
+    });
+    expect(draft.properties).toHaveLength(1);
+  });
+
+  it("preserves an existing match-nothing filter when an unrelated property changes", () => {
+    const draft = fromWire(
+      baseDetail({
+        filter: { any: [] },
+        properties: [{ key: "unused", definition: { type: "text" } }],
+      }),
+    );
+    const removed = changePropertyReferences(draft, draft.properties[0].id);
+    expect(removed.draft.filter).toEqual({ any: [] });
+    expect(removed.membershipChanged).toBe(false);
+  });
+
   it("round-trips member-page visibility without declaring a property", () => {
     const draft = fromWire(baseDetail({ hide_member_properties: true }));
     expect(draft.hideMemberProperties).toBe(true);
@@ -372,10 +487,11 @@ describe("base definition model", () => {
       "datetime",
       "select",
       "url",
+      "relation",
     ] as const) {
       expect(canGroup(type)).toBe(true);
     }
-    for (const type of ["number", "multi_select", "relation"] as const) {
+    for (const type of ["number", "multi_select"] as const) {
       expect(canGroup(type)).toBe(false);
     }
     expect(canGroup(undefined)).toBe(true);

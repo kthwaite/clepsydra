@@ -6,6 +6,10 @@ import type {
   SortKey,
 } from "#/api/bases";
 import { asciiCaseFold } from "./local-validation";
+import {
+  RELATIVE_DATE_OPERATORS,
+  VALUELESS_OPERATORS,
+} from "./operator-labels";
 import { effectiveProperties } from "./property-schema";
 
 export interface BaseEmbedSemanticConfig {
@@ -74,24 +78,6 @@ const MULTI_SYSTEM_OPERATORS: ReadonlySet<FilterOp> = new Set([
   "not_empty",
 ]);
 
-const VALUELESS_OPERATORS: ReadonlySet<FilterOp> = new Set([
-  "is_empty",
-  "not_empty",
-  "is_today",
-  "is_this_week",
-  "is_past_week",
-  "is_next_week",
-  "is_this_month",
-]);
-
-/** Mirrors `SysField::supports_relative_date` in `crates/clep-bases/src/query.rs`. */
-const RELATIVE_DATE_OPERATORS: ReadonlySet<FilterOp> = new Set([
-  "is_today",
-  "is_this_week",
-  "is_past_week",
-  "is_next_week",
-  "is_this_month",
-]);
 const RELATIVE_DATE_SYSTEM_FIELDS: ReadonlySet<string> = new Set([
   "created_at",
   "updated_at",
@@ -176,7 +162,7 @@ function isOrdered(type: PropertyType): boolean {
 }
 
 function supportsOperator(field: ResolvedField, op: FilterOp): boolean {
-  if (RELATIVE_DATE_OPERATORS.has(op)) {
+  if (RELATIVE_DATE_OPERATORS.includes(op)) {
     return field.source === "system"
       ? RELATIVE_DATE_SYSTEM_FIELDS.has(field.name)
       : field.type === "date" || field.type === "datetime";
@@ -236,7 +222,7 @@ function validateComparison(
     ];
   }
 
-  if (VALUELESS_OPERATORS.has(filter.op)) {
+  if (VALUELESS_OPERATORS[filter.op]) {
     return filter.value == null
       ? []
       : [

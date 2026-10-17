@@ -447,6 +447,34 @@ describe("FolioProperties", () => {
     ).toBeVisible();
   });
 
+  it("shows each Base description without making advisory differences an editing conflict", () => {
+    projectionState.data = projection([
+      property("rating", "number", {
+        value: 4,
+        definition: definition("number", { description: "Personal rating" }),
+        declarations: [
+          {
+            base: { slug: "library", name: "Library" },
+            definition: definition("number", {
+              description: "Personal rating",
+            }),
+          },
+          {
+            base: { slug: "reading", name: "Reading" },
+            definition: definition("number", { description: "Out of ten" }),
+          },
+        ],
+      }),
+    ]);
+    renderPanel();
+    expect(screen.getByText("Library: Personal rating")).toBeVisible();
+    expect(screen.getByText("Reading: Out of ten")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Edit rating property" }),
+    ).toHaveAccessibleDescription(/Personal rating.*Out of ten/);
+    expect(commitMock).not.toHaveBeenCalled();
+  });
+
   it("renders shared properties once with adjacent compatible and conflict types", () => {
     const text = definition("text");
     projectionState.data = projection(

@@ -242,6 +242,7 @@ function controllerModel(
       onCopyValue: vi.fn(),
       onDuplicateRow: vi.fn(),
       onArchiveRow: vi.fn(),
+      onSaveTemplate: vi.fn(),
       error: undefined,
     },
     members: {
@@ -276,6 +277,7 @@ function controllerModel(
       onSave: vi.fn(),
       onReloadDefinition: vi.fn(),
     },
+    bulk: { run: vi.fn() },
     window: {
       total: 0,
       loaded: 0,

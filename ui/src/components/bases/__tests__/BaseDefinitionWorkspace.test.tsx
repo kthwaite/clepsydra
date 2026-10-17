@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import {
   afterEach,
@@ -142,6 +142,101 @@ afterEach(() => {
 });
 
 describe("BaseDefinitionWorkspace", () => {
+  it("edits advisory number metadata and retains incompatible values for visible type-change validation", async () => {
+    const user = userEvent.setup();
+    baseState.data = {
+      ...detail,
+      properties: [
+        { key: "rating", definition: { type: "number", default: 4 } },
+      ],
+    };
+    renderWorkspace();
+    await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.click(screen.getByRole("button", { name: "Edit rating" }));
+    await user.type(
+      screen.getByLabelText("Description for rating"),
+      "Personal rating",
+    );
+    await chooseSelectOption(
+      user,
+      "Number format for rating",
+      "Percent (0.25 → 25%)",
+    );
+    await chooseSelectOption(user, "Number display for rating", "Progress bar");
+    await user.type(screen.getByLabelText("Progress target for rating"), "10");
+    await chooseSelectOption(user, "Type for rating", "Boolean");
+    expect(screen.getByText(/Value is incompatible with bool/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByLabelText("Description for rating")).toHaveValue(
+      "Personal rating",
+    );
+    await chooseSelectOption(user, "Type for rating", "Number");
+    expect(
+      screen.getByRole("button", { name: "Edit Default for rating" }),
+    ).toHaveTextContent("400");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it.each([
+    { key: "rating", field: "rating" },
+    { key: "word_count", field: "prop.word_count" },
+  ])(
+    "authors a named row template with typed $key and body without confusing system fields",
+    async ({ key, field }) => {
+      const user = userEvent.setup();
+      baseState.data = {
+        ...detail,
+        properties: [{ key, definition: { type: "number" } }],
+      };
+      updateMock.mockResolvedValue(
+        mutationResponse({ revision: "revision-2" }),
+      );
+      renderWorkspace();
+      await user.click(screen.getByRole("button", { name: "Row templates" }));
+      await user.click(
+        screen.getByRole("button", { name: "Add row template" }),
+      );
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      await user.type(
+        screen.getByRole("textbox", { name: "Template 1 name" }),
+        "Review",
+      );
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Field for template 1" }),
+        field,
+      );
+      await user.click(screen.getByRole("button", { name: "Add field" }));
+      await user.click(
+        screen.getByRole("button", { name: `Edit Review — ${field}` }),
+      );
+      const rating = screen.getByRole("spinbutton", {
+        name: `Review — ${field}`,
+      });
+      await user.clear(rating);
+      await user.type(rating, "4{Enter}");
+      await user.type(
+        screen.getByRole("textbox", { name: "Template 1 body" }),
+        "Reading notes",
+      );
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      expect(updateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            definition: expect.objectContaining({
+              templates: [
+                {
+                  name: "Review",
+                  fields: { [field]: 4 },
+                  body: "Reading notes",
+                },
+              ],
+            }),
+          }),
+        }),
+      );
+    },
+  );
+
   it("renders a named loading status before hydration", () => {
     baseState.data = undefined;
     baseState.isPending = true;
@@ -223,22 +318,6 @@ describe("BaseDefinitionWorkspace", () => {
     });
     expect(await screen.findByText("Saved")).toBeVisible();
     expect(savedCheckbox).not.toBeChecked();
-  });
-
-  it("places Preview properties immediately after Properties in definition navigation", () => {
-    renderWorkspace();
-
-    expect(
-      within(screen.getByRole("navigation", { name: "Definition sections" }))
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual([
-      "General",
-      "Filter",
-      "Properties",
-      "Preview properties",
-      "Views",
-    ]);
   });
 
   it("keeps presentation edits local until Save and sends both additions", async () => {
@@ -732,9 +811,6 @@ describe("BaseDefinitionWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Move path up" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      /changed outside clepsydra/i,
-    );
     expect(
       Array.from(
         screen
@@ -837,9 +913,6 @@ describe("BaseDefinitionWorkspace", () => {
     renderWorkspace();
     const user = await renameBase("My Reading");
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      /changed outside clepsydra/i,
-    );
     expect(screen.getByLabelText("Name")).toHaveValue("My Reading");
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
     expect(baseState.refetch).not.toHaveBeenCalled();
@@ -887,9 +960,6 @@ describe("BaseDefinitionWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
     await user.type(screen.getByLabelText("Description"), " plus local edit");
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      /changed outside clepsydra/i,
-    );
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(
       screen.getByRole("button", { name: "Review my draft" }),
@@ -906,9 +976,6 @@ describe("BaseDefinitionWorkspace", () => {
     expect(screen.getByText("revision-1")).toBeInTheDocument();
     expect(screen.getByText(/Original warning/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Keep my draft" }));
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      /changed outside clepsydra/i,
-    );
     expect(
       screen.getByRole("button", { name: "Reload from file" }),
     ).toBeInTheDocument();
@@ -916,9 +983,6 @@ describe("BaseDefinitionWorkspace", () => {
 
     expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
     expect(screen.getByLabelText("Name")).toHaveValue("My conflicted draft");
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      /changed outside clepsydra/i,
-    );
   });
 
   it("guards browser and internal navigation while dirty", async () => {

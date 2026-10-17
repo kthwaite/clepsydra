@@ -172,6 +172,7 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
         <BaseMemberDraft
           fields={fields}
           titleTemplate={definition.title_template ?? undefined}
+          templates={definition.templates}
           projects={projects}
           isSaving={createMember.isPending}
           isSaveDisabled={!sessionEnabled || isSubmitting}

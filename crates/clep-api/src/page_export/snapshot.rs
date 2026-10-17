@@ -541,6 +541,7 @@ impl<'a> Snapshot<'a> {
                 rows,
                 total,
                 aggregates,
+                ..
             } => {
                 self.table(
                     &mut markdown,
@@ -552,7 +553,7 @@ impl<'a> Snapshot<'a> {
                 )?;
                 append_aggregates(&mut markdown, view, &aggregates)?;
             }
-            QueryOutput::Grouped { groups } => {
+            QueryOutput::Grouped { groups, .. } => {
                 for group in groups {
                     append(
                         &mut markdown,

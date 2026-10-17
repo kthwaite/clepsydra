@@ -4,10 +4,15 @@ import { asciiCaseFold } from "./local-validation";
 export interface ViewStateStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  removeItem(key: string): void;
 }
 
 const LAST_VIEW_PREFIX = "clepsydra.bases.lastView.";
 
+/** A separator is never allowed to occur inside a stored key segment. */
+export function viewStateSegment(value: string): string {
+  return encodeURIComponent(value).replaceAll(".", "%2E");
+}
 /** `window.localStorage`, or nothing when the browser refuses access. */
 export function getViewStateStorage(): ViewStateStorage | undefined {
   try {
@@ -18,7 +23,7 @@ export function getViewStateStorage(): ViewStateStorage | undefined {
 }
 
 function lastViewKey(slug: string): string {
-  return `${LAST_VIEW_PREFIX}${slug}`;
+  return `${LAST_VIEW_PREFIX}${viewStateSegment(slug)}`;
 }
 
 export function readLastView(

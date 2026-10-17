@@ -546,6 +546,19 @@ fn comparison_possibility(
     value: &serde_json::Value,
     today: chrono::NaiveDate,
 ) -> Possibility {
+    // Body is editable (and may come from a row template), so numeric word
+    // count predicates cannot be decided using a hypothetical empty body.
+    // Presence and invalid-operator checks remain fixed; actual candidate
+    // evaluation below uses the submitted body's derived word count.
+    if matches!(
+        resolve_field(field, &QueryContext::for_base(base)),
+        Ok(ResolvedField::Sys(SysField::WordCount))
+    ) && matches!(
+        op,
+        Op::Eq | Op::Ne | Op::Lt | Op::Lte | Op::Gt | Op::Gte | Op::In
+    ) {
+        return Possibility::Maybe;
+    }
     match fixed_candidate_comparison_matches(base, field, op, value, today) {
         Some(true) => Possibility::AlwaysTrue,
         Some(false) => Possibility::AlwaysFalse,
@@ -619,7 +632,7 @@ fn collect_contributors(
                             .unwrap_or_else(|| bare_field(field).to_owned()),
                     ),
                     filter_path: Some(path.to_owned()),
-                    message: "fixed candidate state prevents blank member creation".to_owned(),
+                    message: "fixed candidate state prevents member creation".to_owned(),
                 });
             }
         }
@@ -763,16 +776,16 @@ filter = { field = "status", op = "eq", value = "reading" }
             r#"
 name = "Nested blocker"
 [properties]
-word_count = { type = "number" }
+journal_date = { type = "date" }
 [[views]]
 name = "All"
 layout = "table"
 "#,
         );
         let embed_filter = Filter::All(vec![Filter::Not(Box::new(comparison(
-            "sys.word_count",
-            Op::Eq,
-            serde_json::json!(0),
+            "sys.journal_date",
+            Op::IsEmpty,
+            serde_json::Value::Null,
         )))]);
 
         let capability = composed_member_capability(
@@ -785,7 +798,10 @@ layout = "table"
         assert!(!capability.enabled);
         assert_eq!(capability.blockers.len(), 1);
         assert_eq!(capability.blockers[0].scope, BaseMemberScope::Embed);
-        assert_eq!(capability.blockers[0].field.as_deref(), Some("word_count"));
+        assert_eq!(
+            capability.blockers[0].field.as_deref(),
+            Some("journal_date")
+        );
         assert_eq!(
             capability.blockers[0].filter_path.as_deref(),
             Some("embed_filter.all[0].not")
@@ -1521,7 +1537,7 @@ layout = "table"
     }
 
     #[test]
-    fn positive_word_count_disables_blank_member_creation() {
+    fn positive_word_count_allows_creation_with_editable_body() {
         let base = base(
             r#"
 name = "Longform"
@@ -1532,12 +1548,8 @@ layout = "table"
 "#,
         );
         let capability = creation_capabilities(&base, fixed_today()).remove(0);
-        assert!(!capability.enabled);
-        assert_eq!(capability.blockers[0].field.as_deref(), Some("word_count"));
-        assert_eq!(
-            capability.blockers[0].filter_path.as_deref(),
-            Some("filter")
-        );
+        assert!(capability.enabled);
+        assert!(capability.blockers.is_empty());
     }
 
     #[test]
@@ -2151,10 +2163,7 @@ layout = "table"
                     )
                 })
                 .collect::<Vec<_>>(),
-            vec![
-                (Some("word_count"), Some("filter.all[0]")),
-                (Some("prop.word_count"), Some("filter.all[1]")),
-            ]
+            vec![(Some("prop.word_count"), Some("filter.all[1]")),]
         );
     }
 

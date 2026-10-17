@@ -18,6 +18,9 @@ export interface BaseEmbedConfig {
   sort?: SortKey[];
   limit?: number;
   groupBy?: GroupOverride;
+  /** Ephemeral table search; never serialized into an embed document. */
+  q?: string;
+  searchColumns?: string[];
 }
 
 export function baseRenderSelection(config: BaseEmbedConfig): RenderSelection {
@@ -109,6 +112,8 @@ export function queryIdentity(config: BaseEmbedConfig): string {
     // different result from a cap that happens to equal one window.
     limit: normalized.limit ?? null,
     groupBy: normalized.groupBy ?? null,
+    q: config.q?.trim() || null,
+    searchColumns: config.searchColumns ?? null,
   });
 }
 
@@ -125,6 +130,10 @@ export function baseViewEvaluationBody(
     ...(normalized.groupBy === undefined
       ? {}
       : { group_by: normalized.groupBy }),
+    ...(config.q?.trim() ? { q: config.q.trim() } : {}),
+    ...(config.searchColumns === undefined
+      ? {}
+      : { search_columns: config.searchColumns }),
     limit: window.limit,
     offset: window.offset,
   };

@@ -8,6 +8,7 @@ import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type { DraftProperty } from "./definition-model";
 import { moveItem } from "./definition-model";
+import { EditableCell } from "./EditableCell";
 import { MoveButtons, ReorderHandle, useReorderable } from "./ordered-list";
 
 export const PROPERTY_TYPES: readonly PropertyType[] = [
@@ -46,9 +47,14 @@ function changePropertyType(
   return {
     ...property,
     definition: {
+      ...property.definition,
       type,
-      ...(type === "select" || type === "multi_select" ? { options: [] } : {}),
-      ...(type === "relation" ? { many: true } : {}),
+      ...(type === "select" || type === "multi_select"
+        ? { options: property.definition.options ?? [] }
+        : {}),
+      ...(type === "relation"
+        ? { many: property.definition.many ?? true }
+        : {}),
     },
   };
 }
@@ -476,6 +482,7 @@ export function PropertyDefinitionEditor({
                           onChange={(key) => {
                             if (key !== "one" && key !== "many") return;
                             updateDefinition({
+                              ...property.definition,
                               type: "relation",
                               many: key === "many",
                             });
@@ -496,6 +503,200 @@ export function PropertyDefinitionEditor({
                     property.definition.type === "multi_select") && (
                     <OptionEditor property={property} onChange={onChange} />
                   )}
+                  <div className="grid gap-4 sm:col-span-2">
+                    <label className="text-sm text-mute">
+                      Description for {property.key}
+                      <input
+                        value={property.definition.description ?? ""}
+                        className={INPUT}
+                        onChange={(event) =>
+                          updateDefinition({
+                            ...property.definition,
+                            description: event.target.value || undefined,
+                          })
+                        }
+                      />
+                    </label>
+                    <div className="text-sm text-mute">
+                      <span>Default for {property.key}</span>
+                      <EditableCell
+                        value={
+                          typeof property.definition.default === "string" ||
+                          typeof property.definition.default === "number" ||
+                          typeof property.definition.default === "boolean" ||
+                          (Array.isArray(property.definition.default) &&
+                            property.definition.default.every(
+                              (value) => typeof value === "string",
+                            ))
+                            ? property.definition.default
+                            : null
+                        }
+                        definition={property.definition}
+                        ariaLabel={`Default for ${property.key}`}
+                        commitOnBlur
+                        onCommit={(value) =>
+                          updateDefinition({
+                            ...property.definition,
+                            default: value === null ? undefined : value,
+                          })
+                        }
+                      />
+                      {property.definition.default != null && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onPress={() =>
+                            updateDefinition({
+                              ...property.definition,
+                              default: undefined,
+                            })
+                          }
+                        >
+                          Clear default
+                        </Button>
+                      )}
+                      <p>
+                        Creation prefill only. Existing pages are unchanged.
+                        Type changes retain defaults and template values for
+                        review; incompatible values must be corrected before
+                        saving.
+                      </p>
+                    </div>
+                    {(property.definition.type === "number" ||
+                      property.definition.format != null ||
+                      property.definition.display != null ||
+                      property.definition.currency != null ||
+                      property.definition.target != null) && (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Select
+                          label={`Number format for ${property.key}`}
+                          value={property.definition.format ?? "plain"}
+                          onChange={(key) => {
+                            if (
+                              key === "plain" ||
+                              key === "integer" ||
+                              key === "decimal" ||
+                              key === "percent" ||
+                              key === "currency"
+                            )
+                              updateDefinition({
+                                ...property.definition,
+                                format: key,
+                              });
+                          }}
+                        >
+                          <SelectItem id="plain">Plain</SelectItem>
+                          <SelectItem id="integer">Integer</SelectItem>
+                          <SelectItem id="decimal">Decimal</SelectItem>
+                          <SelectItem id="percent">
+                            Percent (0.25 → 25%)
+                          </SelectItem>
+                          <SelectItem id="currency">Currency</SelectItem>
+                        </Select>
+                        <label className="text-sm text-mute">
+                          Currency for {property.key}
+                          <input
+                            className={INPUT}
+                            placeholder="USD"
+                            value={property.definition.currency ?? ""}
+                            onChange={(event) =>
+                              updateDefinition({
+                                ...property.definition,
+                                currency:
+                                  event.target.value.toUpperCase() || undefined,
+                              })
+                            }
+                          />
+                        </label>
+                        <Select
+                          label={`Number display for ${property.key}`}
+                          value={property.definition.display ?? "number"}
+                          onChange={(key) => {
+                            if (
+                              key === "number" ||
+                              key === "bar" ||
+                              key === "ring"
+                            )
+                              updateDefinition({
+                                ...property.definition,
+                                display: key,
+                              });
+                          }}
+                        >
+                          <SelectItem id="number">Number</SelectItem>
+                          <SelectItem id="bar">Progress bar</SelectItem>
+                          <SelectItem id="ring">Progress ring</SelectItem>
+                        </Select>
+                        <label className="text-sm text-mute">
+                          Progress target for {property.key}
+                          <input
+                            className={INPUT}
+                            type="number"
+                            min="0"
+                            step="any"
+                            placeholder="100"
+                            value={property.definition.target ?? ""}
+                            onChange={(event) =>
+                              updateDefinition({
+                                ...property.definition,
+                                target:
+                                  event.target.value === ""
+                                    ? undefined
+                                    : Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onPress={() => {
+                            const {
+                              format: _format,
+                              currency: _currency,
+                              display: _display,
+                              target: _target,
+                              ...definition
+                            } = property.definition;
+                            updateDefinition(definition);
+                          }}
+                        >
+                          Clear number presentation
+                        </Button>
+                      </div>
+                    )}
+                    {property.definition.type !== "select" &&
+                      property.definition.type !== "multi_select" &&
+                      property.definition.options != null && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onPress={() =>
+                            updateDefinition({
+                              ...property.definition,
+                              options: undefined,
+                            })
+                          }
+                        >
+                          Clear incompatible options
+                        </Button>
+                      )}
+                    {property.definition.type !== "relation" &&
+                      property.definition.many != null && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onPress={() =>
+                            updateDefinition({
+                              ...property.definition,
+                              many: undefined,
+                            })
+                          }
+                        >
+                          Clear incompatible cardinality
+                        </Button>
+                      )}
+                  </div>
                 </div>
               )}
             </div>

@@ -48,10 +48,12 @@ export interface BaseMemberDraftField {
 
 export interface BaseMemberDraftValue {
   title: string;
+  template?: string;
+  body?: string;
   fields: Record<string, CellValue>;
 }
 
-const SYSTEM_FIELDS: Record<string, true> = {
+export const SYSTEM_FIELDS: Record<string, true> = {
   title: true,
   ...CREATABLE_SYSTEM,
   ...READ_ONLY_SYSTEM,
@@ -120,6 +122,16 @@ export function composeMemberDraftFields(
     "title",
     ...(view?.columns ?? []),
     ...capability.fields.map((item) => item.field),
+    ...(definition.properties ?? [])
+      .filter(({ definition }) => definition.default != null)
+      .map(({ key }) => `prop.${key}`),
+    ...(definition.templates ?? []).flatMap((template) =>
+      Object.keys(template.fields ?? {}),
+    ),
+    ...Array.from(
+      (definition.title_template ?? "").matchAll(/\{([^{}]*)\}/g),
+      (match) => match[1].trim(),
+    ),
   ];
   const requirements = new Map<
     string,
@@ -201,15 +213,51 @@ function prefill(field: BaseMemberDraftField): CellValue | undefined {
 
 export function initialMemberDraft(
   fields: readonly BaseMemberDraftField[],
+  template?: NonNullable<BaseDetailResponse["templates"]>[number],
 ): BaseMemberDraftValue {
   const values: Record<string, CellValue> = {};
+  let title = "";
   for (const field of fields) {
     if (field.kind === "kind") values[field.key] = "NOTE";
     if (field.kind === "tags" || field.kind === "aliases") {
       values[field.key] = [];
     }
-    const forced = prefill(field);
-    if (forced !== undefined) values[field.key] = forced;
+    const templateKey =
+      field.kind === "property"
+        ? Object.hasOwn(
+            template?.fields ?? {},
+            `prop.${field.key.replace(/^prop\./, "")}`,
+          )
+          ? `prop.${field.key.replace(/^prop\./, "")}`
+          : field.key
+        : Object.hasOwn(template?.fields ?? {}, `sys.${field.key}`)
+          ? `sys.${field.key}`
+          : field.key;
+    const candidate =
+      prefill(field) ??
+      template?.fields?.[templateKey] ??
+      field.definition?.default;
+    if (
+      candidate !== undefined &&
+      candidate !== null &&
+      (typeof candidate === "string" ||
+        typeof candidate === "number" ||
+        typeof candidate === "boolean" ||
+        (Array.isArray(candidate) &&
+          candidate.every((item) => typeof item === "string")))
+    ) {
+      if (field.kind === "title") title = String(candidate);
+      else values[field.key] = structuredClone(candidate);
+    }
   }
-  return { title: "", fields: values };
+  return {
+    title,
+    fields: values,
+    ...(template
+      ? {
+          template: template.name,
+          ...(template.body == null ? {} : { body: template.body }),
+        }
+      : {}),
+  };
 }

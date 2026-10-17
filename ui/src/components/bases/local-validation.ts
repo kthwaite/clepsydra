@@ -1,4 +1,4 @@
-import type { BaseDetailResponse } from "#/api/bases";
+import type { BaseDetailResponse, PropertyDefinition } from "#/api/bases";
 import { type BaseDraft, canSort } from "./definition-model";
 import { validateFilterDraft } from "./filter-diagnostics";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
@@ -75,6 +75,69 @@ function validatePresentationField(
   };
 }
 
+function advisoryValueError(
+  definition: PropertyDefinition,
+  value: unknown,
+): string | undefined {
+  let valid = false;
+  switch (definition.type) {
+    case "number":
+      valid = typeof value === "number" && Number.isFinite(value);
+      break;
+    case "bool":
+      valid = typeof value === "boolean";
+      break;
+    case "multi_select":
+      valid =
+        Array.isArray(value) &&
+        value.every(
+          (item) =>
+            typeof item === "string" &&
+            (!definition.options?.length || definition.options.includes(item)),
+        );
+      break;
+    case "relation":
+      valid =
+        typeof value === "string" ||
+        (Array.isArray(value) &&
+          value.every((item) => typeof item === "string"));
+      break;
+    case "select":
+      valid =
+        typeof value === "string" &&
+        (!definition.options?.length || definition.options.includes(value));
+      break;
+    case "date":
+      valid =
+        typeof value === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+        Number.isFinite(Date.parse(value));
+      break;
+    case "datetime":
+      valid = typeof value === "string" && Number.isFinite(Date.parse(value));
+      break;
+    case "url":
+    case "text":
+      valid = typeof value === "string";
+      break;
+  }
+  return valid
+    ? undefined
+    : `Value is incompatible with ${definition.type}${definition.options?.length ? " and its allowed options" : ""}.`;
+}
+
+const WRITABLE_TEMPLATE_SYSTEM: Record<string, PropertyDefinition> = {
+  title: { type: "text" },
+  kind: { type: "text" },
+  project: { type: "text" },
+  tags: { type: "multi_select" },
+  aliases: { type: "multi_select" },
+};
+const CURRENCY_NAMES = new Intl.DisplayNames(["en"], {
+  type: "currency",
+  fallback: "none",
+});
+
 export function validateBaseDraftStructure(
   slug: string,
   draft: BaseDraft,
@@ -90,6 +153,94 @@ export function validateBaseDraftStructure(
     });
   }
 
+  const error = (path: string, message: string) =>
+    diagnostics.push({ slug, severity: "error", path, message });
+  for (const { key, definition } of draft.properties) {
+    const path = `properties.${key}`;
+    if (definition.default != null) {
+      const message = advisoryValueError(definition, definition.default);
+      if (message) error(`${path}.default`, message);
+    }
+    for (const field of ["format", "currency", "display", "target"] as const) {
+      if (definition[field] != null && definition.type !== "number")
+        error(
+          `${path}.${field}`,
+          `${field} is only valid on number properties. Clear it or restore the number type.`,
+        );
+    }
+    if (
+      definition.options != null &&
+      definition.type !== "select" &&
+      definition.type !== "multi_select"
+    )
+      error(
+        `${path}.options`,
+        "Options require a select or multi-select property.",
+      );
+    if (definition.many != null && definition.type !== "relation")
+      error(`${path}.many`, "Cardinality requires a relation property.");
+    if (
+      definition.target != null &&
+      (!Number.isFinite(definition.target) || definition.target <= 0)
+    )
+      error(
+        `${path}.target`,
+        "Progress target must be a positive finite number.",
+      );
+    if (definition.format === "currency" && !definition.currency)
+      error(`${path}.currency`, "Choose an ISO 4217 currency code.");
+    if (
+      definition.currency &&
+      (!/^[A-Z]{3}$/.test(definition.currency) ||
+        !CURRENCY_NAMES.of(definition.currency))
+    )
+      error(`${path}.currency`, "Choose a recognized ISO 4217 currency code.");
+    if (definition.currency && definition.format !== "currency")
+      error(`${path}.currency`, "Currency is only valid with currency format.");
+  }
+  const templateNames = new Set<string>();
+  const declared = new Map(
+    draft.properties.map(({ key, definition }) => [key, definition]),
+  );
+  for (const [index, template] of (draft.templates ?? []).entries()) {
+    const path = `templates[${index}]`;
+    const name = template.name;
+    if (!name.trim() || templateNames.has(name))
+      error(`${path}.name`, "Template names must be nonempty and unique.");
+    templateNames.add(name);
+    const identities = new Set<string>();
+    for (const [field, value] of Object.entries(template.fields)) {
+      const property = field.startsWith("prop.");
+      const bare = property
+        ? field.slice(5)
+        : field.startsWith("sys.")
+          ? field.slice(4)
+          : field;
+      const isSystem =
+        !property && (field.startsWith("sys.") || SYSTEM_FIELDS.has(bare));
+      const definition = isSystem
+        ? Object.hasOwn(WRITABLE_TEMPLATE_SYSTEM, bare)
+          ? WRITABLE_TEMPLATE_SYSTEM[bare]
+          : undefined
+        : declared.get(bare);
+      const identity = `${isSystem ? "system" : "property"}:${bare}`;
+      if (identities.has(identity))
+        error(
+          `${path}.fields.${field}`,
+          "This field is already assigned by another qualified name.",
+        );
+      identities.add(identity);
+      if (!definition)
+        error(
+          `${path}.fields.${field}`,
+          "Choose a declared property or writable creation field.",
+        );
+      else {
+        const message = advisoryValueError(definition, value);
+        if (message) error(`${path}.fields.${field}`, message);
+      }
+    }
+  }
   const indexesByName = new Map<string, number[]>();
   const propertyTypes = new Map(
     effectiveProperties(draft.properties).map((property) => [

@@ -96,6 +96,8 @@ pub fn composed_query_spec(
         limit,
         offset: 0,
         group_row_limit,
+        q: None,
+        search_columns: None,
     }
 }
 
@@ -600,6 +602,12 @@ mod tests {
             property_type,
             options: Vec::new(),
             many: None,
+            description: None,
+            default: None,
+            format: None,
+            currency: None,
+            display: None,
+            target: None,
         }
     }
 
@@ -615,6 +623,7 @@ mod tests {
                 preview: Vec::new(),
                 properties,
                 views: Vec::new(),
+                templates: Vec::new(),
             },
         }
     }

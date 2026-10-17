@@ -15,6 +15,7 @@ import {
   pointUnder,
 } from "./context-menu-forward";
 import {
+  columnHideLock,
   type GroupOverride,
   type QuickFilter,
   quickFilterIdentity,
@@ -23,11 +24,12 @@ import {
 export interface BaseHeaderMenuProps {
   column: string;
   label: string;
+  description?: string;
   allowsSorting: boolean;
   groupable: boolean;
   /** True when the effective grouping already uses this column. */
   groupedByThis: boolean;
-  hideable: boolean;
+  visibleCount: number;
   canMoveLeft: boolean;
   canMoveRight: boolean;
   /** The column has a width handle to hand focus to. */
@@ -62,20 +64,13 @@ function resizeBlocker(column: string): string {
     : "This column cannot be resized";
 }
 
-/** Why a column refuses to hide, for the disabled item's description. */
-function hideBlocker(column: string): string {
-  return column === "title"
-    ? "The title column stays visible"
-    : "The last column stays visible";
-}
-
 function HeaderMenu({
   column,
   label,
   allowsSorting,
   groupable,
   groupedByThis,
-  hideable,
+  visibleCount,
   canMoveLeft,
   canMoveRight,
   resizable,
@@ -160,8 +155,8 @@ function HeaderMenu({
       </MenuItem>
       <MenuItem
         id="hide"
-        isDisabled={!hideable}
-        description={hideable ? undefined : hideBlocker(column)}
+        isDisabled={columnHideLock(column, visibleCount) !== undefined}
+        description={columnHideLock(column, visibleCount)}
       >
         Hide column
       </MenuItem>
@@ -246,12 +241,14 @@ export function BaseHeaderMenu(props: BaseHeaderMenuProps) {
           variant="ghost"
           size="sm"
           aria-label={`${rest.label} column menu`}
+          aria-description={rest.description}
           // A context-menu trigger neither presses open nor advertises a
           // popup, and this button does both, so it says so itself.
           aria-haspopup="menu"
           aria-expanded={isOpen}
           className="px-1 py-0 opacity-60 hover:opacity-100 aria-expanded:opacity-100"
-          onPress={() => {
+          onPress={(event) => {
+            if (event.ctrlKey) return;
             const trigger = triggerRef.current;
             if (trigger) summon(pointUnder(trigger));
           }}

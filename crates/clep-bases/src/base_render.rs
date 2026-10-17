@@ -197,6 +197,7 @@ pub fn render_base(
         spec.limit = None;
         let QueryOutput::Grouped {
             groups: selected_groups,
+            ..
         } = evaluate(conn, &spec, &query_context)?
         else {
             unreachable!("render grouping has a group key")

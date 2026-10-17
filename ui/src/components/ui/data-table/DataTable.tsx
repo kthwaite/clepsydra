@@ -39,7 +39,10 @@ import {
   moveColumnBy,
   moveColumnTo,
 } from "#/components/ui/data-table/column-reorder";
-import { useGridNavigation } from "#/components/ui/data-table/grid-navigation";
+import {
+  isEditorTarget,
+  useGridNavigation,
+} from "#/components/ui/data-table/grid-navigation";
 import { useWidthDrag, WidthResizer } from "#/components/ui/width-resizer";
 import { cn } from "#/lib/cn";
 
@@ -92,6 +95,10 @@ export interface DataTableSelection<TRow> {
   /** The header checkbox's name, e.g. "Select all visible rows". */
   allLabel: string;
   rowLabel(row: TRow): string;
+  /** Optional range/keyboard model shared across multiple grids, e.g. groups. */
+  onToggle?(row: TRow, range: boolean): void;
+  onSelectAll?(selected: boolean): void;
+  disabled?: boolean;
 }
 
 export interface DataTableProps<TRow extends RowData> {
@@ -530,7 +537,19 @@ export function DataTable<TRow extends RowData>({
                   type="checkbox"
                   aria-label={selection.rowLabel(row.original)}
                   checked={isSelected}
-                  onChange={(event) => row.toggleSelected(event.target.checked)}
+                  disabled={selection.disabled}
+                  onClick={
+                    selection.onToggle
+                      ? (event) => {
+                          selection.onToggle?.(row.original, event.shiftKey);
+                        }
+                      : undefined
+                  }
+                  onChange={
+                    selection.onToggle
+                      ? noop
+                      : (event) => row.toggleSelected(event.target.checked)
+                  }
                   className="cursor-pointer accent-accent"
                 />
               </td>
@@ -565,6 +584,39 @@ export function DataTable<TRow extends RowData>({
       // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: the ARIA grid pattern on a native table
       role="grid"
       aria-label={ariaLabel}
+      onKeyDownCapture={(event) => {
+        if (
+          !selection?.onToggle ||
+          selection.disabled ||
+          event.defaultPrevented ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey
+        )
+          return;
+        const target = event.target;
+        if (
+          !(target instanceof Element) ||
+          target.closest("table") !== event.currentTarget ||
+          isEditorTarget(target) ||
+          target.closest("[aria-haspopup], [data-grid-skip]")
+        )
+          return;
+        if (event.key === "Escape") {
+          if (!Object.values(selection.selected).some(Boolean)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          selection.onChange({});
+          return;
+        }
+        if (event.key !== " ") return;
+        const id = target.closest("tr")?.getAttribute("data-row-id");
+        const row = modelRows.find((candidate) => candidate.id === id);
+        if (!row) return;
+        event.preventDefault();
+        event.stopPropagation();
+        selection.onToggle(row.original, event.shiftKey);
+      }}
       aria-rowcount={
         virtualize
           ? (showEmpty ? 1 : modelRows.length) + 1 // + the header row
@@ -613,16 +665,19 @@ export function DataTable<TRow extends RowData>({
                 ref={(el) => {
                   if (el) el.indeterminate = someSelected && !allSelected;
                 }}
-                onChange={() =>
-                  // Gazetteer's rule: all visible selected clears the whole
-                  // selection; otherwise it becomes exactly the visible rows.
-                  table.setRowSelection(
-                    allSelected
-                      ? {}
-                      : Object.fromEntries(modelRows.map((r) => [r.id, true])),
-                  )
-                }
-                disabled={modelRows.length === 0}
+                onChange={() => {
+                  if (selection.onSelectAll)
+                    selection.onSelectAll(!allSelected);
+                  else
+                    table.setRowSelection(
+                      allSelected
+                        ? {}
+                        : Object.fromEntries(
+                            modelRows.map((row) => [row.id, true]),
+                          ),
+                    );
+                }}
+                disabled={selection.disabled || modelRows.length === 0}
                 className="cursor-pointer accent-accent"
               />
             </th>

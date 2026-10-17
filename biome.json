@@ -8,7 +8,8 @@
       "./ui/*.{json,js,ts}",
       "./preview-worker/*.mjs",
       "./preview-worker/package.json",
-      "!ui/src/routeTree.gen.ts"
+      "!ui/src/routeTree.gen.ts",
+      "!ui/src/api/schema.d.ts"
     ]
   },
   "linter": {

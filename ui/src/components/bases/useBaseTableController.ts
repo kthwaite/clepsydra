@@ -15,6 +15,7 @@ import {
   useUpdateBase,
   type ViewOverrides,
 } from "#/api/bases";
+import { fetchClient } from "#/api/client";
 import { formatApiError, isApiConflict } from "#/api/error";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useProjects } from "#/lib/useProjects";
@@ -37,12 +38,14 @@ import {
 } from "./member-draft";
 import { propertyKey } from "./property-schema";
 import { outputContains } from "./query-output";
+import { useBaseBulkActions } from "./useBaseBulkActions";
 import { useRowActions } from "./useRowActions";
 import { type OverridesSaveState, useViewOverrides } from "./useViewOverrides";
 import {
   applyOverridesToView,
   composeQuickFilters,
   definitionPayload,
+  orderColumns,
 } from "./view-overrides";
 
 export interface BaseTableControllerOptions {
@@ -136,6 +139,56 @@ export function useBaseTableController(
   const activeView = requestedActiveView || detail.data?.views?.[0]?.name || "";
   const viewResetKey = `${mode}:${slug}:${asciiCaseFold(activeView)}`;
   const overrides = useViewOverrides(viewResetKey);
+  const activeViewDefinition = useMemo(
+    () =>
+      detail.data?.views?.find(
+        (candidate) =>
+          asciiCaseFold(candidate.name) === asciiCaseFold(activeView),
+      ),
+    [activeView, detail.data?.views],
+  );
+  const baseColumns = useMemo(
+    () =>
+      activeViewDefinition?.columns && activeViewDefinition.columns.length > 0
+        ? activeViewDefinition.columns
+        : ["title"],
+    [activeViewDefinition?.columns],
+  );
+  const [storedSearch, setStoredSearch] = useState({
+    key: viewResetKey,
+    text: "",
+    applied: "",
+  });
+  if (storedSearch.key !== viewResetKey) {
+    setStoredSearch({ key: viewResetKey, text: "", applied: "" });
+  }
+  const search = storedSearch.key === viewResetKey ? storedSearch.text : "";
+  const searchApplied =
+    storedSearch.key === viewResetKey ? storedSearch.applied : "";
+  const onSearchChange = useCallback(
+    (text: string) => {
+      setStoredSearch((current) => ({
+        key: viewResetKey,
+        text,
+        applied:
+          text.trim() && current.key === viewResetKey ? current.applied : "",
+      }));
+    },
+    [viewResetKey],
+  );
+  useEffect(() => {
+    if (search.trim() === searchApplied) return;
+    const timer = window.setTimeout(
+      () =>
+        setStoredSearch({
+          key: viewResetKey,
+          text: search,
+          applied: search.trim(),
+        }),
+      200,
+    );
+    return () => window.clearTimeout(timer);
+  }, [search, searchApplied, viewResetKey]);
   const effectiveFilter = useMemo(
     () =>
       composeQuickFilters(
@@ -148,6 +201,13 @@ export function useBaseTableController(
     const first = sort?.[0];
     return first ? { sort: first.field, dir: first.dir } : {};
   }, [sort]);
+  const searchColumns = useMemo(
+    () =>
+      orderColumns(baseColumns, overrides.state.columnOrder).filter(
+        (column) => !overrides.state.hiddenColumns.includes(column),
+      ),
+    [baseColumns, overrides.state.columnOrder, overrides.state.hiddenColumns],
+  );
   const embeddedConfig = useMemo<BaseEmbedConfig>(
     () => ({
       base: mode === "embedded" ? slug : "",
@@ -157,6 +217,7 @@ export function useBaseTableController(
       // The author's ceiling, when they set one. Absent means the reader may
       // scroll to the true total.
       limit: mode === "embedded" ? limit : undefined,
+      ...(searchApplied ? { q: searchApplied, searchColumns } : {}),
       ...(overrides.state.group === undefined
         ? {}
         : { groupBy: overrides.state.group }),
@@ -169,6 +230,8 @@ export function useBaseTableController(
       overrides.state.group,
       slug,
       sort,
+      searchApplied,
+      searchColumns,
     ],
   );
   const savedViewQuery = useBaseView(
@@ -177,6 +240,7 @@ export function useBaseTableController(
     mode === "standalone"
       ? {
           ...sortOverride,
+          ...(searchApplied ? { q: searchApplied, searchColumns } : {}),
           ...(effectiveFilter === undefined ? {} : { filter: effectiveFilter }),
           ...(overrides.state.group === undefined
             ? {}
@@ -308,11 +372,14 @@ export function useBaseTableController(
   const refetchRowActionsView = useCallback(async () => {
     if (mode === "embedded") {
       const result = await evaluationRefetch();
+      if (result.error) throw result.error;
       return { output: result.data?.output };
     }
     const result = await savedViewRefetch();
+    if (result.error) throw result.error;
     return { output: result.data };
   }, [evaluationRefetch, mode, savedViewRefetch]);
+  const bulk = useBaseBulkActions(refetchRowActionsView);
   const rowActions = useRowActions({
     slug,
     activeView,
@@ -334,20 +401,71 @@ export function useBaseTableController(
     (memberState.draftOpen && mode === "embedded"
       ? predicateEmbeddedSuccess?.member_creation
       : undefined);
-  const activeViewDefinition = useMemo(
-    () =>
-      detail.data?.views?.find(
-        (candidate) =>
-          asciiCaseFold(candidate.name) === asciiCaseFold(activeView),
-      ),
-    [activeView, detail.data?.views],
-  );
-  const baseColumns = useMemo(
-    () =>
-      activeViewDefinition?.columns && activeViewDefinition.columns.length > 0
-        ? activeViewDefinition.columns
-        : ["title"],
-    [activeViewDefinition?.columns],
+  const saveTemplate = useCallback(
+    async (row: QueryRow, name: string, includeBody: boolean) => {
+      const current = detail.data;
+      const view = activeViewDefinition;
+      if (!current || !view)
+        throw new Error("Reload the Base before saving a template.");
+      const trimmed = name.trim();
+      if (!trimmed) throw new Error("Enter a template name.");
+      if (
+        (current.templates ?? []).some(
+          (template) => asciiCaseFold(template.name) === asciiCaseFold(trimmed),
+        )
+      )
+        throw new Error("A template with this name already exists.");
+      const [projection, page] = await Promise.all([
+        fetchClient.GET("/api/vault/pages/by-id/{uuid}/properties", {
+          params: { path: { uuid: row.id } },
+        }),
+        fetchClient.GET("/api/vault/pages/{path}", {
+          params: { path: { path: row.path } },
+        }),
+      ]);
+      if (projection.error) throw projection.error;
+      if (page.error) throw page.error;
+      if (!projection.data || !page.data)
+        throw new Error("The source page could not be read.");
+      if (projection.data.encrypted || page.data.encrypted)
+        throw new Error("Protected pages cannot be saved as templates.");
+      const declared = new Set(
+        (current.properties ?? []).map((property) => propertyKey(property.key)),
+      );
+      const fields: Record<string, unknown> = {};
+      for (const property of projection.data.properties) {
+        if (
+          declared.has(propertyKey(property.key)) &&
+          property.present &&
+          property.value != null
+        )
+          fields[`prop.${propertyKey(property.key)}`] = property.value;
+      }
+      fields.kind = row.kind;
+      if (row.project) fields.project = row.project;
+      if (page.data.meta.tags?.length) fields.tags = page.data.meta.tags;
+      const payload = definitionPayload(current, view);
+      payload.templates = [
+        ...(current.templates ?? []),
+        {
+          name: trimmed,
+          fields,
+          ...(includeBody ? { body: page.data.body } : {}),
+        },
+      ];
+      await updateBaseAsync({
+        params: { path: { slug } },
+        body: {
+          expected_revision: current.revision,
+          definition: payload,
+          view_origins: (current.views ?? []).map((candidate) => ({
+            kind: "existing" as const,
+            name: candidate.name,
+          })),
+        },
+      });
+    },
+    [activeViewDefinition, detail.data, slug, updateBaseAsync],
   );
   const [overridesSave, setOverridesSave] = useState<OverridesSaveState>({
     phase: "idle",
@@ -838,6 +956,20 @@ export function useBaseTableController(
         : undefined,
       loading: viewLoading,
       sort,
+      search,
+      searchApplied,
+      onSearchChange,
+      filter: effectiveFilter,
+      searchColumns,
+      identity: JSON.stringify({
+        viewResetKey,
+        filter: effectiveFilter,
+        sort,
+        group: overrides.state.group,
+        searchApplied,
+        searchColumns,
+        revision: detail.data.revision,
+      }),
       onViewChange: handleViewChange,
       onSortChange: handleSortChange,
     },
@@ -850,6 +982,7 @@ export function useBaseTableController(
       onDuplicateRow: handleDuplicateRow,
       onArchiveRow: rowActions.archive,
       error: rowActions.error,
+      onSaveTemplate: saveTemplate,
     },
     members: {
       capability: memberCapability,
@@ -883,6 +1016,7 @@ export function useBaseTableController(
       onSave: () => void saveOverrides(),
       onReloadDefinition: () => void reloadDefinition(),
     },
+    bulk,
     window:
       mode === "embedded"
         ? {
