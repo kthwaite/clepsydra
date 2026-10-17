@@ -1,11 +1,8 @@
 import { FileCode } from "lucide-react";
 import { useState } from "react";
-import { Button, TooltipTrigger } from "react-aria-components";
 import { Button as UiButton } from "#/components/ui/button";
+import { TooltipIconButton } from "#/components/ui/icon-button";
 import { TagInput } from "#/components/ui/tag-input";
-import { VesselTooltip } from "#/components/ui/tooltip";
-import { cn } from "#/lib/cn";
-import { FOCUS_RING } from "#/lib/focusRing";
 
 interface PageEditorHeaderProps {
   path: string;
@@ -43,19 +40,9 @@ function filename(path: string): string {
  */
 export function RawMarkdownButton({ onPress }: { onPress: () => void }) {
   return (
-    <TooltipTrigger delay={300} closeDelay={0}>
-      <Button
-        aria-label="Raw Markdown"
-        onPress={onPress}
-        className={cn(
-          "inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-transparent text-mute transition-colors data-[hovered]:bg-sink data-[hovered]:text-ink max-md:h-11 max-md:w-11",
-          FOCUS_RING,
-        )}
-      >
-        <FileCode size={14} />
-      </Button>
-      <VesselTooltip>Raw Markdown</VesselTooltip>
-    </TooltipTrigger>
+    <TooltipIconButton aria-label="Raw Markdown" onPress={onPress}>
+      <FileCode size={14} />
+    </TooltipIconButton>
   );
 }
 

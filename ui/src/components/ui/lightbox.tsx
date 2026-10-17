@@ -8,39 +8,13 @@ import {
 import { RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
-  Button,
   Modal,
   ModalOverlay,
   Dialog as RACDialog,
-  TooltipTrigger,
 } from "react-aria-components";
-import { VesselTooltip } from "#/components/ui/tooltip";
-import { cn } from "#/lib/cn";
-import { FOCUS_RING } from "#/lib/focusRing";
+import { TooltipIconButton } from "#/components/ui/icon-button";
 
-const CONTROL_CLASS = cn(
-  "inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-raise text-mute shadow-md data-[hovered]:text-accent max-md:h-11 max-md:w-11",
-  FOCUS_RING,
-);
-
-function LightboxControl({
-  label,
-  onPress,
-  children,
-}: {
-  label: string;
-  onPress: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <TooltipTrigger delay={300} closeDelay={0}>
-      <Button aria-label={label} onPress={onPress} className={CONTROL_CLASS}>
-        {children}
-      </Button>
-      <VesselTooltip>{label}</VesselTooltip>
-    </TooltipTrigger>
-  );
-}
+const CONTROL_CLASS = "h-9 w-9 bg-raise shadow-md data-[hovered]:text-accent";
 
 export interface LightboxProps {
   isOpen: boolean;
@@ -139,7 +113,7 @@ export function Lightbox({
             >
               <div
                 data-testid="lightbox-content"
-                className="absolute inset-0 flex items-center justify-center p-8"
+                className="absolute inset-0 flex items-center justify-center p-8 pt-20"
                 style={{
                   transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
                   transformOrigin: "0 0",
@@ -150,8 +124,9 @@ export function Lightbox({
             </div>
             <div className="absolute top-3 right-3 z-10 flex flex-col items-end gap-1">
               <div className="flex items-center gap-1">
-                <LightboxControl
-                  label="Zoom in"
+                <TooltipIconButton
+                  aria-label="Zoom in"
+                  className={CONTROL_CLASS}
                   onPress={() =>
                     drive((behavior, stage) =>
                       behavior.scaleBy(select(stage), 1.25),
@@ -159,9 +134,10 @@ export function Lightbox({
                   }
                 >
                   <ZoomIn size={14} />
-                </LightboxControl>
-                <LightboxControl
-                  label="Zoom out"
+                </TooltipIconButton>
+                <TooltipIconButton
+                  aria-label="Zoom out"
+                  className={CONTROL_CLASS}
                   onPress={() =>
                     drive((behavior, stage) =>
                       behavior.scaleBy(select(stage), 0.8),
@@ -169,9 +145,10 @@ export function Lightbox({
                   }
                 >
                   <ZoomOut size={14} />
-                </LightboxControl>
-                <LightboxControl
-                  label="Reset view"
+                </TooltipIconButton>
+                <TooltipIconButton
+                  aria-label="Reset view"
+                  className={CONTROL_CLASS}
                   onPress={() =>
                     drive((behavior, stage) =>
                       behavior.transform(select(stage), zoomIdentity),
@@ -179,13 +156,14 @@ export function Lightbox({
                   }
                 >
                   <RotateCcw size={14} />
-                </LightboxControl>
-                <LightboxControl
-                  label="Close"
+                </TooltipIconButton>
+                <TooltipIconButton
+                  aria-label="Close"
+                  className={CONTROL_CLASS}
                   onPress={() => onOpenChange(false)}
                 >
                   <X size={14} />
-                </LightboxControl>
+                </TooltipIconButton>
               </div>
               <p
                 aria-live="polite"

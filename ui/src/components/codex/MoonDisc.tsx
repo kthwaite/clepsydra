@@ -1,5 +1,6 @@
 import { useId } from "react";
-import { Button, Tooltip, TooltipTrigger } from "react-aria-components";
+import { Button, TooltipTrigger } from "react-aria-components";
+import { VesselTooltip } from "#/components/ui/tooltip";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING } from "#/lib/focusRing";
 import { MoonFace } from "./moon/MoonFace";
@@ -107,6 +108,7 @@ function PhaseTick({
         className={cn(
           "flex flex-1 cursor-default justify-center bg-transparent p-0 outline-none",
           edge === "top" ? "items-start pt-1" : "items-end pb-1",
+          FOCUS_RING,
         )}
         style={{ height: "12px" }}
       >
@@ -118,15 +120,11 @@ function PhaseTick({
           }}
         />
       </Button>
-      <Tooltip
-        placement={edge}
-        offset={4}
-        className="z-50 flex items-center gap-1.5 rounded-lg bg-ink px-2.5 py-1 text-[12.5px] text-ground shadow-md"
-      >
+      <VesselTooltip placement={edge} className="flex items-center gap-1.5">
         <span>{glyph}</span>
         {name}
         {current && <span className="ml-1 font-medium">· now</span>}
-      </Tooltip>
+      </VesselTooltip>
     </TooltipTrigger>
   );
 }

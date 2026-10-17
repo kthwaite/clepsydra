@@ -8,6 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { Middleware } from "openapi-fetch";
 import { useState } from "react";
 import {
   afterEach,
@@ -19,6 +20,7 @@ import {
   vi,
 } from "vitest";
 import type { BoardResponse } from "#/api/board";
+import { fetchClient } from "#/api/client";
 import {
   EMPTY_FILTER_STATE,
   type FilterState,
@@ -37,6 +39,9 @@ import {
   stubBoardFetch,
 } from "./fixtures";
 
+const httpBoundary: Middleware = {
+  onRequest: ({ request }) => fetch(request),
+};
 const { tasks } = BOARD_FIXTURE;
 
 /** Minimal 3-task fixture for filter-strip composition tests. */
@@ -160,6 +165,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  fetchClient.eject(httpBoundary);
   vi.unstubAllGlobals();
 });
 
@@ -191,6 +197,70 @@ it("opens a selected retired-project task despite the ordinary board filters", a
   expect(within(panel).getByRole("textbox", { name: "Title" })).toHaveValue(
     "Retired project task",
   );
+});
+
+it("keeps Inbox out of kanban and opens its scoped tasks in the list", async () => {
+  stubBoardFetch();
+  useBoardStore.setState({ opFilter: "alpha" });
+  renderScreenWithFilter({ text: "unmatched", facets: { status: ["SEALED"] } });
+  const inbox = await screen.findByRole("button", { name: "Inbox 1" });
+  expect(screen.queryByTestId("kb-col-INTAKE")).not.toBeInTheDocument();
+  expect(screen.queryByText("Task Alpha 2")).not.toBeInTheDocument();
+  await userEvent.click(inbox);
+  expect(screen.getByRole("tab", { name: "List" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(screen.getByText("Task Alpha 2")).toBeInTheDocument();
+  expect(screen.queryByText("Task Alpha 1")).not.toBeInTheDocument();
+  expect(screen.queryByText("Task Unfiled")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^Filters/ }));
+  expect(screen.getByTestId("filter-bar-chip-status")).toHaveTextContent(
+    "Inbox",
+  );
+});
+
+it("returns from the Inbox quick-view to Board without losing project scope or search", async () => {
+  stubBoardFetch();
+  useBoardStore.setState({ opFilter: "alpha" });
+  renderScreenWithFilter();
+  await userEvent.click(await screen.findByRole("button", { name: "Inbox 1" }));
+  await userEvent.type(screen.getByTestId("filter-bar-input"), "Alpha");
+  await userEvent.click(screen.getByRole("tab", { name: "Board" }));
+  expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
+  expect(screen.queryByText("Task Alpha 2")).not.toBeInTheDocument();
+  expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
+  expect(screen.getByTestId("filter-bar-input")).toHaveValue("Alpha");
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+    "Operation Alpha",
+  );
+});
+
+it("keyboard return to Board removes only Inbox from mixed status filters", async () => {
+  stubBoardFetch();
+  useBoardStore.setState({ mode: "backlog", opFilter: "alpha" });
+  renderScreenWithFilter({
+    text: "Alpha",
+    facets: { status: ["INTAKE", "FIELD"], pri: ["P1"] },
+  });
+  const list = await screen.findByRole("tab", { name: "List" });
+  list.focus();
+  await userEvent.keyboard("{Home}");
+  expect(screen.getByRole("tab", { name: "Board" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
+  expect(screen.queryByText("Task Sealed")).not.toBeInTheDocument();
+  expect(screen.getByTestId("filter-bar-input")).toHaveValue("Alpha");
+  await userEvent.click(screen.getByRole("button", { name: /^Filters/ }));
+  expect(screen.getByTestId("filter-bar-chip-status")).toHaveTextContent(
+    "In Progress",
+  );
+  expect(screen.getByTestId("filter-bar-chip-status")).not.toHaveTextContent(
+    "Inbox",
+  );
+  expect(screen.getByTestId("filter-bar-chip-pri")).toHaveTextContent("P1");
 });
 
 // ── filterTasks ───────────────────────────────────────────────────────────────
@@ -286,7 +356,7 @@ describe("TaskingScreen smoke", () => {
     const retryButton = screen.getByRole("button", { name: "Retry" });
     await userEvent.click(retryButton);
 
-    expect(await screen.findByTestId("kb-col-INTAKE")).toBeInTheDocument();
+    expect(await screen.findByTestId("kb-col-TRIAGE")).toBeInTheDocument();
   });
 
   it("renders the board shell when data loads successfully", async () => {
@@ -321,7 +391,6 @@ describe("TaskingScreen smoke", () => {
     await screen.findByRole("tab", { name: "Board" });
 
     for (const [id, label] of [
-      ["INTAKE", "Inbox"],
       ["TRIAGE", "Ready"],
       ["FIELD", "In Progress"],
       ["REVIEW", "Review"],
@@ -615,6 +684,9 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
 // ── filter strip: shared FilterBar composition ────────────────────────────────
 
 describe("TaskingScreen — shared FilterBar composition", () => {
+  beforeEach(() => {
+    useBoardStore.setState({ mode: "backlog", showCompleted: true });
+  });
   it("renders priority filter labels while applying the raw priority id", async () => {
     stubBoardFetch(FILTER_FIXTURE);
     renderScreenWithFilter();
@@ -765,53 +837,6 @@ describe("TaskingScreen — shared FilterBar composition", () => {
 // ── fixed human-facing status labels ──────────────────────────────────────────
 
 describe("TaskingScreen — fixed human-facing status labels", () => {
-  it("projects neutral Board sublabels without leaking or mutating server copy", async () => {
-    const retired = ["unfiled", "staged", "active", "qa / seal", "closed"];
-    const relabeled: BoardResponse = {
-      ...BOARD_FIXTURE,
-      columns: [
-        ...BOARD_FIXTURE.columns.map((column, index) => ({
-          ...column,
-          sub: retired[index],
-        })),
-        {
-          id: "PAUSED",
-          label: "SERVER PAUSED",
-          sub: "server paused",
-        },
-      ],
-    };
-    stubBoardFetch(relabeled);
-    renderScreen();
-    await screen.findByRole("tab", { name: "Board" });
-
-    for (const [id, sublabel, retiredSublabel] of [
-      ["INTAKE", "Unassessed", "unfiled"],
-      ["TRIAGE", "Ready to start", "staged"],
-      ["FIELD", "Being worked on", "active"],
-      ["REVIEW", "Awaiting review", "qa / seal"],
-      ["SEALED", "Completed", "closed"],
-    ]) {
-      const column = screen.getByTestId(`kb-col-${id}`);
-      expect(within(column).getByText(sublabel)).toBeInTheDocument();
-      expect(
-        within(column).queryByText(retiredSublabel),
-      ).not.toBeInTheDocument();
-    }
-
-    const unknown = screen.getByTestId("kb-col-PAUSED");
-    expect(within(unknown).getAllByText("PAUSED")).toHaveLength(2);
-    expect(
-      within(unknown).queryByText("SERVER PAUSED"),
-    ).not.toBeInTheDocument();
-    expect(
-      within(unknown).queryByText("server paused"),
-    ).not.toBeInTheDocument();
-    expect(relabeled.columns.map((column) => column.sub)).toEqual([
-      ...retired,
-      "server paused",
-    ]);
-  });
   it("keeps FIELD displayed as In Progress when the server sends DEPLOYED", async () => {
     const relabeled: BoardResponse = {
       ...BOARD_FIXTURE,
@@ -854,7 +879,7 @@ describe("TaskingScreen — fixed human-facing status labels", () => {
 
 describe("TaskingScreen — stale opFilter self-heal", () => {
   it("resets a persisted opFilter matching no operation to ALL once data loads", async () => {
-    useBoardStore.setState({ opFilter: "ghost-op" });
+    useBoardStore.setState({ opFilter: "ghost-op", mode: "backlog" });
     stubBoardFetch();
     renderScreen();
     await screen.findByRole("tab", { name: "Board" });
@@ -1063,4 +1088,43 @@ describe("Blocked filter flag", () => {
     ]);
     expect(blockedOf({ ...task, blocked: false, hold: "stale" })).toEqual([]);
   });
+});
+
+it("returns a task to Inbox through its status editor, then finds it from the board Inbox link", async () => {
+  fetchClient.use(httpBoundary);
+  let board = BOARD_FIXTURE;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request
+          ? input
+          : new Request(new URL(String(input), "http://localhost"), init);
+      const url = new URL(request.url);
+      if (request.method === "PATCH") {
+        const patch = await request.json();
+        const saved = { ...board.tasks[0], ...patch };
+        board = { ...board, tasks: [saved, ...board.tasks.slice(1)] };
+        return Response.json(saved);
+      }
+      if (url.pathname === "/api/vault/board") return Response.json(board);
+      if (url.pathname === "/api/vault/tasks/history")
+        return Response.json({ days: [] });
+      throw new Error(`Unexpected request: ${request.method} ${url}`);
+    }),
+  );
+  renderScreenWithFilter();
+  await userEvent.click(await screen.findByRole("tab", { name: "List" }));
+  await userEvent.click(screen.getByTestId("bk-inline-status-t1"));
+  await userEvent.click(screen.getByTestId("inline-status-INTAKE"));
+  await waitFor(() =>
+    expect(within(backlogRow("t1")).getByText("Inbox")).toBeInTheDocument(),
+  );
+  await userEvent.click(screen.getByRole("tab", { name: "Board" }));
+  expect(screen.queryByText("Task Alpha 1")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Inbox 3" }));
+  expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
+  expect(screen.getByText("Task Alpha 2")).toBeInTheDocument();
+  expect(screen.getByText("Task Unfiled")).toBeInTheDocument();
+  expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
 });

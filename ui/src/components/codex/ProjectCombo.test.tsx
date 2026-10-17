@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
@@ -109,17 +109,81 @@ describe("ProjectCombo", () => {
     expect(await hint()).toHaveTextContent("");
   });
 
-  it("keeps a draft no project matches on Enter and says so", async () => {
+  it.each(["Enter", "Tab"])(
+    "commits the sole filtered project on %s without trapping focus",
+    async (key) => {
+      const user = userEvent.setup();
+      const { onAssign, outside } = renderCombo();
+      await user.type(combobox(), "tl");
+      await user.keyboard(`{${key}}`);
+      expect(onAssign).toHaveBeenCalledExactlyOnceWith("atlas");
+      expect(combobox()).toHaveValue("atlas");
+      if (key === "Tab") expect(outside).toHaveFocus();
+      else expect(combobox()).toHaveFocus();
+      await user.click(outside);
+      expect(onAssign).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("keeps an unknown draft on Enter and explains the refusal", async () => {
     const user = userEvent.setup();
     const { onAssign } = renderCombo();
-
-    await user.type(combobox(), "atl{Enter}");
-
+    await user.type(combobox(), "ghost{Enter}");
     expect(onAssign).not.toHaveBeenCalled();
-    expect(combobox()).toHaveValue("atl");
+    expect(combobox()).toHaveValue("ghost");
     expect(combobox()).toHaveFocus();
     expect(await hint()).toHaveTextContent(/^No such project/);
-    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+  });
+
+  it.each(["Enter", "Tab"])(
+    "does not guess among multiple matches on %s",
+    async (key) => {
+      const user = userEvent.setup();
+      const { onAssign, outside } = renderCombo();
+      await user.type(combobox(), "e");
+      expect(await screen.findAllByRole("option")).toHaveLength(2);
+      await user.keyboard(`{${key}}`);
+      expect(onAssign).not.toHaveBeenCalled();
+      if (key === "Tab") expect(outside).toHaveFocus();
+    },
+  );
+
+  it("does not commit an IME confirmation", async () => {
+    const user = userEvent.setup();
+    const { onAssign } = renderCombo();
+    await user.type(combobox(), "tl");
+    fireEvent.keyDown(combobox(), { key: "Enter", isComposing: true });
+    expect(onAssign).not.toHaveBeenCalled();
+  });
+
+  it("leaves an unknown project unassigned when tabbing onward", async () => {
+    const user = userEvent.setup();
+    const { onAssign, outside } = renderCombo();
+    await user.type(combobox(), "ghost");
+    await user.tab();
+    expect(onAssign).not.toHaveBeenCalled();
+    expect(combobox()).toHaveValue("");
+    expect(outside).toHaveFocus();
+  });
+
+  it("completes a unique project while Shift+Tab moves backward", async () => {
+    const user = userEvent.setup();
+    const onAssign = vi.fn();
+    render(
+      <>
+        <button type="button">Before</button>
+        <ProjectCombo
+          value={null}
+          options={options}
+          onAssign={onAssign}
+          onClear={() => {}}
+        />
+      </>,
+    );
+    await user.type(combobox(), "tl");
+    await user.tab({ shift: true });
+    expect(onAssign).toHaveBeenCalledExactlyOnceWith("atlas");
+    expect(screen.getByRole("button", { name: "Before" })).toHaveFocus();
   });
 
   it("reverts an unmatched draft to the current value on blur and clears the hint", async () => {
@@ -215,6 +279,26 @@ describe("ProjectCombo", () => {
     await user.click(screen.getByRole("button", { name: "Clear project" }));
 
     expect(onClear).toHaveBeenCalledTimes(1);
+    expect(combobox()).toHaveValue("");
+    expect(combobox()).toHaveFocus();
+  });
+
+  it("lets keyboard users clear the assigned project through native focus traversal", async () => {
+    const user = userEvent.setup();
+    const { onClear, onAssign, rerenderValue } = renderCombo({
+      value: "atlas",
+    });
+    await user.click(combobox());
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Clear project" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onClear).toHaveBeenCalledTimes(1);
+    expect(onAssign).not.toHaveBeenCalled();
+    rerenderValue(null);
+    expect(combobox()).toHaveValue("");
+    expect(combobox()).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus();
   });
 
   it("offers no × button while nothing is assigned", () => {

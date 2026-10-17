@@ -213,11 +213,13 @@ export function TaskingScreen({
   );
   const columns = useMemo(
     () =>
-      data?.columns.map((column) => ({
-        ...column,
-        label: colLabel(column.id),
-        sub: COL_SUBLABEL[column.id] ?? column.id,
-      })) ?? [],
+      data?.columns
+        .filter((column) => column.id !== "INTAKE")
+        .map((column) => ({
+          ...column,
+          label: colLabel(column.id),
+          sub: COL_SUBLABEL[column.id] ?? column.id,
+        })) ?? [],
     [data],
   );
 
@@ -290,6 +292,7 @@ export function TaskingScreen({
             filterState={filterState}
             onFilterChange={onFilterChange}
             onOpenDossier={onOpenDossier}
+            onOpenPage={onOpenPage}
             sealHistory={
               telemetryApplicable
                 ? completionHistory.data?.days.map((day) => day.count)

@@ -1,5 +1,7 @@
 import type { ComponentType } from "react";
+import type { components } from "#/api/schema";
 import { AiJournalMeta, JournalMeta } from "#/components/codex/JournalMeta";
+import { meetingIntake } from "#/components/codex/MeetingIntake";
 import { MeetingMeta } from "#/components/codex/MeetingMeta";
 import { PersonMeta } from "#/components/codex/PersonMeta";
 import { TaskMeta } from "#/components/codex/TaskMeta";
@@ -8,7 +10,7 @@ import { aiJournalDayLabel, journalDayLabel } from "#/lib/journal";
 import type { Kind } from "#/lib/kind";
 
 /** Props FOLIO hands every bespoke block, in the META rail or the header. */
-export type KindMetaExtrasProps = {
+export type KindExtrasProps = {
   path: string;
   /** Workspace tab hosting this folio — lets a block repoint it (day nav). */
   tabId: string;
@@ -20,17 +22,36 @@ export type KindMetaExtrasProps = {
   onMoved?: (page: { path: string }) => void;
 };
 
+/** Kind-specific create fields, separate from the shared title/tags/filing. */
+export type KindIntakeValues = Pick<
+  components["schemas"]["CreatePageRequest"],
+  "attendees" | "occurred_at"
+>;
+
+export type KindIntakeProps = {
+  value: KindIntakeValues;
+  onChange: (value: KindIntakeValues) => void;
+};
+
+export type KindIntakeDefinition = {
+  Fields: ComponentType<KindIntakeProps>;
+  initialValues: () => KindIntakeValues;
+  serialize: (value: KindIntakeValues) => KindIntakeValues;
+};
+
 /** What a per-kind renderer may customise around the shared FOLIO editor. */
 export type KindPresentation = {
+  /** Optional fields collected by Inscribe before a page exists. */
+  intake?: KindIntakeDefinition;
   /** Selects the shared body surface without coupling Folio to kind names. */
   bodyPresentation: "editor" | "ai-conversation" | "recipe";
   /** Extra META-rail block for this kind, or null for the generic surface. */
-  metaExtras: ComponentType<KindMetaExtrasProps> | null;
+  metaExtras: ComponentType<KindExtrasProps> | null;
   /** Label for FOLIO's wrapping Block around metaExtras (default "Details"). */
   metaExtrasLabel?: string;
   /** Kind-specific facts rendered in the document column directly under the
    *  title/tags header (MEETING: occurred + attendees; PERSON: birthday), or null. */
-  headerExtras: ComponentType<KindMetaExtrasProps> | null;
+  headerExtras: ComponentType<KindExtrasProps> | null;
   /** When set, FOLIO renders this string as a static title in place of the
    *  editable title input. */
   readOnlyTitle?: (path: string, title: string) => string;
@@ -76,6 +97,7 @@ const REGISTRY: Partial<Record<Kind, KindPresentation>> = {
     readOnlyTitle: aiJournalDayLabel,
   },
   MEETING: {
+    intake: meetingIntake,
     bodyPresentation: "editor",
     metaExtras: null,
     headerExtras: MeetingMeta,

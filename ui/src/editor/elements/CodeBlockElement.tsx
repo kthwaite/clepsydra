@@ -154,6 +154,7 @@ export function CodeBlockElement({ attributes, children, element }: Props) {
                 screen: there is no picture to expand. */}
             <MermaidExpandButton
               svg={wantsDiagram && state.status === "ready" ? state.svg : null}
+              source={code}
             />
             {/* Pressed when the diagram is what's on screen — while the
                 caret is in the block that is never true, so the control

@@ -190,7 +190,7 @@ describe("Folio meeting header band", () => {
     useWorkspaceStore.setState({ tabs: [], activeTabId: null });
   });
 
-  it("renders the meeting facts under the title, not in the rail", () => {
+  it("keeps meeting facts in the document alongside the accessible page-details rail", () => {
     render(<Folio tabId="t1" path={PATH} />);
 
     const band = screen.getByRole("region", { name: "Meeting details" });
@@ -198,9 +198,9 @@ describe("Folio meeting header band", () => {
     expect(
       within(band).getByRole("combobox", { name: "add attendee" }),
     ).toBeInTheDocument();
-    // The rail is expanded, so a surviving rail block would be mounted.
-    const rail = screen.getByRole("complementary", { name: "Page details" });
-    expect(within(rail).queryByText("Meeting")).toBeNull();
+    expect(
+      screen.getByRole("complementary", { name: "Page details" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps the band on the mobile layout", () => {
@@ -212,5 +212,43 @@ describe("Folio meeting header band", () => {
     expect(
       within(document).getByRole("region", { name: "Meeting details" }),
     ).toBeInTheDocument();
+  });
+
+  it.each([
+    { protection: "read-only", readonly: true },
+    { protection: "offline", offline: true },
+    { protection: "encrypted", encrypted: true },
+  ])("does not offer meeting mutations in a $protection Folio", (state) => {
+    usePageEditorMock.mockReturnValue({ ...meetingEditor(), ...state });
+    render(<Folio tabId="t1" path={PATH} />);
+
+    const details = screen.getByRole("region", { name: "Meeting details" });
+    expect(
+      within(details).getByRole("list", { name: "Attendees:" }),
+    ).toBeInTheDocument();
+    expect(within(details).getByText("Ada")).toBeInTheDocument();
+    expect(
+      within(details).queryByRole("button", { name: "remove Ada" }),
+    ).toBeNull();
+    expect(
+      within(details).queryByRole("button", { name: "Edit occurred at" }),
+    ).toBeNull();
+    expect(within(details).queryByRole("combobox")).toBeNull();
+    expect(commitMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps attendee facts and controls hidden in a locked Folio", () => {
+    usePageEditorMock.mockReturnValue({
+      ...meetingEditor(),
+      encrypted: true,
+      encryptionState: { status: "locked" },
+    });
+    render(<Folio tabId="t1" path={PATH} />);
+
+    expect(
+      screen.queryByRole("region", { name: "Meeting details" }),
+    ).toBeNull();
+    expect(screen.queryByText("Ada")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "add attendee" })).toBeNull();
   });
 });

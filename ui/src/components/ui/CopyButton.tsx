@@ -1,9 +1,6 @@
 import { Check, Copy } from "lucide-react";
-import { Button, TooltipTrigger } from "react-aria-components";
-import { VesselTooltip } from "#/components/ui/tooltip";
+import { TooltipIconButton } from "#/components/ui/icon-button";
 import { useCopyToClipboard } from "#/hooks/useCopyToClipboard";
-import { cn } from "#/lib/cn";
-import { FOCUS_RING } from "#/lib/focusRing";
 
 interface CopyButtonProps {
   /** Resolved at press time, so callers can read live DOM/editor state. */
@@ -15,7 +12,7 @@ interface CopyButtonProps {
 
 /**
  * Reusable copy affordance: an icon button (Copy → Check on success) with a
- * Vessel tooltip. Visibility (e.g. hover-reveal) is the parent's concern, passed
+ * shared tooltip. Visibility (e.g. hover-reveal) is the parent's concern, passed
  * through `className`. React Aria's Button suppresses the mousedown default, so
  * dropping this inside a Slate `contentEditable={false}` region keeps the
  * editor selection intact.
@@ -29,22 +26,12 @@ export function CopyButton({
   const text = copied ? "Copied" : label;
 
   return (
-    <TooltipTrigger delay={300} closeDelay={0}>
-      <Button
-        aria-label={text}
-        onPress={() => void copy(getText())}
-        className={cn(
-          "inline-flex cursor-pointer items-center justify-center rounded-md bg-transparent p-0 text-mute transition-colors data-[focus-visible]:text-accent data-[hovered]:text-accent",
-          FOCUS_RING,
-          // Stay reachable when a parent uses `className` to hover-reveal us:
-          // a keyboard focus on the button reveals it regardless of the parent.
-          "data-[focus-visible]:opacity-100",
-          className,
-        )}
-      >
-        {copied ? <Check size={13} /> : <Copy size={13} />}
-      </Button>
-      <VesselTooltip>{text}</VesselTooltip>
-    </TooltipTrigger>
+    <TooltipIconButton
+      aria-label={text}
+      onPress={() => void copy(getText())}
+      className={className}
+    >
+      {copied ? <Check size={13} /> : <Copy size={13} />}
+    </TooltipIconButton>
   );
 }

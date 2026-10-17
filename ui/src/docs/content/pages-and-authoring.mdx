@@ -25,6 +25,15 @@ organize it.
    **Title**, and add any tags.
 3. Check the **Destination** path, then choose **Inscribe**.
 
+Kind and Project accept a unique filtered match with `Enter` or `Tab`; `Tab`
+continues normal focus traversal. Their clear controls sit inside the input.
+Clearing Project returns it to None; choosing a Project never creates a new slug.
+
+Choosing Meeting adds **When** and **Attendees**. When starts at the current
+quarter-hour and remains editable. Switching away and back preserves those
+draft fields; dismissing the form resets them. Other Kinds do not receive the
+meeting fields when created.
+
 New Folio filenames have the canonical shape
 `<yyyymmdd>.<title-slug>.<short-id>.md`. The selected Kind chooses the top-level
 folder and Project adds a subfolder, so a NOTE in project `atlas` can be created
@@ -140,9 +149,9 @@ naming nobody, and `kind:meeting tag:1:1` the 1:1s (see
 `occurred_at` is an **unquoted** TOML date-time, which is what lets Bases and
 queries sort and filter on it; a quoted string is inert text, so the server
 refuses one. Accepted forms are `2026-08-27T14:00:00Z`, the same without an
-offset, and a bare `2026-08-27` when only the day is known. Clepsydra never
-fills it in for you — an undated meeting is another unfinished note `clep
-doctor` lists.
+offset, and a bare `2026-08-27` when only the day is known. The API does not
+invent a missing time; Inscribe proposes an editable current quarter-hour.
+An undated meeting is another unfinished note `clep doctor` lists.
 
 A MEETING opens with an `## Agenda` / `## Notes` / `## Actions` scaffold when
 created without a body. The Folio shows a **Meeting details** band under the
@@ -152,6 +161,11 @@ way — 12:16 records `12:15:00` — since a meeting belongs to the slot it was
 booked in), and the attendees as removable chips. Type directly after the
 **Attendees** label or the last person to search for a person page or create
 one, without a separate input box.
+
+Read-only, offline, and encrypted Folios keep attendee navigation but do not
+offer meeting metadata edits; locked Folios hide the meeting facts entirely.
+On editable meetings, metadata changes save pending notes first and retain
+subsequent body edits.
 
 Bases offer both meeting fields without property declarations. If a meeting
 Base repeats these controls in **Base properties**, enable **Hide properties

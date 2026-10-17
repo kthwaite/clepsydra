@@ -111,3 +111,82 @@ async fn task_slug_without_project_page_not_retired() {
     let board: Value = fixture.server.get("/api/vault/board").await.json();
     assert_eq!(task_codes(&board), vec!["TSK-orphan"]);
 }
+
+#[tokio::test]
+async fn property_patches_hide_and_restore_a_shared_project_without_deleting_pages() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            project_page(root, "projects/mix-a.md", 1, "mix", None);
+            project_page(root, "projects/mix-b.md", 2, "mix", Some(true));
+            task_page(root, "TSK-mix", 11, "mix");
+            write(
+                root,
+                "notes/mix.md",
+                "---\nid: 00000000-0000-0000-0000-000000000021\ntitle: Project notes\ntype: NOTE\nproject: mix\n---\n\nKeep these notes.\n",
+            );
+        })
+        .build();
+    let server = &fixture.server;
+    let listing = server
+        .get("/api/vault/pages")
+        .add_query_param("kind", "PROJECT")
+        .add_query_param("project", "mix")
+        .await;
+    listing.assert_status_ok();
+    let listing: Value = listing.json();
+    let projects = listing["items"].as_array().unwrap();
+    assert_eq!(projects.len(), 2);
+
+    let task_url = "/api/vault/pages/by-id/00000000-0000-0000-0000-000000000011";
+    let notes_url = "/api/vault/pages/by-id/00000000-0000-0000-0000-000000000021";
+    let task_before: Value = server.get(task_url).await.json();
+    let notes_before: Value = server.get(notes_url).await.json();
+    let board_before: Value = server.get("/api/vault/board").await.json();
+    assert!(
+        board_before["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|column| column["id"] == "INTAKE")
+    );
+
+    for visible in [false, true] {
+        for (index, project) in projects.iter().enumerate() {
+            let id = project["id"].as_str().unwrap();
+            let page_url = format!("/api/vault/pages/by-id/{id}");
+            let before: Value = server.get(&page_url).await.json();
+            server
+                .patch(&format!("{page_url}/properties"))
+                .json(&serde_json::json!({
+                    "set": { "board": visible },
+                    "types": { "board": "bool" },
+                    "expected_revision": before["revision"],
+                }))
+                .await
+                .assert_status_ok();
+            let after: Value = server.get(&page_url).await.json();
+            assert_eq!(after["body"], before["body"]);
+            assert_eq!(after["meta"]["id"], before["meta"]["id"]);
+
+            let board: Value = server.get("/api/vault/board").await.json();
+            // One still-listed page keeps the entire slug active.
+            assert_eq!(
+                task_codes(&board),
+                if visible || index == 0 {
+                    vec!["TSK-mix"]
+                } else {
+                    vec![]
+                },
+            );
+            assert_eq!(board["columns"], board_before["columns"]);
+        }
+        let with_retired: Value = server
+            .get("/api/vault/board")
+            .add_query_param("include_retired", "true")
+            .await
+            .json();
+        assert_eq!(with_retired["tasks"], board_before["tasks"]);
+        assert_eq!(server.get(task_url).await.json::<Value>(), task_before);
+        assert_eq!(server.get(notes_url).await.json::<Value>(), notes_before);
+    }
+}

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PageSummary } from "#/api/types";
 
@@ -276,19 +276,14 @@ describe("InscribeModal", () => {
     const attendeeCombo = () =>
       screen.getByRole("combobox", { name: "Add attendee" });
 
-    async function chooseKind(
-      user: ReturnType<typeof userEvent.setup>,
-      name: string,
-    ) {
-      await user.click(screen.getByRole("combobox", { name: "Kind" }));
-      await user.click(screen.getByRole("option", { name }));
+    async function chooseKind(user: UserEvent, name: string) {
+      const input = screen.getByRole("combobox", { name: "Kind" });
+      await user.clear(input);
+      await user.type(input, name);
+      await user.click(await screen.findByRole("option", { name }));
     }
 
-    async function pickPerson(
-      user: ReturnType<typeof userEvent.setup>,
-      query: string,
-      option: RegExp,
-    ) {
+    async function pickPerson(user: UserEvent, query: string, option: RegExp) {
       await user.type(attendeeCombo(), query);
       await user.click(await screen.findByRole("option", { name: option }));
       // PersonCombo refocuses after a pick, which reopens its popover (when
@@ -395,6 +390,54 @@ describe("InscribeModal", () => {
       expect(vars.body.kind).toBe("NOTE");
       expect(vars.body).not.toHaveProperty("attendees");
       expect(vars.body).not.toHaveProperty("occurred_at");
+    });
+
+    it("preserves meeting edits when returning from another kind", async () => {
+      const user = userEvent.setup();
+      render(<InscribeModal />);
+      await chooseKind(user, "Meeting");
+      await pickPerson(user, "ad", /^Ada$/);
+      fireEvent.change(screen.getByLabelText("When"), {
+        target: { value: "2026-10-07T09:30" },
+      });
+      await chooseKind(user, "Note");
+      await chooseKind(user, "Meeting");
+      expect(screen.getByLabelText("When")).toHaveValue("2026-10-07T09:30");
+      expect(screen.getByRole("list", { name: /Attendees/ })).toHaveTextContent(
+        "Ada",
+      );
+    });
+
+    it("keeps meeting fields and displays the server's attendee refusal", async () => {
+      const user = userEvent.setup();
+      createMutate.mockImplementationOnce((_vars, opts) =>
+        opts?.onError?.({ error: "Attendee must resolve to a PERSON page" }),
+      );
+      render(<InscribeModal />);
+      await chooseKind(user, "Meeting");
+      await pickPerson(user, "ad", /^Ada$/);
+      await user.type(screen.getByRole("textbox", { name: "Title" }), "Review");
+      await user.click(screen.getByRole("button", { name: "Inscribe" }));
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Attendee must resolve to a PERSON page",
+      );
+      expect(screen.getByRole("list", { name: /Attendees/ })).toHaveTextContent(
+        "Ada",
+      );
+      expect(screen.getByLabelText("When")).toHaveValue("2026-10-08T14:30");
+      expect(openTabMock).not.toHaveBeenCalled();
+      expect(useUiStore.getState().isInscribeOpen).toBe(true);
+    });
+
+    it("completes a kind with Enter without submitting the intake", async () => {
+      const user = userEvent.setup();
+      render(<InscribeModal />);
+      await user.type(screen.getByRole("textbox", { name: "Title" }), "Draft");
+      const input = screen.getByRole("combobox", { name: "Kind" });
+      await user.clear(input);
+      await user.type(input, "eet{Enter}");
+      expect(screen.getByLabelText("When")).toBeVisible();
+      expect(createMutate).not.toHaveBeenCalled();
     });
 
     it("does not submit on Enter in the attendee combobox", async () => {

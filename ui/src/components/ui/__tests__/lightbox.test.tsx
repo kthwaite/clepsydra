@@ -72,6 +72,16 @@ describe("Lightbox", () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
+  it("keeps keyboard traversal inside its controls", async () => {
+    const { user, dialog } = await openLightbox();
+    for (let step = 0; step < 8; step += 1) {
+      await user.tab();
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+    await user.tab({ shift: true });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
   it("zooms in, zooms out and resets the stage transform", async () => {
     const { user } = await openLightbox();
     const content = screen.getByTestId("lightbox-content");

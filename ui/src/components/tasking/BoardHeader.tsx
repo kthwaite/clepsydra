@@ -6,9 +6,14 @@ import { Button } from "#/components/ui/button";
 import { Popover } from "#/components/ui/popover";
 import { Spark } from "#/components/ui/spark";
 import { cn } from "#/lib/cn";
-import type { FilterField, FilterState } from "#/lib/filters/model";
+import {
+  type FilterField,
+  type FilterState,
+  removeFacetValue,
+} from "#/lib/filters/model";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
-import { useBoardStore } from "#/store/board";
+import { type BoardMode, useBoardStore } from "#/store/board";
+import { BoardProjects } from "./BoardProjects";
 import {
   findActiveCycle,
   HealthDot,
@@ -47,6 +52,7 @@ interface BoardHeaderProps {
   filterState: FilterState;
   onFilterChange: (next: FilterState) => void;
   onOpenDossier?: (dossier: string) => void;
+  onOpenPage?: (path: string, label?: string) => void;
   sealHistory?: number[];
   sealHistoryPending?: boolean;
   sealHistoryError?: boolean;
@@ -66,6 +72,7 @@ export function BoardHeader({
   filterState,
   onFilterChange,
   onOpenDossier,
+  onOpenPage,
   sealHistory = [],
   sealHistoryPending = false,
   sealHistoryError = false,
@@ -86,6 +93,14 @@ export function BoardHeader({
     // sentinels) presets nothing.
     const scoped = projects.find((p) => p.key === opFilter);
     openTaskModal(scoped?.slug ? { project: scoped.slug } : {});
+  }
+
+  function selectMode(next: BoardMode) {
+    if (next === "card" && filterState.facets.status?.includes("INTAKE")) {
+      // Inbox is a list-only quick view, never a constraint on kanban lanes.
+      onFilterChange(removeFacetValue(filterState, "status", "INTAKE"));
+    }
+    setMode(next);
   }
 
   // Stats
@@ -138,6 +153,7 @@ export function BoardHeader({
           <Stat label="Blocked" value={onHold} hot={onHold > 0} />
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          <BoardProjects onOpenPage={onOpenPage} />
           <DialogTrigger>
             <Button variant="ghost" size="sm">
               Details
@@ -284,7 +300,7 @@ export function BoardHeader({
                   ? "bg-raise font-medium text-ink shadow-sm"
                   : "text-mute hover:text-ink",
               )}
-              onClick={() => setMode(m.id)}
+              onClick={() => selectMode(m.id)}
               onKeyDown={(event) => {
                 const index = MODES.findIndex((item) => item.id === m.id);
                 let next: number;
@@ -300,7 +316,7 @@ export function BoardHeader({
                   return;
                 }
                 event.preventDefault();
-                setMode(MODES[next].id);
+                selectMode(MODES[next].id);
                 event.currentTarget.parentElement
                   ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
                   ?.[next]?.focus();
@@ -310,6 +326,19 @@ export function BoardHeader({
             </button>
           ))}
         </div>
+        {mode === "card" && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onPress={() => {
+              onFilterChange({ text: "", facets: { status: ["INTAKE"] } });
+              setMode("backlog");
+            }}
+          >
+            Inbox{" "}
+            {scopedTasks.filter((task) => task.status === "INTAKE").length}
+          </Button>
+        )}
         {/* Keep search mounted for the board's / keyboard shortcut. Facet
             options live in an overlay rather than pushing cards down. */}
         <FilterBar

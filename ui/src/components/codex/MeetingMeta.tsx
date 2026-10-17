@@ -1,6 +1,8 @@
 import { Plus, X } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { usePropertyCommit } from "#/api/bases";
+import { fetchClient } from "#/api/client";
+import { formatApiError } from "#/api/error";
 import { usePage } from "#/api/pages";
 import type { CellValue } from "#/components/bases/cells/types";
 import { EditableCell } from "#/components/bases/EditableCell";
@@ -15,7 +17,7 @@ import {
 import { ATTENDEES_KEY, asWikilink, readAttendees } from "#/lib/attendance";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
-import type { KindMetaExtrasProps } from "#/lib/kindPresentation";
+import type { KindExtrasProps } from "#/lib/kindPresentation";
 import {
   floorToQuarterHour,
   localIso,
@@ -43,7 +45,12 @@ const LABEL = "text-[13px] text-mute";
  *
  *  Both fields use the same property-patch path as Bases, including the
  *  `datetime` hint that keeps `occurred_at` a native TOML date-time. */
-export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
+export function MeetingMeta({
+  path,
+  isDraft,
+  readOnly = true,
+  beginMetadataChange,
+}: KindExtrasProps) {
   const { data: page } = usePage(path);
   const commit = usePropertyCommit();
   const pages = useIndexedPages();
@@ -51,17 +58,51 @@ export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const protectedPage = readOnly || isDraft;
+  const protectedRef = useRef(protectedPage);
+  const savingRef = useRef(false);
+  useEffect(() => {
+    protectedRef.current = protectedPage;
+  }, [protectedPage]);
   const attendeesLabelId = useId();
 
   const attendees = readAttendees(page?.meta.attendees);
   const occurredAt = readOccurredAt(page?.meta.occurred_at);
 
   const patch = async (key: string, value: CellValue, hint?: "datetime") => {
-    if (!page) return;
+    if (!page || protectedPage || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
+    setSaveError(null);
     try {
-      await commit({ id: page.meta.id, path: page.path }, key, value, hint);
+      if (!beginMetadataChange)
+        throw new Error("The Folio editor is not ready.");
+      const session = await beginMetadataChange();
+      if (protectedRef.current) {
+        session.cancel();
+        return;
+      }
+      await session.apply(async () => {
+        await commit(
+          { id: page.meta.id, path: session.pagePath },
+          key,
+          value,
+          hint,
+          session.revision,
+        );
+        const result = await fetchClient.GET("/api/vault/pages/{path}", {
+          params: { path: { path: session.pagePath } },
+        });
+        if (result.error) throw result.error;
+        if (!result.data)
+          throw new Error("Couldn’t refresh the saved meeting.");
+        return result.data;
+      });
+    } catch (error) {
+      setSaveError(formatApiError(error, "Couldn’t update meeting details."));
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -77,6 +118,7 @@ export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
     patch(OCCURRED_AT_KEY, value, value === null ? undefined : "datetime");
 
   const add = (name: string) => {
+    if (protectedPage || savingRef.current) return;
     // Re-adding someone already named is a no-op, not a duplicate the server
     // would reject. PersonCombo already hides them; this guards Enter.
     if (attendees.some((a) => a.toLowerCase() === name.toLowerCase())) return;
@@ -84,7 +126,7 @@ export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
   };
 
   const create = async (name: string) => {
-    if (creating !== null) return;
+    if (protectedPage || creating !== null || savingRef.current) return;
     setCreating(name);
     setCreateError(null);
     try {
@@ -105,15 +147,25 @@ export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
       <div className={cn(LABEL, "pt-2")}>Occurred</div>
       <div className="flex min-w-0 items-center gap-2">
         <div className="min-w-0 max-w-[18rem] flex-1">
-          <EditableCell
-            value={occurredAt}
-            definition={OCCURRED_AT_DEFINITION}
-            ariaLabel="occurred at"
-            commitOnBlur
-            onCommit={(value) => void setOccurredAt(value)}
-          />
+          {protectedPage || saving ? (
+            occurredAt ? (
+              <time dateTime={occurredAt} className="text-[14px] text-ink-2">
+                {occurredAt}
+              </time>
+            ) : (
+              <span className="text-[14px] text-mute">Not recorded</span>
+            )
+          ) : (
+            <EditableCell
+              value={occurredAt}
+              definition={OCCURRED_AT_DEFINITION}
+              ariaLabel="occurred at"
+              commitOnBlur
+              onCommit={(value) => void setOccurredAt(value)}
+            />
+          )}
         </div>
-        {!isDraft && !occurredAt && (
+        {!protectedPage && !occurredAt && (
           <Button
             size="sm"
             isDisabled={saving}
@@ -131,13 +183,16 @@ export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
           Attendees:
         </span>
         {attendees.length > 0 && (
-          <ul aria-labelledby={attendeesLabelId} className="contents list-none">
+          <ul
+            aria-labelledby={attendeesLabelId}
+            className="m-0 flex max-w-full min-w-0 flex-wrap gap-1.5 p-0 list-none"
+          >
             {attendees.map((attendee) => {
               const target = findPageByName(pages, attendee);
               return (
                 <li
                   key={attendee}
-                  className="inline-flex h-[30px] max-w-[16rem] min-w-0 items-center gap-0.5 rounded-full bg-sink pr-1 pl-3 text-[14px]"
+                  className="inline-flex h-[30px] max-w-[min(16rem,100%)] min-w-0 items-center gap-0.5 rounded-full bg-sink pr-1 pl-3 text-[14px]"
                 >
                   {target ? (
                     <CLink
@@ -154,11 +209,11 @@ export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
                       >
                         {attendee}
                       </span>
-                      {!isDraft && (
+                      {!protectedPage && (
                         <button
                           type="button"
                           className={cn(CHIP_ICON_BUTTON, "text-accent")}
-                          disabled={creating !== null}
+                          disabled={creating !== null || saving}
                           aria-label={`create ${attendee}`}
                           title="Create the person page"
                           onClick={() => void create(attendee)}
@@ -168,29 +223,39 @@ export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
                       )}
                     </span>
                   )}
-                  <button
-                    type="button"
-                    className={cn(CHIP_ICON_BUTTON, "text-mute hover:text-hot")}
-                    disabled={saving || isDraft}
-                    aria-label={`remove ${attendee}`}
-                    onClick={() =>
-                      void write(
-                        attendees.filter((entry) => entry !== attendee),
-                      )
-                    }
-                  >
-                    <X size={12} strokeWidth={2} aria-hidden />
-                  </button>
+                  {!protectedPage && (
+                    <button
+                      type="button"
+                      className={cn(
+                        CHIP_ICON_BUTTON,
+                        "text-mute hover:text-hot",
+                      )}
+                      disabled={saving}
+                      aria-label={`remove ${attendee}`}
+                      onClick={() =>
+                        void write(
+                          attendees.filter((entry) => entry !== attendee),
+                        )
+                      }
+                    >
+                      <X size={12} strokeWidth={2} aria-hidden />
+                    </button>
+                  )}
                 </li>
               );
             })}
           </ul>
         )}
 
-        {!isDraft && (
+        {!protectedPage && (
           <PersonCombo onPick={add} exclude={attendees} disabled={saving} />
         )}
 
+        {saveError && (
+          <p role="alert" className="col-span-full m-0 text-[12.5px] text-hot">
+            {saveError}
+          </p>
+        )}
         {createError && (
           <div className="text-[12.5px] text-hot">{createError}</div>
         )}

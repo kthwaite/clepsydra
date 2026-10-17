@@ -224,9 +224,11 @@ it cannot proceed, or link the Tasks it waits on as Blockers (see below).
 
 The Task Board has four views:
 
-- **Board** groups Task cards into **Inbox**, **Ready**, **In Progress**,
-  **Review**, and **Done**. Each column header has a tick; the Inbox and Done
-  ticks are faint. A card's priority code is toned by rank: Critical in the
+- **Board** groups Task cards into **Ready**, **In Progress**, **Review**, and
+  **Done**. **Inbox N** opens Inbox Tasks in List without changing their status
+  or the selected Project; returning to Board removes the Inbox-only constraint.
+  Each column header has a tick; the Done tick is faint.
+  A card's priority code is toned by rank: Critical in the
   warm hot colour, High in ink, Medium and Low muted. A small dot shows its
   status: cobalt for In Progress, hot for Review, faint for Inbox and Done.
   A typed Task shows its type (`FIX`, `FEATURE`, …) in a small chip after the
@@ -241,10 +243,11 @@ The Task Board has four views:
   lines with a fade. Its Checklist items are left out, because the progress
   bar already counts them. Headings show at body size and images are hidden.
   Choose a link in it to open that page.
-- **List** groups Tasks by **Critical**, **High**, **Medium**, and **Low**
-  priority. List hides Done (`SEALED`) Tasks by default; the **Show N
-  completed** / **Hide completed** toggle beside the view tabs reveals them,
-  and the choice persists with the other board settings.
+- **List** stacks the active Cycle's Tasks above the Backlog in compact,
+  sortable tables. Long lists render a scrolling window of rows. List hides
+  Done (`SEALED`) Tasks by default; the **Show N completed** / **Hide completed**
+  toggle beside the view tabs reveals them, and the choice persists with the
+  other board settings.
 - **Cycles** shows the selected Cycle, its progress, and its Tasks. The strip
   at the top lists every Cycle with its state; choose one to show it, or
   choose **Backlog** for Tasks that are not assigned to a Cycle.
@@ -287,12 +290,17 @@ Board columns can also be resized at their right edge, and each column scrolls
 independently.
 
 The Scope rail groups Tasks by Project and Cycle, with Backlog for Tasks not assigned to a Cycle.
-Every Project page appears in the rail; set `board = false` in a Project
-page's frontmatter to hide it. `board = false` also retires the Project: once
-every Project page that declares a slug says `board = false`, the Board hides
-that row and all of the slug's Tasks. A slug with no Project page is never
-retired. The MCP `vault_board` tool still returns a retired Project's Tasks
-when its `project` parameter names that Project, and Task codes still resolve.
+Choose **Manage projects** on desktop or mobile to hide or restore a Project
+without deleting its notes or Tasks. The dialog includes hidden Projects and
+links to their pages. A change updates `board` on every Project page sharing
+the slug. If a page fails to save, the dialog names it, reports partial
+completion, and offers **Retry incomplete change**.
+
+You can also set `board = false` in Project frontmatter. Once every Project
+page declaring a slug says `board = false`, the Board hides that row and all
+of the slug's Tasks. A slug with no Project page is never retired. The MCP
+`vault_board` tool still returns a retired Project's Tasks when its `project`
+parameter names that Project, and Task codes still resolve.
 Pages that declare a `project` slug share one
 row per slug, and `board = true` breaks the tie when several pages declare the
 same slug. Every page's Project — a Task's included — must name a slug that a

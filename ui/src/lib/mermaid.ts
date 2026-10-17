@@ -170,6 +170,11 @@ export async function renderMermaid(
       securityLevel: "strict",
       theme: "base",
       themeVariables: diagramThemeVariables(),
+      // Mermaid positions and measures temporary SVG nodes synchronously.
+      // Even the app's reduced-motion 0.01ms transitions leave those reads
+      // between positions, inflating the layout. Mermaid scopes this CSS to
+      // the generated SVG; diagram geometry must never transition.
+      themeCSS: "* { transition: none !important; }",
     });
     appliedSignature = theme;
   }

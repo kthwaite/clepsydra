@@ -33,6 +33,7 @@ export function MermaidCodeBlock({ code }: { code: string }) {
           />
           <MermaidExpandButton
             svg={state.status === "ready" ? state.svg : null}
+            source={code}
           />
           <MermaidViewToggle isDiagram={diagram} onChange={setDiagram} />
         </div>

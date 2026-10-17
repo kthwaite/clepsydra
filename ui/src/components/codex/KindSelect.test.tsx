@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { KindSelect } from "#/components/codex/KindSelect";
@@ -74,6 +74,117 @@ describe("KindSelect", () => {
     expect(onAssign).toHaveBeenCalledWith("BOOK");
   });
 
+  it.each(["Enter", "Tab"])(
+    "commits the unique filtered kind on %s",
+    async (key) => {
+      const user = userEvent.setup();
+      const onAssign = vi.fn();
+      render(
+        <>
+          <KindSelect value="NOTE" inferred={false} onAssign={onAssign} />
+          <button type="button">Outside</button>
+        </>,
+      );
+      const input = screen.getByRole("combobox", { name: "Kind" });
+      await user.clear(input);
+      await user.type(input, "eet");
+      await user.keyboard(`{${key}}`);
+      expect(onAssign).toHaveBeenCalledExactlyOnceWith("MEETING");
+      if (key === "Tab")
+        expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus();
+      else expect(screen.getByRole("combobox", { name: "Kind" })).toHaveFocus();
+    },
+  );
+
+  it.each(["Enter", "Tab"])(
+    "resolves the current kind's prefix on %s without reassigning it",
+    async (key) => {
+      const user = userEvent.setup();
+      const onAssign = vi.fn();
+      render(
+        <>
+          <KindSelect value="MEETING" inferred={false} onAssign={onAssign} />
+          <button type="button">Outside</button>
+        </>,
+      );
+      const input = screen.getByRole("combobox", { name: "Kind" });
+      await user.clear(input);
+      await user.type(input, "mee");
+      await user.keyboard(`{${key}}`);
+      expect(input).toHaveValue("Meeting");
+      expect(onAssign).not.toHaveBeenCalled();
+      if (key === "Tab")
+        expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus();
+      else expect(input).toHaveFocus();
+    },
+  );
+
+  it.each(["Enter", "Tab"])(
+    "does not guess among multiple kind matches on %s",
+    async (key) => {
+      const user = userEvent.setup();
+      const onAssign = vi.fn();
+      render(
+        <>
+          <KindSelect value="NOTE" inferred={false} onAssign={onAssign} />
+          <button type="button">Outside</button>
+        </>,
+      );
+      const input = screen.getByRole("combobox", { name: "Kind" });
+      await user.clear(input);
+      await user.type(input, "o");
+      await user.keyboard(`{${key}}`);
+      expect(onAssign).not.toHaveBeenCalled();
+      if (key === "Tab")
+        expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus();
+    },
+  );
+
+  it.each(["Enter", "Tab"])(
+    "does not assign an unknown kind on %s",
+    async (key) => {
+      const user = userEvent.setup();
+      const onAssign = vi.fn();
+      render(
+        <>
+          <KindSelect value="NOTE" inferred={false} onAssign={onAssign} />
+          <button type="button">Outside</button>
+        </>,
+      );
+      const input = screen.getByRole("combobox", { name: "Kind" });
+      await user.clear(input);
+      await user.type(input, "ghost");
+      await user.keyboard(`{${key}}`);
+      expect(onAssign).not.toHaveBeenCalled();
+      if (key === "Tab")
+        expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus();
+    },
+  );
+
+  it("does not commit an IME confirmation", async () => {
+    const user = userEvent.setup();
+    const onAssign = vi.fn();
+    render(<KindSelect value="NOTE" inferred={false} onAssign={onAssign} />);
+    const input = screen.getByRole("combobox", { name: "Kind" });
+    await user.clear(input);
+    await user.type(input, "eet");
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(onAssign).not.toHaveBeenCalled();
+  });
+
+  it("clears the filter without unassigning the kind and keeps typing focus", async () => {
+    const user = userEvent.setup();
+    const onAssign = vi.fn();
+    render(<KindSelect value="NOTE" inferred={false} onAssign={onAssign} />);
+    await user.click(screen.getByRole("button", { name: "Clear kind" }));
+    const input = screen.getByRole("combobox", { name: "Kind" });
+    expect(input).toHaveValue("");
+    expect(input).toHaveFocus();
+    expect(onAssign).not.toHaveBeenCalled();
+    await user.type(input, "eet{Enter}");
+    expect(onAssign).toHaveBeenCalledExactlyOnceWith("MEETING");
+  });
+
   it("reverts unmatched text on blur without assigning", async () => {
     const user = userEvent.setup();
     const onAssign = vi.fn();
@@ -144,5 +255,70 @@ describe("KindSelect", () => {
 
     expect(onAssign).toHaveBeenCalledWith("BOOK");
     expect(input).toHaveValue("");
+  });
+
+  it("allows the same kind in successive bulk operations without duplicating either pick on blur", async () => {
+    const user = userEvent.setup();
+    const onAssign = vi.fn();
+    render(
+      <>
+        <KindSelect value={null} inferred={false} onAssign={onAssign} />
+        <button type="button">Outside</button>
+      </>,
+    );
+    const input = screen.getByRole("combobox", { name: "Kind" });
+    const outside = screen.getByRole("button", { name: "Outside" });
+    for (const count of [1, 2]) {
+      await user.click(input);
+      await user.click(await screen.findByRole("option", { name: "Book" }));
+      await user.click(outside);
+      expect(onAssign).toHaveBeenCalledTimes(count);
+      expect(onAssign).toHaveBeenLastCalledWith("BOOK");
+      expect(input).toHaveValue("");
+    }
+  });
+
+  it("allows repeating a keyboard bulk assignment after focus traversal", async () => {
+    const user = userEvent.setup();
+    const onAssign = vi.fn();
+    render(
+      <>
+        <KindSelect value={null} inferred={false} onAssign={onAssign} />
+        <button type="button">Outside</button>
+      </>,
+    );
+    const input = screen.getByRole("combobox", { name: "Kind" });
+    for (const count of [1, 2]) {
+      await user.type(input, "boo");
+      await user.tab();
+      expect(onAssign).toHaveBeenCalledTimes(count);
+      expect(onAssign).toHaveBeenLastCalledWith("BOOK");
+      expect(input).toHaveValue("");
+      expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus();
+    }
+  });
+
+  it("can retry a kind assignment when the authoritative value remains unchanged", async () => {
+    const user = userEvent.setup();
+    const onAssign = vi.fn();
+    render(
+      <>
+        <KindSelect value="NOTE" inferred={false} onAssign={onAssign} />
+        <button type="button">Outside</button>
+      </>,
+    );
+    const input = screen.getByRole("combobox", { name: "Kind" });
+    const outside = screen.getByRole("button", { name: "Outside" });
+    for (const count of [1, 2]) {
+      await user.clear(input);
+      await user.type(input, "boo");
+      await user.click(await screen.findByRole("option", { name: "Book" }));
+      await user.click(outside);
+      // A refused save leaves the authoritative value as NOTE. A later
+      // deliberate choice must retry, not echo the previous interaction.
+      expect(onAssign).toHaveBeenCalledTimes(count);
+      expect(onAssign).toHaveBeenLastCalledWith("BOOK");
+      expect(input).toHaveValue("Note");
+    }
   });
 });

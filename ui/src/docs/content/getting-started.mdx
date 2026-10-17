@@ -374,7 +374,7 @@ node shapes, not icons.
 
 | Pip | Meaning |
 | --- | --- |
-| Faint grey | Inbox or Done column |
+| Faint grey | Done column |
 | Grey | Ready column |
 | Cyan | In Progress column |
 | Amber | Review column |
@@ -515,6 +515,11 @@ and scroll or pinch to zoom; `Esc` returns you to the page. In the editor you
 can also click the diagram itself (or focus it and press `Enter`) to drop the
 caret into its source, and the source stays visible for as long as the caret is
 inside it — a diagram is never in the way of editing the block it came from.
+
+The expanded view initially fits the diagram below its controls, including on
+mobile. **Reset view** returns to that fit; closing and reopening also resets
+pan and zoom. `Esc` restores focus to the expand control. The controls have
+keyboard-focus tooltips and touch-sized targets.
 
 Diagrams follow the current theme, and the mermaid renderer loads
 only when a page actually contains one. If mermaid cannot parse a block,

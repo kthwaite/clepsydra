@@ -10,7 +10,7 @@ import type { SendPatch } from "#/components/tasking/usePatchQueue";
 import { Button } from "#/components/ui/button";
 import { useResolveWikilinkTarget } from "#/editor/useResolveWikilinkTarget";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import type { KindMetaExtrasProps } from "#/lib/kindPresentation";
+import type { KindExtrasProps } from "#/lib/kindPresentation";
 import { useBoardStore } from "#/store/board";
 
 /** A Folio shares Tasking's fields, but owns its document and navigation. */
@@ -20,7 +20,7 @@ export function TaskMeta({
   readOnly = true,
   beginMetadataChange,
   onMoved,
-}: KindMetaExtrasProps) {
+}: KindExtrasProps) {
   const { data, isLoading, error, refetch } = useBoard({
     includeRetired: true,
   });

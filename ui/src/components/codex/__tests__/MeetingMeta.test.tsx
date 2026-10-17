@@ -1,7 +1,15 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PageSummary } from "#/api/types";
+import type { GeneratedChangeSession } from "#/editor/usePageEditor";
+import type { KindExtrasProps } from "#/lib/kindPresentation";
 import { useWorkspaceStore } from "#/store/workspace";
 
 const { usePageMock, usePagesMock, createMutateAsync, commitMock } = vi.hoisted(
@@ -20,6 +28,12 @@ vi.mock("#/api/pages", () => ({
 vi.mock("#/api/bases", () => ({ usePropertyCommit: () => commitMock }));
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => useWorkspaceStore.getState().openTab,
+}));
+
+vi.mock("#/api/client", () => ({
+  fetchClient: {
+    GET: async () => ({ data: { body: "", revision: "saved-revision" } }),
+  },
 }));
 
 import { MeetingMeta } from "../MeetingMeta";
@@ -54,9 +68,24 @@ const people = [
   person("people/grace.md", "Grace Hopper"),
 ];
 
-function renderMeta({ isDraft = false }: { isDraft?: boolean } = {}) {
-  render(
-    <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={isDraft} />,
+function renderMeta(props: Partial<KindExtrasProps> = {}) {
+  return render(
+    <MeetingMeta
+      path="meetings/kickoff.md"
+      tabId="t1"
+      isDraft={false}
+      readOnly={false}
+      beginMetadataChange={async (): Promise<GeneratedChangeSession> => ({
+        pagePath: "meetings/kickoff.md",
+        body: "",
+        revision: "page-revision",
+        cancel: () => {},
+        apply: async (write) => {
+          await write();
+        },
+      })}
+      {...props}
+    />,
   );
 }
 
@@ -95,6 +124,91 @@ describe("MeetingMeta", () => {
     expect(screen.getByText("Grace")).toBeInTheDocument();
   });
 
+  it("keeps attendee navigation but exposes no mutation controls when protected", async () => {
+    usePageMock.mockReturnValue(
+      page(["[[Ada]]", "[[Grace]]"], "2026-08-27T14:00:00Z"),
+    );
+    renderMeta({ readOnly: true });
+
+    expect(
+      screen.getByRole("list", { name: "Attendees:" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByText("2026-08-27T14:00:00Z")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "remove Ada" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "create Grace" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Edit occurred at" }),
+    ).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    await userEvent.click(screen.getByRole("link", { name: "Ada" }));
+    expect(useWorkspaceStore.getState().tabs).toContainEqual(
+      expect.objectContaining({ path: "people/ada.md" }),
+    );
+    expect(commitMock).not.toHaveBeenCalled();
+    expect(createMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("discards an open date edit when protection turns on", () => {
+    usePageMock.mockReturnValue(page([], "2026-08-27T14:00:00Z"));
+    const view = renderMeta();
+    fireEvent.click(screen.getByRole("button", { name: "Edit occurred at" }));
+    fireEvent.change(screen.getByLabelText("occurred at"), {
+      target: { value: "2026-08-28T09:30:00" },
+    });
+    view.rerender(
+      <MeetingMeta
+        path="meetings/kickoff.md"
+        tabId="t1"
+        isDraft={false}
+        readOnly
+      />,
+    );
+    expect(screen.queryByLabelText("occurred at")).toBeNull();
+    expect(commitMock).not.toHaveBeenCalled();
+  });
+
+  it("does not remove an attendee if the Folio becomes protected while its notes save", async () => {
+    usePageMock.mockReturnValue(page(["[[Ada]]"]));
+    let release!: (session: GeneratedChangeSession) => void;
+    const pending = new Promise<GeneratedChangeSession>((resolve) => {
+      release = resolve;
+    });
+    const view = renderMeta({ beginMetadataChange: () => pending });
+    fireEvent.click(screen.getByRole("button", { name: "remove Ada" }));
+    view.rerender(
+      <MeetingMeta
+        path="meetings/kickoff.md"
+        tabId="t1"
+        isDraft={false}
+        readOnly
+      />,
+    );
+    await act(async () => {
+      release({
+        pagePath: "meetings/kickoff.md",
+        body: "Saved notes",
+        revision: "page-revision",
+        cancel: () => {},
+        apply: async (write) => {
+          await write();
+        },
+      });
+    });
+    expect(screen.getByText("Ada")).toBeInTheDocument();
+    expect(commitMock).not.toHaveBeenCalled();
+  });
+
+  it("shows a refused meeting edit without losing the attendee", async () => {
+    usePageMock.mockReturnValue(page(["[[Ada]]"]));
+    commitMock.mockRejectedValueOnce(new Error("This meeting is protected."));
+    renderMeta();
+    await userEvent.click(screen.getByRole("button", { name: "remove Ada" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByText("Ada")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "remove Ada" })).toBeEnabled();
+  });
+
   it("adds a picked person as a wikilink alongside the existing ones", async () => {
     const user = userEvent.setup();
     usePageMock.mockReturnValue(page(["[[Ada]]"]));
@@ -111,6 +225,7 @@ describe("MeetingMeta", () => {
         "attendees",
         ["[[Ada]]", "[[Grace Hopper]]"],
         undefined,
+        "page-revision",
       ),
     );
   });
@@ -142,6 +257,7 @@ describe("MeetingMeta", () => {
         "attendees",
         null,
         undefined,
+        "page-revision",
       ),
     );
   });
@@ -160,6 +276,7 @@ describe("MeetingMeta", () => {
         "attendees",
         ["[[Ada]]"],
         undefined,
+        "page-revision",
       ),
     );
   });
@@ -208,7 +325,9 @@ describe("MeetingMeta", () => {
       usePageMock.mockReturnValue(page(["[[Ada]]"], undefined));
       renderMeta();
 
-      fireEvent.click(screen.getByRole("button", { name: "Now" }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Now" }));
+      });
 
       // The hint is what keeps it a TOML date-time rather than a string; the
       // zeroed seconds are the quarter-hour floor, not the wall clock.
@@ -217,6 +336,7 @@ describe("MeetingMeta", () => {
         "occurred_at",
         "2026-08-27T14:15:00",
         "datetime",
+        "page-revision",
       );
     } finally {
       vi.useRealTimers();
@@ -241,6 +361,7 @@ describe("MeetingMeta", () => {
         // The stored value's zone suffix survives the edit.
         "2026-08-28T09:30:00Z",
         "datetime",
+        "page-revision",
       ),
     );
   });
@@ -261,6 +382,7 @@ describe("MeetingMeta", () => {
         "occurred_at",
         null,
         undefined,
+        "page-revision",
       ),
     );
   });
@@ -276,7 +398,10 @@ describe("MeetingMeta", () => {
       screen.queryByRole("button", { name: "Now" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "create Grace" })).toBeNull();
-    expect(screen.getByRole("button", { name: "remove Grace" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "remove Grace" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Edit occurred at" }),
+    ).toBeNull();
     expect(commitMock).not.toHaveBeenCalled();
     expect(createMutateAsync).not.toHaveBeenCalled();
   });

@@ -14,7 +14,7 @@ import {
 } from "#/lib/birthday";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
-import type { KindMetaExtrasProps } from "#/lib/kindPresentation";
+import type { KindExtrasProps } from "#/lib/kindPresentation";
 
 /** The birthday editor's schema: the shared native date picker. */
 const BIRTHDAY_DEFINITION = { type: "date" } as const;
@@ -29,7 +29,7 @@ const LABEL = "text-[13px] text-mute";
  *  a full date, so a yearless birthday shows in it as year 2000 (a leap year,
  *  so Feb 29 is pickable); "Year unknown" decides which form a commit
  *  writes. The display shows the birthday itself, never the stand-in year. */
-export function PersonMeta({ path, isDraft }: KindMetaExtrasProps) {
+export function PersonMeta({ path, isDraft }: KindExtrasProps) {
   const { data: page } = usePage(path);
   const commit = usePropertyCommit();
   const [editing, setEditing] = useState(false);

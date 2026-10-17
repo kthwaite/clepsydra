@@ -99,6 +99,33 @@ describe("MermaidCodeBlock", () => {
     expect(within(dialog).getByTestId("svg")).toBeInTheDocument();
   });
 
+  it("makes the source available once inside the modal and restores keyboard focus", async () => {
+    const user = userEvent.setup();
+    const dialog = await expandDiagram(user);
+
+    expect(within(dialog).getByText(/graph TD;/)).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/graph TD;/)).toHaveLength(1);
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Expand diagram" }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it("reveals a named copy tooltip on keyboard focus and copies with Enter", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    render(<MermaidCodeBlock code={SOURCE} />);
+
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Copy code" })).toHaveFocus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Copy code");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(SOURCE));
+    expect(screen.getByRole("button", { name: "Copied" })).toHaveFocus();
+  });
+
   it("offers no expand control while the source is showing", async () => {
     const user = userEvent.setup();
     render(<MermaidCodeBlock code={SOURCE} />);

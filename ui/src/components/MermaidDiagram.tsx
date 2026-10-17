@@ -1,8 +1,8 @@
 import { Maximize2 } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Button, ToggleButton, TooltipTrigger } from "react-aria-components";
+import { ToggleButton } from "react-aria-components";
+import { TooltipIconButton } from "#/components/ui/icon-button";
 import { Lightbox } from "#/components/ui/lightbox";
-import { VesselTooltip } from "#/components/ui/tooltip";
 import { cn } from "#/lib/cn";
 import {
   type MermaidRenderResult,
@@ -62,10 +62,13 @@ export function useMermaidRender(code: string | null): MermaidState {
  * The rendered picture itself. Sized to its container, so it fits the reading
  * column inline and the stage inside a lightbox.
  */
-function DiagramSvg({ svg }: { svg: string }) {
+function DiagramSvg({ svg, fit = false }: { svg: string; fit?: boolean }) {
   return (
     <div
-      className="cl-mermaid-svg flex justify-center [&>svg]:h-auto [&>svg]:max-w-full"
+      className={cn(
+        "cl-mermaid-svg flex justify-center [&>svg]:max-w-full",
+        fit ? "h-full [&>svg]:h-full [&>svg]:w-full" : "[&>svg]:h-auto",
+      )}
       // The authored source stays available to assistive tech in the block's
       // <pre>; the picture itself is decorative.
       aria-hidden="true"
@@ -124,9 +127,11 @@ export function MermaidDiagram({
  */
 export function MermaidExpandButton({
   svg,
+  source,
   className,
 }: {
   svg: string | null;
+  source: string;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -134,32 +139,32 @@ export function MermaidExpandButton({
   // mermaid comes back. An open lightbox holds the last picture across that
   // gap, rather than closing itself and snatching focus back to this button.
   const held = useRef<string | null>(null);
-  if (svg !== null) held.current = svg;
+  useEffect(() => {
+    if (svg !== null) held.current = svg;
+  }, [svg]);
   const shown = svg ?? (open ? held.current : null);
 
   if (shown === null) return null;
 
   return (
     <>
-      <TooltipTrigger delay={300} closeDelay={0}>
-        <Button
-          aria-label="Expand diagram"
-          onPress={() => setOpen(true)}
-          className={cn(
-            "inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-transparent p-0 text-mute outline-none transition-colors data-[focus-visible]:text-accent data-[hovered]:bg-sink data-[hovered]:text-ink",
-            // Stay reachable when a parent uses `className` to hover-reveal us.
-            "data-[focus-visible]:opacity-100",
-            className,
-          )}
-        >
-          <Maximize2 size={13} />
-        </Button>
-        <VesselTooltip>Expand diagram</VesselTooltip>
-      </TooltipTrigger>
+      <TooltipIconButton
+        aria-label="Expand diagram"
+        onPress={() => setOpen(true)}
+        className={className}
+      >
+        <Maximize2 size={13} />
+      </TooltipIconButton>
       <Lightbox isOpen={open} onOpenChange={setOpen} label="Diagram">
-        <div className="w-full">
-          <DiagramSvg svg={shown} />
+        <div className="h-full w-full">
+          <DiagramSvg svg={shown} fit />
         </div>
+        {/* The modal hides the page's source from assistive tech while open.
+            Keep exactly one source here rather than announcing both SVG text
+            and Mermaid syntax. */}
+        <pre className="sr-only">
+          <code>{source}</code>
+        </pre>
       </Lightbox>
     </>
   );

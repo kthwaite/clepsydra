@@ -6,6 +6,7 @@ import {
   type BoardStatus,
   tasksByStatus,
 } from "#/components/mobile/mobile-data";
+import { BoardProjects } from "#/components/tasking/BoardProjects";
 import {
   COL_LABEL,
   COL_ORDER,
@@ -151,6 +152,9 @@ export function MobileTasking() {
             </SelectItem>
           ))}
         </Select>
+        <BoardProjects
+          onOpenPage={(path, label) => openTab("page", path, label)}
+        />
         <h1 className="font-serif text-[44px] leading-none text-ink">
           {title}
         </h1>

@@ -14,7 +14,7 @@ import {
   nearestEntry,
   relativeDays,
 } from "#/lib/journal";
-import type { KindMetaExtrasProps } from "#/lib/kindPresentation";
+import type { KindExtrasProps } from "#/lib/kindPresentation";
 import {
   dayOfYear,
   formatDayMonth,
@@ -57,7 +57,7 @@ function JournalStreamMeta({
   path,
   tabId,
   isDraft,
-}: { spec: StreamSpec } & KindMetaExtrasProps) {
+}: { spec: StreamSpec } & KindExtrasProps) {
   const { data: recent } = spec.useRecent(FETCH_DAYS);
   const { data: counterpartRecent } = spec.counterpart.useRecent(FETCH_DAYS);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
@@ -228,10 +228,10 @@ const AI_SPEC: StreamSpec = {
   },
 };
 
-export function JournalMeta(props: KindMetaExtrasProps) {
+export function JournalMeta(props: KindExtrasProps) {
   return <JournalStreamMeta spec={HUMAN_SPEC} {...props} />;
 }
 
-export function AiJournalMeta(props: KindMetaExtrasProps) {
+export function AiJournalMeta(props: KindExtrasProps) {
   return <JournalStreamMeta spec={AI_SPEC} {...props} />;
 }

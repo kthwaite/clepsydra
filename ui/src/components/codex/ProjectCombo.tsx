@@ -6,6 +6,7 @@ import {
   ListBox,
   ListBoxItem,
   Popover,
+  useFilter,
 } from "react-aria-components";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING } from "#/lib/focusRing";
@@ -23,11 +24,9 @@ export interface ProjectComboProps {
 
 const NO_SUCH_PROJECT = "No such project.";
 
-/** Strict project picker: only a listed slug commits. A listbox pick, or
- *  Enter/blur on a draft spelling a listed slug (case-insensitive, trimmed),
- *  assigns it; Enter on anything else keeps the draft and says so; blur on
- *  anything else reverts to the current value. Creating a project is a
- *  separate step (a PROJECT page), never a side effect of this field. */
+/** Strict project picker: listed slugs only. Enter/Tab complete a sole
+ * filtered result; exact spellings also commit on blur. An unknown draft
+ * never creates a project. */
 export function ProjectCombo({
   value,
   options,
@@ -50,9 +49,13 @@ export function ProjectCombo({
   // the listbox. A fresh mount starts closed and in step; focus is put back.
   const [epoch, setEpoch] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectedRef = useRef(value);
+  const skipBlur = useRef(false);
+  const { contains } = useFilter({ sensitivity: "base" });
 
   useEffect(() => {
     setSelected(value);
+    selectedRef.current = value;
     setDraft(value ?? "");
     setHint(null);
   }, [value]);
@@ -69,30 +72,39 @@ export function ProjectCombo({
 
   const pick = (slug: string) => {
     setSelected(slug);
+    selectedRef.current = slug;
     setDraft(slug);
     setHint(null);
     onAssign(slug);
   };
 
-  // Enter on a bare draft (no option focused — those belong to react-aria).
-  const commitDraft = () => {
-    const slug = findListed(draft);
+  const commitDraft = (keepFocus: boolean) => {
+    const matches = draft.trim()
+      ? options.filter((slug) => contains(slug, draft.trim()))
+      : [];
+    const slug =
+      findListed(draft) ?? (matches.length === 1 ? matches[0] : undefined);
     if (slug === undefined) {
-      setHint(draft.trim() ? NO_SUCH_PROJECT : null);
-    } else if (slug !== selected) {
+      setHint(draft.trim() && matches.length === 0 ? NO_SUCH_PROJECT : null);
+    } else if (slug !== selectedRef.current) {
       pick(slug);
     } else {
       setDraft(slug);
       setHint(null);
     }
-    setEpoch((n) => n + 1);
+    if (keepFocus) setEpoch((n) => n + 1);
+    else if (slug !== undefined) skipBlur.current = true;
   };
 
   const settleDraft = () => {
+    if (skipBlur.current) {
+      skipBlur.current = false;
+      return;
+    }
     const slug = findListed(draft);
     if (slug === undefined) {
       setDraft(selected ?? "");
-    } else if (slug !== selected) {
+    } else if (slug !== selectedRef.current) {
       pick(slug);
     } else {
       setDraft(slug);
@@ -102,7 +114,7 @@ export function ProjectCombo({
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-center gap-1">
+      <div className="relative min-w-0">
         <ComboBox
           key={epoch}
           aria-label={ariaLabel ?? "Project"}
@@ -117,31 +129,43 @@ export function ProjectCombo({
           onSelectionChange={(key) => {
             // With both selection and input controlled, react-aria echoes the
             // current key on Enter/blur; only a new key is a pick.
-            if (key != null && key !== selected) pick(String(key));
+            if (key != null && key !== selectedRef.current) pick(String(key));
           }}
-          className="min-w-0 flex-1"
+          className="relative min-w-0"
         >
           <Input
             ref={inputRef}
             placeholder="None"
-            onKeyDown={(event) => {
+            onKeyDownCapture={(event) => {
               if (
+                event.nativeEvent.isComposing ||
+                event.nativeEvent.keyCode === 229
+              ) {
+                event.stopPropagation();
+                return;
+              }
+              if (event.key === "Tab") {
+                // Keep native focus traversal; don't remount or refocus.
+                event.stopPropagation();
+                commitDraft(false);
+              } else if (
                 event.key === "Enter" &&
-                !event.nativeEvent.isComposing &&
                 !event.currentTarget.getAttribute("aria-activedescendant")
               ) {
-                commitDraft();
+                event.preventDefault();
+                event.stopPropagation();
+                commitDraft(true);
               }
             }}
             onBlur={settleDraft}
             className={cn(
-              "h-8 w-full rounded-lg bg-sink px-2.5 text-[13.5px] outline-none transition-colors",
+              "h-8 w-full rounded-lg bg-sink pr-9 pl-2.5 text-[13.5px] outline-none transition-colors",
               "placeholder:text-mute",
               "data-[focused]:bg-raise data-[focused]:text-ink data-[focused]:ring-2 data-[focused]:ring-accent",
               "text-ink",
             )}
           />
-          <Popover className="min-w-[180px] rounded-xl bg-raise p-1 shadow-lg outline-none">
+          <Popover className="w-(--trigger-width) rounded-xl bg-raise p-1 shadow-lg outline-none">
             <ListBox className="max-h-[280px] overflow-auto outline-none">
               {options.map((p) => (
                 <ListBoxItem
@@ -160,21 +184,29 @@ export function ProjectCombo({
               ))}
             </ListBox>
           </Popover>
+          {value !== null && (
+            <Button
+              slot={null}
+              aria-label={ariaLabel ? `Clear ${ariaLabel}` : "Clear project"}
+              aria-describedby={ariaDescribedBy}
+              onPress={() => {
+                selectedRef.current = null;
+                setSelected(null);
+                setDraft("");
+                setHint(null);
+                onClear();
+                inputRef.current?.focus();
+              }}
+              className={cn(
+                "absolute right-0.5 top-0.5 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full text-[15px] text-mute transition-colors",
+                "data-[hovered]:bg-sink data-[hovered]:text-hot",
+                FOCUS_RING,
+              )}
+            >
+              ×
+            </Button>
+          )}
         </ComboBox>
-        {value !== null && (
-          <Button
-            aria-label={ariaLabel ? `Clear ${ariaLabel}` : "Clear project"}
-            aria-describedby={ariaDescribedBy}
-            onPress={onClear}
-            className={cn(
-              "flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded-full text-[15px] text-mute transition-colors",
-              "data-[hovered]:bg-sink data-[hovered]:text-hot",
-              FOCUS_RING,
-            )}
-          >
-            ×
-          </Button>
-        )}
       </div>
       {/* Always mounted so assistive tech announces the hint when it lands. */}
       <div
