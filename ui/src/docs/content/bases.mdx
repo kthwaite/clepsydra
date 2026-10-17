@@ -33,7 +33,7 @@ The Configure workspace has six sections:
 - **Properties** declares ordered advisory property schemas and their options.
 - **Row templates** defines named property prefills and optional body content for new members.
 - **Preview properties** chooses the ordered, optionally labelled fields used by generic page previews.
-- **Views** configures ordered table views, their extra filters, columns, display labels, sorts, grouping, and aggregates.
+- **Views** configures ordered table views, their extra filters, columns, display labels, sorts, grouping, aggregates, conditional row colours, and whole-view metric cards.
 
 Changes remain a local draft until you explicitly choose **Save**; there is no autosave. **Discard** restores the last loaded revision. Leaving with unsaved changes opens a confirmation, and closing the browser is guarded by the browser's unsaved-change prompt. Every Save includes the revision that was loaded. If the file changed in another editor or Clepsydra session, Save retains the local draft and reports a conflict instead of overwriting the newer file. Reload the changed definition before deliberately reapplying or discarding the draft.
 
@@ -447,6 +447,8 @@ Each `[[views]]` entry is a saved view. Its fields are:
 - `sort`: an ordered list of `{ field, dir }` keys. Directions are `asc` and `desc`; omitted `dir` defaults to `asc`. Equal values use page path as a stable tie-breaker.
 - `group_by`: a grouping field.
 - `aggregates`: aggregate calculations shown with grouped results, or as a totals row for a flat view.
+- `color_rules`: ordered `{ filter, color }` rules; the first matching rule supplies the row's accent.
+- `metrics`: ordered `{ fn, field?, label?, target? }` calculations displayed above the table.
 
 Use a property in `group_by` when it is built in or declared. Groupable property types are `select`, `text`, `bool`, `date`, `datetime`, `url`, and `relation`; scalar system fields such as `kind` are also groupable. `number` and `multi_select` properties are not groupable. A relation contributes only its first target in stored link order, so a multi-target page never duplicates across groups. Resolved groups show the target's title and an open action; unresolved targets remain readable and absent relations form the empty group.
 
@@ -479,7 +481,47 @@ aggregates = [
 ]
 sort = [{ field = "started", dir = "desc" }]
 columns = ["title", "author", "rating", "started"]
+color_rules = [
+  { color = "madder", filter = { field = "rating", op = "gte", value = 4 } },
+  { color = "ochre", filter = { field = "status", op = "eq", value = "reading" } },
+]
+metrics = [
+  { fn = "count", label = "Books", target = 50 },
+  { fn = "avg", field = "rating", label = "Average rating" },
+]
 ```
+
+### Conditional row colours and metric cards
+
+In **Configure → Views**, choose **Add colour rule** and build its conditions with
+the shared filter editor. Move rules up or down to set precedence: the first
+matching rule wins, and unmatched rows remain uncoloured. Conditions can reference
+fields that are not visible columns. The supported accents are `sepia`,
+`verdigris`, `slate`, `madder`, `ochre`, and `indigo`; arbitrary CSS colours are not
+accepted. Tables show a labelled left-edge marker without replacing selection or
+keyboard-focus styling.
+
+Choose **Add metric** to select an aggregate function, eligible field, and optional
+label. Metrics use the aggregate functions and field restrictions above. They
+cover the entire effective view after membership, saved-view, embed, quick-filter,
+and row-search conditions, before pagination. Grouped tables still show whole-view
+metric cards, independently of each group's aggregates. Standalone and embedded
+tables use the same cards and property number formatting.
+
+An optional `target` must be finite and greater than zero, and the aggregate must
+produce a numeric result. Progress fills stop at their bounds while the displayed
+value remains truthful. Missing results display `—`, not zero, and have no progress
+bar. A real zero stays `0`.
+
+Metric and rule changes remain a draft until **Save**. Property rename previews
+include rule predicates and metric fields. Deleting a referenced property removes
+the whole affected colour rule and affected metrics, rather than broadening a rule
+by dropping only one condition. The existing comment/unknown-field preservation
+guards still apply.
+
+Query responses include an optional `color` on matching rows and a `metrics` array
+of scalar or null values in definition order. Unconfigured presentation fields are
+omitted; metric values do not depend on the loaded row window.
 
 ## Web UI, saved tables, and inline editing
 

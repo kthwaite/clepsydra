@@ -44,6 +44,7 @@ export interface FlatViewProps {
   chrome?: "full" | "compact";
   toolbarActions?: ReactNode;
   rowWindow?: BaseTableWindow;
+  bulk?: BaseTableViewReady["bulk"];
   onCommitCell: (
     row: QueryRow,
     key: string,
@@ -145,6 +146,7 @@ function readyModel(flat: FlatViewProps): BaseTableViewReady {
       onReloadDefinition: flat.onReloadDefinition,
     },
     window: flat.rowWindow,
+    bulk: flat.bulk,
   };
 }
 

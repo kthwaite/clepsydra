@@ -22,9 +22,13 @@ import { ReactEditor } from "slate-react";
 import type {
   BaseEmbedElement,
   GeneratedRegionElement,
+  SearchEmbedElement,
 } from "#/editor/schema/types";
 
-type AtomicBaseElement = BaseEmbedElement | GeneratedRegionElement;
+type AtomicBaseElement =
+  | BaseEmbedElement
+  | GeneratedRegionElement
+  | SearchEmbedElement;
 
 export interface BaseEmbedEntryFocusHandle {
   focusEntry(): boolean;
@@ -201,7 +205,9 @@ export function useBaseEmbedEditingController(
       const [node] = Editor.node(editor, path);
       if (
         !SlateElement.isElement(node) ||
-        (node.type !== "base-embed" && node.type !== "generated-region")
+        (node.type !== "base-embed" &&
+          node.type !== "generated-region" &&
+          node.type !== "search-embed")
       ) {
         return false;
       }
@@ -221,7 +227,9 @@ export function useBaseEmbedEditingController(
         const [node] = Editor.node(editor, path);
         if (
           !SlateElement.isElement(node) ||
-          (node.type !== "base-embed" && node.type !== "generated-region")
+          (node.type !== "base-embed" &&
+            node.type !== "generated-region" &&
+            node.type !== "search-embed")
         )
           return;
         entryFocusHandles.current.get(node)?.focusEdit();

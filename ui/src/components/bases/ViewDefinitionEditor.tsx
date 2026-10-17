@@ -32,6 +32,7 @@ import {
 } from "./ordered-list";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
 import { builtInFieldLabel, effectiveProperties } from "./property-schema";
+import { ViewPresentationEditor } from "./ViewPresentationEditor";
 
 interface FieldCapability {
   key: string;
@@ -700,6 +701,18 @@ export function ViewDefinitionEditor({
               Add aggregate
             </Button>
           </ViewSection>
+
+          <ViewPresentationEditor
+            view={view}
+            viewPath={viewPath}
+            properties={properties}
+            fields={fields}
+            functions={AGGREGATE_FUNCTION_OPTIONS}
+            diagnostics={diagnostics}
+            registerFocus={registerFocus}
+            onChange={onChange}
+            onAnnounceMove={onAnnounceMove}
+          />
 
           <ViewSection
             id={`${view.id}-filter-heading`}

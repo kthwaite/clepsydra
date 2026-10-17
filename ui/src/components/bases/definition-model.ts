@@ -1,7 +1,9 @@
 import type {
   Aggregate,
+  BaseColorRule,
   BaseFile,
   BaseFilter,
+  BaseMetric,
   FilterOp,
   PropertyDefinition,
   PropertyType,
@@ -33,6 +35,8 @@ export interface DraftView {
   sort: SortKey[];
   group_by?: string;
   aggregates: Aggregate[];
+  color_rules?: BaseColorRule[];
+  metrics?: BaseMetric[];
   labels: NonNullable<NonNullable<BaseFile["views"]>[number]["labels"]>;
   columns: string[];
 }
@@ -102,6 +106,12 @@ export function fromWire(detail: BaseFile): BaseDraft {
       aggregates: (view.aggregates ?? []).map((aggregate) => ({
         ...aggregate,
       })),
+      ...(view.color_rules?.length
+        ? { color_rules: structuredClone(view.color_rules) }
+        : {}),
+      ...(view.metrics?.length
+        ? { metrics: structuredClone(view.metrics) }
+        : {}),
       labels: { ...(view.labels ?? {}) },
       columns: [...(view.columns ?? [])],
     })),
@@ -141,6 +151,12 @@ export function toWire(draft: BaseDraft): BaseFile {
       sort: view.sort.map((sort) => ({ ...sort })),
       ...(view.group_by === undefined ? {} : { group_by: view.group_by }),
       aggregates: view.aggregates.map((aggregate) => ({ ...aggregate })),
+      ...(view.color_rules?.length
+        ? { color_rules: structuredClone(view.color_rules) }
+        : {}),
+      ...(view.metrics?.length
+        ? { metrics: structuredClone(view.metrics) }
+        : {}),
       ...(Object.keys(view.labels).length === 0
         ? {}
         : { labels: { ...view.labels } }),
@@ -274,6 +290,29 @@ export function changePropertyReferences(
       if (!item.field) return [item];
       const field = reference(item.field, `${location}: aggregates`);
       return field === undefined ? [] : [{ ...item, field }];
+    });
+    view.color_rules = view.color_rules?.flatMap((rule) => {
+      const referencesProperty = (value: BaseFilter): boolean =>
+        "field" in value
+          ? matches(value.field)
+          : "not" in value
+            ? referencesProperty(value.not)
+            : ("all" in value ? value.all : value.any).some(referencesProperty);
+      if (!referencesProperty(rule.filter)) return [rule];
+      if (nextKey === undefined) {
+        changes.add(`${location}: colour rules (remove entire affected rules)`);
+        return [];
+      }
+      const next = filter(rule.filter, `${location}: colour rules`);
+      return next ? [{ ...rule, filter: next }] : [];
+    });
+    view.metrics = view.metrics?.flatMap((metric) => {
+      if (!metric.field) return [metric];
+      const field = reference(
+        metric.field,
+        `${location}: metrics${nextKey === undefined ? " (remove affected metrics)" : ""}`,
+      );
+      return field === undefined ? [] : [{ ...metric, field }];
     });
     view.labels = Object.fromEntries(
       Object.entries(view.labels).flatMap(([key, label]) => {

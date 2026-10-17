@@ -184,6 +184,106 @@ describe("BaseTableView status", () => {
   });
 });
 
+describe("Base view presentation", () => {
+  it.each(["full", "compact"] as const)(
+    "shows whole-view metric values and colour cues with %s chrome",
+    async (chrome) => {
+      const user = userEvent.setup();
+      const { rerender } = renderView({
+        chrome,
+        bulk: { run: vi.fn() },
+        definition: {
+          ...definition,
+          properties: [
+            {
+              key: "rating",
+              definition: { type: "number", format: "decimal" },
+            },
+          ],
+          views: [
+            {
+              name: "Continues",
+              columns: ["title", "rating"],
+              metrics: [
+                {
+                  fn: "sum",
+                  field: "rating",
+                  label: "Total rating",
+                  target: 10,
+                },
+                { fn: "count", label: "No books" },
+                {
+                  fn: "avg",
+                  field: "rating",
+                  label: "Missing rating",
+                  target: 5,
+                },
+              ],
+            },
+          ],
+        },
+        output: {
+          ...flat,
+          rows: [{ ...row, color: "madder" }],
+          metrics: [25, 0, null],
+        },
+      });
+      const metrics = screen.getByRole("region", { name: "View metrics" });
+      expect(within(metrics).getByText("25.00")).toBeVisible();
+      expect(within(metrics).getByText("0")).toBeVisible();
+      expect(within(metrics).getByText("—")).toBeVisible();
+      const progress = within(metrics).getByRole("progressbar", {
+        name: "Total rating",
+      });
+      expect(progress).toHaveAttribute("aria-valuenow", "10");
+      expect(progress).toHaveAttribute("aria-valuetext", "25.00 of 10.00");
+      expect(
+        within(metrics).queryByRole("progressbar", { name: "Missing rating" }),
+      ).not.toBeInTheDocument();
+      const marker = screen.getByRole("img", { name: "Madder row colour" });
+      expect(marker).toHaveStyle({ backgroundColor: "var(--quire-madder)" });
+      const colouredRow = marker.closest("tr");
+      assert(colouredRow);
+      await user.click(within(colouredRow).getByRole("checkbox"));
+      expect(colouredRow).toHaveAttribute("aria-selected", "true");
+      expect(
+        within(colouredRow).getByRole("button", { name: row.title }),
+      ).toBeEnabled();
+      rerender({
+        output: {
+          shape: "grouped",
+          groups: [
+            {
+              key: "reading",
+              rows: [{ ...row, color: "indigo" }],
+              total: 1,
+              aggregates: [],
+            },
+          ],
+          metrics: [3, 0, null],
+        },
+      });
+      expect(
+        within(screen.getByRole("region", { name: "View metrics" })).getByText(
+          "3.00",
+        ),
+      ).toBeVisible();
+      expect(
+        screen.getByRole("img", { name: "Indigo row colour" }),
+      ).toHaveStyle({ backgroundColor: "var(--quire-indigo)" });
+      rerender({ output: { ...flat, metrics: [null, 0, null] } });
+      expect(
+        screen.queryByRole("img", { name: /row colour/ }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(
+          screen.getByRole("region", { name: "View metrics" }),
+        ).queryByRole("progressbar"),
+      ).not.toBeInTheDocument();
+    },
+  );
+});
+
 describe("BaseTableView compact chrome", () => {
   it("names the Base without claiming a document heading", () => {
     renderView({ chrome: "compact", configureSlug: undefined });

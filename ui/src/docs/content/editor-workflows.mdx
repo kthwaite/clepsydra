@@ -317,6 +317,7 @@ filter the menu, then choose a command with the pointer, `Enter`, or `Tab`.
 | **Time Heading** | Current local time as a section heading |
 | **Date & Time Heading** | Today's date and the current local time as a section heading |
 | **Base embed** | A live saved Base view |
+| **Search embed** | Live, bounded results from a search saved in this note |
 | **Table** | Empty three-column, three-row GFM table |
 | **Heading 1** through **Heading 6** | Markdown heading levels 1–6 |
 | **Bullet list** | Unordered list |
@@ -379,6 +380,19 @@ its document-local overrides. The rendered table stays a live, non-owning view:
 member edits write member pages, while Base/view/filter/sort/limit changes write
 only this Folio block. Missing Base or view references remain repairable in the
 inspector rather than being discarded.
+
+### Embed a saved search
+
+Choose **Search embed** from the slash menu, enter a query and optional result
+limit, then choose **Apply**. The query uses the command palette's search syntax.
+**Cancel** or `Escape` discards a new insertion or leaves an existing search
+unchanged. **Edit search** changes its configuration; **Remove search** removes
+the block, not its result pages.
+
+Results stay live and open their source Folios. Read-only, protected, and offline
+hosts do not offer search configuration changes. See
+[saved-search fences](/docs/links-search-graph-and-repair#save-a-search-inside-a-folio)
+for the portable Markdown format and repair behavior.
 
 ### Give a block an ID and reference it
 

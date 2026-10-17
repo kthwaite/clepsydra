@@ -32,12 +32,14 @@ import {
 import { createTableGrid } from "#/editor/transforms/table";
 import type { CustomEditor } from "#/editor/types";
 import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
+import { useOnlineStatus } from "#/hooks/useOnlineStatus";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { BlockRefCombobox } from "./BlockRefCombobox";
 import {
   BaseEmbedEditingProvider,
   useBaseEmbedEditingController,
 } from "./baseEmbedEditing";
+import { useBaseRendering } from "./baseRendering";
 import { makeDecorateCode } from "./decorate-code";
 import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
@@ -75,6 +77,7 @@ import { SelectionBubbleMenu } from "./SelectionBubbleMenu";
 import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
 import { makeBaseEmbed } from "./schema/elements/baseEmbed";
 import { makeBlockRef } from "./schema/elements/blockRef";
+import { makeSearchEmbed } from "./schema/elements/searchEmbed";
 import { makeWikilink } from "./schema/elements/wikilink";
 import { withSchema } from "./schema/withSchema";
 import {
@@ -143,6 +146,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     id: "base",
     label: "Base embed",
     description: "Insert a live saved Base view",
+  },
+  {
+    id: "search",
+    label: "Search embed",
+    description: "Insert live results from a note-local search",
   },
   {
     id: "table",
@@ -288,6 +296,10 @@ export function SlateEditor({
     },
     [editor],
   );
+  const baseRendering = useBaseRendering();
+  const online = useOnlineStatus();
+  const searchReadOnly =
+    readOnly || baseRendering?.readonly === true || !online;
   const inlineSourceEditing = useInlineSourceEditingController(
     editor,
     INLINE_SOURCE_ADAPTERS,
@@ -525,11 +537,14 @@ export function SlateEditor({
     }
   };
 
-  const slashCommands = SLASH_COMMANDS;
+  const slashCommands = searchReadOnly
+    ? SLASH_COMMANDS.filter((command) => command.id !== "search")
+    : SLASH_COMMANDS;
 
   const executeSlashCommand = useCallback(
     (cmd: SlashCommand) => {
       if (!slashTrigger) return;
+      if (cmd.id === "search" && searchReadOnly) return;
       const { selection } = editor;
       if (!selection) return;
 
@@ -542,9 +557,9 @@ export function SlateEditor({
         return;
       }
 
-      if (cmd.id === "base") {
+      if (cmd.id === "base" || cmd.id === "search") {
         let bookmark: RangeRef | undefined;
-        const node = makeBaseEmbed();
+        const node = cmd.id === "search" ? makeSearchEmbed() : makeBaseEmbed();
         Editor.withoutNormalizing(editor, () => {
           Transforms.delete(editor, {
             at: { anchor: slashTrigger.anchor, focus: selection.focus },
@@ -595,7 +610,7 @@ export function SlateEditor({
       });
       setSlashTrigger(null);
     },
-    [baseEmbedEditing, slashTrigger, editor],
+    [baseEmbedEditing, slashTrigger, editor, searchReadOnly],
   );
 
   const dismissSlash = useCallback(() => {
@@ -634,7 +649,9 @@ export function SlateEditor({
         at: editor.selection,
         match: (node) =>
           SlateElement.isElement(node) &&
-          (node.type === "base-embed" || node.type === "generated-region"),
+          (node.type === "base-embed" ||
+            node.type === "generated-region" ||
+            node.type === "search-embed"),
         mode: "lowest",
         voids: true,
       });
@@ -656,7 +673,9 @@ export function SlateEditor({
         at: editor.selection,
         match: (node) =>
           SlateElement.isElement(node) &&
-          (node.type === "base-embed" || node.type === "generated-region"),
+          (node.type === "base-embed" ||
+            node.type === "generated-region" ||
+            node.type === "search-embed"),
         mode: "lowest",
         voids: true,
       });
@@ -665,6 +684,12 @@ export function SlateEditor({
       }
       if (selectedBase) {
         event.preventDefault();
+        if (
+          SlateElement.isElement(selectedBase[0]) &&
+          selectedBase[0].type === "search-embed" &&
+          searchReadOnly
+        )
+          return;
         baseEmbedEditing.remove(selectedBase[1], selectedBase[0]);
         return;
       }

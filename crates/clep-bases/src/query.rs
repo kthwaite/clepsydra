@@ -15,8 +15,9 @@ use rusqlite::Connection;
 use thiserror::Error;
 
 use crate::base::{
-    Aggregate, AggregateFn, BODY_COLUMN, BaseDefinition, Filter, Op, PropertyType, SortDir,
-    SortKey, builtin_property, is_body_field_reference, relative_date_window,
+    Aggregate, AggregateFn, BODY_COLUMN, BaseDefinition, ColorRule, Filter, MetricDefinition, Op,
+    PropertyType, RowColor, SortDir, SortKey, builtin_property, is_body_field_reference,
+    relative_date_window,
 };
 use clep_vault::canonical::CanonicalName;
 use clep_vault::link::normalize_links_to_target;
@@ -905,6 +906,8 @@ pub struct QuerySpec {
     pub sort: Vec<SortKey>,
     pub group_by: Option<String>,
     pub aggregates: Vec<Aggregate>,
+    pub color_rules: Vec<ColorRule>,
+    pub metrics: Vec<MetricDefinition>,
     /// Property keys (or system fields) to materialize as row columns.
     pub columns: Vec<String>,
     pub limit: Option<u32>,
@@ -923,6 +926,8 @@ pub struct QueryRow {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<RowColor>,
     #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     pub columns: serde_json::Map<String, serde_json::Value>,
 }
@@ -957,11 +962,17 @@ pub enum QueryOutput {
         /// over the whole predicate (unaffected by `limit`/`offset`).
         #[schema(value_type = Vec<serde_json::Value>)]
         aggregates: Vec<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[schema(value_type = Vec<serde_json::Value>)]
+        metrics: Vec<serde_json::Value>,
     },
     Grouped {
         groups: Vec<GroupResult>,
         #[serde(skip_serializing_if = "Option::is_none")]
         unfiltered_total: Option<i64>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[schema(value_type = Vec<serde_json::Value>)]
+        metrics: Vec<serde_json::Value>,
     },
 }
 
@@ -974,6 +985,8 @@ struct PreparedQuery {
     /// Params bound inside ORDER BY (relation-sort correlated subqueries);
     /// placeholders bind in textual order, so these come last.
     order_params: Vec<SqlValue>,
+    color_expression: Option<String>,
+    color_params: Vec<SqlValue>,
 }
 
 fn search_clause(
@@ -1130,6 +1143,18 @@ fn prepare(spec: &QuerySpec, ctx: &QueryContext) -> Result<PreparedQuery, QueryE
         format!("{}, p.path ASC", order_exprs.join(", "))
     };
 
+    let mut color_expression = None;
+    let mut color_params = Vec::new();
+    if !spec.color_rules.is_empty() {
+        let mut expression = String::from("CASE");
+        for (index, rule) in spec.color_rules.iter().enumerate() {
+            let compiled = compile_filter(&rule.filter, ctx)?;
+            expression.push_str(&format!(" WHEN ({}) THEN {index}", compiled.clause));
+            color_params.extend(compiled.params);
+        }
+        expression.push_str(" ELSE NULL END");
+        color_expression = Some(expression);
+    }
     Ok(PreparedQuery {
         where_clause,
         where_params,
@@ -1137,6 +1162,8 @@ fn prepare(spec: &QuerySpec, ctx: &QueryContext) -> Result<PreparedQuery, QueryE
         join_params,
         order_clause,
         order_params,
+        color_expression,
+        color_params,
     })
 }
 
@@ -1146,8 +1173,13 @@ pub fn evaluate(
     spec: &QuerySpec,
     ctx: &QueryContext,
 ) -> Result<QueryOutput, QueryError> {
-    for aggregate in &spec.aggregates {
-        if let Some(field) = aggregate.field.as_deref()
+    for field in spec
+        .aggregates
+        .iter()
+        .map(|aggregate| aggregate.field.as_deref())
+        .chain(spec.metrics.iter().map(|metric| metric.field.as_deref()))
+    {
+        if let Some(field) = field
             && matches!(
                 resolve_field(field, ctx),
                 Err(QueryError::ProjectionOnlyBody)
@@ -1168,8 +1200,34 @@ fn evaluate_flat(
     ctx: &QueryContext,
 ) -> Result<QueryOutput, QueryError> {
     let prepared = prepare(spec, ctx)?;
-    let plan = plan_aggregates(spec, ctx)?;
+    let plan = plan_aggregates(
+        spec.aggregates
+            .iter()
+            .map(|agg| (agg.function, agg.field.as_deref()))
+            .chain(
+                spec.metrics
+                    .iter()
+                    .map(|metric| (metric.function, metric.field.as_deref())),
+            ),
+        ctx,
+    )?;
+    let (total, mut aggregates) = whole_view_aggregates(conn, &prepared, &plan)?;
+    let metrics = aggregates.split_off(spec.aggregates.len());
+    let rows = fetch_rows(conn, spec, ctx, &prepared, None, spec.limit, spec.offset)?;
+    Ok(QueryOutput::Flat {
+        rows,
+        total,
+        unfiltered_total: unfiltered_total(conn, spec, ctx)?,
+        aggregates,
+        metrics,
+    })
+}
 
+fn whole_view_aggregates(
+    conn: &Connection,
+    prepared: &PreparedQuery,
+    plan: &AggregatePlan,
+) -> Result<(i64, Vec<serde_json::Value>), QueryError> {
     // Header query: total row count plus every non-median aggregate, all
     // computed over the whole predicate (`limit`/`offset` apply only to the
     // row fetch below).
@@ -1192,22 +1250,16 @@ fn evaluate_flat(
         rusqlite::params_from_iter(header_params.iter()),
         |row| {
             let total: i64 = row.get(0)?;
-            let aggregates = read_aggregate_values(row, &plan, 1)?;
+            let aggregates = read_aggregate_values(row, plan, 1)?;
             Ok((total, aggregates))
         },
     )?;
 
     for median in &plan.medians {
-        aggregates[median.index] = median_value(conn, &prepared, median, None)?;
+        aggregates[median.index] = median_value(conn, prepared, median, None)?;
     }
 
-    let rows = fetch_rows(conn, spec, ctx, &prepared, None, spec.limit, spec.offset)?;
-    Ok(QueryOutput::Flat {
-        rows,
-        total,
-        unfiltered_total: unfiltered_total(conn, spec, ctx)?,
-        aggregates,
-    })
+    Ok((total, aggregates))
 }
 
 fn evaluate_grouped(
@@ -1238,7 +1290,23 @@ fn evaluate_grouped(
     };
 
     let prepared = prepare(spec, ctx)?;
-    let plan = plan_aggregates(spec, ctx)?;
+    let plan = plan_aggregates(
+        spec.aggregates
+            .iter()
+            .map(|agg| (agg.function, agg.field.as_deref())),
+        ctx,
+    )?;
+    let metrics = if spec.metrics.is_empty() {
+        Vec::new()
+    } else {
+        let metric_plan = plan_aggregates(
+            spec.metrics
+                .iter()
+                .map(|metric| (metric.function, metric.field.as_deref())),
+            ctx,
+        )?;
+        whole_view_aggregates(conn, &prepared, &metric_plan)?.1
+    };
 
     // The grouped header query: key, total, aggregates.
     let (group_expr, group_join, group_join_param) = group_column.sql();
@@ -1324,6 +1392,7 @@ fn evaluate_grouped(
     Ok(QueryOutput::Grouped {
         groups,
         unfiltered_total: unfiltered_total(conn, spec, ctx)?,
+        metrics,
     })
 }
 
@@ -1397,25 +1466,55 @@ struct MedianPlan {
     numeric: bool,
 }
 
+pub(crate) fn validate_metric(metric: &MetricDefinition, ctx: &QueryContext) -> Result<(), String> {
+    if let Some(field) = metric.field.as_deref() {
+        resolve_field(field, ctx).map_err(|error| error.to_string())?;
+    }
+    plan_aggregates([(metric.function, metric.field.as_deref())], ctx)
+        .map_err(|error| error.to_string())?;
+    if let Some(target) = metric.target {
+        if !target.is_finite() || target <= 0.0 {
+            return Err("metric target must be finite and greater than zero".into());
+        }
+        if matches!(
+            metric.function,
+            AggregateFn::Min | AggregateFn::Max | AggregateFn::Median
+        ) {
+            let numeric = match resolve_field(metric.field.as_deref().unwrap_or_default(), ctx)
+                .map_err(|error| error.to_string())?
+            {
+                ResolvedField::Prop { ty, .. } => ty == PropertyType::Number,
+                ResolvedField::Sys(sys) => sys.property_type() == PropertyType::Number,
+            };
+            if !numeric {
+                return Err("metric target requires a numeric aggregate result".into());
+            }
+        }
+    }
+    Ok(())
+}
+
 enum AggregateTarget {
     Property { key: String, ty: PropertyType },
     System(&'static str, PropertyType),
 }
 
-fn plan_aggregates(spec: &QuerySpec, ctx: &QueryContext) -> Result<AggregatePlan, QueryError> {
+fn plan_aggregates<'a>(
+    aggregates: impl IntoIterator<Item = (AggregateFn, Option<&'a str>)>,
+    ctx: &QueryContext,
+) -> Result<AggregatePlan, QueryError> {
     let mut plan = AggregatePlan {
         exprs: Vec::new(),
         joins: String::new(),
         params: Vec::new(),
         medians: Vec::new(),
     };
-    for (i, agg) in spec.aggregates.iter().enumerate() {
-        let function = agg.function;
+    for (i, (function, field)) in aggregates.into_iter().enumerate() {
         if !function.requires_field() {
             plan.exprs.push(Some("COUNT(*)".to_string()));
             continue;
         }
-        let Some(field) = agg.field.as_deref() else {
+        let Some(field) = field else {
             return Err(QueryError::InvalidAggregate(function));
         };
         let target = match resolve_field(field, ctx)? {
@@ -1763,6 +1862,11 @@ fn fetch_rows(
             }
         }
     }
+    if let Some(expression) = &prepared.color_expression {
+        select_cols.push_str(", ");
+        select_cols.push_str(expression);
+        column_params.extend(prepared.color_params.iter().cloned());
+    }
 
     // Group restriction, shared with `median_value`.
     let (group_join, group_join_params, group_clause, group_params) = group_predicate(group);
@@ -1839,6 +1943,12 @@ fn fetch_rows(
             title: row.get(2)?,
             kind: row.get(3)?,
             project: row.get(4)?,
+            color: if prepared.color_expression.is_some() {
+                row.get::<_, Option<usize>>(n_fixed + appended_columns.len())?
+                    .map(|index| spec.color_rules[index].color)
+            } else {
+                None
+            },
             columns,
         })
     })?;
@@ -2348,6 +2458,7 @@ moment  = { type = "datetime" }
             total,
             unfiltered_total,
             aggregates,
+            ..
         } = evaluate(
             index.connection(),
             &spec,
@@ -2535,6 +2646,7 @@ moment  = { type = "datetime" }
             total,
             unfiltered_total,
             aggregates,
+            ..
         } = output
         else {
             panic!("expected flat output");
@@ -2553,6 +2665,7 @@ moment  = { type = "datetime" }
         let QueryOutput::Grouped {
             groups,
             unfiltered_total,
+            ..
         } = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
         else {
             panic!("grouped")
@@ -4253,6 +4366,8 @@ started = { type = "date" }
                 agg(AggregateFn::Range, Some("started")),
                 agg(AggregateFn::Sum, Some("rating")),
             ],
+            color_rules: Vec::new(),
+            metrics: Vec::new(),
             columns: vec![],
             limit: Some(2),
             offset: 1,

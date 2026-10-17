@@ -92,6 +92,8 @@ pub fn composed_query_spec(
             None => view.group_by.clone(),
         },
         aggregates: view.aggregates.clone(),
+        color_rules: view.color_rules.clone(),
+        metrics: view.metrics.clone(),
         columns: view.columns.clone(),
         limit,
         offset: 0,
@@ -653,6 +655,8 @@ mod tests {
 
     fn view() -> ViewDefinition {
         ViewDefinition {
+            color_rules: Vec::new(),
+            metrics: Vec::new(),
             name: "Continues".into(),
             labels: Default::default(),
             layout: "table".into(),

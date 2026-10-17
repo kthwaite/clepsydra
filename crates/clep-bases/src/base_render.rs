@@ -105,6 +105,8 @@ pub fn render_base(
     let stored = base_document::load(root, &selection.base)?;
     let base = &stored.definition;
     let empty_view = ViewDefinition {
+        color_rules: Vec::new(),
+        metrics: Vec::new(),
         name: String::new(),
         labels: BTreeMap::new(),
         layout: "table".into(),
@@ -149,6 +151,8 @@ pub fn render_base(
     spec.limit = Some(selection.limit.unwrap_or(MAX_ROWS + 1));
     spec.columns.clear();
     spec.aggregates.clear();
+    spec.color_rules.clear();
+    spec.metrics.clear();
     let query_context = QueryContext::for_base(base).with_today(today);
     let QueryOutput::Flat {
         rows: identities, ..

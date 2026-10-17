@@ -1,5 +1,9 @@
 import type { BaseDetailResponse, PropertyDefinition } from "#/api/bases";
-import { type BaseDraft, canSort } from "./definition-model";
+import {
+  aggregateFunctions,
+  type BaseDraft,
+  canSort,
+} from "./definition-model";
 import { validateFilterDraft } from "./filter-diagnostics";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
 import { effectiveProperties, propertyKey } from "./property-schema";
@@ -291,6 +295,62 @@ export function validateBaseDraftStructure(
     diagnostics.push(
       ...validateFilterDraft(view.filter, slug, `views[${index}].filter`),
     );
+    for (const [ruleIndex, rule] of (view.color_rules ?? []).entries()) {
+      diagnostics.push(
+        ...validateFilterDraft(
+          rule.filter,
+          slug,
+          `views[${index}].color_rules[${ruleIndex}].filter`,
+        ),
+      );
+    }
+    for (const [metricIndex, metric] of (view.metrics ?? []).entries()) {
+      const path = `views[${index}].metrics[${metricIndex}]`;
+      const identity = metric.field
+        ? presentationFieldIdentity(metric.field)
+        : undefined;
+      const system = identity?.startsWith("system:")
+        ? identity.slice(7)
+        : undefined;
+      const type = system
+        ? system === "word_count"
+          ? "word_count"
+          : system === "tags" || system === "aliases"
+            ? "system-multi"
+            : system === "journal_date"
+              ? "date"
+              : "text"
+        : metric.field
+          ? propertyTypes.get(propertyKey(metric.field))
+          : undefined;
+      if (metric.fn !== "count" && !metric.field) {
+        error(`${path}.field`, "Choose a field for this metric.");
+      } else if (!aggregateFunctions(type).includes(metric.fn)) {
+        error(
+          `${path}.field`,
+          "This metric function is not available for the selected field.",
+        );
+      }
+      if (metric.label != null && !metric.label.trim()) {
+        error(`${path}.label`, "Metric label must not be empty.");
+      }
+      if (metric.target != null) {
+        if (!Number.isFinite(metric.target) || metric.target <= 0) {
+          error(
+            `${path}.target`,
+            "Metric target must be a finite number greater than zero.",
+          );
+        } else if (
+          (metric.fn === "min" ||
+            metric.fn === "max" ||
+            metric.fn === "median") &&
+          type !== "number" &&
+          type !== "word_count"
+        ) {
+          error(`${path}.target`, "Targets require a numeric metric result.");
+        }
+      }
+    }
     if (view.name.trim().length === 0) {
       diagnostics.push({
         slug,

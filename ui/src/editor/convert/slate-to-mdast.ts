@@ -26,6 +26,7 @@ import type {
   FolioMathMdast,
   WikiLinkMdast,
 } from "./mdastTypes";
+import { searchFenceToMarkdown } from "./searchEmbedMarkdown";
 
 // ---------------------------------------------------------------------------
 // toMarkdown extension for wikilinks
@@ -432,12 +433,16 @@ function withoutAtomicTrailingSentinel(nodes: Descendant[]): Descendant[] {
   const sentinel = nodes[nodes.length - 1];
   if (
     SlateText.isText(base) ||
-    (base.type !== "base-embed" && base.type !== "generated-region") ||
+    (base.type !== "base-embed" &&
+      base.type !== "generated-region" &&
+      base.type !== "search-embed") ||
     SlateText.isText(sentinel) ||
     sentinel.type !== "paragraph" ||
     (base.type === "base-embed"
       ? sentinel.baseEmbedTrailingSentinel !== true
-      : sentinel.generatedRegionTrailingSentinel !== true) ||
+      : base.type === "search-embed"
+        ? sentinel.searchEmbedTrailingSentinel !== true
+        : sentinel.generatedRegionTrailingSentinel !== true) ||
     Object.keys(sentinel).length !== 3 ||
     sentinel.children.length !== 1
   ) {
@@ -472,6 +477,7 @@ export function slateToMdast(nodes: Descendant[]): string {
     rule: "-",
     extensions: [
       baseFenceToMarkdown(),
+      searchFenceToMarkdown(),
       generatedRegionToMarkdown(),
       folioMathToMarkdown(),
       gfmToMarkdownWithEmptyTasks(),
@@ -482,9 +488,12 @@ export function slateToMdast(nodes: Descendant[]): string {
   const last = root.children.at(-1) as unknown as
     | BaseFenceMdast
     | { type: "generatedRegion"; rawBlock: string }
+    | { type: "searchFence"; rawBlock: string }
     | undefined;
   if (
-    (last?.type === "baseFence" || last?.type === "generatedRegion") &&
+    (last?.type === "baseFence" ||
+      last?.type === "generatedRegion" ||
+      last?.type === "searchFence") &&
     !/[\r\n]$/.test(last.rawBlock)
   ) {
     return markdown.slice(0, -1);

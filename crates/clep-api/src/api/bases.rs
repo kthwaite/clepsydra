@@ -1017,6 +1017,8 @@ mod tests {
                         sort: Vec::new(),
                         group_by: None,
                         aggregates: Vec::new(),
+                        color_rules: Vec::new(),
+                        metrics: Vec::new(),
                         columns: vec!["title".to_string()],
                     }],
                 },
@@ -1063,11 +1065,13 @@ mod tests {
                         title: Some(base.file.name.clone()),
                         kind: "NOTE".to_string(),
                         project: None,
+                        color: None,
                         columns: serde_json::Map::new(),
                     }],
                     total: 1,
                     unfiltered_total: None,
                     aggregates: Vec::new(),
+                    metrics: Vec::new(),
                 })
             },
         )

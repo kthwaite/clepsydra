@@ -18,6 +18,7 @@ import {
 } from "./elements/list";
 import { inlineMathDescriptor, mathBlockDescriptor } from "./elements/math";
 import { paragraphDescriptor } from "./elements/paragraph";
+import { searchEmbedDescriptor } from "./elements/searchEmbed";
 import {
   tableCellDescriptor,
   tableDescriptor,
@@ -50,6 +51,7 @@ const ALL: ElementDescriptor[] = [
   tableRowDescriptor,
   tableCellDescriptor,
   baseEmbedDescriptor,
+  searchEmbedDescriptor,
   generatedRegionDescriptor,
 ];
 

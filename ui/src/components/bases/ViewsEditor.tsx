@@ -68,6 +68,14 @@ function hasSpecificDiagnosticControl(
   if (sort) return Number(sort[1]) < view.sort.length;
   const aggregate = path.match(/^views\[\d+\]\.aggregates\[(\d+)\]/);
   if (aggregate) return Number(aggregate[1]) < view.aggregates.length;
+  const presentation = path.match(
+    /^views\[\d+\]\.(color_rules|metrics)\[(\d+)\]/,
+  );
+  if (presentation) {
+    const items =
+      presentation[1] === "color_rules" ? view.color_rules : view.metrics;
+    return Number(presentation[2]) < (items?.length ?? 0);
+  }
   if (path.startsWith(`${prefix}.labels.`)) {
     return Object.hasOwn(view.labels, path.slice(`${prefix}.labels.`.length));
   }
@@ -176,7 +184,8 @@ export function ViewsEditor({
           </h2>
           <p className="mt-1.5 pl-[17px] text-[14px] leading-normal text-mute">
             Each saved view owns its table columns, sort order, grouping,
-            aggregates, and an additional membership filter.
+            aggregates, row colours, metrics, and an additional membership
+            filter.
           </p>
         </div>
         <Button variant="primary" onPress={add}>

@@ -82,6 +82,8 @@ impl QueryRequest {
                 sort,
                 group_by,
                 aggregates,
+                color_rules: Vec::new(),
+                metrics: Vec::new(),
                 columns,
                 limit,
                 offset,

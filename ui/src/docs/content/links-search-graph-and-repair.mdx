@@ -171,6 +171,34 @@ Full-text search is distinct from wikilink and block search. The `[[` suggestion
 menu filters the page catalogue by title, canonical name, and path. Block search
 is described in [Block References and Transclusion](/docs/block-references-and-transclusion).
 
+## Save a search inside a Folio
+
+Use **Search embed** in the slash menu, or write a fenced `search` block:
+
+````markdown
+```search
+query = "kind:meeting tag:1:1"
+limit = 20
+```
+````
+
+The definition belongs to the note; there is no separate named-search registry.
+`query` must be a nonblank string. `limit` is optional, defaults to 20, and accepts
+whole numbers from 1 through 200. These are the only supported options.
+
+The block uses the same search endpoint, ranking, syntax errors, and protected-page
+privacy rules described above. It shows page links with plain-text snippets, or
+paths when snippets are absent; it never recursively embeds result pages.
+The status reports results returned and the configured limit, not a total match
+count. Vault changes refresh the results without changing the stored fence.
+
+Configuration is buffered until **Apply**. **Cancel** preserves the previous
+definition. Malformed TOML, unknown options, and unknown fence metadata remain
+recoverable rather than being discarded: **Repair search** opens the source, and
+only applying a valid repair replaces it. Searches remain readable on read-only
+or protected hosts, but cannot be configured or removed there. Offline blocks
+explain that results are unavailable and refresh after reconnecting.
+
 ## Manage and rename tags
 
 Choose **Manage tags** in the Gazetteer on desktop or mobile. Search the tag

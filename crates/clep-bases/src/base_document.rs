@@ -1066,19 +1066,19 @@ fn merge_value(
         (Value::Array(raw), Value::Array(current), Value::Array(desired)) => {
             merge_array(raw, current, desired, path)
         }
-        (raw, current, desired)
-            if same_value_shape(raw, current) && same_value_shape(current, desired) =>
-        {
+        (raw, current, desired) => {
+            if !same_value_shape(raw, current) || !same_value_shape(current, desired) {
+                // A managed value may change type (for example, a reordered
+                // colour predicate). Replace it only when no source-only
+                // content or comments would be discarded.
+                ensure_value_removable(raw, current, path)?;
+            }
             let decor = raw.decor().clone();
             let mut replacement = desired.clone();
             *replacement.decor_mut() = decor;
             *raw = replacement;
             Ok(())
         }
-        _ => Err(unsupported(
-            path,
-            "the current value syntax does not match the managed value shape",
-        )),
     }
 }
 
@@ -1482,6 +1482,8 @@ fn same_value_shape(left: &Value, right: &Value) -> bool {
         (Value::String(_), Value::String(_))
             | (Value::Integer(_), Value::Integer(_))
             | (Value::Float(_), Value::Float(_))
+            | (Value::Integer(_), Value::Float(_))
+            | (Value::Float(_), Value::Integer(_))
             | (Value::Boolean(_), Value::Boolean(_))
             | (Value::Datetime(_), Value::Datetime(_))
             | (Value::Array(_), Value::Array(_))

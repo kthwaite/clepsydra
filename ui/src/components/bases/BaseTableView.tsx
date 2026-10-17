@@ -38,6 +38,7 @@ import { BaseBulkActions } from "./BaseBulkActions";
 import { BaseCsvActions } from "./BaseCsvActions";
 import { BaseHeaderMenu } from "./BaseHeaderMenu";
 import { BaseMemberDraft } from "./BaseMemberDraft";
+import { BaseMetrics, formatAggregateValue, rowColor } from "./BaseMetrics";
 import {
   FilterPicker,
   GroupPicker,
@@ -59,7 +60,6 @@ import type {
   BaseTableViewModel,
   BaseTableViewReady,
 } from "./base-table-model";
-import { formatNumber } from "./cells/NumberDisplay";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { columnWidthsKey } from "./column-widths";
 import { canGroup, canSort, GROUPABLE_SYSTEM_FIELDS } from "./definition-model";
@@ -189,21 +189,11 @@ function AggregateChips({
         const aggregate = definition.views?.find(
           (view) => asciiCaseFold(view.name) === asciiCaseFold(viewName),
         )?.aggregates?.[index];
-        const property = aggregate?.field
-          ? definition.properties?.find(
-              (entry) =>
-                propertyKey(entry.key) === propertyKey(aggregate.field ?? ""),
-            )?.definition
-          : undefined;
-        const formatted =
-          aggregate?.fn === "percent_filled" && typeof value === "number"
-            ? `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`
-            : typeof value === "number" &&
-                property?.type === "number" &&
-                aggregate &&
-                !aggregate.fn.startsWith("count")
-              ? formatNumber(value, property)
-              : formatCellValue(value as CellValue);
+        const formatted = formatAggregateValue(
+          value,
+          aggregate,
+          definition.properties,
+        );
         return (
           <span
             key={aggregateRow?.id ?? `aggregate-${index}`}
@@ -1092,10 +1082,21 @@ const ReadyBaseTableView = forwardRef<
 
   const cellFor = (rows: QueryRow[], row: QueryRow, column: string) => {
     const property = properties.get(propertyKey(column));
+    const color =
+      column === firstVisibleColumn ? rowColor(row.color) : undefined;
     return (
       // One menu serves the row; each cell forwards its context events to
       // the `⋯` button that owns it.
       <div className="flex min-w-0 items-center">
+        {color ? (
+          <span
+            role="img"
+            aria-label={`${color.label} row colour`}
+            title={`${color.label} row colour`}
+            className="pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-full"
+            style={{ backgroundColor: color.token }}
+          />
+        ) : null}
         <CellContextTrigger
           row={row}
           column={column}
@@ -1185,7 +1186,7 @@ const ReadyBaseTableView = forwardRef<
         sortable: columnAllowsSorting(column),
         rowHeader: column === firstVisibleColumn,
         cellClassName:
-          "align-middle first:rounded-l-[10px] last:rounded-r-[10px]",
+          "relative align-middle first:rounded-l-[10px] last:rounded-r-[10px]",
       };
     });
 
@@ -1772,6 +1773,13 @@ const ReadyBaseTableView = forwardRef<
         >
           {capStatus}
         </p>
+      ) : null}
+      {output && view?.metrics?.length ? (
+        <BaseMetrics
+          definitions={view.metrics}
+          values={output.metrics ?? []}
+          properties={definition.properties}
+        />
       ) : null}
       {emptyResult ? (
         <p

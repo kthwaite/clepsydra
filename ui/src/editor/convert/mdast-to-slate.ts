@@ -28,6 +28,7 @@ import { remarkFolioMath } from "#/lib/markdown/folioMath";
 import { baseEmbedFromCode } from "./baseEmbedMarkdown";
 import { generatedRegionBlocks } from "./generatedRegionMarkdown";
 import type { FolioInlineMathMdast, FolioMathMdast } from "./mdastTypes";
+import { searchEmbedFromCode } from "./searchEmbedMarkdown";
 
 // Re-export for the barrel
 export type { Descendant };
@@ -230,6 +231,8 @@ function convertBlockNode(
     case "code": {
       const baseEmbed = baseEmbedFromCode(node, source);
       if (baseEmbed) return baseEmbed;
+      const searchEmbed = searchEmbedFromCode(node, source);
+      if (searchEmbed) return searchEmbed;
       const blockIdMatch = CODE_BLOCK_ID_RE.exec(node.value);
       return {
         type: "code-block",

@@ -435,6 +435,36 @@ pub struct PreviewFieldDefinition {
     pub label: Option<String>,
 }
 
+/// A theme-owned row accent, never arbitrary CSS.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RowColor {
+    Sepia,
+    Verdigris,
+    Slate,
+    Madder,
+    Ochre,
+    Indigo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ColorRule {
+    pub filter: Filter,
+    pub color: RowColor,
+}
+
+/// A whole-view aggregate, optionally presented against a numeric target.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MetricDefinition {
+    #[serde(rename = "fn")]
+    pub function: AggregateFn,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<f64>,
+}
 /// A saved view: layout, optional extra filter, sort, grouping, columns.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ViewDefinition {
@@ -452,6 +482,10 @@ pub struct ViewDefinition {
     pub group_by: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aggregates: Vec<Aggregate>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub color_rules: Vec<ColorRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metrics: Vec<MetricDefinition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub columns: Vec<String>,
 }
@@ -1730,6 +1764,35 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                 &mut push,
             );
         }
+        for (rule_index, rule) in view.color_rules.iter().enumerate() {
+            let path = format!("views[{view_index}].color_rules[{rule_index}].filter");
+            validate_filter(base, &rule.filter, &path, "color rule", &mut push);
+            if let Err(error) = crate::query::compile_filter(
+                &rule.filter,
+                &crate::query::QueryContext::for_base(base),
+            ) {
+                push(BaseDiagnosticSeverity::Error, Some(path), error.to_string());
+            }
+        }
+        for (metric_index, metric) in view.metrics.iter().enumerate() {
+            let path = format!("views[{view_index}].metrics[{metric_index}]");
+            if metric
+                .label
+                .as_deref()
+                .is_some_and(|label| label.trim().is_empty())
+            {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    Some(format!("{path}.label")),
+                    "metric label must not be empty".into(),
+                );
+            }
+            if let Err(error) =
+                crate::query::validate_metric(metric, &crate::query::QueryContext::for_base(base))
+            {
+                push(BaseDiagnosticSeverity::Error, Some(path), error);
+            }
+        }
         for (sort_index, sort) in view.sort.iter().enumerate() {
             validate_sort_field(
                 base,
@@ -2222,6 +2285,8 @@ name = "All"
             views: names
                 .into_iter()
                 .map(|name| ViewDefinition {
+                    color_rules: Vec::new(),
+                    metrics: Vec::new(),
                     name: name.to_string(),
                     layout: default_layout(),
                     labels: BTreeMap::new(),

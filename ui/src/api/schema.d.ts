@@ -2692,6 +2692,10 @@ export interface components {
         CaptureRequest: {
             content: string;
         };
+        ColorRule: {
+            color: components["schemas"]["RowColor"];
+            filter: components["schemas"]["Filter"];
+        };
         /** @description A Conflict Copy and its original, side by side. */
         ConflictCompareDto: {
             copy_path: string;
@@ -3240,6 +3244,14 @@ export interface components {
             /** Format: int64 */
             marked: number;
         };
+        /** @description A whole-view aggregate, optionally presented against a numeric target. */
+        MetricDefinition: {
+            field?: string | null;
+            fn: components["schemas"]["AggregateFn"];
+            label?: string | null;
+            /** Format: double */
+            target?: number | null;
+        };
         MoveFolderRequest: {
             destination: string;
         };
@@ -3588,6 +3600,7 @@ export interface components {
              *     over the whole predicate (unaffected by `limit`/`offset`).
              */
             aggregates: unknown[];
+            metrics?: unknown[];
             rows: components["schemas"]["QueryRow"][];
             /** @enum {string} */
             shape: "flat";
@@ -3597,6 +3610,7 @@ export interface components {
             unfiltered_total?: number | null;
         } | {
             groups: components["schemas"]["GroupResult"][];
+            metrics?: unknown[];
             /** @enum {string} */
             shape: "grouped";
             /** Format: int64 */
@@ -3625,6 +3639,7 @@ export interface components {
          *     frontmatter order).
          */
         QueryRow: {
+            color?: null | components["schemas"]["RowColor"];
             columns: {
                 [key: string]: unknown;
             };
@@ -3738,6 +3753,11 @@ export interface components {
             expected_revision: string;
             wrapped_identity: string;
         };
+        /**
+         * @description A theme-owned row accent, never arbitrary CSS.
+         * @enum {string}
+         */
+        RowColor: "sepia" | "verdigris" | "slate" | "madder" | "ochre" | "indigo";
         RowTemplate: {
             body?: string | null;
             fields?: {
@@ -4113,6 +4133,7 @@ export interface components {
         /** @description A saved view: layout, optional extra filter, sort, grouping, columns. */
         ViewDefinition: {
             aggregates?: components["schemas"]["Aggregate"][];
+            color_rules?: components["schemas"]["ColorRule"][];
             columns?: string[];
             filter?: null | components["schemas"]["Filter"];
             group_by?: string | null;
@@ -4121,6 +4142,7 @@ export interface components {
                 [key: string]: string;
             };
             layout?: string;
+            metrics?: components["schemas"]["MetricDefinition"][];
             name: string;
             sort?: components["schemas"]["SortKey"][];
         };

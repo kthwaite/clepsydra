@@ -14,6 +14,7 @@ export interface ParagraphElement {
   baseEmbedTrailingSentinel?: true;
   /** Editor-only caret escape synthesized after a terminal generated region. */
   generatedRegionTrailingSentinel?: true;
+  searchEmbedTrailingSentinel?: true;
   properties?: Record<string, string>;
   children: Descendant[];
 }
@@ -226,6 +227,15 @@ export type GeneratedRegionElement =
   | ValidGeneratedRegionElement
   | InvalidGeneratedRegionElement;
 
+export type SearchEmbedElement = {
+  type: "search-embed";
+  children: [{ text: "" }];
+} & (
+  | { status: "unconfigured" }
+  | { status: "configured"; query: string; limit?: number; rawBlock?: string }
+  | { status: "invalid"; rawBlock: string; source: string; parseError: string }
+);
+
 export type CustomElement =
   | ParagraphElement
   | HeadingElement
@@ -249,6 +259,7 @@ export type CustomElement =
   | TableRowElement
   | TableCellElement
   | BaseEmbedElement
+  | SearchEmbedElement
   | GeneratedRegionElement;
 
 export type ElementType = CustomElement["type"];
