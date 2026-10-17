@@ -554,7 +554,20 @@ export function Folio({ tabId, path }: FolioProps) {
   // title, not in the META rail: they are content, not sidebar metadata.
   const HeaderExtras = presentation.headerExtras;
   const headerExtras = HeaderExtras ? (
-    <HeaderExtras path={path} tabId={tabId} isDraft={editor.isDraft} />
+    <HeaderExtras
+      path={path}
+      tabId={tabId}
+      isDraft={editor.isDraft}
+      pageId={editor.pageId ?? undefined}
+      readOnly={
+        (folioReadOnly && !editor.generatedChangePending) ||
+        editor.offline === true ||
+        encrypted ||
+        locked
+      }
+      beginMetadataChange={editor.beginGeneratedChange}
+      onMoved={followMove}
+    />
   ) : null;
 
   const document = (
@@ -770,7 +783,7 @@ export function Folio({ tabId, path }: FolioProps) {
           )}
         </Prop>
         <Prop k="Project">
-          {folioReadOnly || isJournalKind ? (
+          {folioReadOnly || isJournalKind || kind === "TASK" ? (
             <span
               title={
                 isJournalKind

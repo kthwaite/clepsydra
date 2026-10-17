@@ -2,6 +2,8 @@ import type { ComponentType } from "react";
 import { AiJournalMeta, JournalMeta } from "#/components/codex/JournalMeta";
 import { MeetingMeta } from "#/components/codex/MeetingMeta";
 import { PersonMeta } from "#/components/codex/PersonMeta";
+import { TaskMeta } from "#/components/codex/TaskMeta";
+import type { PageEditorState } from "#/editor/usePageEditor";
 import { aiJournalDayLabel, journalDayLabel } from "#/lib/journal";
 import type { Kind } from "#/lib/kind";
 
@@ -12,6 +14,10 @@ export type KindMetaExtrasProps = {
   tabId: string;
   /** True while the editor drafts a not-yet-created page (today's journal). */
   isDraft: boolean;
+  pageId?: string;
+  readOnly?: boolean;
+  beginMetadataChange?: PageEditorState["beginGeneratedChange"];
+  onMoved?: (page: { path: string }) => void;
 };
 
 /** What a per-kind renderer may customise around the shared FOLIO editor. */
@@ -40,6 +46,11 @@ const GENERIC: KindPresentation = {
  *  navigation or sidebar metadata (JOURNAL's day nav), and in the header when
  *  they are facts of the note itself (MEETING's occurred + attendees). */
 const REGISTRY: Partial<Record<Kind, KindPresentation>> = {
+  TASK: {
+    bodyPresentation: "editor",
+    metaExtras: null,
+    headerExtras: TaskMeta,
+  },
   RECIPE: {
     bodyPresentation: "recipe",
     metaExtras: null,

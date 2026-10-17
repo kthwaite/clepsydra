@@ -71,7 +71,7 @@ import {
 import { useStartWarning } from "./StartWarning";
 import { TaskBodyField } from "./TaskBodyField";
 import { diffToPatch, fromTask, type TaskDraft } from "./taskDraft";
-import { useDebounced, usePatchQueue } from "./usePatchQueue";
+import { type SendPatch, useDebounced, usePatchQueue } from "./usePatchQueue";
 
 /** How long the armed "Confirm archive" state persists before auto-disarm. */
 const ARCHIVE_DISARM_MS = 3000;
@@ -111,7 +111,22 @@ export interface TaskEditPanelProps {
   onOpenDossier?: (link: string) => void;
 }
 
-export function TaskEditPanel({
+export function TaskEditPanel(props: TaskEditPanelProps) {
+  return <TaskEditor {...props} />;
+}
+
+export interface TaskMetadataEditorProps
+  extends Omit<TaskEditPanelProps, "onClose"> {
+  readOnly: boolean;
+  sendPatch: SendPatch;
+  onOpenTask: (task: BoardTask) => void;
+}
+
+export function TaskMetadataEditor(props: TaskMetadataEditorProps) {
+  return <TaskEditor {...props} metadataOnly onClose={() => {}} />;
+}
+
+function TaskEditor({
   task,
   tasks,
   projects,
@@ -120,7 +135,16 @@ export function TaskEditPanel({
   onClose,
   onOpenPage,
   onOpenDossier,
-}: TaskEditPanelProps) {
+  metadataOnly = false,
+  readOnly = false,
+  sendPatch,
+  onOpenTask,
+}: TaskEditPanelProps & {
+  metadataOnly?: boolean;
+  readOnly?: boolean;
+  sendPatch?: SendPatch;
+  onOpenTask?: (task: BoardTask) => void;
+}) {
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
   const patch = usePatchTask();
   const archive = useArchiveTask();
@@ -129,8 +153,11 @@ export function TaskEditPanel({
 
   // Local mirror of text fields that debounce before patching
   const [draft, setDraft] = useState<TaskDraft>(() => fromTask(task));
-  const setField = (field: keyof TaskDraft, value: string) =>
+  const editedFields = useRef(new Set<keyof TaskDraft>());
+  const setField = (field: keyof TaskDraft, value: string) => {
+    editedFields.current.add(field);
     setDraft((d) => ({ ...d, [field]: value }));
+  };
 
   // Archive confirmation state (two-step; auto-disarms)
   const [archiveArmed, setArchiveArmed] = useState(false);
@@ -170,21 +197,32 @@ export function TaskEditPanel({
   const taskId = task.id;
   // biome-ignore lint/correctness/useExhaustiveDependencies: reinitialise only on open
   useEffect(() => {
+    editedFields.current.clear();
     setDraft(fromTask(task));
     setArchiveArmed(false);
     setArchiving(false);
   }, [taskId]);
 
+  useEffect(() => {
+    if (!metadataOnly) return;
+    setDraft((previous) => {
+      const next = fromTask(task);
+      for (const field of editedFields.current) next[field] = previous[field];
+      return next;
+    });
+  }, [metadataOnly, task]);
+
   // Escape closes unless the save-and-archive sequence is in flight or the
   // start warning owns the key.
   const startWarningOpen = startWarning.isOpen;
   useEffect(() => {
+    if (metadataOnly) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !archiving && !startWarningOpen) onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [archiving, startWarningOpen, onClose]);
+  }, [archiving, startWarningOpen, onClose, metadataOnly]);
 
   // When hold toggle is activated (task.hold becomes truthy from an optimistic
   // patch), sync the reason input's state with the hold value.
@@ -212,7 +250,19 @@ export function TaskEditPanel({
 
   // Every Tasking PATCH enters one serial queue, so archive has a single
   // barrier for immediate controls, debounced fields, and earlier failures.
-  const patchAsync = patch.mutateAsync;
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const send = sendPatch ?? patch.mutateAsync;
+  const patchAsync: SendPatch = async (request) => {
+    if (readOnly) throw new Error("This task is read-only.");
+    try {
+      const saved = await send(request);
+      setSaveError(null);
+      return saved;
+    } catch (error) {
+      setSaveError(formatApiError(error, "Couldn’t save task metadata"));
+      throw error;
+    }
+  };
   const queue = usePatchQueue<PatchIntentLane>(task, patchAsync);
 
   // Debounced patches (300ms). Each hook exposes an awaited flush used by
@@ -223,6 +273,8 @@ export function TaskEditPanel({
     field: keyof TaskDraft,
     value: string,
   ) => {
+    if (readOnly || !editedFields.current.has(field)) return;
+    if (metadataOnly && (field === "title" || field === "tags")) return;
     const next = diffToPatch(task, { [field]: value });
     if (Object.keys(next).length > 0) return queue.enqueue(lane, next);
     queue.clearFailure(lane);
@@ -253,6 +305,7 @@ export function TaskEditPanel({
   const [blockedByError, setBlockedByError] = useState<string | null>(null);
   const [blocksError, setBlocksError] = useState<string | null>(null);
   const saveBlockedBy = (next: string[]) => {
+    if (readOnly) return;
     setBlockedByError(null);
     queue.enqueue("blockedBy", { blocked_by: next }).catch((error) => {
       queue.clearFailure("blockedBy");
@@ -260,6 +313,7 @@ export function TaskEditPanel({
     });
   };
   const saveBlocks = (otherCode: string, add: boolean) => {
+    if (readOnly) return;
     const other = tasks.find((t) => t.code === otherCode);
     if (!other) return;
     setBlocksError(null);
@@ -270,7 +324,8 @@ export function TaskEditPanel({
       setBlocksError(formatApiError(error, "Couldn’t save blocked tasks")),
     );
   };
-  const openTask = (other: BoardTask) => setEditTaskId(other.id);
+  const openTask = (other: BoardTask) =>
+    onOpenTask ? onOpenTask(other) : setEditTaskId(other.id);
 
   // Whole-task links open its card; addressed passages need the page reader.
   const openBodyLink = (
@@ -334,6 +389,340 @@ export function TaskEditPanel({
     }
   };
 
+  const fields = (
+    <fieldset
+      className={cn(
+        "m-0 flex min-w-0 flex-col gap-4.5 [&>*]:shrink-0",
+        !metadataOnly && "h-full overflow-y-auto px-6 pt-3 pb-6",
+      )}
+      disabled={archiving || readOnly}
+      data-testid="edit-panel-fields"
+    >
+      <legend className="sr-only">Task fields</legend>
+      {saveError && (
+        <p role="alert" className="text-[13px] text-hot">
+          {saveError}
+        </p>
+      )}
+
+      {/* Title — serif, borderless */}
+      {!metadataOnly && (
+        <textarea
+          className={cn(
+            "-mx-2.5 resize-none rounded-[10px] bg-transparent px-2.5 py-1.5 font-serif text-[26px] leading-[1.15] text-ink hover:bg-sink/50",
+            FOCUS_RING_NATIVE,
+          )}
+          rows={2}
+          aria-label="Title"
+          value={draft.title}
+          onChange={(e) => setField("title", e.target.value)}
+          data-testid="edit-panel-title"
+        />
+      )}
+
+      <EdField label="Status">
+        <DispositionRow
+          value={task.status}
+          isDisabled={archiving || readOnly}
+          onChange={(colId) =>
+            startWarning.guard(task, colId, () =>
+              queue.patchNow("status", { status: colId }),
+            )
+          }
+          testIdPrefix="edit-panel"
+          colLabel={colLabel}
+        />
+      </EdField>
+
+      <EdField label="Priority">
+        <PriorityRow
+          value={task.priority}
+          onChange={(p) => queue.patchNow("priority", { priority: p })}
+          isDisabled={archiving || readOnly}
+          testIdPrefix="edit-panel"
+        />
+      </EdField>
+
+      <EdField label="Type">
+        <TypeRow
+          value={task.task_type}
+          isDisabled={archiving || readOnly}
+          onChange={(t) => queue.patchNow("taskType", { task_type: t })}
+          testIdPrefix="edit-panel"
+        />
+      </EdField>
+
+      {/* Project + cycle */}
+      <div className="grid grid-cols-2 gap-3.5">
+        <EdField label="Project">
+          <Select
+            aria-label="Project"
+            value={task.project ?? ""}
+            onChange={(key) =>
+              /* empty string is the sentinel for clear → UNFILED */
+              queue.patchNow("project", {
+                project: key === null ? "" : String(key),
+              })
+            }
+            isDisabled={archiving || readOnly}
+            data-testid="edit-panel-project"
+          >
+            <SelectItem id="">No project</SelectItem>
+            {assignableScopes.map((scope) => (
+              <SelectItem
+                key={scope.key}
+                id={scope.key}
+                textValue={scopeLabel(scope)}
+              >
+                {scopeLabel(scope)}
+              </SelectItem>
+            ))}
+          </Select>
+        </EdField>
+        <EdField label="Cycle">
+          <Select
+            aria-label="Cycle"
+            value={task.cycle ?? "BACKLOG"}
+            onChange={(key) => {
+              const value = key === null ? "BACKLOG" : String(key);
+              /* BACKLOG → send null to clear cycle */
+              queue.patchNow("cycle", {
+                cycle: value === "BACKLOG" ? null : value,
+              });
+            }}
+            isDisabled={archiving || readOnly}
+            data-testid="edit-panel-cycle"
+          >
+            <SelectItem id="BACKLOG">Backlog</SelectItem>
+            {selectableCycles.map((c) => (
+              <SelectItem
+                key={c.id}
+                id={c.code}
+                textValue={`${c.code} (${cycleStateLabel(c.state)})`}
+              >
+                {c.code} ({cycleStateLabel(c.state)})
+              </SelectItem>
+            ))}
+          </Select>
+        </EdField>
+      </div>
+
+      {/* Assignee + estimate */}
+      <div className="grid grid-cols-2 gap-3.5">
+        <EdField label="Assignee">
+          <input
+            type="text"
+            aria-label="Assignee"
+            className={INPUT_CLS}
+            value={draft.assignee}
+            onChange={(e) => setField("assignee", e.target.value)}
+            data-testid="edit-panel-assignee"
+          />
+        </EdField>
+        <EdField label="Estimate">
+          <input
+            type="text"
+            aria-label="Estimate"
+            className={INPUT_CLS}
+            value={draft.estimate}
+            onChange={(e) => setField("estimate", e.target.value)}
+            data-testid="edit-panel-estimate"
+          />
+        </EdField>
+      </div>
+
+      {/* Start + due */}
+      <div className="grid grid-cols-2 gap-3.5">
+        <EdField label="Start date">
+          <input
+            type="date"
+            aria-label="Start date"
+            className={INPUT_CLS}
+            value={draft.start}
+            onChange={(e) => setField("start", e.target.value)}
+            data-testid="edit-panel-start"
+          />
+        </EdField>
+        <EdField label="Due date">
+          <input
+            type="date"
+            aria-label="Due date"
+            className={INPUT_CLS}
+            value={draft.due}
+            onChange={(e) => setField("due", e.target.value)}
+            data-testid="edit-panel-due"
+          />
+        </EdField>
+      </div>
+
+      {/* Checklist — read-only (plan decision 7). The markdown body is
+                  the source of truth for checklist items; we show progress
+                  and an "Open page" affordance. */}
+      <EdField
+        label="Checklist"
+        hint={total ? `${done} of ${total} done` : "No items"}
+      >
+        <div className="flex items-center gap-3.5">
+          <ChecklistBar
+            percent={pct}
+            isComplete={isComplete}
+            className="h-1.5 flex-1"
+            indicatorTestId="edit-panel-checklist-bar"
+          />
+          {!metadataOnly && (
+            <Button
+              size="sm"
+              className="shrink-0 rounded-full"
+              onPress={() => onOpenPage?.(task.path)}
+              data-testid="edit-panel-open-page"
+            >
+              Open page
+              <ArrowRight aria-hidden className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
+      </EdField>
+
+      {!metadataOnly && (
+        <EdField label="Tags" hint="Comma-separated">
+          <input
+            type="text"
+            aria-label="Tags"
+            className={INPUT_CLS}
+            value={draft.tags}
+            onChange={(e) => setField("tags", e.target.value)}
+            data-testid="edit-panel-tags"
+          />
+        </EdField>
+      )}
+
+      {/* Blocker — a switch-looking toggle button */}
+      <EdField label="Blocker">
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            aria-pressed={Boolean(task.hold)}
+            className={cn(
+              "flex cursor-pointer items-center gap-3 self-start rounded-full text-[14px] text-ink-2",
+              FOCUS_RING_NATIVE,
+            )}
+            onClick={() => {
+              if (!task.hold) focusReasonOnHold.current = true;
+              queue.patchNow("holdToggle", {
+                hold: task.hold ? null : "BLOCKED",
+              });
+            }}
+            data-testid="edit-panel-hold-toggle"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "relative h-5 w-8.5 shrink-0 rounded-full transition-colors",
+                task.hold ? "bg-hot" : "bg-faint",
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-0.75 h-3.5 w-3.5 rounded-full bg-raise shadow-sm transition-[left]",
+                  task.hold ? "left-4.25" : "left-0.75",
+                )}
+              />
+            </span>
+            {task.hold ? "Blocked" : "Not blocked"}
+          </button>
+          {task.hold && (
+            <input
+              ref={holdReasonRef}
+              type="text"
+              aria-label="Blocker"
+              className={INPUT_CLS}
+              value={draft.hold}
+              onChange={(e) => setField("hold", e.target.value)}
+              data-testid="edit-panel-hold-reason"
+            />
+          )}
+        </div>
+      </EdField>
+
+      <BlockerField
+        label="Blocked by"
+        isDisabled={archiving || readOnly}
+        noun="blocker"
+        testId="edit-panel-blocked-by"
+        codes={task.blocked_by}
+        tasks={tasks}
+        selfCode={task.code}
+        onAdd={(code) => saveBlockedBy([...task.blocked_by, code])}
+        onRemove={(code) =>
+          saveBlockedBy(task.blocked_by.filter((c) => c !== code))
+        }
+        onOpen={openTask}
+        error={blockedByError}
+      />
+
+      <BlockerField
+        label="Blocks"
+        isDisabled={archiving || readOnly}
+        noun="blocked task"
+        testId="edit-panel-blocks"
+        codes={task.blocks}
+        tasks={tasks}
+        selfCode={task.code}
+        onAdd={(code) => saveBlocks(code, true)}
+        onRemove={(code) => saveBlocks(code, false)}
+        onOpen={openTask}
+        error={blocksError}
+      />
+
+      {/* Related page */}
+      <EdField label="Related page" hint="Optional">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            aria-label="Related page"
+            className={cn(INPUT_CLS, "flex-1", draft.link && "text-accent")}
+            placeholder="[[page]]"
+            value={draft.link}
+            onChange={(e) => setField("link", e.target.value)}
+            data-testid="edit-panel-link"
+          />
+          {link && (
+            <Button
+              size="sm"
+              className="h-9.5 shrink-0 rounded-full"
+              onPress={() => onOpenDossier?.(link)}
+              data-testid="edit-panel-open-dossier"
+              aria-label="Open related page"
+            >
+              Open
+              <ArrowRight aria-hidden className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
+      </EdField>
+
+      {!metadataOnly && (
+        <TaskBodyField path={task.path} onOpenPage={openBodyLink} />
+      )}
+    </fieldset>
+  );
+
+  if (metadataOnly) {
+    return (
+      <div className="flex min-w-0 flex-col gap-4">
+        {startWarning.dialog}
+        <div className="flex flex-wrap items-center gap-2 text-[13px] text-mute">
+          <span>{task.code}</span>
+          <CopyButton getText={() => task.code} label="Copy task code" />
+          <span>{task.blocked ? "Blocked" : "Not blocked"}</span>
+        </div>
+        {readOnly && (
+          <p className="text-[13px] text-mute">Task metadata is read-only.</p>
+        )}
+        {fields}
+      </div>
+    );
+  }
   return (
     <>
       {startWarning.dialog}
@@ -397,304 +786,7 @@ export function TaskEditPanel({
 
           {/* Dock body — a fade at the foot hints at more fields below */}
           <div className="relative min-h-0 flex-1">
-            <fieldset
-              className="m-0 flex h-full min-w-0 flex-col gap-4.5 overflow-y-auto px-6 pt-3 pb-6 [&>*]:shrink-0"
-              disabled={archiving}
-              data-testid="edit-panel-fields"
-            >
-              <legend className="sr-only">Task fields</legend>
-
-              {/* Title — serif, borderless */}
-              <textarea
-                className={cn(
-                  "-mx-2.5 resize-none rounded-[10px] bg-transparent px-2.5 py-1.5 font-serif text-[26px] leading-[1.15] text-ink hover:bg-sink/50",
-                  FOCUS_RING_NATIVE,
-                )}
-                rows={2}
-                aria-label="Title"
-                value={draft.title}
-                onChange={(e) => setField("title", e.target.value)}
-                data-testid="edit-panel-title"
-              />
-
-              <EdField label="Status">
-                <DispositionRow
-                  value={task.status}
-                  onChange={(colId) =>
-                    startWarning.guard(task, colId, () =>
-                      queue.patchNow("status", { status: colId }),
-                    )
-                  }
-                  testIdPrefix="edit-panel"
-                  colLabel={colLabel}
-                />
-              </EdField>
-
-              <EdField label="Priority">
-                <PriorityRow
-                  value={task.priority}
-                  onChange={(p) => queue.patchNow("priority", { priority: p })}
-                  testIdPrefix="edit-panel"
-                />
-              </EdField>
-
-              <EdField label="Type">
-                <TypeRow
-                  value={task.task_type}
-                  onChange={(t) => queue.patchNow("taskType", { task_type: t })}
-                  testIdPrefix="edit-panel"
-                />
-              </EdField>
-
-              {/* Project + cycle */}
-              <div className="grid grid-cols-2 gap-3.5">
-                <EdField label="Project">
-                  <Select
-                    aria-label="Project"
-                    value={task.project ?? ""}
-                    onChange={(key) =>
-                      /* empty string is the sentinel for clear → UNFILED */
-                      queue.patchNow("project", {
-                        project: key === null ? "" : String(key),
-                      })
-                    }
-                    isDisabled={archiving}
-                    data-testid="edit-panel-project"
-                  >
-                    <SelectItem id="">No project</SelectItem>
-                    {assignableScopes.map((scope) => (
-                      <SelectItem
-                        key={scope.key}
-                        id={scope.key}
-                        textValue={scopeLabel(scope)}
-                      >
-                        {scopeLabel(scope)}
-                      </SelectItem>
-                    ))}
-                  </Select>
-                </EdField>
-                <EdField label="Cycle">
-                  <Select
-                    aria-label="Cycle"
-                    value={task.cycle ?? "BACKLOG"}
-                    onChange={(key) => {
-                      const value = key === null ? "BACKLOG" : String(key);
-                      /* BACKLOG → send null to clear cycle */
-                      queue.patchNow("cycle", {
-                        cycle: value === "BACKLOG" ? null : value,
-                      });
-                    }}
-                    isDisabled={archiving}
-                    data-testid="edit-panel-cycle"
-                  >
-                    <SelectItem id="BACKLOG">Backlog</SelectItem>
-                    {selectableCycles.map((c) => (
-                      <SelectItem
-                        key={c.id}
-                        id={c.code}
-                        textValue={`${c.code} (${cycleStateLabel(c.state)})`}
-                      >
-                        {c.code} ({cycleStateLabel(c.state)})
-                      </SelectItem>
-                    ))}
-                  </Select>
-                </EdField>
-              </div>
-
-              {/* Assignee + estimate */}
-              <div className="grid grid-cols-2 gap-3.5">
-                <EdField label="Assignee">
-                  <input
-                    type="text"
-                    aria-label="Assignee"
-                    className={INPUT_CLS}
-                    value={draft.assignee}
-                    onChange={(e) => setField("assignee", e.target.value)}
-                    data-testid="edit-panel-assignee"
-                  />
-                </EdField>
-                <EdField label="Estimate">
-                  <input
-                    type="text"
-                    aria-label="Estimate"
-                    className={INPUT_CLS}
-                    value={draft.estimate}
-                    onChange={(e) => setField("estimate", e.target.value)}
-                    data-testid="edit-panel-estimate"
-                  />
-                </EdField>
-              </div>
-
-              {/* Start + due */}
-              <div className="grid grid-cols-2 gap-3.5">
-                <EdField label="Start date">
-                  <input
-                    type="date"
-                    aria-label="Start date"
-                    className={INPUT_CLS}
-                    value={draft.start}
-                    onChange={(e) => setField("start", e.target.value)}
-                    data-testid="edit-panel-start"
-                  />
-                </EdField>
-                <EdField label="Due date">
-                  <input
-                    type="date"
-                    aria-label="Due date"
-                    className={INPUT_CLS}
-                    value={draft.due}
-                    onChange={(e) => setField("due", e.target.value)}
-                    data-testid="edit-panel-due"
-                  />
-                </EdField>
-              </div>
-
-              {/* Checklist — read-only (plan decision 7). The markdown body is
-                  the source of truth for checklist items; we show progress
-                  and an "Open page" affordance. */}
-              <EdField
-                label="Checklist"
-                hint={total ? `${done} of ${total} done` : "No items"}
-              >
-                <div className="flex items-center gap-3.5">
-                  <ChecklistBar
-                    percent={pct}
-                    isComplete={isComplete}
-                    className="h-1.5 flex-1"
-                    indicatorTestId="edit-panel-checklist-bar"
-                  />
-                  <Button
-                    size="sm"
-                    className="shrink-0 rounded-full"
-                    onPress={() => onOpenPage?.(task.path)}
-                    data-testid="edit-panel-open-page"
-                  >
-                    Open page
-                    <ArrowRight aria-hidden className="h-3 w-3" />
-                  </Button>
-                </div>
-              </EdField>
-
-              <EdField label="Tags" hint="Comma-separated">
-                <input
-                  type="text"
-                  aria-label="Tags"
-                  className={INPUT_CLS}
-                  value={draft.tags}
-                  onChange={(e) => setField("tags", e.target.value)}
-                  data-testid="edit-panel-tags"
-                />
-              </EdField>
-
-              {/* Blocker — a switch-looking toggle button */}
-              <EdField label="Blocker">
-                <div className="flex flex-col gap-2">
-                  <button
-                    type="button"
-                    aria-pressed={Boolean(task.hold)}
-                    className={cn(
-                      "flex cursor-pointer items-center gap-3 self-start rounded-full text-[14px] text-ink-2",
-                      FOCUS_RING_NATIVE,
-                    )}
-                    onClick={() => {
-                      if (!task.hold) focusReasonOnHold.current = true;
-                      queue.patchNow("holdToggle", {
-                        hold: task.hold ? null : "BLOCKED",
-                      });
-                    }}
-                    data-testid="edit-panel-hold-toggle"
-                  >
-                    <span
-                      aria-hidden
-                      className={cn(
-                        "relative h-5 w-8.5 shrink-0 rounded-full transition-colors",
-                        task.hold ? "bg-hot" : "bg-faint",
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "absolute top-0.75 h-3.5 w-3.5 rounded-full bg-raise shadow-sm transition-[left]",
-                          task.hold ? "left-4.25" : "left-0.75",
-                        )}
-                      />
-                    </span>
-                    {task.hold ? "Blocked" : "Not blocked"}
-                  </button>
-                  {task.hold && (
-                    <input
-                      ref={holdReasonRef}
-                      type="text"
-                      aria-label="Blocker"
-                      className={INPUT_CLS}
-                      value={draft.hold}
-                      onChange={(e) => setField("hold", e.target.value)}
-                      data-testid="edit-panel-hold-reason"
-                    />
-                  )}
-                </div>
-              </EdField>
-
-              <BlockerField
-                label="Blocked by"
-                noun="blocker"
-                testId="edit-panel-blocked-by"
-                codes={task.blocked_by}
-                tasks={tasks}
-                selfCode={task.code}
-                onAdd={(code) => saveBlockedBy([...task.blocked_by, code])}
-                onRemove={(code) =>
-                  saveBlockedBy(task.blocked_by.filter((c) => c !== code))
-                }
-                onOpen={openTask}
-                error={blockedByError}
-              />
-
-              <BlockerField
-                label="Blocks"
-                noun="blocked task"
-                testId="edit-panel-blocks"
-                codes={task.blocks}
-                tasks={tasks}
-                selfCode={task.code}
-                onAdd={(code) => saveBlocks(code, true)}
-                onRemove={(code) => saveBlocks(code, false)}
-                onOpen={openTask}
-                error={blocksError}
-              />
-
-              {/* Related page */}
-              <EdField label="Related page" hint="Optional">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    aria-label="Related page"
-                    className={cn(
-                      INPUT_CLS,
-                      "flex-1",
-                      draft.link && "text-accent",
-                    )}
-                    placeholder="[[page]]"
-                    value={draft.link}
-                    onChange={(e) => setField("link", e.target.value)}
-                    data-testid="edit-panel-link"
-                  />
-                  {link && (
-                    <Button
-                      size="sm"
-                      className="h-9.5 shrink-0 rounded-full"
-                      onPress={() => onOpenDossier?.(link)}
-                      data-testid="edit-panel-open-dossier"
-                      aria-label="Open related page"
-                    >
-                      Open
-                      <ArrowRight aria-hidden className="h-3 w-3" />
-                    </Button>
-                  )}
-                </div>
-              </EdField>
-
-              <TaskBodyField path={task.path} onOpenPage={openBodyLink} />
-            </fieldset>
+            {fields}
             <span
               aria-hidden
               className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-linear-to-b from-transparent to-raise"

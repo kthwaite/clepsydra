@@ -171,6 +171,31 @@ Full-text search is distinct from wikilink and block search. The `[[` suggestion
 menu filters the page catalogue by title, canonical name, and path. Block search
 is described in [Block References and Transclusion](/docs/block-references-and-transclusion).
 
+## Manage and rename tags
+
+Choose **Manage tags** in the Gazetteer on desktop or mobile. Search the tag
+list and compare each tag's total, editable, and computed page counts.
+Computed-only kind tags cannot be renamed.
+
+Choose an editable tag, enter its replacement without `#`, and choose
+**Preview rename**. The preview lists affected pages and any conflicts without
+writing files. If the target already exists, explicitly acknowledge merging
+before **Apply rename** becomes available. A merge removes duplicate target
+tags within each affected page.
+
+The operation changes only the exact editable frontmatter tag. Descendants,
+computed kind tags, and saved Base or embed filters remain unchanged. Renaming
+can therefore change membership in a saved view; update its filters separately
+when appropriate.
+
+Apply rechecks the preview's source pages, revisions, and merge state before
+using the existing atomic batch mutation path. A stale preview or unresolved
+conflict changes no pages; inspect the error and preview again. Page bodies,
+including read-only and encrypted bodies, remain untouched. Unrelated
+frontmatter and inline comments are preserved. Legacy or incomplete
+frontmatter, or comments inside a tag array that cannot be preserved, must be
+repaired manually before the rename can proceed.
+
 ## Navigate the Constellation graph
 
 Open `/graph` or run **Open Constellation (graph)**. The route opens a Constellation tab and then replaces the browser location with the workspace route.

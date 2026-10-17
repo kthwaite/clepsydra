@@ -1,9 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryKey,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import { formatApiError } from "#/api/error";
 import type { components } from "#/api/schema";
 import {
   invalidateByPath,
+  invalidatePageContent,
   invalidatePageStructure,
   invalidateRubbish,
   queryKeys,
@@ -149,11 +155,22 @@ async function responseError(res: Response, fallback: string): Promise<Error> {
 // Query hooks
 // ---------------------------------------------------------------------------
 
-export function useBoard() {
+export function useBoard({
+  includeRetired = false,
+  enabled = true,
+}: {
+  includeRetired?: boolean;
+  enabled?: boolean;
+} = {}) {
   return useQuery<BoardResponse>({
-    queryKey: queryKeys.board.all,
+    queryKey: includeRetired
+      ? [...queryKeys.board.all, "including-retired"]
+      : queryKeys.board.all,
+    enabled,
     queryFn: async () => {
-      const res = await fetch(API_BASE);
+      const res = await fetch(
+        includeRetired ? `${API_BASE}?include_retired=true` : API_BASE,
+      );
       if (!res.ok) throw new Error("Failed to fetch board");
       return res.json() as Promise<BoardResponse>;
     },
@@ -187,7 +204,7 @@ export function usePatchTask() {
     BoardTask,
     Error,
     { id: string; patch: PatchTaskRequest },
-    { previous: BoardResponse | undefined }
+    { previous: Array<[QueryKey, BoardResponse | undefined]> }
   >({
     mutationFn: async ({ id, patch }) => {
       const res = await fetch(`${API_BASE}/tasks/${id}`, {
@@ -200,20 +217,38 @@ export function usePatchTask() {
     },
     onMutate: async ({ id, patch }) => {
       await qc.cancelQueries({ queryKey: queryKeys.board.all });
-      const previous = qc.getQueryData<BoardResponse>(queryKeys.board.all);
-      if (previous) {
-        qc.setQueryData<BoardResponse>(
-          queryKeys.board.all,
-          applyTaskPatch(previous, id, patch),
-        );
-      }
+      const previous = qc.getQueriesData<BoardResponse>({
+        queryKey: queryKeys.board.all,
+      });
+      qc.setQueriesData<BoardResponse>(
+        { queryKey: queryKeys.board.all },
+        (board) => (board ? applyTaskPatch(board, id, patch) : board),
+      );
       return { previous };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.previous !== undefined) {
-        qc.setQueryData(queryKeys.board.all, ctx.previous);
+      for (const [key, board] of ctx?.previous ?? []) {
+        if (board) qc.setQueryData(key, board);
       }
       toast.error("TASK EDIT FAILED — REVERTED");
+    },
+    onSuccess: (saved, { patch }) => {
+      qc.setQueriesData<BoardResponse>(
+        { queryKey: queryKeys.board.all },
+        (board) =>
+          board
+            ? {
+                ...board,
+                tasks: deriveBlockState(
+                  board.tasks.map((task) =>
+                    task.id === saved.id ? saved : task,
+                  ),
+                ),
+              }
+            : board,
+      );
+      if (patch.project !== undefined) invalidatePageStructure(qc);
+      else invalidatePageContent(qc, saved.path, saved.id);
     },
     onSettled: () => {
       invalidateTaskingTelemetry(qc);

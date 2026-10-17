@@ -373,6 +373,10 @@ Find similar pages. Responses: `200` Similar pages by tag overlap; `400` Invalid
 Get stats. Responses: `200` Vault statistics; `500` Internal server error.
 ### `GET /api/vault/index/tags`
 List tags. Responses: `200` Tag counts; `500` Internal server error.
+### `POST /api/vault/index/tags/rename/preview`
+Preview an exact editable page-tag rename with `{source, target}`. Returns affected page paths, titles and revisions, editable/computed counts, conflicts, target-existence state, and a fingerprint. Does not write files. Descendants, computed tags, and saved Base/embed filters are unchanged. Responses: `200` Preview; `400` Invalid names; `409` Vault could not be fully inspected.
+### `POST /api/vault/index/tags/rename/apply`
+Apply `{source, target, expected_fingerprint, acknowledge_merge}` through the atomic batch coordinator. Existing targets require explicit merge acknowledgement; duplicate target tags are removed per page. Returns `updated_count`. Responses: `200` Renamed; `400` Invalid names; `409` Stale preview, unresolved conflicts, or unacknowledged merge, with no pages changed and refreshed `detail.preview`; `500` Batch mutation failed.
 ### `GET /api/vault/index/unlinked/{path}`
 List unlinked mentions: pages whose body names this page's title or an alias, as a whole phrase and ignoring case, without linking to it. Responses: `200` Pages that mention this page's title or an alias without linking to it; `400` Invalid path; `500` Internal server error.
 ### `GET /api/vault/index/unresolved`

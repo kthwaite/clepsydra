@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { type BoardTask, useBoard, useCreateTask } from "#/api/board";
+import { formatApiError } from "#/api/error";
 import {
   type BoardStatus,
   tasksByStatus,
@@ -11,11 +13,15 @@ import {
   fmtCycleWindow,
   isDone,
   priColor,
+  taskStatusLabel,
 } from "#/components/tasking/board-constants";
 import { deriveProjectScopes } from "#/components/tasking/board-projects";
+import { TaskEditPanel } from "#/components/tasking/TaskEditPanel";
 import { filterTasks } from "#/components/tasking/TaskingScreen";
+import { Button } from "#/components/ui/button";
 import { Select, SelectItem } from "#/components/ui/select";
 import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
+import { useResolveWikilinkTarget } from "#/editor/useResolveWikilinkTarget";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
@@ -73,6 +79,14 @@ export function MobileTasking() {
   const { data, isLoading, isError } = useBoard();
   const opFilter = useBoardStore((s) => s.opFilter);
   const setOpFilter = useBoardStore((s) => s.setOpFilter);
+  const editTaskId = useBoardStore((s) => s.editTaskId);
+  const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
+  const selectedBoard = useBoard({
+    includeRetired: true,
+    enabled: editTaskId !== null,
+  });
+  const openTab = useOpenTab();
+  const { resolve } = useResolveWikilinkTarget();
   const create = useCreateTask();
   const today = localDateKey(new Date());
   const [status, setStatus] = useState<BoardStatus | null>(null);
@@ -80,6 +94,9 @@ export function MobileTasking() {
   const [draft, setDraft] = useState("");
 
   const tasks = data?.tasks ?? [];
+  const editTask =
+    tasks.find((task) => task.id === editTaskId) ??
+    selectedBoard.data?.tasks.find((task) => task.id === editTaskId);
   const scopes = useMemo(
     () => deriveProjectScopes(data?.operations ?? [], data?.tasks ?? []),
     [data],
@@ -242,6 +259,63 @@ export function MobileTasking() {
           </button>
         )}
       </div>
+      {editTaskId && !editTask && (
+        <div
+          role={selectedBoard.isError ? "alert" : "status"}
+          className="px-5 pt-4 text-sm text-mute"
+        >
+          {selectedBoard.isLoading
+            ? "Loading selected task…"
+            : selectedBoard.isError
+              ? "Couldn’t load the selected task."
+              : "The selected task is no longer available."}
+          {selectedBoard.isError && (
+            <Button
+              onPress={() => {
+                void selectedBoard.refetch();
+              }}
+            >
+              Retry
+            </Button>
+          )}
+          <Button onPress={() => setEditTaskId(null)}>Dismiss</Button>
+        </div>
+      )}
+      {editTask && (
+        <div className="fixed inset-0 z-50 bg-ground">
+          <TaskEditPanel
+            key={editTask.id}
+            task={editTask}
+            tasks={selectedBoard.data?.tasks ?? tasks}
+            projects={
+              selectedBoard.data
+                ? deriveProjectScopes(
+                    selectedBoard.data.operations,
+                    selectedBoard.data.tasks,
+                  )
+                : scopes
+            }
+            cycles={data?.cycles ?? []}
+            colLabel={taskStatusLabel}
+            onClose={() => setEditTaskId(null)}
+            onOpenPage={(path, label, target) =>
+              openTab("page", path, label, target)
+            }
+            onOpenDossier={(link) => {
+              void resolve(link)
+                .then((target) => {
+                  if (!target) throw new Error("Related page not found.");
+                  openTab("page", target.path, target.title);
+                })
+                .catch((error) =>
+                  toast.error(
+                    formatApiError(error, "Couldn’t open related page."),
+                  ),
+                );
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

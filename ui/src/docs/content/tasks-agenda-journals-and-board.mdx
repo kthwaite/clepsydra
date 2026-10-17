@@ -93,7 +93,8 @@ Agenda shows open Todos plus dated Tasks whose status is not Done:
 The browser’s local date defines these boundaries.
 
 Change a Todo checkbox or a Task status directly in Agenda. Edit Todo due dates
-with **Todo properties** in Folio. Edit Task due dates on the Task Board.
+with **Todo properties** in Folio. Edit Task due dates on the Task Board or in
+the Folio's **Task details**.
 Agenda uses the Task display labels listed below; their persisted status values
 remain unchanged.
 
@@ -301,6 +302,26 @@ first (for example with **Assign** or `vault_assign`), then file Tasks and
 other pages under it.
 Switching views does not change Task pages. Dragging a card or editing its
 panel updates the corresponding Task page metadata.
+
+### Edit Task metadata in Folio
+
+A Task Folio has a **Task details** section beneath its title. It shares the
+Task Board's editors for status, priority, type, Project, Cycle, assignee,
+estimate, start and due dates, hold reason, Related page, **Blocked by**, and
+**Blocks**. The task code, derived blocked state, and Checklist progress are
+read-only. Edit the title, tags, body, and Checklist through the ordinary Folio
+controls rather than a second copy of those fields.
+
+Choices save immediately; text fields autosave after a short pause. Pending
+text edits stay attached to their original Task when switching pages. Metadata
+writes first drain pending document edits, refresh the canonical page revision,
+and follow the Task's new path when a Project change refiles it. Rejected edits
+show the server's error without changing the saved dependency graph.
+
+**Open in Tasking** selects that exact Task on desktop or mobile, clearing
+stale board filters. This also works for completed Tasks and Tasks belonging to
+retired Projects; it does not unhide those Projects in the ordinary board.
+Read-only, offline, and encrypted Folios do not permit Task metadata writes.
 
 ### Create, start, and close Cycles
 

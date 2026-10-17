@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,8 +20,13 @@ const m = vi.hoisted(() => ({
 vi.mock("#/api/board", () => ({
   useBoard: () => ({ data: m.board, isLoading: false, isError: false }),
   useCreateTask: () => ({ mutate: m.create, isPending: m.creating }),
+  usePatchTask: () => ({ mutateAsync: vi.fn() }),
+  useArchiveTask: () => ({ mutateAsync: vi.fn() }),
 }));
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => m.openTab }));
+vi.mock("#/components/tasking/TaskBodyField", () => ({
+  TaskBodyField: () => null,
+}));
 
 import { MobileTasking } from "#/components/mobile/MobileTasking";
 import { useBoardStore } from "#/store/board";
@@ -42,6 +48,9 @@ const task = (
     body_excerpt: "",
     updated_at: "2026-09-01T00:00:00Z",
     project: "clepsydra",
+    blocked_by: [],
+    blocks: [],
+    blocked: false,
     ...over,
   }) as BoardTask;
 
@@ -87,8 +96,23 @@ describe("MobileTasking", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     m.board = board();
-    useBoardStore.setState({ opFilter: "ALL" });
+    useBoardStore.setState({ opFilter: "ALL", editTaskId: null });
     m.creating = false;
+  });
+
+  it("opens an explicitly selected task even outside the current mobile scope", async () => {
+    useBoardStore.setState({ opFilter: "UNFILED", editTaskId: "d" });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MobileTasking />
+      </QueryClientProvider>,
+    );
+    const panel = screen.getByRole("dialog", { name: "Edit task" });
+    expect(within(panel).getByRole("textbox", { name: "Title" })).toHaveValue(
+      "Task d",
+    );
+    await userEvent.click(within(panel).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Edit task" })).toBeNull();
   });
 
   it("falls back to all projects when the saved project is gone", () => {

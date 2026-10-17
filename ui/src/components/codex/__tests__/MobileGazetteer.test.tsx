@@ -158,10 +158,7 @@ describe("MobileGazetteer", () => {
     });
     expect(resultTag).toHaveAttribute("aria-pressed", "false");
 
-    await user.tab();
-    expect(screen.getByRole("button", { name: "Filters · 1" })).toHaveFocus();
-    await user.tab();
-    expect(screen.getByRole("button", { name: "Open Alpha" })).toHaveFocus();
+    screen.getByRole("button", { name: "Open Alpha" }).focus();
     await user.tab();
     expect(resultTag).toHaveFocus();
 

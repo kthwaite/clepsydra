@@ -1397,6 +1397,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/index/tags/rename/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["apply_tag_rename"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/index/tags/rename/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["preview_tag_rename"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/index/unlinked/{path}": {
         parameters: {
             query?: never;
@@ -3873,6 +3905,43 @@ export interface components {
             count: number;
             /** @description The tag string, e.g. "tag" or "tag/subtag". */
             tag: string;
+        };
+        TagRenameApplyRequest: {
+            /** @description Required when the destination already exists (including computed tags). */
+            acknowledge_merge: boolean;
+            /** @description Fingerprint from the complete preview, including all source revisions. */
+            expected_fingerprint: string;
+            source: string;
+            target: string;
+        };
+        TagRenameConflict: {
+            path?: string | null;
+            reason: string;
+        };
+        TagRenamePage: {
+            path: string;
+            revision: string;
+            title: string;
+        };
+        TagRenamePreview: {
+            /** @description Editable source pages, including any blocked pages listed in conflicts. */
+            affected_count: number;
+            /** @description Pages whose source tag is computed and will remain unchanged. */
+            computed_count: number;
+            conflicts: components["schemas"]["TagRenameConflict"][];
+            fingerprint: string;
+            pages: components["schemas"]["TagRenamePage"][];
+            source: string;
+            target: string;
+            target_exists: boolean;
+        };
+        TagRenameRequest: {
+            /** @description Exact editable tag spelling; descendants and computed tags are untouched. */
+            source: string;
+            target: string;
+        };
+        TagRenameResult: {
+            updated_count: number;
         };
         TaskCompletionDay: {
             /** Format: int32 */
@@ -8581,6 +8650,99 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    apply_tag_rename: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagRenameApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Exact page tags renamed atomically */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagRenameResult"];
+                };
+            };
+            /** @description Invalid tag names */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Preview stale, pages blocked, or merge not acknowledged; no pages changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Batch mutation failed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    preview_tag_rename: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagRenameRequest"];
+            };
+        };
+        responses: {
+            /** @description No-write exact tag rename preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagRenamePreview"];
+                };
+            };
+            /** @description Invalid tag names */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Vault could not be fully inspected */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

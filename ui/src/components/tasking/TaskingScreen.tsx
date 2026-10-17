@@ -101,6 +101,10 @@ export function TaskingScreen({
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
   const setOpFilter = useBoardStore((s) => s.setOpFilter);
   const showCompleted = useBoardStore((s) => s.showCompleted);
+  const selectedBoard = useBoard({
+    includeRetired: true,
+    enabled: editTaskId !== null,
+  });
 
   const {
     projects,
@@ -165,6 +169,9 @@ export function TaskingScreen({
         : null,
     };
   }, [data, opFilter, filterState, editTaskId, mode, showCompleted]);
+  const selectedTask =
+    editTask ??
+    selectedBoard.data?.tasks.find((task) => task.id === editTaskId);
 
   // Self-heal a stale persisted opFilter: if the filter names a scope that no
   // longer exists (project renamed/deleted since last session), the board
@@ -350,12 +357,41 @@ export function TaskingScreen({
         {/* Right-dock edit panel — keyed by task id so switching tasks
                 is a real remount: the unmount flush delivers any pending
                 debounced edit for the old task before the new panel mounts. */}
-        {editTask && (
+        {editTaskId && !selectedTask && (
+          <div
+            role={selectedBoard.isError ? "alert" : "status"}
+            className="max-w-sm p-4 text-sm text-mute"
+          >
+            {selectedBoard.isLoading
+              ? "Loading selected task…"
+              : selectedBoard.isError
+                ? "Couldn’t load the selected task."
+                : "The selected task is no longer available."}
+            {selectedBoard.isError && (
+              <Button
+                onPress={() => {
+                  void selectedBoard.refetch();
+                }}
+              >
+                Retry
+              </Button>
+            )}
+            <Button onPress={() => setEditTaskId(null)}>Dismiss</Button>
+          </div>
+        )}
+        {selectedTask && (
           <TaskEditPanel
-            key={editTask.id}
-            task={editTask}
-            tasks={tasks}
-            projects={projects}
+            key={selectedTask.id}
+            task={selectedTask}
+            tasks={selectedBoard.data?.tasks ?? tasks}
+            projects={
+              selectedBoard.data
+                ? deriveProjectScopes(
+                    selectedBoard.data.operations,
+                    selectedBoard.data.tasks,
+                  )
+                : projects
+            }
             cycles={cycles}
             colLabel={colLabel}
             onClose={() => setEditTaskId(null)}

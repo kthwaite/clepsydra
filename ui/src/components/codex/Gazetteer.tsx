@@ -8,6 +8,7 @@ import { shortFolio } from "#/components/codex/folio-utils";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { MobileGazetteer } from "#/components/codex/MobileGazetteer";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { TagManagementButton } from "#/components/codex/TagManagement";
 import { Tick } from "#/components/codex/Tick";
 import { FilterBar } from "#/components/filters/FilterBar";
 import { KindIcon } from "#/components/KindIcon";
@@ -518,6 +519,7 @@ export function Gazetteer({ filters }: Props) {
           {tagSummary}
         </span>
         <div className="flex-1" />
+        <TagManagementButton />
         {columnsCustomised && (
           <Button variant="ghost" size="sm" onPress={resetColumns}>
             Reset columns

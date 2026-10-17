@@ -116,18 +116,21 @@ export function DispositionRow({
   onChange,
   testIdPrefix,
   colLabel,
+  isDisabled = false,
 }: {
   value: string;
   onChange: (colId: string) => void;
   testIdPrefix: string;
   /** Resolves a column id to its display label. */
   colLabel: ColLabelFn;
+  isDisabled?: boolean;
 }) {
   return (
     <RadioGroup
       aria-label="Status"
       value={value}
       onChange={onChange}
+      isDisabled={isDisabled}
       segmented
       optionsClassName={CHOICE_TRACK_CLS}
     >
@@ -153,16 +156,19 @@ export function PriorityRow({
   value,
   onChange,
   testIdPrefix,
+  isDisabled = false,
 }: {
   value: string;
   onChange: (pri: string) => void;
   testIdPrefix: string;
+  isDisabled?: boolean;
 }) {
   return (
     <RadioGroup
       aria-label="Priority"
       value={value}
       onChange={onChange}
+      isDisabled={isDisabled}
       segmented
       optionsClassName={CHOICE_TRACK_CLS}
     >
@@ -201,16 +207,19 @@ export function TypeRow({
   value,
   onChange,
   testIdPrefix,
+  isDisabled = false,
 }: {
   value: string | null | undefined;
   onChange: (type: string | null) => void;
   testIdPrefix: string;
+  isDisabled?: boolean;
 }) {
   return (
     <RadioGroup
       aria-label="Type"
       value={value || TYPE_NONE_VALUE}
       onChange={(v) => onChange(v === TYPE_NONE_VALUE ? null : v)}
+      isDisabled={isDisabled}
       segmented
       optionsClassName={CHOICE_TRACK_CLS}
     >

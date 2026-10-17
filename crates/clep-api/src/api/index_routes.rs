@@ -566,6 +566,14 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/ambiguous", get(ambiguous))
         .route("/warnings", get(warnings))
         .route("/tags", get(tags))
+        .route(
+            "/tags/rename/preview",
+            post(super::tag_management::preview_tag_rename),
+        )
+        .route(
+            "/tags/rename/apply",
+            post(super::tag_management::apply_tag_rename),
+        )
         .route("/stats", get(stats))
         .route("/rebuild", post(rebuild_index))
         .route("/create-from-link", post(create_from_link))

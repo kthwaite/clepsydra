@@ -39,6 +39,7 @@ export interface BlockerFieldProps {
   onOpen: (task: BoardTask) => void;
   /** Server message from the last failed change, shown under the field. */
   error: string | null;
+  isDisabled?: boolean;
 }
 
 export function BlockerField({
@@ -52,6 +53,7 @@ export function BlockerField({
   onRemove,
   onOpen,
   error,
+  isDisabled = false,
 }: BlockerFieldProps) {
   const byCode = useMemo(() => new Map(tasks.map((t) => [t.code, t])), [tasks]);
   const exclude = useMemo(() => [selfCode, ...codes], [selfCode, codes]);
@@ -91,6 +93,7 @@ export function BlockerField({
                   )}
                   <button
                     type="button"
+                    disabled={isDisabled}
                     aria-label={`Remove ${noun} ${code}`}
                     className={cn(
                       "inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full text-mute hover:bg-raise hover:text-ink",
@@ -107,6 +110,7 @@ export function BlockerField({
         )}
         <TaskCombo
           ariaLabel={`Add ${noun}`}
+          isDisabled={isDisabled}
           tasks={tasks}
           exclude={exclude}
           onPick={onAdd}
@@ -137,11 +141,13 @@ function TaskCombo({
   tasks,
   exclude,
   onPick,
+  isDisabled,
 }: {
   ariaLabel: string;
   tasks: readonly BoardTask[];
   exclude: readonly string[];
   onPick: (code: string) => void;
+  isDisabled: boolean;
 }) {
   const [draft, setDraft] = useState("");
   // Remounting after a pick clears the selection and closes the popover.
@@ -162,6 +168,7 @@ function TaskCombo({
     <ComboBox
       key={epoch}
       aria-label={ariaLabel}
+      isDisabled={isDisabled}
       menuTrigger="focus"
       allowsCustomValue
       inputValue={draft}

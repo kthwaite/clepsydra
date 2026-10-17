@@ -163,6 +163,36 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("opens a selected retired-project task despite the ordinary board filters", async () => {
+  const retired = {
+    ...BOARD_FIXTURE.tasks[0],
+    id: "retired-task",
+    title: "Retired project task",
+    project: "retired",
+  };
+  const normalFetch = stubBoardFetch(BOARD_FIXTURE);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      if (String(input).includes("include_retired=true")) {
+        return Promise.resolve(
+          Response.json({
+            ...BOARD_FIXTURE,
+            tasks: [...BOARD_FIXTURE.tasks, retired],
+          }),
+        );
+      }
+      return normalFetch();
+    }),
+  );
+  useBoardStore.setState({ editTaskId: retired.id, opFilter: "beta" });
+  renderScreen();
+  const panel = await screen.findByRole("dialog", { name: "Edit task" });
+  expect(within(panel).getByRole("textbox", { name: "Title" })).toHaveValue(
+    "Retired project task",
+  );
+});
+
 // ── filterTasks ───────────────────────────────────────────────────────────────
 
 describe("filterTasks", () => {

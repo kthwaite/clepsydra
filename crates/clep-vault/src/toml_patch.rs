@@ -68,8 +68,27 @@ pub fn splice_frontmatter(raw: &str, edits: &FrontmatterEdits) -> Result<String,
             doc.remove(key);
             continue;
         }
-        let item = toml_edit::Item::Value(json_to_toml_value(key, value, *hint)?);
-        doc[key.as_str()] = item;
+        let mut replacement = json_to_toml_value(key, value, *hint)?;
+        if let Some(previous) = doc.get(key).and_then(toml_edit::Item::as_value) {
+            if let Some(array) = previous.as_array() {
+                let has_comment = |raw: Option<&str>| raw.is_some_and(|text| text.contains('#'));
+                if has_comment(array.trailing().as_str())
+                    || array.iter().any(|item| {
+                        has_comment(item.decor().prefix().and_then(|raw| raw.as_str()))
+                            || has_comment(item.decor().suffix().and_then(|raw| raw.as_str()))
+                    })
+                {
+                    return Err(SpliceError::UnrepresentableValue {
+                        key: key.clone(),
+                        reason:
+                            "array contains comments; edit this field manually to preserve them"
+                                .to_owned(),
+                    });
+                }
+            }
+            *replacement.decor_mut() = previous.decor().clone();
+        }
+        doc[key.as_str()] = toml_edit::Item::Value(replacement);
     }
     if let Some(updated_at) = &edits.updated_at {
         let text = updated_at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
@@ -79,7 +98,11 @@ pub fn splice_frontmatter(raw: &str, edits: &FrontmatterEdits) -> Result<String,
                 reason: e.to_string(),
             }
         })?;
-        doc["updated_at"] = toml_edit::value(dt);
+        let mut replacement = toml_edit::Value::from(dt);
+        if let Some(previous) = doc.get("updated_at").and_then(toml_edit::Item::as_value) {
+            *replacement.decor_mut() = previous.decor().clone();
+        }
+        doc["updated_at"] = toml_edit::Item::Value(replacement);
     }
 
     Ok(format!("+++\n{doc}+++\n{body}"))

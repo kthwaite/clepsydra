@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   fireEvent,
@@ -26,13 +27,18 @@ import {
   vi,
 } from "vitest";
 import type * as AttachmentsApi from "#/api/attachments";
+import type { BoardResponse, PatchTaskRequest } from "#/api/board";
+import { applyTaskPatch } from "#/api/board";
+import { fetchClient } from "#/api/client";
 import type {
   BacklinkEntry,
   OutlinkEntry,
   TagCount,
   UnlinkedMentionEntry,
 } from "#/api/types";
+import { BOARD_FIXTURE } from "#/components/tasking/__tests__/fixtures";
 import type { CustomEditor } from "#/editor/types";
+import { useBoardStore } from "#/store/board";
 
 // The recovery panel is the PRIMARY (declarative) invalid-tab path: usePage
 // opts out of throwOnError, so a 404 surfaces as editor.error and Folio's
@@ -2583,4 +2589,316 @@ describe("Folio in-session restoration", () => {
     });
     expect(dialogAction).toHaveFocus();
   });
+});
+
+describe("Task Folio metadata", () => {
+  function mountTask(
+    options: {
+      readonly?: boolean;
+      encrypted?: boolean;
+      locked?: boolean;
+      rejectBlockers?: boolean;
+      movedPath?: string;
+      patchGate?: Promise<void>;
+    } = {},
+  ) {
+    let board: BoardResponse = structuredClone(BOARD_FIXTURE);
+    const task = board.tasks[0];
+    assert(task);
+    const editor = {
+      ...editableEditor(),
+      kind: "TASK",
+      pageId: task.id,
+      ...options,
+      encryptionState: options.locked
+        ? { status: "locked" as const }
+        : { status: "plain" as const, body: "Editable body" },
+      beginGeneratedChange: async () => ({
+        cancel: () => {},
+        apply: async (write: () => Promise<unknown>) => {
+          await write();
+        },
+      }),
+    };
+    usePageEditorMock.mockReturnValue(editor);
+    const requests: Array<{ id: string; patch: PatchTaskRequest }> = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (init?.method === "PATCH") {
+          const id = url.split("/").at(-1) ?? "";
+          const patch = JSON.parse(String(init.body)) as PatchTaskRequest;
+          requests.push({ id, patch });
+          await options.patchGate;
+          if (options.rejectBlockers && patch.blocked_by) {
+            return Response.json(
+              { error: "Blocker cycle is not allowed." },
+              { status: 400 },
+            );
+          }
+          board = applyTaskPatch(board, id, patch);
+          if (patch.project !== undefined && options.movedPath) {
+            board = {
+              ...board,
+              tasks: board.tasks.map((entry) =>
+                entry.id === id
+                  ? { ...entry, path: options.movedPath ?? entry.path }
+                  : entry,
+              ),
+            };
+          }
+          return Response.json(board.tasks.find((entry) => entry.id === id));
+        }
+        if (url.includes("/api/vault/board")) return Response.json(board);
+        if (url.includes("/api/vault/pages/")) {
+          return Response.json({
+            body: "Editable body",
+            revision: "revision-2",
+          });
+        }
+        return Response.json([]);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(fetchClient, "GET").mockImplementation(async () => {
+      const response = await fetch("/api/vault/pages/task");
+      return { data: await response.json(), response };
+    });
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    client.setQueryData(["board", "including-retired"], board);
+    useWorkspaceStore.setState({ tabs: [], activeTabId: null });
+    useWorkspaceStore.getState().openTab("page", task.path, task.title);
+    const tabId = useWorkspaceStore.getState().activeTabId;
+    assert(tabId);
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Folio tabId={tabId} path={task.path} />
+      </QueryClientProvider>,
+    );
+    return { ...view, requests, task, client, editor, tabId };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("edits Tasking metadata without duplicating the Folio document editor", async () => {
+    const { requests } = mountTask();
+    const metadata = await screen.findByRole("region", {
+      name: "Task details",
+    });
+    expect(
+      within(metadata).queryByRole("textbox", { name: "Title" }),
+    ).toBeNull();
+    expect(
+      within(metadata).queryByRole("button", { name: "Archive" }),
+    ).toBeNull();
+    for (const name of [
+      "Assignee",
+      "Estimate",
+      "Start date",
+      "Due date",
+      "Related page",
+    ]) {
+      expect(within(metadata).getByLabelText(name)).toBeInTheDocument();
+    }
+    fireEvent.change(within(metadata).getByLabelText("Assignee"), {
+      target: { value: "Ada" },
+    });
+    fireEvent.click(
+      within(metadata).getByRole("radio", { name: "P0 Critical" }),
+    );
+    await waitFor(() =>
+      expect(requests.some(({ patch }) => patch.assignee === "Ada")).toBe(true),
+    );
+    expect(
+      within(metadata).getByRole("radio", { name: "P0 Critical" }),
+    ).toBeChecked();
+    fireEvent.change(within(metadata).getByLabelText("Assignee"), {
+      target: { value: "" },
+    });
+    await waitFor(() =>
+      expect(requests.some(({ patch }) => patch.assignee === null)).toBe(true),
+    );
+  });
+
+  it.each([{ readonly: true }, { encrypted: true }])(
+    "refuses metadata edits on protected Folios: %j",
+    async (protection) => {
+      const { requests } = mountTask(protection);
+      const metadata = await screen.findByRole("region", {
+        name: "Task details",
+      });
+      expect(within(metadata).getByLabelText("Assignee")).toBeDisabled();
+      expect(
+        within(metadata).getByRole("radio", { name: "P0 Critical" }),
+      ).toBeDisabled();
+      expect(requests).toEqual([]);
+    },
+  );
+
+  it("opens the exact task even with stale Tasking filters", async () => {
+    useBoardStore.setState({
+      opFilter: "beta",
+      mode: "cycle",
+      cycleSel: "old",
+      editTaskId: "t3",
+    });
+    const { task } = mountTask();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open in Tasking" }),
+    );
+    await waitFor(() =>
+      expect(useBoardStore.getState().editTaskId).toBe(task.id),
+    );
+    expect(useBoardStore.getState().opFilter).toBe("ALL");
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/tasking", search: {} });
+  });
+
+  it("does not expose Tasking writes while the Folio is locked", () => {
+    const { requests } = mountTask({ encrypted: true, locked: true });
+    expect(screen.queryByRole("region", { name: "Task details" })).toBeNull();
+    expect(requests).toEqual([]);
+  });
+
+  it("keeps the last edit attached to its original task when switching Folios", async () => {
+    const { requests, rerender, client, editor, task } = mountTask();
+    fireEvent.change(await screen.findByLabelText("Assignee"), {
+      target: { value: "Ada" },
+    });
+    const other = BOARD_FIXTURE.tasks[2];
+    assert(other);
+    usePageEditorMock.mockReturnValue({ ...editor, pageId: other.id });
+    rerender(
+      <QueryClientProvider client={client}>
+        <Folio key={other.path} tabId="other-task" path={other.path} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() =>
+      expect(requests).toContainEqual({
+        id: task.id,
+        patch: { assignee: "Ada" },
+      }),
+    );
+    expect(screen.getByLabelText("Assignee")).toHaveValue("");
+    expect(requests.some(({ id }) => id === other.id)).toBe(false);
+  });
+
+  it("keeps rejected blockers unchanged and still opens the task in Tasking", async () => {
+    const { task } = mountTask({ rejectBlockers: true });
+    const combo = await screen.findByRole("combobox", { name: "Add blocker" });
+    await userEvent.click(combo);
+    await userEvent.type(combo, "Task Beta");
+    await userEvent.click(
+      await screen.findByRole("option", { name: /TSK-0003/ }),
+    );
+    expect(
+      (await screen.findAllByText("Blocker cycle is not allowed.")).length,
+    ).toBeGreaterThan(0);
+    await userEvent.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("button", { name: "Remove blocker TSK-0003" }),
+    ).toBeNull();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Open in Tasking" }),
+    );
+    await waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith({ to: "/tasking", search: {} }),
+    );
+    expect(useBoardStore.getState().editTaskId).toBe(task.id);
+  });
+
+  it("edits inverse blockers on the dependent task", async () => {
+    const { requests } = mountTask();
+    const combo = await screen.findByRole("combobox", {
+      name: "Add blocked task",
+    });
+    await userEvent.click(combo);
+    await userEvent.type(combo, "Task Beta");
+    await userEvent.click(
+      await screen.findByRole("option", { name: /TSK-0003/ }),
+    );
+    await waitFor(() =>
+      expect(requests).toContainEqual({
+        id: "t3",
+        patch: { blocked_by: ["TSK-0001"] },
+      }),
+    );
+    await userEvent.keyboard("{Escape}");
+    expect(
+      await screen.findByRole("button", {
+        name: "Remove blocked task TSK-0003",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("follows a project refile without discarding the Folio body", async () => {
+    const movedPath = "tasks/beta/task.md";
+    const { tabId } = mountTask({ movedPath });
+    const metadata = await screen.findByRole("region", {
+      name: "Task details",
+    });
+    await userEvent.click(
+      within(metadata).getByRole("button", { name: /Project/ }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: /Operation Beta/ }),
+    );
+    await waitFor(() =>
+      expect(
+        useWorkspaceStore.getState().tabs.find((tab) => tab.id === tabId)?.path,
+      ).toBe(movedPath),
+    );
+    expect(screen.getByRole("textbox", { name: "Page body" })).toHaveValue(
+      "Editable body",
+    );
+  });
+
+  it.each([false, true])(
+    "settles a refile after unmount without hijacking a reused tab (reused=%s)",
+    async (reused) => {
+      let release!: () => void;
+      const patchGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const movedPath = "tasks/beta/task.md";
+      const { tabId, requests, unmount } = mountTask({ movedPath, patchGate });
+      const metadata = await screen.findByRole("region", {
+        name: "Task details",
+      });
+      await userEvent.click(
+        within(metadata).getByRole("button", { name: /Project/ }),
+      );
+      await userEvent.click(
+        await screen.findByRole("option", { name: /Operation Beta/ }),
+      );
+      await waitFor(() =>
+        expect(requests).toContainEqual({
+          id: "t1",
+          patch: { project: "beta" },
+        }),
+      );
+      unmount();
+      if (reused) {
+        useWorkspaceStore.getState().updateTabPath(tabId, "notes/another.md");
+        useWorkspaceStore.getState().setTabPageId(tabId, "another-id");
+      }
+      await act(async () => {
+        release();
+        await patchGate;
+      });
+      await waitFor(() =>
+        expect(
+          useWorkspaceStore.getState().tabs.find((tab) => tab.id === tabId)
+            ?.path,
+        ).toBe(reused ? "notes/another.md" : movedPath),
+      );
+    },
+  );
 });

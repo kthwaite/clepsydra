@@ -165,8 +165,13 @@ export function useFolioTab({
   // page path changes. Repoint the open tab to the new path; because FOLIO is
   // keyed on the tab path (TabContent), this remounts the editor at the new
   // location — the entire follow mechanism.
-  const followMove = (data: { path?: string }) => {
-    if (data.path && data.path !== path) updateTabPath(tabId, data.path);
+  const followMove = (data: { id?: string; path?: string }) => {
+    const tab = useWorkspaceStore
+      .getState()
+      .tabs.find((tab) => tab.id === tabId);
+    if (tab?.type !== "page" || (data.id && tab.pageId !== data.id))
+      return;
+    if (data.path && data.path !== tab.path) updateTabPath(tabId, data.path);
   };
 
   return { tabQuire, isActiveTab, updateTabPath, closeTab, followMove };

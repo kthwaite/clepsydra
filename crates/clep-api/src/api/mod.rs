@@ -35,6 +35,7 @@ pub mod properties;
 pub mod query;
 pub mod rubbish;
 pub mod sync;
+pub mod tag_management;
 pub mod tasks;
 pub mod uptime;
 

@@ -8,6 +8,7 @@ import {
   ModalOverlay,
 } from "react-aria-components";
 import type { ContentEntry } from "#/api/types";
+import { TagManagementButton } from "#/components/codex/TagManagement";
 import { Tick } from "#/components/codex/Tick";
 import { FilterBar } from "#/components/filters/FilterBar";
 import { KindIcon } from "#/components/KindIcon";
@@ -120,6 +121,9 @@ export function MobileGazetteer({
           Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
         </AriaButton>
       </header>
+      <div className="px-5 pt-3">
+        <TagManagementButton />
+      </div>
 
       <div className="cl-noscroll min-h-0 flex-1 overflow-y-auto px-4 pt-[18px] pb-3">
         {rows.length > 0 ? (
