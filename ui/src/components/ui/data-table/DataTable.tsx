@@ -29,7 +29,6 @@ import {
   useCallback,
   useEffect,
   useId,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -43,6 +42,11 @@ import {
   isEditorTarget,
   useGridNavigation,
 } from "#/components/ui/data-table/grid-navigation";
+import {
+  ReorderAnnouncement,
+  reorderEdgeShadow,
+  useReorderFeedback,
+} from "#/components/ui/reorder-feedback";
 import { useWidthDrag, WidthResizer } from "#/components/ui/width-resizer";
 import { cn } from "#/lib/cn";
 
@@ -407,32 +411,25 @@ export function DataTable<TRow extends RowData>({
     );
 
   // Reorder: announcements, and focus kept on a moved header.
-  const [announcement, setAnnouncement] = useState("");
+  const { announcement, report } = useReorderFeedback();
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropFeedback, setDropFeedback] = useState<DropFeedback | null>(null);
-  const restoreFocus = useRef<Element | null>(null);
 
   const commitOrder = (next: string[] | null, moved: string) => {
     if (!next || !onColumnOrderChange) return;
     const active = gridRef.current?.ownerDocument.activeElement ?? null;
-    if (active && gridRef.current?.contains(active)) {
-      restoreFocus.current = active;
-    }
+    const focusTarget =
+      active instanceof HTMLElement && gridRef.current?.contains(active)
+        ? active
+        : null;
     onColumnOrderChange(next, moved);
     const visible = next.filter((id) => visibleIds.includes(id));
     const label = byId.get(moved)?.label ?? moved;
-    setAnnouncement(
+    report(
       `Moved ${label} to position ${visible.indexOf(moved) + 1} of ${visible.length}.`,
+      () => focusTarget,
     );
   };
-
-  useLayoutEffect(() => {
-    const el = restoreFocus.current;
-    restoreFocus.current = null;
-    if (el instanceof HTMLElement && el.isConnected) {
-      if (el.ownerDocument.activeElement !== el) el.focus();
-    }
-  });
 
   const reorderHandlers = useRef<ReorderHandlers>(null as never);
   reorderHandlers.current = {
@@ -760,9 +757,7 @@ export function DataTable<TRow extends RowData>({
       </p>
       {/* A live region without role="status": the screens hosting a table
           keep that role for their own messages. */}
-      <p aria-live="polite" aria-atomic="true" className="sr-only">
-        {announcement}
-      </p>
+      <ReorderAnnouncement announcement={announcement} />
     </>
   );
 }
@@ -917,16 +912,7 @@ function HeaderCell<TRow>({
         KEY_FOCUS,
         column.headerClassName,
       )}
-      style={
-        dropEdge
-          ? {
-              boxShadow:
-                dropEdge === "left"
-                  ? "inset 2px 0 0 0 var(--accent)"
-                  : "inset -2px 0 0 0 var(--accent)",
-            }
-          : undefined
-      }
+      style={{ boxShadow: reorderEdgeShadow(dropEdge ?? null) }}
     >
       <span ref={labelRef} id={labelId}>
         {content}

@@ -1,5 +1,6 @@
 import { usePatchTask } from "#/api/board";
 import { useToggleTaskStatus } from "#/api/tasks";
+import { TodoAssignee } from "#/components/agenda/TodoAssignee";
 import {
   COL_ORDER,
   isDone,
@@ -45,6 +46,7 @@ export interface TodoRowItem {
   /** Omitted where the list is already one day. */
   due?: string | null;
   priority?: string | null;
+  assignee?: string;
 }
 
 /** A TASK page, wherever it was listed from. */
@@ -93,6 +95,7 @@ export function TodoRow({ todo }: { todo: TodoRowItem }) {
           {todo.priority && (
             <Badge size="sm">{todo.priority.toUpperCase()}</Badge>
           )}
+          {todo.assignee && <TodoAssignee value={todo.assignee} />}
           <button
             type="button"
             onClick={() => openTab("page", todo.page_path)}

@@ -241,26 +241,29 @@ status `[-]` in
 [Tasks, Agenda, Journals, and Board](/docs/tasks-agenda-journals-and-board) is
 recognized by the index, not by Folio's checkbox.
 
-A Todo list item renders its `due`, `scheduled`, and `priority` properties as
-read-only chips after its text: `DUE 2026-08-20`, `SCHED 2026-08-15`, and the
-priority values `A`, `B`, and `C` as `HIGH`, `MED`, and `LOW`, the same mapping
-the Agenda's Todo list uses. Another priority value is shown verbatim in
-capitals. The chips stay on the first line of an item that carries a nested
-sub-list. Plain bullets and other blocks show no chips, and property keys other
-than those three stay invisible everywhere. A read-only Folio shows the chips
-but they are inert there: the popover below does not open.
+A Todo list item renders its `due`, `scheduled`, `priority`, and `assignee`
+properties as chips after its text. Dates appear as `DUE 2026-08-20` and
+`SCHED 2026-08-15`; priority values `A`, `B`, and `C` appear as `HIGH`, `MED`,
+and `LOW`, matching Agenda. Another priority value is shown verbatim in
+capitals. The assignee names one PERSON page. Chips stay with the parent item
+when it carries a nested sub-list; assignment does not pass to its children.
+Plain bullets show no task chips. In a read-only Folio, person references remain
+navigable, but task properties cannot be edited.
 
 Click a chip — or the `+` control that appears when you hover or focus a Todo
-list item with none of the three properties set — to open the **Todo properties**
-popover. `Command+Shift+P` on macOS or `Ctrl+Shift+P` elsewhere opens the same
-popover for the Todo list item holding the caret, including from vim normal mode.
-Due and Scheduled are date fields, each with a clear control, and Priority is a
-HIGH / MED / LOW toggle writing `A`, `B`, or `C`; pressing the level already set
-clears it. The popover buffers its edits: `Enter` commits them, as does clicking
-outside it, and `Escape` discards them. `Enter` while one of the popover's own
-buttons has focus activates that button instead of committing. A commit that
-changes nothing writes nothing, other properties on the item are left untouched,
-clearing every property removes the record, and focus returns to the editor.
+without these properties — to open **Todo properties**.
+`Command+Shift+P` on macOS or `Ctrl+Shift+P` elsewhere opens the same popover
+for the Todo holding the caret, including from vim normal mode. Due and
+Scheduled are date fields with clear controls. Priority is a HIGH / MED / LOW
+toggle writing `A`, `B`, or `C`; pressing the selected level clears it.
+**Assignee (Person)** chooses one existing PERSON page; choose another to
+reassign, or use **Clear assignee** to leave the Todo unassigned.
+
+Edits are buffered: **Apply**, `Enter` from a text field, or clicking outside
+commits; **Cancel** or `Escape` discards. `Enter` on a button or the person
+selector operates that control instead of committing. Unchanged drafts write
+nothing. Other properties, formatting, and nested items are preserved; clearing
+every property removes the record, and focus returns to the editor.
 
 Typing an inline property also works. In any block that can carry properties,
 `[key:: value]` converts on the closing `]`, for any key, as long as at least
@@ -272,12 +275,16 @@ one undo reverses the whole conversion. Nothing converts inside a code block or
 inline code, `[key::value]` without that space still scaffolds a link, and so
 does a plain `[label]`.
 
+Person assignment round-trips as an ordinary wikilink inside an inline property,
+for example `[assignee:: [[Ada Lovelace]]]`. Existing manual references are
+retained; newly selected people use a vault-path reference with a display label.
+Completing a Todo retains its assignment. Code examples do not become properties.
+
 A trailing `^blockId` marker, properties on blocks other than Todo list items,
-and keys outside those three remain Markdown-level constructs that Folio parses
-on load and re-emits on save without ever showing. Read or correct those outside
-the web editor — an external editor over the [LSP](/docs/lsp), the CLI, the
-API, or MCP tooling. The Tasks guide holds the syntax and how `due`,
-`scheduled`, and `priority` drive the agenda.
+and keys outside these four remain Markdown-level constructs that Folio parses
+on load and re-emits on save without showing. Read or correct those with an
+external editor over the [LSP](/docs/lsp), the CLI, API, or MCP tooling. The
+Tasks guide explains date and priority behavior and Agenda's person filter.
 
 A property whose value is a bare URL cannot round-trip, because the Markdown
 parser autolinks that URL first.
@@ -424,9 +431,9 @@ a definitive 404 does not retry automatically.
   restore a block that no longer exists.
 - Pasting a URL over selected text replaces the selection instead of linking it.
 - Block IDs are invisible in Folio. They survive a save, but they cannot be read
-  or corrected there. Of the inline properties, only `due`, `scheduled`, and
-  `priority` on a Todo list item can be seen and edited, as chips; every other
-  key, and every property on a block that is not a Todo list item, stays invisible.
+  or corrected there. Of the inline properties, only `due`, `scheduled`,
+  `priority`, and `assignee` on a Todo list item have editing controls; every
+  other key, and properties on other block types, stay invisible.
 - `Escape` in the wikilink chooser leaves the typed `[[query` text in the
   document.
 

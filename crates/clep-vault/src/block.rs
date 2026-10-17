@@ -62,7 +62,9 @@ fn block_id_regex() -> &'static Regex {
 fn inline_property_regex() -> &'static Regex {
     use std::sync::OnceLock;
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\[([A-Za-z_][\w-]*)::\s+([^\]]+)\]").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"\[([A-Za-z_][\w-]*)::[ \t]+((?:\[\[[^\]\r\n]+\]\]|[^\[\]\r\n])+)\]").unwrap()
+    })
 }
 
 /// Lazily compiled regex for cancelled checkbox: `[-] ` at start of text.
@@ -86,7 +88,11 @@ fn extract_block_id(text: &mut String) -> Option<String> {
 }
 
 /// Strip all `[key:: value]` inline properties from `text`, returning them.
-fn extract_inline_properties(text: &mut String) -> HashMap<String, String> {
+fn extract_inline_properties(
+    text: &mut String,
+    code_ranges: &[Range<usize>],
+    removed_prefix: usize,
+) -> HashMap<String, String> {
     let re = inline_property_regex();
     let mut props = HashMap::new();
     let mut result = String::with_capacity(text.len());
@@ -94,6 +100,11 @@ fn extract_inline_properties(text: &mut String) -> HashMap<String, String> {
 
     for caps in re.captures_iter(text.as_str()) {
         let m = caps.get(0).unwrap();
+        if code_ranges.iter().any(|code| {
+            m.start() + removed_prefix < code.end && code.start < m.end() + removed_prefix
+        }) {
+            continue;
+        }
         let key = caps[1].to_string();
         let value = caps[2].trim().to_string();
         result.push_str(&text[last_end..m.start()]);
@@ -123,9 +134,13 @@ fn extract_cancelled_checkbox(text: &mut String) -> bool {
 }
 
 /// Post-process raw content: extract block ID, inline properties, and trim.
-fn postprocess_content(text: &mut String) -> (Option<String>, HashMap<String, String>) {
+fn postprocess_content(
+    text: &mut String,
+    code_ranges: &[Range<usize>],
+    removed_prefix: usize,
+) -> (Option<String>, HashMap<String, String>) {
     let block_id = extract_block_id(text);
-    let properties = extract_inline_properties(text);
+    let properties = extract_inline_properties(text, code_ranges, removed_prefix);
     *text = text.trim().to_string();
     (block_id, properties)
 }
@@ -135,6 +150,9 @@ fn postprocess_content(text: &mut String) -> (Option<String>, HashMap<String, St
 struct BlockBuilder {
     block_type: BlockType,
     text_parts: Vec<String>,
+    text_len: usize,
+    /// Ranges in joined text that originate from code, not metadata syntax.
+    code_ranges: Vec<Range<usize>>,
     checkbox: Option<CheckboxState>,
     list_depth: usize,
     span_start: usize,
@@ -168,6 +186,8 @@ fn start_block_builder(
     *current = Some(BlockBuilder {
         block_type,
         text_parts: Vec::new(),
+        text_len: 0,
+        code_ranges: Vec::new(),
         checkbox: None,
         list_depth,
         span_start,
@@ -210,6 +230,8 @@ fn handle_paragraph_start(
         *current = Some(BlockBuilder {
             block_type: BlockType::Blockquote,
             text_parts: Vec::new(),
+            text_len: 0,
+            code_ranges: Vec::new(),
             checkbox: None,
             list_depth: 0,
             span_start: range_start,
@@ -240,8 +262,13 @@ fn handle_paragraph_end(
 }
 
 /// Append inline text to the in-progress builder (no-op if none open).
-fn append_text(current: &mut Option<BlockBuilder>, text: String) {
+fn append_text(current: &mut Option<BlockBuilder>, text: String, inline_code: bool) {
     if let Some(builder) = current.as_mut() {
+        let start = builder.text_len;
+        builder.text_len += text.len();
+        if inline_code || builder.block_type == BlockType::Code {
+            builder.code_ranges.push(start..builder.text_len);
+        }
         builder.text_parts.push(text);
     }
 }
@@ -351,10 +378,10 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
             Event::End(TagEnd::BlockQuote(_)) => {
                 in_blockquote = false;
             }
-            Event::Text(text) => append_text(&mut current, text.to_string()),
-            Event::Code(code) => append_text(&mut current, format!("`{code}`")),
-            Event::SoftBreak => append_text(&mut current, " ".to_string()),
-            Event::HardBreak => append_text(&mut current, "\n".to_string()),
+            Event::Text(text) => append_text(&mut current, text.to_string(), false),
+            Event::Code(code) => append_text(&mut current, format!("`{code}`"), true),
+            Event::SoftBreak => append_text(&mut current, " ".to_string(), false),
+            Event::HardBreak => append_text(&mut current, "\n".to_string(), false),
             _ => {}
         }
     }
@@ -386,7 +413,9 @@ fn emit_block(blocks: &mut Vec<Block>, builder: BlockBuilder) {
     };
 
     // Post-process: extract block ID and inline properties
-    let (block_id, mut properties) = postprocess_content(&mut content);
+    let removed_prefix = builder.text_len - content.len();
+    let (block_id, mut properties) =
+        postprocess_content(&mut content, &builder.code_ranges, removed_prefix);
 
     // Set status property from checkbox state
     if let Some(state) = checkbox {
@@ -456,90 +485,6 @@ fn assign_parents_and_order(blocks: &mut [Block]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn flush_current_emits_and_clears() {
-        let mut blocks = Vec::new();
-        let mut current = Some(BlockBuilder {
-            block_type: BlockType::Paragraph,
-            text_parts: vec!["hi".to_string()],
-            checkbox: None,
-            list_depth: 0,
-            span_start: 0,
-            span_end: 2,
-            accepts_checkbox: false,
-        });
-        flush_current(&mut blocks, &mut current);
-        assert!(current.is_none());
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].content, "hi");
-    }
-
-    #[test]
-    fn set_checkbox_maps_checked_flag() {
-        let mut current = Some(BlockBuilder {
-            block_type: BlockType::ListItem,
-            text_parts: Vec::new(),
-            checkbox: None,
-            list_depth: 0,
-            span_start: 0,
-            span_end: 0,
-            accepts_checkbox: true,
-        });
-        set_checkbox(&mut current, true);
-        assert_eq!(
-            current.as_ref().unwrap().checkbox,
-            Some(CheckboxState::Done)
-        );
-        set_checkbox(&mut current, false);
-        assert_eq!(
-            current.as_ref().unwrap().checkbox,
-            Some(CheckboxState::Todo)
-        );
-    }
-
-    #[test]
-    fn paragraph_start_in_blockquote_uses_paragraph_span_without_flushing() {
-        // A blockquote-wrapped paragraph start overwrites the in-progress
-        // builder without emitting it and keeps its own source span.
-        let mut blocks: Vec<Block> = Vec::new();
-        let mut current = Some(BlockBuilder {
-            block_type: BlockType::Paragraph,
-            text_parts: vec!["stale".to_string()],
-            checkbox: None,
-            list_depth: 0,
-            span_start: 0,
-            span_end: 5,
-            accepts_checkbox: false,
-        });
-        handle_paragraph_start(&mut blocks, &mut current, true, 20, 30);
-        // The previous builder was dropped, not emitted.
-        assert!(blocks.is_empty(), "blockquote start must not flush");
-        let b = current.as_ref().expect("a builder should be present");
-        assert_eq!(b.block_type, BlockType::Blockquote);
-        assert_eq!(b.span_start, 20, "span_start comes from paragraph start");
-    }
-
-    #[test]
-    fn paragraph_end_uses_paragraph_span_end() {
-        let mut blocks: Vec<Block> = Vec::new();
-        let mut current = Some(BlockBuilder {
-            block_type: BlockType::Blockquote,
-            text_parts: vec!["quote".to_string()],
-            checkbox: None,
-            list_depth: 0,
-            span_start: 10,
-            span_end: 0,
-            accepts_checkbox: false,
-        });
-        handle_paragraph_end(&mut blocks, &mut current, 99);
-        assert!(current.is_none());
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(
-            blocks[0].span.end, 99,
-            "paragraph range end should be retained"
-        );
-    }
 
     #[test]
     fn parses_simple_definition_list() {

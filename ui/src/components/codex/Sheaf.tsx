@@ -10,12 +10,24 @@ import {
 } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
 import { Plus, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { SheafContextMenu } from "#/components/codex/SheafContextMenu";
 import { TabPreviewCard } from "#/components/codex/TabPreviewCard";
 import { shouldPreviewTab } from "#/components/codex/tab-preview";
 import { KindIcon } from "#/components/KindIcon";
+import {
+  ReorderAnnouncement,
+  reorderEdgeShadow,
+} from "#/components/ui/reorder-feedback";
 import { useActivateTabWithFolioHistory } from "#/hooks/useFolioHistoryNavigation";
+import { useFolioReorder } from "#/hooks/useFolioReorder";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { resolveKindFromPath } from "#/lib/kind";
@@ -26,7 +38,11 @@ import {
   sheafSegments,
 } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
-import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
+import {
+  type TabDescriptor,
+  type TabMoveTarget,
+  useWorkspaceStore,
+} from "#/store/workspace";
 
 type SheafProps = {
   activeTabId: string | null;
@@ -75,6 +91,8 @@ export function Sheaf({
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
   const [dropFeedback, setDropFeedback] = useState<SheafDropFeedback>(null);
   const sheafRef = useRef<HTMLDivElement>(null);
+  const { announcement, move, moveBy, cancel } = useFolioReorder(sheafRef);
+  const reorderHintId = useId();
   const openTimer = useRef<number | null>(null);
 
   const clearOpenTimer = useCallback(() => {
@@ -143,9 +161,13 @@ export function Sheaf({
           const sourceTabId = getSheafTabId(source.data);
           if (sourceTabId) onTabDndStart(sourceTabId);
         },
-        onDrop: onTabDndEnd,
+        onDrop: ({ source, location }) => {
+          onTabDndEnd();
+          const tabId = getSheafTabId(source.data);
+          if (tabId && location.current.dropTargets.length === 0) cancel(tabId);
+        },
       }),
-    [onTabDndEnd, onTabDndStart],
+    [cancel, onTabDndEnd, onTabDndStart],
   );
 
   const renderTab = (tab: TabDescriptor) => (
@@ -154,6 +176,9 @@ export function Sheaf({
       tab={tab}
       active={tab.id === activeTabId}
       dragged={tab.id === draggedTabId}
+      move={move}
+      moveBy={moveBy}
+      reorderHintId={reorderHintId}
       dropEdge={
         dropFeedback?.kind === "tab" && dropFeedback.tabId === tab.id
           ? dropFeedback.edge
@@ -176,6 +201,11 @@ export function Sheaf({
         className,
       )}
     >
+      <p id={reorderHintId} className="sr-only">
+        Reorder with Alt+ArrowLeft or Alt+ArrowRight. Moving across a quire
+        boundary joins the destination quire.
+      </p>
+      <ReorderAnnouncement role="status" announcement={announcement} />
       {runs.map((run, index) =>
         run.kind === "quire" ? (
           <Segment
@@ -183,9 +213,11 @@ export function Sheaf({
             label={run.quire.name}
             rule={quireRule(run.quire)}
             drop={{ quireId: run.quire.id }}
+            move={move}
           >
             <QuireHeader
               quire={run.quire}
+              move={move}
               memberCount={run.members.length}
               highlighted={
                 dropFeedback?.kind === "quire" &&
@@ -205,6 +237,7 @@ export function Sheaf({
             rule="var(--rule)"
             grow={index === runs.length - 1}
             drop={looseDrop(run.tabs, index === runs.length - 1)}
+            move={move}
           >
             {run.tabs.map(renderTab)}
             {index === runs.length - 1 && (
@@ -232,13 +265,9 @@ export function Sheaf({
   );
 }
 
-type SegmentDrop = Parameters<
-  ReturnType<typeof useWorkspaceStore.getState>["moveTab"]
->[1];
-
 /** Where a drop on a loose segment's own space lands: the trailing segment
  *  means "end of the row"; an earlier one means "after its last tab". */
-function looseDrop(tabs: TabDescriptor[], trailing: boolean): SegmentDrop {
+function looseDrop(tabs: TabDescriptor[], trailing: boolean): TabMoveTarget {
   const last = tabs.at(-1);
   return trailing || !last
     ? { position: "end" }
@@ -254,34 +283,48 @@ function Segment({
   rule,
   grow,
   drop,
+  move,
   children,
 }: {
   label: string;
   rule: string;
   grow?: boolean;
-  drop: SegmentDrop;
+  drop: TabMoveTarget;
+  move: (tabId: string, target: TabMoveTarget) => void;
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const moveTab = useWorkspaceStore((s) => s.moveTab);
-  const dropKey = JSON.stringify(drop);
+  const [highlighted, setHighlighted] = useState(false);
+  const target = useRef(drop);
+  useLayoutEffect(() => {
+    target.current = drop;
+  }, [drop]);
 
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const target = JSON.parse(dropKey) as SegmentDrop;
     return dropTargetForElements({
       element,
       getData: () => ({ kind: "sheaf-segment" }),
       canDrop: ({ source }) => getSheafTabId(source.data) !== null,
+      onDragEnter: ({ self, location }) =>
+        setHighlighted(
+          location.current.dropTargets[0]?.element === self.element,
+        ),
+      onDrag: ({ self, location }) =>
+        setHighlighted(
+          location.current.dropTargets[0]?.element === self.element,
+        ),
+      onDragLeave: () => setHighlighted(false),
       onDrop: ({ source, self, location }) => {
+        setHighlighted(false);
         // Tabs and the quire label inside handle their own drops.
         if (location.current.dropTargets[0]?.element !== self.element) return;
         const sourceTabId = getSheafTabId(source.data);
-        if (sourceTabId) moveTab(sourceTabId, target);
+        if (sourceTabId) move(sourceTabId, target.current);
       },
     });
-  }, [dropKey, moveTab]);
+  }, [move]);
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: a run of tab buttons, not form controls; a fieldset would add form semantics and default borders, so an ARIA group names the quire instead.
@@ -290,7 +333,11 @@ function Segment({
       role="group"
       aria-label={label}
       className={cn("flex flex-shrink-0 items-stretch", grow && "flex-1")}
-      style={{ boxShadow: `inset 0 -1px 0 0 ${rule}` }}
+      style={{
+        boxShadow: highlighted
+          ? "inset 0 -2px 0 0 var(--accent)"
+          : `inset 0 -1px 0 0 ${rule}`,
+      }}
     >
       {children}
     </div>
@@ -306,6 +353,7 @@ type QuireHeaderProps = {
   highlighted: boolean;
   setDropFeedback: (feedback: SheafDropFeedback) => void;
   onToggle: () => void;
+  move: (tabId: string, target: TabMoveTarget) => void;
 };
 
 function QuireHeader({
@@ -314,9 +362,9 @@ function QuireHeader({
   highlighted,
   setDropFeedback,
   onToggle,
+  move,
 }: QuireHeaderProps) {
   const ref = useRef<HTMLButtonElement>(null);
-  const moveTab = useWorkspaceStore((s) => s.moveTab);
 
   useEffect(() => {
     const element = ref.current;
@@ -331,21 +379,25 @@ function QuireHeader({
       onDrop: ({ source }) => {
         setDropFeedback(null);
         const sourceTabId = getSheafTabId(source.data);
-        if (sourceTabId) moveTab(sourceTabId, { quireId: quire.id });
+        if (sourceTabId) move(sourceTabId, { quireId: quire.id });
       },
     });
-  }, [moveTab, quire.id, setDropFeedback]);
+  }, [move, quire.id, setDropFeedback]);
 
   return (
     <SheafContextMenu target={{ kind: "quire", quireId: quire.id }}>
       <button
         ref={ref}
         type="button"
+        data-quire-id={quire.id}
         onClick={onToggle}
         aria-label={`quire ${quire.name}, ${memberCount} folios${
           quire.collapsed ? ", collapsed" : ""
         }`}
-        className="flex flex-shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap pr-2.5"
+        className={cn(
+          "flex flex-shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md pr-2.5",
+          FOCUS_RING_NATIVE,
+        )}
         style={{
           color: quireColorVar(quire.color),
           outline: highlighted ? "1px solid var(--accent)" : undefined,
@@ -368,6 +420,9 @@ type FolioTabProps = {
   tab: TabDescriptor;
   active: boolean;
   dragged: boolean;
+  move: (tabId: string, target: TabMoveTarget) => void;
+  moveBy: (tabId: string, delta: -1 | 1) => void;
+  reorderHintId: string;
   dropEdge: "left" | "right" | null;
   setDropFeedback: (feedback: SheafDropFeedback) => void;
   onDndStart: (tabId: string) => void;
@@ -382,6 +437,9 @@ function FolioTab({
   active,
   dragged,
   dropEdge,
+  move,
+  moveBy,
+  reorderHintId,
   setDropFeedback,
   onDndStart,
   onDndEnd,
@@ -391,7 +449,6 @@ function FolioTab({
 }: FolioTabProps) {
   const closeTab = useWorkspaceStore((s) => s.closeTab);
   const dragHandleRef = useRef<HTMLButtonElement>(null);
-  const moveTab = useWorkspaceStore((s) => s.moveTab);
   const ref = useRef<HTMLDivElement>(null);
 
   const kind = resolveKindFromPath(t.path ?? "");
@@ -446,21 +503,20 @@ function FolioTab({
           const sourceTabId = getSheafTabId(source.data);
           const edge = extractClosestEdge(self.data);
           if (!sourceTabId || (edge !== "left" && edge !== "right")) return;
-          moveTab(sourceTabId, {
+          move(sourceTabId, {
             tabId: t.id,
             position: edge === "left" ? "before" : "after",
           });
         },
       }),
     );
-  }, [moveTab, onDndEnd, onDndStart, setDropFeedback, t.id]);
+  }, [move, onDndEnd, onDndStart, setDropFeedback, t.id]);
   // Rules paint on the wrapper so they span the full tab, close control
   // included — the label button alone stops short of the ✕. The quire's
   // own rule lives on its Segment.
   const rules = [
     active ? "inset 0 -2px 0 0 var(--accent)" : null,
-    dropEdge === "left" ? "inset 2px 0 0 0 var(--accent)" : null,
-    dropEdge === "right" ? "inset -2px 0 0 0 var(--accent)" : null,
+    reorderEdgeShadow(dropEdge),
   ].filter(Boolean);
 
   return (
@@ -476,6 +532,23 @@ function FolioTab({
         <button
           ref={dragHandleRef}
           type="button"
+          data-folio-id={t.id}
+          aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
+          aria-describedby={reorderHintId}
+          onKeyDown={(event) => {
+            if (
+              !event.altKey ||
+              event.ctrlKey ||
+              event.metaKey ||
+              event.shiftKey
+            )
+              return;
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            event.stopPropagation();
+            onLeave();
+            moveBy(t.id, event.key === "ArrowLeft" ? -1 : 1);
+          }}
           onClick={() => onActivate(t.id)}
           onMouseEnter={(e) => onEnter(t.id, t.path, e.currentTarget)}
           onMouseLeave={onLeave}
@@ -503,7 +576,7 @@ function FolioTab({
         onClick={onClose}
         aria-label="close folio"
         className={cn(
-          "flex-shrink-0 cursor-pointer rounded-md pr-2.5 pl-1 leading-none text-faint transition-opacity hover:text-ink focus-visible:opacity-100",
+          "flex-shrink-0 cursor-pointer rounded-md pr-2.5 pl-1 leading-none text-faint transition-opacity motion-reduce:transition-none hover:text-ink focus-visible:opacity-100",
           FOCUS_RING_NATIVE,
           active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
         )}

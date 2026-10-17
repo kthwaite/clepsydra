@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
 import type { AgendaItem, AgendaResponse } from "#/api/tasks";
 import { useAgenda } from "#/api/tasks";
+import type { PageSummary } from "#/api/types";
 import { AgendaItemList } from "#/components/agenda/AgendaItemList";
 import { FilterBar } from "#/components/filters/FilterBar";
 import { MobileAgenda } from "#/components/mobile/MobileAgenda";
@@ -13,6 +14,7 @@ import {
 import { SectionHeading } from "#/components/ui/section-heading";
 import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
+import { pageName, usePeople } from "#/hooks/usePeople";
 import { type FilterState, isFilterActive } from "#/lib/filters/model";
 import {
   defineFilterRoute,
@@ -21,6 +23,7 @@ import {
   useFilterRoute,
 } from "#/lib/filters/route";
 import { formatDayMonth, localDateKey, parseLocalDate } from "#/lib/time";
+import { todoAssigneePerson } from "#/lib/todoAssignee";
 import { useProjectValues } from "#/lib/useProjects";
 
 const TODO_STATUS_VALUES = ["open", "doing"] as const;
@@ -86,6 +89,7 @@ const AGENDA_FACETS: readonly FacetDef[] = [
   },
   { id: "project", kind: "single", label: "Project" },
   { id: "blocked", kind: "flag", label: "Blocked" },
+  { id: "todoPerson", kind: "single", label: "Inline TODO person" },
 ];
 
 /** The Agenda's URL-backed filter. */
@@ -117,7 +121,20 @@ function AgendaPage() {
   const agenda = useAgenda(today);
   const mobile = useMobileLayout();
 
-  if (mobile) return <MobileAgenda agenda={agenda} today={today} />;
+  if (mobile)
+    return (
+      <MobileAgenda
+        agenda={agenda}
+        today={today}
+        personId={filterState.facets.todoPerson?.[0] ?? ""}
+        onPersonChange={(id) =>
+          onFilterChange({
+            ...filterState,
+            facets: { ...filterState.facets, todoPerson: id ? [id] : [] },
+          })
+        }
+      />
+    );
 
   return (
     <AgendaScreen
@@ -132,6 +149,7 @@ function AgendaPage() {
 export function matchesAgendaFilter(
   item: AgendaItem,
   filterState: FilterState,
+  people: readonly PageSummary[] = [],
 ): boolean {
   const type = filterState.facets.type ?? [];
   if (type.length > 0 && !type.includes(item.kind)) return false;
@@ -142,7 +160,9 @@ export function matchesAgendaFilter(
   const taskPriority = filterState.facets.taskPriority ?? [];
   const project = filterState.facets.project ?? [];
   const blocked = filterState.facets.blocked ?? [];
-  const hasTodoFacet = todoStatus.length > 0 || todoPriority.length > 0;
+  const todoPerson = filterState.facets.todoPerson ?? [];
+  const hasTodoFacet =
+    todoStatus.length > 0 || todoPriority.length > 0 || todoPerson.length > 0;
   const hasTaskFacet =
     taskStatus.length > 0 ||
     taskPriority.length > 0 ||
@@ -152,6 +172,10 @@ export function matchesAgendaFilter(
   let textHay: string;
   if (item.kind === "todo") {
     if (hasTaskFacet) return false;
+    if (todoPerson.length > 0) {
+      const person = todoAssigneePerson(item.properties.assignee, people);
+      if (!person || !todoPerson.includes(person.id)) return false;
+    }
     const displayStatus = item.status === "todo" ? "open" : item.status;
     if (todoStatus.length > 0 && !todoStatus.includes(displayStatus)) {
       return false;
@@ -202,20 +226,25 @@ export function AgendaScreen({
   onFilterChange: (next: FilterState) => void;
 }) {
   const projects = useProjectValues();
+  const people = usePeople();
 
   const filterFields = useMemo(
     () =>
       facetFields(AGENDA_FACETS, {
         project: projects.map((value) => ({ value })),
+        todoPerson: people.map((person) => ({
+          value: person.id,
+          label: pageName(person),
+        })),
       }),
-    [projects],
+    [projects, people],
   );
 
   const filtered = useMemo(() => {
     const data = agenda.data;
     if (!data) return null;
     const apply = (items: readonly AgendaItem[]) =>
-      items.filter((item) => matchesAgendaFilter(item, filterState));
+      items.filter((item) => matchesAgendaFilter(item, filterState, people));
     return {
       overdue: apply(data.overdue),
       today: apply(data.today),
@@ -224,7 +253,7 @@ export function AgendaScreen({
         .filter((day) => day.items.length > 0),
       undated: apply(data.undated),
     };
-  }, [agenda.data, filterState]);
+  }, [agenda.data, filterState, people]);
 
   return (
     <div className="flex h-full flex-col">
@@ -234,7 +263,7 @@ export function AgendaScreen({
         </h1>
         <FilterBar
           fields={filterFields}
-          primaryFieldIds={["type", "todoStatus", "taskStatus"]}
+          primaryFieldIds={["type", "todoStatus", "taskStatus", "todoPerson"]}
           state={filterState}
           onChange={onFilterChange}
           textPlaceholder="Filter Agenda…"

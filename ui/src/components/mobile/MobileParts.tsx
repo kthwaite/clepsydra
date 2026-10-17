@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { toast } from "sonner";
 import type { AgendaItem } from "#/api/tasks";
 import { useToggleTaskStatus } from "#/api/tasks";
+import { TodoAssignee } from "#/components/agenda/TodoAssignee";
 import { Tick } from "#/components/codex/Tick";
 import {
   agendaItemPath,
@@ -184,6 +185,11 @@ export function AgendaRow({
         </span>
       </Checkbox>
       <span className="-mt-2.5 flex pl-[26px]">{metaLine}</span>
+      {item.properties.assignee && (
+        <span className="pl-[26px]">
+          <TodoAssignee value={item.properties.assignee} />
+        </span>
+      )}
     </div>
   );
 }

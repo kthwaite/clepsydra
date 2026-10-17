@@ -341,6 +341,73 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("Sheaf accessible ordering", () => {
+  it("moves a focused folio with Alt+Arrow, announces its position and preserves the active page", async () => {
+    seed(false);
+    const user = userEvent.setup();
+    render(<Sheaf activeTabId="t3" />);
+    screen.getByRole("button", { name: "Alpha" }).focus();
+
+    await user.keyboard("{Alt>}{ArrowRight}{/Alt}");
+
+    const group = screen.getByRole("group", { name: "thesis" });
+    expect(group).toHaveTextContent(/thesis.*Beta.*Alpha/);
+    expect(screen.getByRole("button", { name: "Alpha" })).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Moved Alpha to position 2 of 3 in thesis.",
+    );
+    expect(useWorkspaceStore.getState().activeTabId).toBe("t3");
+
+    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      "t2",
+      "t1",
+      "t3",
+    ]);
+
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Moved Alpha to position 1 of 3 in thesis.",
+    );
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+    expect(screen.getByRole("button", { name: "Alpha" })).toHaveFocus();
+    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      "t1",
+      "t2",
+      "t3",
+    ]);
+  });
+
+  it("moves into a collapsed quire without losing focus or opening an inactive folio", async () => {
+    seed(true);
+    useWorkspaceStore.setState({
+      tabs: [
+        ...useWorkspaceStore.getState().tabs,
+        { id: "t4", type: "page", path: "d.md", label: "Delta" },
+      ],
+      activeTabId: "t4",
+    });
+    const user = userEvent.setup();
+    render(<Sheaf activeTabId="t4" />);
+    screen.getByRole("button", { name: "Gamma" }).focus();
+
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+
+    expect(
+      screen.queryByRole("button", { name: "Gamma" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /quire thesis, 3 folios, collapsed/i,
+      }),
+    ).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Moved Gamma to position 2 of 4 in thesis.",
+    );
+    expect(useWorkspaceStore.getState().activeTabId).toBe("t4");
+    expect(useWorkspaceStore.getState().quires.q1.collapsed).toBe(true);
+  });
+});
+
 describe("Sheaf quire rendering", () => {
   it("renders the quire label cell before its member tabs", () => {
     seed(false);

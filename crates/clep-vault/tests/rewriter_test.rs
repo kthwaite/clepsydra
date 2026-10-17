@@ -7,21 +7,21 @@ use clep_vault::rewriter::{DELETE_PLAIN, DELETE_UNLINK, rewrite_links_in_content
 #[test]
 fn rewrite_wikilink() {
     let content = "See [[Old Page]] for details.";
-    let result = rewrite_links_in_content(content, &[("Old Page", "New Page")]);
+    let result = rewrite_links_in_content(content, &[("Old Page", "New Page")], &[]);
     assert_eq!(result, "See [[New Page]] for details.");
 }
 
 #[test]
 fn rewrite_wikilink_with_display_text() {
     let content = "See [[Old Page|my notes]] for details.";
-    let result = rewrite_links_in_content(content, &[("Old Page", "New Page")]);
+    let result = rewrite_links_in_content(content, &[("Old Page", "New Page")], &[]);
     assert_eq!(result, "See [[New Page|my notes]] for details.");
 }
 
 #[test]
 fn rewrite_markdown_link() {
     let content = "See [notes](old.md) for details.";
-    let result = rewrite_links_in_content(content, &[("old.md", "new.md")]);
+    let result = rewrite_links_in_content(content, &[], &[("old.md", "new.md")]);
     assert_eq!(result, "See [notes](new.md) for details.");
 }
 
@@ -30,7 +30,8 @@ fn rewrite_multiple_links() {
     let content = "[[Alpha]] and [[Beta]] and [gamma](gamma.md)";
     let result = rewrite_links_in_content(
         content,
-        &[("Alpha", "A"), ("Beta", "B"), ("gamma.md", "g.md")],
+        &[("Alpha", "A"), ("Beta", "B")],
+        &[("gamma.md", "g.md")],
     );
     assert_eq!(result, "[[A]] and [[B]] and [gamma](g.md)");
 }
@@ -38,7 +39,7 @@ fn rewrite_multiple_links() {
 #[test]
 fn skip_links_in_code_blocks() {
     let content = "```\n[[Old Page]]\n```\n\nOutside `[[Old Page]]` too.\n\n[[Old Page]]";
-    let result = rewrite_links_in_content(content, &[("Old Page", "New Page")]);
+    let result = rewrite_links_in_content(content, &[("Old Page", "New Page")], &[]);
     // The fenced code block and inline code should be untouched;
     // only the bare wikilink outside should be rewritten.
     assert!(
@@ -59,7 +60,7 @@ fn skip_links_in_code_blocks() {
 fn delete_rewrite_plain_text() {
     let content = "See [[Doomed Page]] for info.";
     let new_target = format!("{DELETE_PLAIN}Doomed Page");
-    let result = rewrite_links_in_content(content, &[("Doomed Page", &new_target)]);
+    let result = rewrite_links_in_content(content, &[("Doomed Page", &new_target)], &[]);
     assert_eq!(result, "See Doomed Page for info.");
 }
 
@@ -67,6 +68,22 @@ fn delete_rewrite_plain_text() {
 fn delete_rewrite_unlink() {
     let content = "See [[Doomed Page]] for info.";
     let new_target = format!("{DELETE_UNLINK}Doomed Page");
-    let result = rewrite_links_in_content(content, &[("Doomed Page", &new_target)]);
+    let result = rewrite_links_in_content(content, &[("Doomed Page", &new_target)], &[]);
     assert_eq!(result, "See ~~Doomed Page~~ for info.");
+}
+
+#[test]
+fn rewrite_targets_are_specific_to_link_syntax() {
+    let content = "[[people/ada.md|Ada]] [Other](people/ada.md) \
+                   [[../people/ada.md|Other]] [Ada](../people/ada.md)";
+    let result = rewrite_links_in_content(
+        content,
+        &[("people/ada.md", "people/renamed.md")],
+        &[("../people/ada.md", "../people/renamed.md")],
+    );
+    assert_eq!(
+        result,
+        "[[people/renamed.md|Ada]] [Other](people/ada.md) \
+         [[../people/ada.md|Other]] [Ada](../people/renamed.md)"
+    );
 }

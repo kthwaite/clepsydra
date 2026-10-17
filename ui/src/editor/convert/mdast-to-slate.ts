@@ -849,21 +849,73 @@ function findLastTextNode(children: Descendant[]): CustomText | null {
 }
 
 /**
- * Collect all CustomText nodes from a Descendant[] tree (in order).
+ * Scan contiguous phrasing runs, including wikilink voids. A linked property
+ * is split by remark into text/wikiLink/text; stripping each text leaf alone
+ * cannot own its closing brackets. Keep offsets into the original leaves so
+ * surrounding marks and ordinary links survive unchanged.
  */
-function collectTextNodes(children: Descendant[]): CustomText[] {
-  const result: CustomText[] = [];
-  for (const child of children) {
-    if (isTextNode(child)) {
-      result.push(child);
-    } else {
-      const el = child as CustomElement;
-      if (el.children) {
-        result.push(...collectTextNodes(el.children));
+function extractProperties(
+  children: Descendant[],
+  properties: Record<string, string>,
+): void {
+  let start = 0;
+  while (start < children.length) {
+    const pieces: string[] = [];
+    let end = start;
+    while (end < children.length) {
+      const child = children[end];
+      if (isTextNode(child) && !child.code) pieces.push(child.text);
+      else if (!isTextNode(child) && child.type === "wikilink") {
+        pieces.push(
+          `[[${child.target}${child.alias ? `|${child.alias}` : ""}]]`,
+        );
+      } else break;
+      end++;
+    }
+    if (end === start) {
+      const child = children[start];
+      if (!isTextNode(child) && child.type === "paragraph") {
+        extractProperties(child.children, properties);
       }
+      start++;
+      continue;
+    }
+    const matches = [...pieces.join("").matchAll(inlinePropertyScanner())];
+    for (const match of matches) properties[match[1]] = match[2].trim();
+    if (matches.length > 0) {
+      let offset = 0;
+      const retained: Descendant[] = [];
+      for (let i = start; i < end; i++) {
+        const child = children[i];
+        const length = pieces[i - start].length;
+        let text = pieces[i - start];
+        for (let m = matches.length - 1; m >= 0; m--) {
+          const match = matches[m];
+          const from = Math.max(0, match.index - offset);
+          const to = Math.min(length, match.index + match[0].length - offset);
+          if (from < to) text = text.slice(0, from) + text.slice(to);
+        }
+        if (isTextNode(child)) retained.push({ ...child, text });
+        else if (text) retained.push(child);
+        offset += length;
+      }
+      children.splice(start, end - start, ...retained);
+      start += retained.length;
+    } else start = end;
+  }
+}
+
+function trimMetadataWhitespace(children: Descendant[]): void {
+  for (let index = children.length - 1; index >= 0; index--) {
+    const child = children[index];
+    if (isTextNode(child)) {
+      child.text = child.text.trimEnd();
+      if (child.text) return;
+    } else {
+      if (child.type === "paragraph") trimMetadataWhitespace(child.children);
+      return;
     }
   }
-  return result;
 }
 
 /**
@@ -888,22 +940,9 @@ function extractBlockMetadata<T extends Descendant>(element: T): T {
       ? el.children.filter((c) => !isNestedList(c))
       : el.children;
 
-  // 1. Extract inline properties from all text nodes
-  const allTextNodes = collectTextNodes(searchChildren);
+  // Linked values span text and wikilink nodes, but never nested task items.
   const properties: Record<string, string> = {};
-  for (const textChild of allTextNodes) {
-    const scanner = inlinePropertyScanner();
-    const matches: Array<{ full: string; key: string; value: string }> = [];
-    let match = scanner.exec(textChild.text);
-    while (match !== null) {
-      matches.push({ full: match[0], key: match[1], value: match[2] });
-      match = scanner.exec(textChild.text);
-    }
-    for (const m of matches) {
-      properties[m.key] = m.value;
-      textChild.text = textChild.text.replace(m.full, "");
-    }
-  }
+  extractProperties(searchChildren, properties);
   if (Object.keys(properties).length > 0) {
     el.properties = properties;
   }
@@ -922,10 +961,7 @@ function extractBlockMetadata<T extends Descendant>(element: T): T {
   }
 
   // 3. Clean up trailing whitespace left by property/blockId removal
-  const lastTextAfter = findLastTextNode(searchChildren);
-  if (lastTextAfter && (el.blockId || el.properties)) {
-    lastTextAfter.text = lastTextAfter.text.trimEnd();
-  }
+  if (el.blockId || el.properties) trimMetadataWhitespace(searchChildren);
 
   return element;
 }

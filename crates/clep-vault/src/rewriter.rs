@@ -22,29 +22,36 @@ struct Edit {
     replacement: String,
 }
 
-/// Rewrite links in Markdown `content`, applying the given `replacements`.
+/// Rewrite links in Markdown `content`, using separate replacement targets for
+/// wikilinks (vault names/paths) and Markdown links (source-relative URLs).
 ///
-/// Each entry in `replacements` is `(old_target, new_target)`. Wikilinks whose
-/// target matches `old_target` are rewritten to `new_target`, preserving any
-/// display text. Standard markdown links whose URL matches `old_target` have
-/// their URL replaced.
+/// Each entry is `(old_target, new_target)`. Only the matching syntax is
+/// rewritten; wikilink display text and Markdown link labels are preserved.
 ///
 /// Special `new_target` prefixes trigger delete-rewrite modes:
 /// - `\x00PLAIN:text` replaces `[[target]]` with `text` (plain text, no syntax)
 /// - `\x00UNLINK:text` replaces `[[target]]` with `~~text~~` (strikethrough)
 ///
 /// Links inside code blocks, inline code, and HTML blocks are left untouched.
-pub fn rewrite_links_in_content(content: &str, replacements: &[(&str, &str)]) -> String {
-    if replacements.is_empty() {
+pub fn rewrite_links_in_content(
+    content: &str,
+    wikilink_replacements: &[(&str, &str)],
+    markdown_replacements: &[(&str, &str)],
+) -> String {
+    if wikilink_replacements.is_empty() && markdown_replacements.is_empty() {
         return content.to_string();
     }
 
-    let edits = collect_edits(content, replacements);
+    let edits = collect_edits(content, wikilink_replacements, markdown_replacements);
     apply_edits(content, edits)
 }
 
 /// Scan `content` for links matching any replacement and return edits.
-fn collect_edits(content: &str, replacements: &[(&str, &str)]) -> Vec<Edit> {
+fn collect_edits(
+    content: &str,
+    wikilink_replacements: &[(&str, &str)],
+    markdown_replacements: &[(&str, &str)],
+) -> Vec<Edit> {
     let raw_iter = Parser::new_ext(content, Options::empty()).into_offset_iter();
     let parser = TextMergeWithOffset::new(raw_iter);
 
@@ -63,7 +70,8 @@ fn collect_edits(content: &str, replacements: &[(&str, &str)]) -> Vec<Edit> {
             // --- standard markdown links [text](url) ---
             Event::Start(Tag::Link { dest_url, .. }) if !in_code_block && !in_html_block => {
                 let url = dest_url.as_ref();
-                if let Some((_old, new)) = replacements.iter().find(|(old, _)| *old == url) {
+                if let Some((_old, new)) = markdown_replacements.iter().find(|(old, _)| *old == url)
+                {
                     // The range covers the entire `[text](url)` syntax.
                     // We need to replace just the URL portion.
                     let link_text = &content[range.start..range.end];
@@ -86,7 +94,9 @@ fn collect_edits(content: &str, replacements: &[(&str, &str)]) -> Vec<Edit> {
                         None => (inner, None),
                     };
 
-                    if let Some((_old, new)) = replacements.iter().find(|(old, _)| *old == target) {
+                    if let Some((_old, new)) =
+                        wikilink_replacements.iter().find(|(old, _)| *old == target)
+                    {
                         let abs_start = range.start + m.start();
                         let abs_end = range.start + m.end();
 

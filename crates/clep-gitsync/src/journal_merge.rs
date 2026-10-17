@@ -395,7 +395,7 @@ fn repoint_links(root: &Path, pairs: &[(String, String)], warnings: &mut Vec<Str
         if !pairs.iter().any(|(old, _)| content.contains(old)) {
             continue;
         }
-        let rewritten = rewrite_links_in_content(&content, &pairs);
+        let rewritten = rewrite_links_in_content(&content, &pairs, &pairs);
         if rewritten != content
             && let Err(e) =
                 clep_vault::atomic_file::atomic_replace(entry.path(), rewritten.as_bytes())

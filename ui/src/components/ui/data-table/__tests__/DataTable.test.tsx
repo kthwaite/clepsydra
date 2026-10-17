@@ -823,6 +823,22 @@ describe("keyboard reorder", () => {
     expect(author).toHaveFocus();
   });
 
+  it("keeps the moved header focused at both ordering boundaries without moving pinned columns", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    const author = header("Author");
+    author.focus();
+    await user.keyboard("{Alt>}{ArrowRight}{ArrowRight}{ArrowRight}{/Alt}");
+    expect(headerTexts()).toEqual(["title", "year", "tags", "author"]);
+    expect(author).toHaveFocus();
+    expect(announcer()).toHaveTextContent("Moved Author to position 4 of 4.");
+
+    await user.keyboard("{Alt>}{ArrowLeft}{ArrowLeft}{ArrowLeft}{/Alt}");
+    expect(headerTexts()).toEqual(["title", "author", "year", "tags"]);
+    expect(author).toHaveFocus();
+    expect(announcer()).toHaveTextContent("Moved Author to position 2 of 4.");
+  });
+
   it("walks the header row past resizers", async () => {
     render(<Harness />);
     header("Author").focus();

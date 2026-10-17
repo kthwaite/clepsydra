@@ -160,6 +160,7 @@ pub struct BuildStats {
 // ---------------------------------------------------------------------------
 
 const TAG_DERIVATION_VERSION: &str = "1";
+const BLOCK_DERIVATION_VERSION: &str = "2";
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS pages (
@@ -799,8 +800,16 @@ impl VaultIndex {
                 |row| row.get(0),
             )
             .optional()?;
+        let stored_block_derivation_version: Option<String> = tx
+            .query_row(
+                "SELECT value FROM derivation_meta WHERE key = 'block_derivation_version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
         let force_rederive = stored_epoch.as_deref() != Some(epoch.as_str())
-            || stored_tag_derivation_version.as_deref() != Some(TAG_DERIVATION_VERSION);
+            || stored_tag_derivation_version.as_deref() != Some(TAG_DERIVATION_VERSION)
+            || stored_block_derivation_version.as_deref() != Some(BLOCK_DERIVATION_VERSION);
         let repair_frontmatter = self.repair_frontmatter;
         let (mut parsed_files, seen_paths) = collect_indexed_pages(
             vault,
@@ -824,6 +833,11 @@ impl VaultIndex {
             "INSERT INTO derivation_meta (key, value) VALUES ('tag_derivation_version', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![TAG_DERIVATION_VERSION],
+        )?;
+        tx.execute(
+            "INSERT INTO derivation_meta (key, value) VALUES ('block_derivation_version', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![BLOCK_DERIVATION_VERSION],
         )?;
         tx.commit()?;
         let rubbish_store = RubbishStore::for_vault(vault.root());

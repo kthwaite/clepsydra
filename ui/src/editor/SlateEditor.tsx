@@ -294,7 +294,7 @@ export function SlateEditor({
   );
   const mathEditing = useMathEditingController(editor);
   const baseEmbedEditing = useBaseEmbedEditingController(editor);
-  const taskProperties = useTaskPropertyPopoverController(editor);
+  const taskProperties = useTaskPropertyPopoverController(editor, readOnly);
   const handledInsertionRef = useRef<number | null>(null);
 
   useEffect(() => {

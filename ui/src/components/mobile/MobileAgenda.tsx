@@ -1,3 +1,4 @@
+import { useId, useState } from "react";
 import type { AgendaResponse } from "#/api/tasks";
 import { AgendaRow, Eyebrow } from "#/components/mobile/MobileParts";
 import {
@@ -5,6 +6,10 @@ import {
   agendaItemKey,
   bucketAgenda,
 } from "#/components/mobile/mobile-data";
+import { pageName, usePeople } from "#/hooks/usePeople";
+import { cn } from "#/lib/cn";
+import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { todoAssigneePerson } from "#/lib/todoAssignee";
 
 const TICK: Record<AgendaBucketKey, string> = {
   overdue: "bg-hot",
@@ -24,11 +29,31 @@ interface AgendaQuery {
 export function MobileAgenda({
   agenda,
   today,
+  personId,
+  onPersonChange,
 }: {
   agenda: AgendaQuery;
   today: string;
+  personId?: string;
+  onPersonChange?: (id: string) => void;
 }) {
-  const buckets = agenda.data ? bucketAgenda(agenda.data) : [];
+  const people = usePeople();
+  const filterId = useId();
+  const [localPersonId, setLocalPersonId] = useState("");
+  const selectedPerson = personId ?? localPersonId;
+  const buckets = (agenda.data ? bucketAgenda(agenda.data) : [])
+    .map((bucket) => ({
+      ...bucket,
+      items: selectedPerson
+        ? bucket.items.filter(
+            (item) =>
+              item.kind === "todo" &&
+              todoAssigneePerson(item.properties.assignee, people)?.id ===
+                selectedPerson,
+          )
+        : bucket.items,
+    }))
+    .filter((bucket) => bucket.items.length > 0);
   const open = buckets.reduce((n, b) => n + b.items.length, 0);
 
   return (
@@ -41,6 +66,30 @@ export function MobileAgenda({
           <span className="text-[13px] text-mute">{`${open} open`}</span>
         )}
       </div>
+      <div className="flex flex-col gap-2">
+        <label htmlFor={filterId} className="text-[13px] text-mute">
+          Inline TODO person
+        </label>
+        <select
+          id={filterId}
+          value={selectedPerson}
+          onChange={(event) => {
+            setLocalPersonId(event.target.value);
+            onPersonChange?.(event.target.value);
+          }}
+          className={cn(
+            "min-h-11 rounded-xl bg-sink px-3 text-[15px] text-ink",
+            FOCUS_RING_NATIVE,
+          )}
+        >
+          <option value="">All people and Task pages</option>
+          {people.map((person) => (
+            <option key={person.id} value={person.id}>
+              {pageName(person)}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {agenda.isLoading && <p className="text-[15px] text-mute">Loading…</p>}
       {agenda.isError && (
@@ -49,7 +98,11 @@ export function MobileAgenda({
         </p>
       )}
       {agenda.data && buckets.length === 0 && (
-        <p className="text-[15px] text-mute">Nothing open.</p>
+        <p className="text-[15px] text-mute">
+          {selectedPerson
+            ? "No inline TODOs assigned to this person."
+            : "Nothing open."}
+        </p>
       )}
 
       {buckets.map((bucket) => (

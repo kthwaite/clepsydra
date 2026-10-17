@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::Router;
+use axum::{Router, http::StatusCode};
 use axum_test::TestServer;
 use tokio::sync::broadcast;
 
@@ -87,6 +87,273 @@ fn setup_server_with_seed(seed: impl FnOnce(&std::path::Path)) -> (TestServer, T
 
 fn setup_server() -> (TestServer, TempDir) {
     setup_server_with_seed(|_| {})
+}
+
+#[tokio::test]
+async fn inline_code_is_not_todo_metadata_even_when_it_contains_linked_values() {
+    let (server, _tmp) = setup_server();
+    let markdown = "- [ ] Example `[assignee:: [[Ada Lovelace]]] [priority:: A]` [estimate:: 2h]\n- [-] Cancelled `[assignee:: [[Grace Hopper]]]` [priority:: B]\n- [ ] Split [assignee:: `Ada`]\n";
+    server
+        .post("/api/vault/pages/code-properties.md")
+        .json(&serde_json::json!({ "title": "Code properties", "body": markdown }))
+        .await
+        .assert_status(StatusCode::CREATED);
+    let response = server.get("/api/vault/tasks?page=code-properties.md").await;
+    response.assert_status_ok();
+    let data: serde_json::Value = response.json();
+    let tasks = data["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 3);
+    for task in tasks {
+        assert!(task["properties"].get("assignee").is_none(), "{task}");
+    }
+    let example = tasks
+        .iter()
+        .find(|task| task["content"].as_str().unwrap().starts_with("Example"))
+        .unwrap();
+    assert_eq!(
+        example["content"],
+        "Example `[assignee:: [[Ada Lovelace]]] [priority:: A]`"
+    );
+    assert!(example["properties"].get("priority").is_none());
+    assert_eq!(example["properties"]["estimate"], "2h");
+    let cancelled = tasks
+        .iter()
+        .find(|task| task["status"] == "cancelled")
+        .unwrap();
+    assert_eq!(cancelled["properties"]["priority"], "B");
+    assert_eq!(
+        cancelled["content"],
+        "Cancelled `[assignee:: [[Grace Hopper]]]`"
+    );
+    let page: serde_json::Value = server
+        .get("/api/vault/pages/code-properties.md")
+        .await
+        .json();
+    assert_eq!(page["body"], markdown);
+}
+
+#[tokio::test]
+async fn linked_todo_assignee_roundtrips_with_nested_metadata_and_completion() {
+    let (server, _tmp) = setup_server();
+    let markdown = "- [ ] Send **report** to [[Client]] [assignee:: [[Ada Lovelace]]] [priority:: A]\n  - [ ] Child [assignee:: [[Grace Hopper|Grace]]] [estimate:: 2h]\n";
+    server
+        .post("/api/vault/pages/delegation.md")
+        .json(&serde_json::json!({ "title": "Delegation", "body": markdown }))
+        .await
+        .assert_status(StatusCode::CREATED);
+    let response = server.get("/api/vault/tasks?page=delegation.md").await;
+    response.assert_status_ok();
+    let tasks: serde_json::Value = response.json();
+    let parent = &tasks["tasks"][0];
+    assert_eq!(parent["properties"]["assignee"], "[[Ada Lovelace]]");
+    assert_eq!(parent["properties"]["priority"], "A");
+    assert_eq!(parent["content"], "Send report to [[Client]]");
+    assert_eq!(
+        tasks["tasks"][1]["properties"]["assignee"],
+        "[[Grace Hopper|Grace]]"
+    );
+    assert_eq!(tasks["tasks"][1]["properties"]["estimate"], "2h");
+    for status in ["done", "cancelled", "todo"] {
+        server
+            .put("/api/vault/tasks/status")
+            .json(&serde_json::json!({
+                "page_path": "delegation.md",
+                "span_start": parent["span_start"],
+                "status": status
+            }))
+            .await
+            .assert_status_ok();
+        let updated: serde_json::Value = server
+            .get("/api/vault/tasks?page=delegation.md")
+            .await
+            .json();
+        assert_eq!(
+            updated["tasks"][0]["properties"]["assignee"],
+            "[[Ada Lovelace]]"
+        );
+        assert_eq!(updated["tasks"][0]["status"], status);
+    }
+    let page: serde_json::Value = server.get("/api/vault/pages/delegation.md").await.json();
+    assert_eq!(page["body"], markdown);
+    server
+        .put("/api/vault/pages/delegation.md")
+        .json(&serde_json::json!({
+            "body": markdown.replace(" [assignee:: [[Ada Lovelace]]]", ""),
+            "expected_revision": page["revision"]
+        }))
+        .await
+        .assert_status_ok();
+    let cleared: serde_json::Value = server
+        .get("/api/vault/tasks?page=delegation.md")
+        .await
+        .json();
+    assert!(cleared["tasks"][0]["properties"].get("assignee").is_none());
+    assert_eq!(cleared["tasks"][0]["properties"]["priority"], "A");
+    assert_eq!(
+        cleared["tasks"][1]["properties"]["assignee"],
+        "[[Grace Hopper|Grace]]"
+    );
+}
+
+#[tokio::test]
+async fn startup_rederives_linked_todo_properties_from_the_legacy_cache() {
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::write(
+            root.join("delegation.md"),
+            "---\nid: 01951234-0000-7000-8000-bbb000000098\ntitle: Delegation\n---\n- [ ] Send report [assignee:: [[Ada Lovelace]]]\n",
+        ).unwrap();
+        let vault = Vault::open(root).unwrap();
+        let mut legacy = VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+        legacy.build(&vault).unwrap();
+        // A cache from before linked property parsing, with unchanged page bytes.
+        legacy
+            .connection()
+            .execute_batch(
+                "DELETE FROM derivation_meta WHERE key = 'block_derivation_version';
+             UPDATE block_properties SET value = '[[Ada Lovelace' WHERE key = 'assignee';
+             UPDATE blocks SET content = 'Send report ]]';",
+            )
+            .unwrap();
+    });
+    let response = server.get("/api/vault/tasks?page=delegation.md").await;
+    response.assert_status_ok();
+    let tasks: serde_json::Value = response.json();
+    assert_eq!(tasks["tasks"][0]["content"], "Send report");
+    assert_eq!(
+        tasks["tasks"][0]["properties"]["assignee"],
+        "[[Ada Lovelace]]"
+    );
+}
+
+#[tokio::test]
+async fn moving_a_person_repairs_todo_assignment_through_ordinary_body_links() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/pages/people/ada.md")
+        .json(&serde_json::json!({
+            "title": "Ada Lovelace",
+            "kind": "PERSON",
+            "aliases": ["Enchantress of Numbers"]
+        }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let person: serde_json::Value = created.json();
+    let path = person["path"].as_str().unwrap();
+    let path_stem = path.strip_suffix(".md").unwrap();
+    let stem = path_stem.rsplit('/').next().unwrap();
+    let body = format!(
+        "- [ ] Send **report** [assignee:: [[{path}|Ada]]] [estimate:: 2h]\n\
+         - [ ] Review estimate [assignee:: [[{path_stem}|Reviewer]]]\n\n\
+         [[{stem}|Filename]] [[Ada Lovelace]] [[Enchantress of Numbers]]\n\n\
+         [Person](../{path})\n\
+         [Unrelated nested page]({path})\n\
+         [Unrelated extensionless page]({path_stem})\n\
+         [Unrelated stem URL]({stem})\n\n\
+         `[[{path}|Literal]]` `[Literal](../{path})`\n\n\
+         ```markdown\n[[{path}]]\n[Literal](../{path})\n```\n"
+    );
+    server
+        .post("/api/vault/pages/notes/delegation.md")
+        .json(&serde_json::json!({ "title": "Delegation", "body": body }))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post(&format!("/api/vault/pages-move/{path}"))
+        .json(&serde_json::json!({ "destination": "people/moved-ada.md" }))
+        .await
+        .assert_status_ok();
+    let tasks: serde_json::Value = server
+        .get("/api/vault/tasks?page=notes%2Fdelegation.md")
+        .await
+        .json();
+    let assigned = tasks["tasks"][0]["properties"]["assignee"]
+        .as_str()
+        .unwrap();
+    assert_eq!(assigned, "[[people/moved-ada.md|Ada]]");
+    assert_eq!(
+        tasks["tasks"][1]["properties"]["assignee"],
+        "[[people/moved-ada|Reviewer]]"
+    );
+    assert_eq!(tasks["tasks"][0]["properties"]["estimate"], "2h");
+    let links: serde_json::Value = server
+        .get("/api/vault/index/backlinks/people/moved-ada.md")
+        .await
+        .json();
+    assert!(
+        links
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|link| link["source_path"] == "notes/delegation.md")
+    );
+    let page: serde_json::Value = server
+        .get("/api/vault/pages/notes/delegation.md")
+        .await
+        .json();
+    let expected = body
+        .replacen(
+            &format!("[assignee:: [[{path}|Ada]]]"),
+            "[assignee:: [[people/moved-ada.md|Ada]]]",
+            1,
+        )
+        .replacen(
+            &format!("[assignee:: [[{path_stem}|Reviewer]]]"),
+            "[assignee:: [[people/moved-ada|Reviewer]]]",
+            1,
+        )
+        .replacen(&format!("[[{stem}|Filename]]"), "[[moved-ada|Filename]]", 1)
+        .replacen(
+            &format!("[Person](../{path})"),
+            "[Person](../people/moved-ada.md)",
+            1,
+        );
+    assert_eq!(page["body"], expected);
+    let moved: serde_json::Value = server
+        .get("/api/vault/pages/people/moved-ada.md")
+        .await
+        .json();
+    let renamed = server
+        .put("/api/vault/pages/people/moved-ada.md")
+        .json(&serde_json::json!({
+            "title": "Augusta Ada King",
+            "expected_revision": moved["revision"]
+        }))
+        .await;
+    renamed.assert_status_ok();
+    let renamed: serde_json::Value = renamed.json();
+    let renamed_path = renamed["path"].as_str().unwrap();
+    let backlinks: serde_json::Value = server
+        .get(&format!("/api/vault/index/backlinks/{renamed_path}"))
+        .await
+        .json();
+    assert!(
+        backlinks
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|link| link["source_path"] == "notes/delegation.md")
+    );
+    let refreshed: serde_json::Value = server
+        .get("/api/vault/tasks?page=notes%2Fdelegation.md")
+        .await
+        .json();
+    assert_eq!(refreshed["tasks"][0]["properties"]["assignee"], assigned);
+    assert_eq!(
+        refreshed["tasks"][1]["properties"]["assignee"],
+        "[[people/moved-ada|Reviewer]]"
+    );
+    let outlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/outlinks/notes/delegation.md")
+        .await
+        .json();
+    for target in ["people/moved-ada.md", "people/moved-ada"] {
+        let link = outlinks
+            .iter()
+            .find(|link| link["target_raw"] == target)
+            .unwrap_or_else(|| panic!("missing assignment link: {target}"));
+        assert_eq!(link["target_path"], renamed_path);
+        assert!(!link["target_id"].is_null(), "{link}");
+    }
 }
 
 #[tokio::test]

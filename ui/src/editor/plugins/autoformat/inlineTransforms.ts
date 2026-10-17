@@ -305,6 +305,37 @@ function propertyOwnerEntry(
   return [block, blockPath];
 }
 
+/** Reconstruct the current phrasing run, including already-autoformatted links. */
+function propertyTextBefore(editor: Editor): {
+  text: string;
+  points: Array<{ start: number; path: Path; length: number }>;
+} | null {
+  const anchor = editor.selection?.anchor;
+  if (!anchor) return null;
+  const parentPath = Path.parent(anchor.path);
+  const parent = Node.get(editor, parentPath);
+  if (!SlateElement.isElement(parent)) return null;
+  let text = "";
+  let points: Array<{ start: number; path: Path; length: number }> = [];
+  for (let i = 0; i <= anchor.path[anchor.path.length - 1]; i++) {
+    const child = parent.children[i];
+    const path = [...parentPath, i];
+    if (Text.isText(child) && !child.code) {
+      const value = Path.equals(path, anchor.path)
+        ? child.text.slice(0, anchor.offset)
+        : child.text;
+      points.push({ start: text.length, path, length: value.length });
+      text += value;
+    } else if (SlateElement.isElement(child) && child.type === "wikilink") {
+      text += `[[${child.target}${child.alias ? `|${child.alias}` : ""}]]`;
+    } else {
+      text = "";
+      points = [];
+    }
+  }
+  return { text, points };
+}
+
 /**
  * `[key:: value]` typed in the editor becomes a block property instead of
  * literal text, mirroring how the same syntax is read out of a saved file.
@@ -315,10 +346,11 @@ function tryInlinePropertyTransform(
   editor: Editor,
   closerConsumed: boolean,
 ): boolean {
-  const info = getTextBefore(editor);
-  if (!info) return false;
+  const info = propertyTextBefore(editor);
+  const anchor = editor.selection?.anchor;
+  if (!info || !anchor) return false;
 
-  const { text: textBefore, path } = info;
+  const { text: textBefore, points } = info;
   if (closerConsumed && !textBefore.endsWith("]")) return false;
   // Unless overtype already consumed it, the typed ] is not in the text yet.
   const candidate = closerConsumed ? textBefore : `${textBefore}]`;
@@ -341,13 +373,18 @@ function tryInlinePropertyTransform(
     deleteStart--;
   }
 
-  const properties = { ...block.properties, [match.key]: match.value };
+  const start = points.find(
+    (point) =>
+      point.start <= deleteStart && deleteStart <= point.start + point.length,
+  );
+  if (!start) return false;
+  const properties = { ...block.properties, [match.key]: match.value.trim() };
 
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
       Transforms.select(editor, {
-        anchor: { path, offset: deleteStart },
-        focus: { path, offset: textBefore.length },
+        anchor: { path: start.path, offset: deleteStart - start.start },
+        focus: anchor,
       });
       Transforms.delete(editor);
       Transforms.setNodes<PropertyBearingElement>(

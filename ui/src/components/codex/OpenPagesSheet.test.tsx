@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -66,6 +66,83 @@ describe("OpenPagesSheet", () => {
       within(loose).getByRole("button", { name: "Friday 25 September" }),
     ).toBeVisible();
     expect(within(loose).getByRole("button", { name: "Orphan" })).toBeVisible();
+  });
+
+  it("moves pages with explicit touch-sized actions, retains focus and restores saved order", async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const { unmount } = render(
+      <OpenPagesSheet isOpen onOpenChange={onOpenChange} />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Move Hero of Alexandria up" }),
+    );
+
+    expect(screen.getByRole("group", { name: "Research" })).toHaveTextContent(
+      /Hero of Alexandria.*Ctesibius/,
+    );
+    expect(
+      screen.getByRole("button", { name: "Hero of Alexandria" }),
+    ).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Moved Hero of Alexandria to position 1 of 4 in Research.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Move Hero of Alexandria up" }),
+    ).toBeDisabled();
+    expect(useWorkspaceStore.getState().activeTabId).toBe("a");
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    const saved = localStorage.getItem("clepsydra.workspace");
+    if (!saved) throw new Error("The reordered workspace was not persisted");
+    unmount();
+    useWorkspaceStore.setState({ tabs: [], quires: {}, activeTabId: null });
+    localStorage.setItem("clepsydra.workspace", saved);
+    await act(async () => {
+      await useWorkspaceStore.persist.rehydrate();
+    });
+    render(<OpenPagesSheet isOpen onOpenChange={onOpenChange} />);
+    expect(screen.getByRole("group", { name: "Research" })).toHaveTextContent(
+      /Hero of Alexandria.*Ctesibius/,
+    );
+  });
+
+  it("moves across quire boundaries with the same membership rules as a tab drop", async () => {
+    useWorkspaceStore.setState({ activeTabId: "d" });
+    const user = userEvent.setup();
+    render(<OpenPagesSheet isOpen onOpenChange={() => {}} />);
+    await user.click(
+      screen.getByRole("button", { name: "Move Friday 25 September up" }),
+    );
+
+    expect(
+      within(screen.getByRole("group", { name: "Research" })).getByRole(
+        "button",
+        { name: "Friday 25 September" },
+      ),
+    ).toHaveFocus();
+    expect(useWorkspaceStore.getState().quires.q1.collapsed).toBe(true);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Moved Friday 25 September to position 2 of 4 in Research.",
+    );
+
+    await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
+    await user.click(
+      screen.getByRole("button", { name: "Move Friday 25 September down" }),
+    );
+    expect(
+      within(screen.getByRole("group", { name: "Ungrouped" })).getByRole(
+        "button",
+        { name: "Friday 25 September" },
+      ),
+    ).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Move Friday 25 September down" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Moved Friday 25 September to position 4 of 4, ungrouped.",
+    );
+    expect(useWorkspaceStore.getState().activeTabId).toBe("d");
   });
 
   it("marks the active page", () => {

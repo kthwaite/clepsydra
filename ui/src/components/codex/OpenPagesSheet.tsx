@@ -1,10 +1,12 @@
-import { X } from "lucide-react";
-import { type CSSProperties, useState } from "react";
+import { ArrowDown, ArrowUp, X } from "lucide-react";
+import { type CSSProperties, useId, useRef, useState } from "react";
 import { KindIcon } from "#/components/KindIcon";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
+import { ReorderAnnouncement } from "#/components/ui/reorder-feedback";
 import { BottomSheet } from "#/components/ui/sheet";
 import { useActivateTabWithFolioHistory } from "#/hooks/useFolioHistoryNavigation";
+import { useFolioReorder } from "#/hooks/useFolioReorder";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { resolveKindFromPath } from "#/lib/kind";
@@ -15,6 +17,13 @@ import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 interface OpenPagesSheetProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
+}
+
+interface PageMovement {
+  moveBy: (tabId: string, delta: -1 | 1) => void;
+  firstTabId?: string;
+  lastTabId?: string;
+  hintId: string;
 }
 
 /** Mobile open pages (spec §9 Q3): the Sheaf's groups as a bottom sheet.
@@ -29,6 +38,15 @@ export function OpenPagesSheet({ isOpen, onOpenChange }: OpenPagesSheetProps) {
     run.kind === "quire" ? run.members.length > 0 : run.tabs.length > 0,
   );
   const [confirming, setConfirming] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const { announcement, moveBy } = useFolioReorder(root);
+  const hintId = useId();
+  const movement: PageMovement = {
+    moveBy,
+    firstTabId: pageTabs[0]?.id,
+    lastTabId: pageTabs.at(-1)?.id,
+    hintId,
+  };
   const close = () => onOpenChange(false);
 
   return (
@@ -37,7 +55,8 @@ export function OpenPagesSheet({ isOpen, onOpenChange }: OpenPagesSheetProps) {
       onOpenChange={onOpenChange}
       aria-label="Open pages"
     >
-      <div className="flex flex-col gap-[18px]">
+      <div ref={root} className="flex flex-col gap-[18px]">
+        <ReorderAnnouncement role="status" announcement={announcement} />
         <div className="flex items-baseline gap-2.5">
           <h2 className="flex-1 font-serif text-[30px] leading-none">
             Open pages
@@ -52,6 +71,12 @@ export function OpenPagesSheet({ isOpen, onOpenChange }: OpenPagesSheetProps) {
             </Button>
           )}
         </div>
+        {pageTabs.length > 1 && (
+          <p id={hintId} className="text-sm text-mute">
+            Move pages with the up and down buttons. Crossing a quire boundary
+            joins the destination quire.
+          </p>
+        )}
         {confirming && (
           <div className="flex flex-col gap-3 rounded-xl bg-sink p-4">
             <p className="text-[15px] text-ink">
@@ -95,6 +120,7 @@ export function OpenPagesSheet({ isOpen, onOpenChange }: OpenPagesSheetProps) {
               color={quireColorVar(run.quire.color)}
               tabs={run.members}
               onPicked={close}
+              movement={movement}
             />
           ) : (
             <PageGroup
@@ -102,6 +128,7 @@ export function OpenPagesSheet({ isOpen, onOpenChange }: OpenPagesSheetProps) {
               name="Ungrouped"
               tabs={run.tabs}
               onPicked={close}
+              movement={movement}
             />
           ),
         )}
@@ -115,12 +142,14 @@ function PageGroup({
   color,
   tabs,
   onPicked,
+  movement,
 }: {
   name: string;
   /** Quire hue; absent for loose pages. */
   color?: string;
   tabs: TabDescriptor[];
   onPicked: () => void;
+  movement: PageMovement;
 }) {
   const rule = color
     ? "shadow-[inset_0_-1px_0_color-mix(in_srgb,var(--q)_45%,transparent)]"
@@ -149,7 +178,12 @@ function PageGroup({
         {name}
       </div>
       {tabs.map((tab) => (
-        <PageRow key={tab.id} tab={tab} onPicked={onPicked} />
+        <PageRow
+          key={tab.id}
+          tab={tab}
+          onPicked={onPicked}
+          movement={movement}
+        />
       ))}
     </div>
   );
@@ -158,9 +192,11 @@ function PageGroup({
 function PageRow({
   tab,
   onPicked,
+  movement,
 }: {
   tab: TabDescriptor;
   onPicked: () => void;
+  movement: PageMovement;
 }) {
   const active = useWorkspaceStore((s) => s.activeTabId === tab.id);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
@@ -168,7 +204,7 @@ function PageRow({
   return (
     <div
       className={cn(
-        "flex h-[52px] items-center gap-3 rounded-xl pr-1.5 pl-3",
+        "flex min-h-[52px] items-center gap-1 rounded-xl pr-1.5 pl-3",
         active && "bg-accent-tint",
       )}
     >
@@ -180,6 +216,16 @@ function PageRow({
       />
       <button
         type="button"
+        data-folio-id={tab.id}
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+        onKeyDown={(event) => {
+          if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+            return;
+          if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+          event.preventDefault();
+          event.stopPropagation();
+          movement.moveBy(tab.id, event.key === "ArrowUp" ? -1 : 1);
+        }}
         aria-current={active ? "page" : undefined}
         onClick={() => {
           activate(tab.id);
@@ -193,6 +239,32 @@ function PageRow({
       >
         {tab.label}
       </button>
+      <IconButton
+        aria-label={`Move ${tab.label} up`}
+        aria-describedby={
+          movement.firstTabId !== movement.lastTabId
+            ? movement.hintId
+            : undefined
+        }
+        isDisabled={tab.id === movement.firstTabId}
+        onPress={() => movement.moveBy(tab.id, -1)}
+        className="h-11 w-11 shrink-0 text-mute"
+      >
+        <ArrowUp aria-hidden="true" />
+      </IconButton>
+      <IconButton
+        aria-label={`Move ${tab.label} down`}
+        aria-describedby={
+          movement.firstTabId !== movement.lastTabId
+            ? movement.hintId
+            : undefined
+        }
+        isDisabled={tab.id === movement.lastTabId}
+        onPress={() => movement.moveBy(tab.id, 1)}
+        className="h-11 w-11 shrink-0 text-mute"
+      >
+        <ArrowDown aria-hidden="true" />
+      </IconButton>
       <IconButton
         aria-label={`Close ${tab.label}`}
         onPress={() => closeTab(tab.id)}

@@ -10,10 +10,15 @@ import {
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { type Descendant, type Editor, Node, Transforms } from "slate";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { markdownToSlate, slateToMarkdown } from "#/editor/convert";
 import { SlateEditor } from "#/editor/SlateEditor";
 import type { ListItemElement } from "#/editor/schema/types";
 import type { CustomEditor } from "#/editor/types";
+
+// Navigation is the mounted editor's external boundary; do not require the
+// application router merely to render inline page references.
+vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
 
 beforeAll(() => {
   // jsdom leaves isContentEditable unimplemented; slate-react's
@@ -44,19 +49,48 @@ function taskList(...items: ListItemElement[]): Descendant {
   return { type: "bulleted-list", children: items };
 }
 
-function renderEditor(initialValue: Descendant[]) {
+function renderEditor(initialValue: Descendant[], readOnly = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, enabled: false } },
+  });
+  client.setQueryData(["get", "/api/vault/pages", {}], {
+    items: [
+      {
+        id: "ada",
+        kind: "PERSON",
+        title: "Ada Lovelace",
+        canonical_name: "Ada Lovelace",
+        path: "people/ada.md",
+        aliases: [],
+      },
+      {
+        id: "grace",
+        kind: "PERSON",
+        title: "Grace Hopper",
+        canonical_name: "Grace Hopper",
+        path: "people/grace.md",
+        aliases: [],
+      },
+      {
+        id: "report",
+        kind: "NOTE",
+        title: "Report",
+        canonical_name: "Report",
+        path: "notes/report.md",
+        aliases: [],
+      },
+    ],
   });
   const editorRef = createRef<CustomEditor>();
   // Mirrors usePageEditor's dirty rule: only non-selection operations count.
   let astChanges = 0;
 
-  render(
+  const renderTree = (protectedMode: boolean) => (
     <QueryClientProvider client={client}>
       <SlateEditor
         initialValue={initialValue}
         editorRef={editorRef}
+        readOnly={protectedMode}
         onChange={(_value, editor) => {
           if (editor.operations.some((op) => op.type !== "set_selection")) {
             astChanges += 1;
@@ -64,12 +98,15 @@ function renderEditor(initialValue: Descendant[]) {
         }}
         onSaveNow={() => {}}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const rendered = render(renderTree(readOnly));
 
   const editor = () => editorRef.current as Editor;
   return {
     editor,
+    unmount: rendered.unmount,
+    setReadOnly: (value: boolean) => rendered.rerender(renderTree(value)),
     astChanges: () => astChanges,
     item: (path: number[]) => Node.get(editor(), path) as ListItemElement,
     editable: () => screen.getByRole("textbox"),
@@ -86,6 +123,157 @@ function dialog(): HTMLElement {
 }
 
 describe("SlateEditor task property popover", () => {
+  it("keeps inline-code property examples as body text, not assignment or priority", () => {
+    const markdown =
+      "- [ ] Example `[assignee:: [[Ada Lovelace]]] [priority:: A]` [estimate:: 2h]\n";
+    const view = renderEditor(markdownToSlate(markdown));
+    expect(
+      screen
+        .getByText("[assignee:: [[Ada Lovelace]]] [priority:: A]")
+        .closest("code"),
+    ).not.toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Assignee Ada Lovelace" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Priority High" })).toBeNull();
+    expect(slateToMarkdown(view.editor().children)).toContain(
+      "`[assignee:: [[Ada Lovelace]]] [priority:: A]` [estimate:: 2h]",
+    );
+  });
+  it("loads linked assignment without losing formatting, nested ownership or ordinary links", async () => {
+    const user = userEvent.setup();
+    const view = renderEditor(
+      markdownToSlate(
+        "- [ ] Send **report** to [[Client]] [assignee:: [[Ada Lovelace]]] [estimate:: 3h]\n  - [ ] Child [assignee:: [[Grace Hopper|Grace]]]\n",
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "Assignee Ada Lovelace" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Assignee Grace" }),
+    ).toBeVisible();
+    expect(screen.getByText("report").closest("strong")).not.toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Assignee Ada Lovelace" }),
+    );
+    expect(
+      within(dialog()).getByRole("option", { name: "Ada Lovelace" }),
+    ).toHaveProperty("selected", true);
+    await user.click(
+      within(dialog()).getByRole("button", { name: "Clear assignee" }),
+    );
+    await user.click(within(dialog()).getByRole("button", { name: "Cancel" }));
+    expect(slateToMarkdown(view.editor().children)).toContain(
+      "[assignee:: [[Ada Lovelace]]]",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Assignee Ada Lovelace" }),
+    );
+    await user.click(
+      within(dialog()).getByRole("button", { name: "Clear assignee" }),
+    );
+    await user.click(within(dialog()).getByRole("button", { name: "Apply" }));
+    const saved = slateToMarkdown(view.editor().children);
+    expect(saved).not.toContain("[assignee:: [[Ada Lovelace]]]");
+    expect(saved).toContain("**report**");
+    expect(saved).toContain("[[Client]]");
+    expect(saved).toContain("[estimate:: 3h]");
+    expect(saved).toContain("[assignee:: [[Grace Hopper|Grace]]]");
+    expect(slateToMarkdown(markdownToSlate(saved))).toBe(saved);
+  });
+  it("chooses and changes exactly one PERSON, then preserves it on completion and reload", async () => {
+    const user = userEvent.setup();
+    const view = renderEditor(
+      markdownToSlate("- [ ] Send **report** [priority:: A]\n"),
+    );
+    await user.click(screen.getByRole("button", { name: "Priority High" }));
+    const select = within(dialog()).getByRole("combobox", {
+      name: "Assignee (Person)",
+    });
+    expect(within(select).queryByRole("option", { name: "Report" })).toBeNull();
+    await user.selectOptions(select, "[[people/ada.md|Ada Lovelace]]");
+    await user.click(within(dialog()).getByRole("button", { name: "Apply" }));
+    await user.click(
+      screen.getByRole("button", { name: "Assignee Ada Lovelace" }),
+    );
+    await user.selectOptions(
+      within(dialog()).getByRole("combobox", { name: "Assignee (Person)" }),
+      "[[people/grace.md|Grace Hopper]]",
+    );
+    await user.click(within(dialog()).getByRole("button", { name: "Apply" }));
+    await user.click(screen.getByRole("checkbox"));
+    const saved = slateToMarkdown(view.editor().children);
+    expect(saved).toContain("[assignee:: [[people/grace.md|Grace Hopper]]]");
+    expect(saved).not.toContain("people/ada.md");
+    expect(saved).toContain("[priority:: A]");
+    view.unmount();
+    renderEditor(markdownToSlate(saved));
+    expect(screen.getByRole("checkbox")).toBeChecked();
+    expect(screen.getByText("report").closest("strong")).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Assignee Grace Hopper" }),
+    ).toBeVisible();
+  });
+
+  it("autoformats a linked property after the inner wikilink has become a void", async () => {
+    const view = renderEditor([
+      taskList(task("Send report ", { checked: false })),
+    ]);
+    view.caretAt([0, 0, 0, 0], "Send report ".length);
+    // jsdom cannot type into contenteditable: use the real mounted editor's
+    // insertion pipeline, including wikilink and property autoformat.
+    await act(async () => {
+      for (const character of "[assignee:: [[Ada Lovelace]]]")
+        view.editor().insertText(character);
+    });
+    expect(
+      await screen.findByRole("button", { name: "Assignee Ada Lovelace" }),
+    ).toBeVisible();
+    expect(slateToMarkdown(view.editor().children)).toContain(
+      "Send report [assignee:: [[Ada Lovelace]]]",
+    );
+  });
+
+  it("shows assignment without allowing protected TODO mutations", () => {
+    const view = renderEditor(
+      markdownToSlate("- [ ] Send report [assignee:: [[Ada Lovelace]]]\n"),
+      true,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Assignee Ada Lovelace" }),
+    ).toBeNull();
+    expect(screen.getByRole("link", { name: "Ada Lovelace" })).toBeVisible();
+    expect(screen.getByRole("checkbox")).toBeDisabled();
+    fireEvent.keyDown(
+      screen.getByRole("link", { name: "Ada Lovelace" }),
+      TASK_PROPERTIES_CHORD,
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(view.astChanges()).toBe(0);
+  });
+
+  it("discards an open assignment draft when the Folio becomes read-only", async () => {
+    const user = userEvent.setup();
+    const view = renderEditor(
+      markdownToSlate("- [ ] Send report [assignee:: [[Ada Lovelace]]]\n"),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Assignee Ada Lovelace" }),
+    );
+    await user.selectOptions(
+      within(dialog()).getByRole("combobox", { name: "Assignee (Person)" }),
+      "[[people/grace.md|Grace Hopper]]",
+    );
+    view.setReadOnly(true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    view.setReadOnly(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(slateToMarkdown(view.editor().children)).toContain(
+      "[assignee:: [[Ada Lovelace]]]",
+    );
+    expect(view.astChanges()).toBe(0);
+  });
   it("opens from a chip with the item's current values prefilled", async () => {
     const user = userEvent.setup();
     renderEditor([

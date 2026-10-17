@@ -22,6 +22,7 @@ function AgendaTodoRow({ todo }: { todo: AgendaTodo }) {
         ...todo,
         due: todo.properties.due,
         priority: todo.properties.priority,
+        assignee: todo.properties.assignee,
       }}
     />
   );

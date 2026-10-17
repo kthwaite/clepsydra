@@ -627,6 +627,29 @@ impl<'a> MutationPlanner<'a> {
 
         let old_stem = source_vp.stem().to_string();
         let new_stem = dest_vp.stem().to_string();
+        // Moves change filename/path names, not titles or aliases. Wikilink
+        // paths are vault-relative, unlike source-relative Markdown URLs.
+        let wikilink_replacements = [
+            (old_stem.as_str(), new_stem.as_str()),
+            (source_vp.as_str(), dest_vp.as_str()),
+            (
+                source_vp
+                    .as_str()
+                    .strip_suffix(".md")
+                    .unwrap_or(source_vp.as_str()),
+                dest_vp
+                    .as_str()
+                    .strip_suffix(".md")
+                    .unwrap_or(dest_vp.as_str()),
+            ),
+        ];
+        // At the vault root an extensionless path is already the stem.
+        // Keep its stem semantics, including when only the directory changes.
+        let wikilink_replacements = if source_vp.as_str().contains('/') {
+            &wikilink_replacements[..]
+        } else {
+            &wikilink_replacements[..2]
+        };
 
         let mut plan = MutationPlan::empty();
 
@@ -664,43 +687,25 @@ impl<'a> MutationPlanner<'a> {
                 continue;
             }
 
-            let mut replacements: Vec<(String, String)> = Vec::new();
-
-            // Stem-based wikilink rewrite. A page resolves under several
-            // canonical names (title, filename, path, aliases — see
-            // `derivers::canonical_names`); a move changes only the
-            // filename/path-derived ones, so `[[old-stem]]` must follow the
-            // file while `[[Title]]` and `[[alias]]` keep resolving untouched.
-            // Rewriting title links to the stem here mangled 23 pages on
-            // 2026-08-28 (TSK-0119).
-            if old_stem != new_stem {
-                replacements.push((old_stem.clone(), new_stem.clone()));
-            }
-
-            // Markdown link: old relative path -> new relative path
             let old_rel = compute_relative_path(ref_vp.as_str(), source_vp.as_str());
             let new_rel = compute_relative_path(ref_vp.as_str(), dest_vp.as_str());
-            if old_rel != new_rel {
-                replacements.push((old_rel, new_rel));
-            }
-
-            if replacements.is_empty() {
-                continue;
-            }
-
-            let replacement_refs: Vec<(&str, &str)> = replacements
-                .iter()
-                .map(|(old, new)| (old.as_str(), new.as_str()))
-                .collect();
-
-            let new_content = rewriter::rewrite_links_in_content(&content, &replacement_refs);
+            let markdown_replacements = [(old_rel.as_str(), new_rel.as_str())];
+            let new_content = rewriter::rewrite_links_in_content(
+                &content,
+                wikilink_replacements,
+                &markdown_replacements,
+            );
             if new_content != content {
                 // Record per-replacement text edits (for dry-run preview)
-                for (old, new) in &replacements {
+                for &(old, new) in wikilink_replacements
+                    .iter()
+                    .chain(&markdown_replacements)
+                    .filter(|(old, new)| old != new)
+                {
                     plan.text_edits.push(PlannedTextEdit {
                         path: ref_path_str.clone(),
-                        old_text: old.clone(),
-                        new_text: new.clone(),
+                        old_text: old.to_string(),
+                        new_text: new.to_string(),
                     });
                 }
 
@@ -814,7 +819,8 @@ impl<'a> MutationPlanner<'a> {
                 .map(|(old, new)| (old.as_str(), new.as_str()))
                 .collect();
 
-            let new_content = rewriter::rewrite_links_in_content(&content, &replacement_refs);
+            let new_content =
+                rewriter::rewrite_links_in_content(&content, &replacement_refs, &replacement_refs);
             if new_content != content {
                 // Record per-replacement text edits (for dry-run preview)
                 for (old, _new) in &replacements {
@@ -917,6 +923,20 @@ impl<'a> MutationPlanner<'a> {
         for (old_vp, new_vp, _expected_source) in &md_files {
             let old_stem = old_vp.stem().to_string();
             let new_stem = new_vp.stem().to_string();
+            let wikilink_replacements = [
+                (old_stem.as_str(), new_stem.as_str()),
+                (old_vp.as_str(), new_vp.as_str()),
+                (
+                    old_vp
+                        .as_str()
+                        .strip_suffix(".md")
+                        .unwrap_or(old_vp.as_str()),
+                    new_vp
+                        .as_str()
+                        .strip_suffix(".md")
+                        .unwrap_or(new_vp.as_str()),
+                ),
+            ];
             plan.moved_pages.push((old_vp.clone(), new_vp.clone()));
             plan.index_events.push(ChangeEvent::Remove(old_vp.clone()));
             plan.index_events.push(ChangeEvent::Upsert(new_vp.clone()));
@@ -945,34 +965,26 @@ impl<'a> MutationPlanner<'a> {
                     (content, Some(expected))
                 };
 
-                let mut replacements = Vec::<(String, String)>::new();
-                // Same rule as plan_page_move: only the stem-derived name
-                // changes, so title links stay as written.
-                if old_stem != new_stem {
-                    replacements.push((old_stem.clone(), new_stem.clone()));
-                }
                 let old_rel = compute_relative_path(ref_vp.as_str(), old_vp.as_str());
                 let new_rel = compute_relative_path(ref_vp.as_str(), new_vp.as_str());
-                if old_rel != new_rel {
-                    replacements.push((old_rel, new_rel));
-                }
-                if replacements.is_empty() {
-                    continue;
-                }
-
-                let replacement_refs = replacements
-                    .iter()
-                    .map(|(old, new)| (old.as_str(), new.as_str()))
-                    .collect::<Vec<_>>();
-                let new_content = rewriter::rewrite_links_in_content(&content, &replacement_refs);
+                let markdown_replacements = [(old_rel.as_str(), new_rel.as_str())];
+                let new_content = rewriter::rewrite_links_in_content(
+                    &content,
+                    &wikilink_replacements,
+                    &markdown_replacements,
+                );
                 if new_content == content {
                     continue;
                 }
-                for (old, new) in &replacements {
+                for &(old, new) in wikilink_replacements
+                    .iter()
+                    .chain(&markdown_replacements)
+                    .filter(|(old, new)| old != new)
+                {
                     plan.text_edits.push(PlannedTextEdit {
                         path: ref_path_str.clone(),
-                        old_text: old.clone(),
-                        new_text: new.clone(),
+                        old_text: old.to_string(),
+                        new_text: new.to_string(),
                     });
                 }
                 if let Some(index) = existing_index {

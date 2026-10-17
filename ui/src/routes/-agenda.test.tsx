@@ -49,6 +49,30 @@ vi.mock("#/hooks/useMobileLayout", () => ({
 vi.mock("#/lib/useProjects", () => ({
   useProjectValues: () => ["Atlas", "Zephyr"],
 }));
+vi.mock("#/api/pages", () => ({
+  usePages: () => ({
+    data: {
+      items: [
+        {
+          id: "ada",
+          kind: "PERSON",
+          title: "Ada Lovelace",
+          canonical_name: "Ada Lovelace",
+          path: "people/ada.md",
+          aliases: ["Countess"],
+        },
+        {
+          id: "grace",
+          kind: "PERSON",
+          title: "Grace Hopper",
+          canonical_name: "Grace Hopper",
+          path: "people/grace.md",
+          aliases: [],
+        },
+      ],
+    },
+  }),
+}));
 
 import { AGENDA_FILTER, AgendaScreen, Route } from "#/routes/agenda";
 
@@ -146,6 +170,30 @@ afterEach(() => {
 });
 
 describe("Agenda route filters", () => {
+  it("filters inline TODOs by the referenced person, not Task-page assignee text", async () => {
+    render(
+      <ControlledAgendaScreen
+        initial={{ text: "", facets: { todoPerson: ["ada"] } }}
+        data={response({
+          today: [
+            todo("Ada assignment", 1, {
+              properties: { assignee: "[[Countess|Ada]]" },
+            }),
+            todo("Grace assignment", 2, {
+              properties: { assignee: "[[Grace Hopper]]" },
+            }),
+            todo("Unassigned", 3),
+            task("Task page", 4),
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText("Ada assignment")).toBeVisible();
+    expect(screen.queryByText("Grace assignment")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unassigned")).not.toBeInTheDocument();
+    expect(screen.queryByText("Task page")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Ada" })).toBeVisible();
+  });
   it("normalizes every persisted status and priority while passing through unknown query keys", () => {
     const validateSearch = Route.options.validateSearch;
     if (typeof validateSearch !== "function") {
@@ -185,6 +233,7 @@ describe("Agenda route filters", () => {
       "taskPriority",
       "project",
       "blocked",
+      "todoPerson",
     ]);
   });
 
@@ -212,6 +261,7 @@ describe("Agenda route filters", () => {
       taskPriority: undefined,
       project: undefined,
       blocked: undefined,
+      todoPerson: undefined,
       tab: "today",
     });
   });

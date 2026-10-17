@@ -38,6 +38,22 @@ vi.mock("#/api/tasks", async () => {
 });
 vi.mock("sonner", () => ({ toast: { error: m.toastError } }));
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => m.openTab }));
+vi.mock("#/api/pages", () => ({
+  usePages: () => ({
+    data: {
+      items: [
+        {
+          id: "ada",
+          kind: "PERSON",
+          title: "Ada Lovelace",
+          canonical_name: "Ada Lovelace",
+          path: "people/ada.md",
+          aliases: ["Countess"],
+        },
+      ],
+    },
+  }),
+}));
 
 import { MobileAgenda } from "#/components/mobile/MobileAgenda";
 
@@ -88,6 +104,35 @@ const agenda = (
 
 describe("MobileAgenda", () => {
   beforeEach(() => vi.clearAllMocks());
+  it("selects an inline TODO person without showing unrelated Task pages", async () => {
+    const assigned = {
+      ...todo("Delegate report", 8),
+      properties: { assignee: "[[Countess|Ada]]" },
+    };
+    render(
+      <MobileAgenda
+        agenda={agenda({
+          data: { ...data, undated: [assigned, todo("Nobody", 9)] },
+        })}
+        today="2026-09-25"
+      />,
+    );
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Inline TODO person" }),
+      "ada",
+    );
+    expect(screen.getByText("Delegate report")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Ada" })).toBeVisible();
+    expect(screen.queryByText("Book the room")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nobody")).not.toBeInTheDocument();
+    expect(screen.getByText("1 open")).toBeVisible();
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Inline TODO person" }),
+      "",
+    );
+    expect(screen.getByText("Book the room")).toBeVisible();
+    expect(screen.getByText("Nobody")).toBeVisible();
+  });
 
   it("titles the screen with the open count", () => {
     render(<MobileAgenda agenda={agenda()} today="2026-09-25" />);

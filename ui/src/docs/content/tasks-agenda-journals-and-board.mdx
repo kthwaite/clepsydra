@@ -13,9 +13,9 @@ views and mutations over those files, not separate stores.
 - Run the server and let the vault index finish.
 - Open `/agenda` for due Todos and `/tasking` for Project and Cycle planning.
 - Use checkbox list items such as `- [ ] Draft proposal`. Inline properties use
-  the Markdown form `[due:: 2026-08-14]`, `[scheduled:: 2026-08-13]`, and
-  `[priority:: A]`. Write them in Markdown, or set them on a Todo from the
-  **Todo properties** popover in Folio
+  the Markdown form `[due:: 2026-08-14]`, `[scheduled:: 2026-08-13]`,
+  `[priority:: A]`, and `[assignee:: [[Ada Lovelace]]]`. Write them in Markdown,
+  or set them from **Todo properties** in Folio
   ([Editor Workflows](/docs/editor-workflows)).
 - Todo priority values are `A`, `B`, and `C`, badged `HIGH`, `MED`, and `LOW`
   in Agenda lists and Folio chips. Another value is badged verbatim in
@@ -54,6 +54,12 @@ checkbox. Wait for reindexing, then reload the page, Task Board, or Agenda
 before changing status. Todos inside protected pages are visible only according
 to the protected-page index boundary and cannot be changed through the Todo
 status endpoint.
+
+Assign a Todo to **one PERSON page** from Folio's **Assignee (Person)** selector.
+The assignment appears in Folio and desktop/mobile Agenda as a person reference.
+Change or clear it without changing the Todo's dates, priority, other properties,
+or nested items. Completion keeps the assignment. This is separate from a
+Task page's free-text assignee field.
 
 ### Review the Atrium summary
 
@@ -97,6 +103,12 @@ with **Todo properties** in Folio. Edit Task due dates on the Task Board or in
 the Folio's **Task details**.
 Agenda uses the Task display labels listed below; their persisted status values
 remain unchanged.
+
+Use **Inline TODO person** to show only Todos assigned to the selected PERSON.
+Unassigned Todos, other people's Todos, and Task pages are excluded — even a
+Task whose free-text assignee has the same name. Clear the filter to restore
+the mixed Agenda. Desktop offers the filter in its filter bar; mobile has a
+person selector above the sections.
 
 ### Open and capture into journals
 

@@ -30,12 +30,16 @@ import {
 } from "slate";
 import { HistoryEditor } from "slate-history";
 import { ReactEditor } from "slate-react";
+import { TodoAssignee } from "#/components/agenda/TodoAssignee";
 import { Tick } from "#/components/codex/Tick";
 import { TASK_PROPERTY_KEYS, type TaskPropertyKey } from "#/editor/properties";
 import type { ListItemElement } from "#/editor/schema/types";
 import type { TaskPropertyPopoverController } from "#/editor/taskPropertyContext";
+import { pageName, usePeople } from "#/hooks/usePeople";
+import { asWikilink } from "#/lib/attendance";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
+import { todoAssigneePerson, todoAssigneeReference } from "#/lib/todoAssignee";
 
 // ---------------------------------------------------------------------------
 // Draft — the buffered edit, seeded at open and written on commit
@@ -50,6 +54,7 @@ function draftFromProperties(
     due: properties?.due ?? "",
     scheduled: properties?.scheduled ?? "",
     priority: properties?.priority ?? "",
+    assignee: properties?.assignee ?? "",
   };
 }
 
@@ -60,7 +65,7 @@ function isTaskPropertyKey(key: string): key is TaskPropertyKey {
 /**
  * Fold the draft into the item's record: task keys come from the draft (a
  * cleared field drops its key), every other key is carried through untouched —
- * the popover edits three keys, it does not own the record.
+ * the popover edits task keys, it does not own the record.
  */
 function mergeTaskProperties(
   existing: Record<string, string> | undefined,
@@ -129,10 +134,19 @@ export function taskItemAtSelection(
 
 export function useTaskPropertyPopoverController(
   editor: Editor,
+  readOnly: boolean,
 ): TaskPropertyPopoverState {
   const pathRef = useRef<PathRef | null>(null);
   const sessionIdRef = useRef(0);
   const [session, setSession] = useState<TaskPropertySession | null>(null);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+  useEffect(() => {
+    if (!readOnly) return;
+    pathRef.current?.unref();
+    pathRef.current = null;
+    setSession(null);
+  }, [readOnly]);
 
   const close = useCallback(() => {
     pathRef.current?.unref();
@@ -145,6 +159,7 @@ export function useTaskPropertyPopoverController(
 
   const openForPath = useCallback(
     (path: Path, anchor: HTMLElement) => {
+      if (readOnlyRef.current) return;
       if (!Editor.hasPath(editor, path)) return;
       const node = Node.get(editor, path);
       if (!SlateElement.isElement(node) || node.type !== "list-item") return;
@@ -165,7 +180,7 @@ export function useTaskPropertyPopoverController(
       // A live path is the only thing that authorizes the write: if the item
       // was deleted while the popover was open, the draft is dropped.
       const path = pathRef.current?.current;
-      if (path && Editor.hasPath(editor, path)) {
+      if (!readOnlyRef.current && path && Editor.hasPath(editor, path)) {
         const node = Node.get(editor, path);
         if (SlateElement.isElement(node) && node.type === "list-item") {
           const next = mergeTaskProperties(node.properties, draft);
@@ -243,6 +258,9 @@ export function TaskPropertyPopover({
   onDiscard,
 }: TaskPropertyPopoverProps) {
   const [draft, setDraft] = useState(initial);
+  const people = usePeople();
+  const currentAssignee = todoAssigneePerson(draft.assignee, people);
+  const assigneeId = useId();
   // Dismissal can arrive from a listener that captured an older render; the
   // ref keeps every exit path writing the draft the operator actually sees.
   const draftRef = useRef(draft);
@@ -296,7 +314,11 @@ export function TaskPropertyPopover({
     if (event.key !== "Enter") return;
     // Enter on a button is that button's activation (toggle / clear); the
     // operator presses Enter again from anywhere else to commit.
-    if (event.target instanceof HTMLButtonElement) return;
+    if (
+      event.target instanceof HTMLButtonElement ||
+      event.target instanceof HTMLSelectElement
+    )
+      return;
     event.preventDefault();
     finish("commit");
   };
@@ -373,6 +395,49 @@ export function TaskPropertyPopover({
             </div>
           </div>
 
+          <div className="flex flex-col gap-1.5 pl-[17px]">
+            <label className={LABEL_CLASS} htmlFor={assigneeId}>
+              Assignee (Person)
+            </label>
+            <div className="flex items-center gap-1.5">
+              <select
+                id={assigneeId}
+                value={draft.assignee}
+                onChange={(event) => setField("assignee", event.target.value)}
+                className={INPUT_CLASS}
+              >
+                <option value="">Unassigned</option>
+                {draft.assignee && !currentAssignee && (
+                  <option value={draft.assignee}>
+                    {todoAssigneeReference(draft.assignee)?.alias ??
+                      todoAssigneeReference(draft.assignee)?.target ??
+                      draft.assignee}
+                  </option>
+                )}
+                {people.map((person) => (
+                  <option
+                    key={person.id}
+                    value={
+                      currentAssignee?.id === person.id
+                        ? draft.assignee
+                        : asWikilink(`${person.path}|${pageName(person)}`)
+                    }
+                  >
+                    {pageName(person)}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                aria-label="Clear assignee"
+                onClick={() => setField("assignee", "")}
+                className={CLEAR_BUTTON_CLASS}
+              >
+                ×
+              </button>
+            </div>
+            {draft.assignee && <TodoAssignee value={draft.assignee} />}
+          </div>
           <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0 pl-[17px]">
             <legend className={cn(LABEL_CLASS, "mb-1.5 p-0")}>Priority</legend>
             <div className="flex gap-1 rounded-[20px] bg-sink p-1">
@@ -401,6 +466,28 @@ export function TaskPropertyPopover({
               })}
             </div>
           </fieldset>
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => finish("discard")}
+              className={cn(
+                "rounded-full px-3 py-2 text-mute",
+                FOCUS_RING_NATIVE,
+              )}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => finish("commit")}
+              className={cn(
+                "rounded-full bg-accent px-3 py-2 text-ground",
+                FOCUS_RING_NATIVE,
+              )}
+            >
+              Apply
+            </button>
+          </div>
         </div>
       </FloatingFocusManager>
     </FloatingPortal>

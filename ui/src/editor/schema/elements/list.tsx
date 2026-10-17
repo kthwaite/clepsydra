@@ -15,11 +15,13 @@ import {
   useReadOnly,
   useSlateStatic,
 } from "slate-react";
+import { TodoAssignee } from "#/components/agenda/TodoAssignee";
 import { TASK_PROPERTY_KEYS, type TaskPropertyKey } from "#/editor/properties";
 import { useTaskPropertyPopover } from "#/editor/taskPropertyContext";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { formatDayMonth } from "#/lib/time";
+import { todoAssigneeReference } from "#/lib/todoAssignee";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type {
   BulletedListElement,
@@ -57,6 +59,7 @@ const CHIP_SPECS: Record<TaskPropertyKey, ChipSpec> = {
   due: { name: "Due", isDate: true },
   scheduled: { name: "Scheduled", isDate: true },
   priority: { name: "Priority", isDate: false },
+  assignee: { name: "Assignee", isDate: false },
 };
 
 const CHIP_CLASS =
@@ -98,7 +101,12 @@ function taskPropertyChips(
         tone: "date",
       });
     } else {
-      const display = priorityLabel(value);
+      const reference =
+        key === "assignee" ? todoAssigneeReference(value) : null;
+      const display =
+        key === "assignee"
+          ? (reference?.alias ?? reference?.target ?? value)
+          : priorityLabel(value);
       chips.push({
         key,
         text: display,
@@ -133,29 +141,32 @@ function TaskPropertyControls({ element }: { element: ListItemElement }) {
     <span
       contentEditable={false}
       data-task-properties=""
-      className={cn(
-        "ml-2 shrink-0 select-none space-x-1.5 whitespace-nowrap",
-        chips.length === 0 && "max-md:hidden",
-      )}
+      className="ml-2 flex shrink-0 select-none flex-wrap items-center gap-1.5 max-md:max-w-[45%]"
     >
       {chips.length > 0 ? (
-        chips.map((chip) => (
-          <button
-            key={chip.key}
-            type="button"
-            aria-label={chip.name}
-            disabled={readOnly}
-            className={cn(
-              CHIP_CLASS,
-              CHIP_TONE[chip.tone],
-              !readOnly && CHIP_INTERACTIVE,
-            )}
-            onMouseDown={keepSelection}
-            onClick={open}
-          >
-            {chip.text}
-          </button>
-        ))
+        chips.map((chip) =>
+          readOnly &&
+          chip.key === "assignee" &&
+          element.properties?.assignee ? (
+            <TodoAssignee key={chip.key} value={element.properties.assignee} />
+          ) : (
+            <button
+              key={chip.key}
+              type="button"
+              aria-label={chip.name}
+              disabled={readOnly}
+              className={cn(
+                CHIP_CLASS,
+                CHIP_TONE[chip.tone],
+                !readOnly && CHIP_INTERACTIVE,
+              )}
+              onMouseDown={keepSelection}
+              onClick={open}
+            >
+              {chip.text}
+            </button>
+          ),
+        )
       ) : (
         <button
           type="button"
@@ -164,7 +175,7 @@ function TaskPropertyControls({ element }: { element: ListItemElement }) {
             CHIP_CLASS,
             CHIP_TONE.plain,
             CHIP_INTERACTIVE,
-            "opacity-0 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100",
+            "opacity-0 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 max-md:min-h-11 max-md:opacity-100",
           )}
           onMouseDown={keepSelection}
           onClick={open}

@@ -14,10 +14,16 @@
  * (breaking other features) or pre-processing raw markdown (fragile). Accepted
  * as a v2 concern — URL values in inline properties are uncommon in practice.
  */
-const INLINE_PROPERTY_SOURCE = /\[([A-Za-z_][\w-]*)::[ \t]+([^\]]+)\]/.source;
+const INLINE_PROPERTY_SOURCE =
+  /\[([A-Za-z_][\w-]*)::[ \t]+((?:\[\[[^\]\r\n]+\]\]|[^[\]\r\n])+)\]/.source;
 
 /** Keys the task affordances (chips, popover) surface on task list items. */
-export const TASK_PROPERTY_KEYS = ["due", "scheduled", "priority"] as const;
+export const TASK_PROPERTY_KEYS = [
+  "due",
+  "scheduled",
+  "priority",
+  "assignee",
+] as const;
 
 export type TaskPropertyKey = (typeof TASK_PROPERTY_KEYS)[number];
 

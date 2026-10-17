@@ -147,6 +147,12 @@ export const selectWorkspaceMode = (s: WorkspaceState): WorkspaceMode => {
   return "launcher";
 };
 
+/** A Folio destination shared by pointer drops and accessible move actions. */
+export type TabMoveTarget =
+  | { tabId: string; position: "before" | "after" }
+  | { quireId: string }
+  | { position: "end" };
+
 interface WorkspaceActions {
   openTab: (
     type: TabType,
@@ -171,13 +177,7 @@ interface WorkspaceActions {
     tabId: string,
     requestId: string,
   ) => Pick<OpenTabTarget, "blockId" | "heading"> | undefined;
-  moveTab: (
-    sourceTabId: string,
-    target:
-      | { tabId: string; position: "before" | "after" }
-      | { quireId: string }
-      | { position: "end" },
-  ) => void;
+  moveTab: (sourceTabId: string, target: TabMoveTarget) => void;
   updateTabLabel: (tabId: string, label: string) => void;
   setTabPageId: (tabId: string, pageId: string) => void;
   updateTabPath: (tabId: string, path: string, label?: string) => void;
