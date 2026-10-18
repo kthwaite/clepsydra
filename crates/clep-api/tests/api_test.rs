@@ -4610,58 +4610,62 @@ async fn sse_events_endpoint_returns_stream() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn graph_returns_nodes_and_edges() {
-    let (server, _tmp) = setup_server();
+async fn graph_returns_resolved_kinds_without_changing_link_kinds() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            for (path, content) in [
+                (
+                    "notes/quotation.md",
+                    "---\nid: 0190f8a0-0000-7000-8000-000000000801\ntitle: Quotation\ntype: quote\nblocked_by: [ordinary]\n---\n[[daily]]",
+                ),
+                (
+                    "journals/daily.md",
+                    "---\nid: 0190f8a0-0000-7000-8000-000000000802\ntitle: Daily\n---\nJournal.",
+                ),
+                (
+                    "ordinary.md",
+                    "---\nid: 0190f8a0-0000-7000-8000-000000000803\ntitle: Ordinary\n---\nNote.",
+                ),
+            ] {
+                let absolute = root.join(path);
+                fs::create_dir_all(absolute.parent().unwrap()).unwrap();
+                fs::write(absolute, content).unwrap();
+            }
+        })
+        .build();
 
-    // Create two pages that link to each other
-    server
-        .post("/api/vault/pages/alpha.md")
-        .json(&serde_json::json!({
-            "title": "Alpha",
-            "body": "Link to [[Beta]]"
-        }))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    server
-        .post("/api/vault/pages/beta.md")
-        .json(&serde_json::json!({
-            "title": "Beta",
-            "body": "Link to [[Alpha]]"
-        }))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Rebuild to ensure links are resolved
-    server
-        .post("/api/vault/index/rebuild")
-        .await
-        .assert_status_ok();
-
-    let response = server.get("/api/vault/index/graph").await;
+    let response = fixture.server.get("/api/vault/index/graph").await;
     response.assert_status_ok();
+    let graph: serde_json::Value = response.json();
+    let nodes = graph["nodes"].as_array().unwrap();
+    for (path, kind) in [
+        ("notes/quotation.md", "QUOTE"),
+        ("journals/daily.md", "JOURNAL"),
+        ("ordinary.md", "NOTE"),
+    ] {
+        let node = nodes.iter().find(|node| node["path"] == path).unwrap();
+        assert_eq!(node["kind"], kind, "{path}");
+    }
 
-    let body: serde_json::Value = response.json();
-    let nodes = body["nodes"].as_array().unwrap();
-    let edges = body["edges"].as_array().unwrap();
-    assert!(
-        nodes.len() >= 2,
-        "expected at least 2 nodes, got {}",
-        nodes.len()
+    let outgoing: BTreeSet<(&str, &str)> = graph["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|edge| edge["source"] == "0190f8a0-0000-7000-8000-000000000801")
+        .map(|edge| {
+            (
+                edge["target"].as_str().unwrap(),
+                edge["kind"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        outgoing,
+        BTreeSet::from([
+            ("0190f8a0-0000-7000-8000-000000000802", "wiki"),
+            ("0190f8a0-0000-7000-8000-000000000803", "property_ref"),
+        ])
     );
-    assert!(!edges.is_empty(), "expected at least 1 edge");
-
-    // Verify node structure
-    let node = &nodes[0];
-    assert!(node.get("id").is_some());
-    assert!(node.get("path").is_some());
-    assert!(node.get("title").is_some());
-
-    // Verify edge structure
-    let edge = &edges[0];
-    assert!(edge.get("source").is_some());
-    assert!(edge.get("target").is_some());
-    assert!(edge.get("kind").is_some());
 }
 
 // ---------------------------------------------------------------------------

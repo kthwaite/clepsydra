@@ -352,7 +352,7 @@ Get content index. Responses: `200` Content index; `500` Internal server error.
 ### `POST /api/vault/index/create-from-link`
 Create from link. Responses: `201` Page created from unresolved link; `400` Invalid request; `409` Page already exists; `500` Internal server error.
 ### `GET /api/vault/index/graph`
-Get graph. Responses: `200` Resolved link graph; `500` Internal server error.
+Get graph. Each node includes its resolved `kind` (the canonical Kind enum, using explicit page metadata before folder inference); edges retain their link kind, including `property_ref`. Responses: `200` Resolved link graph; `500` Internal server error.
 ### `GET /api/vault/index/issues`
 List reference issues. Responses: `200` Paginated reference issue inventory; `400` Invalid filter or pagination value; `500` Reference issue inventory unavailable.
 ### `POST /api/vault/index/issues/apply`

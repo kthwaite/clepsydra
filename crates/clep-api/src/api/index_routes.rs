@@ -157,6 +157,7 @@ pub struct GraphNode {
     id: String,
     path: String,
     title: Option<String>,
+    kind: Kind,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -1218,7 +1219,7 @@ pub async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphRespo
         .with_index(move |index, _vault| {
             let conn = index.connection();
 
-            let mut node_stmt = conn.prepare("SELECT id, path, title FROM pages")?;
+            let mut node_stmt = conn.prepare("SELECT id, path, title, kind FROM pages")?;
 
             let nodes: Vec<GraphNode> = node_stmt
                 .query_map([], |row| {
@@ -1226,10 +1227,19 @@ pub async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphRespo
                         id: row.get(0)?,
                         path: row.get(1)?,
                         title: row.get(2)?,
+                        kind: Kind::from_token(row.get_ref(3)?.as_str()?).ok_or_else(|| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                3,
+                                rusqlite::types::Type::Text,
+                                Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "invalid indexed page kind",
+                                )),
+                            )
+                        })?,
                     })
                 })?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<Result<_, _>>()?;
 
             let mut edge_stmt = conn.prepare(
                 "SELECT source_id, target_id, kind FROM links WHERE target_id IS NOT NULL",

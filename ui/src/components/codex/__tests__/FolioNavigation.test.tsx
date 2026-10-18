@@ -137,14 +137,25 @@ vi.mock("#/api/index", () => ({
   useGraph: () => ({
     data: {
       nodes: [
-        { id: "alpha-id", path: "notes/alpha.md", title: "Alpha" },
-        { id: "beta-id", path: "notes/beta.md", title: "Beta" },
+        {
+          id: "alpha-id",
+          path: "notes/alpha.md",
+          title: "Alpha",
+          kind: "NOTE",
+        },
+        { id: "beta-id", path: "notes/beta.md", title: "Beta", kind: "NOTE" },
         {
           id: "daily-id",
           path: "journals/2026-08-08.md",
           title: "Daily",
+          kind: "JOURNAL",
         },
-        { id: "orphan-id", path: "notes/orphan.md", title: "Orphan" },
+        {
+          id: "orphan-id",
+          path: "notes/orphan.md",
+          title: "Orphan",
+          kind: "NOTE",
+        },
       ],
       edges: [
         { source: "alpha-id", target: "beta-id", kind: "wikilink" },
@@ -256,6 +267,7 @@ vi.mock("#/hooks/useVaultEvents", () => ({
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 vi.mock("#/components/ForceGraph", () => ({
   ForceGraph: () => <div role="img" aria-label="Constellation graph" />,
+  KindGlyph: () => null,
 }));
 vi.mock("#/components/codex/useScrollSpy", () => ({
   useScrollSpy: () => ({ activeIndex: -1, scrollTo: vi.fn() }),
@@ -540,7 +552,11 @@ describe("mobile Folio Back", () => {
     useConstellationStore.setState({
       selectedAnchorId: null,
       depth: null,
-      hideDaily: false,
+      hiddenKinds: [],
+      propertyRefsVisible: true,
+      selectedNodeId: null,
+      focusHops: 1,
+      groupBy: "none",
       orphansVisible: true,
       mode: "graph",
     });
@@ -975,6 +991,9 @@ describe("mobile Folio Back", () => {
     });
     const router = renderNavigation("/workspace");
 
+    await user.click(
+      await screen.findByRole("button", { name: "Filters and details" }),
+    );
     const anchorTrigger = await screen.findByRole("button", {
       name: /Anchor page/,
     });
@@ -983,8 +1002,9 @@ describe("mobile Folio Back", () => {
       screen.getByRole("option", { name: "Alpha · notes/alpha.md" }),
     );
     await user.click(screen.getByRole("button", { name: "Depth 2" }));
-    await user.click(screen.getByRole("switch", { name: "Hide journals" }));
+    await user.click(screen.getByRole("switch", { name: "Journal" }));
     await user.click(screen.getByRole("switch", { name: "Show orphans" }));
+    await user.click(screen.getByRole("button", { name: "Close details" }));
     await user.click(screen.getByRole("button", { name: "List view" }));
     await user.click(screen.getByRole("button", { name: "Open Alpha" }));
     const editor = await screen.findByRole("textbox", { name: "Page body" });
@@ -1004,6 +1024,9 @@ describe("mobile Folio Back", () => {
       expect(router.state.location.pathname).toBe("/workspace"),
     );
     expect(useWorkspaceStore.getState().activeTabId).toBe("graph");
+    await user.click(
+      screen.getByRole("button", { name: "Filters and details" }),
+    );
     expect(
       screen.getByRole("button", { name: /Anchor page/ }),
     ).toHaveTextContent("Alpha · notes/alpha.md");

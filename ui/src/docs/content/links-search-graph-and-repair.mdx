@@ -230,12 +230,42 @@ Open `/graph` or run **Open Constellation (graph)**. The route opens a Constella
 
 The graph contains one node for every indexed folio and one edge for every resolved link whose `target_id` is present. Unresolved and ambiguous links have no graph edge. Link kinds are retained on edges; the graph does not infer an edge from text similarity. An isolated page has neither inbound nor outbound resolved edges. An orphan has no inbound resolved edge but may still link outward.
 
-Use the Constellation controls to anchor on a folio, choose one- or two-hop depth, hide journal pages, and include or exclude unconnected nodes. Selecting a node opens its folio. These controls filter the displayed projection; they do not change links or page files.
+**Select to focus; Open to navigate.** Click or tap a node, select a hub or list
+row, or press Enter/Space on a keyboard-focused node to pin it. **Open focused
+page** opens that folio; list rows also have their own **Open** action.
+**Focus** chooses a one- or two-hop neighbourhood. Other nodes and edges remain
+on the map, muted rather than removed. Hovering or keyboard-focusing a graph node
+temporarily previews its neighbourhood; leaving restores the pinned focus.
+The pinned page remains legible during a preview. **Clear focus** or Escape
+clears focus without changing your filters, positions, or zoom.
 
-The right sidebar shows the visible node and edge counts, hubs, filters, and
-legend. Use the sidebar toggle in the graph's top-right corner to hide or restore
-it; hiding it expands the graph without changing your filters. On mobile, open
-**Details** for the counts, hubs, and orphans.
+The filters control a separate displayed projection:
+
+- **Kinds** switches use the server's resolved page kind, not a filename or
+  folder guess. Journals, AI journals, Tasks, Todos, and Cycles are independent.
+- **Property references** includes or excludes `property_ref` edges. Focus,
+  depth, hub counts, and unconnected-page filtering use the remaining edges.
+- **Show orphans** retains the existing graph-control meaning: pages with no
+  remaining connections. This differs from Reference Repairs' inbound-only
+  definition of an orphan.
+- **Anchor page** and **Depth** restrict the map to one or two hops around an
+  anchor, or **All** pages. Depth removes nodes; focus only mutes them. If an
+  anchor is deleted or filtered out, depth returns to All. Hidden or deleted
+  selections are cleared rather than reappearing when their kind is restored.
+
+**Group by** arranges the layout by kind or top-level folder, or leaves it
+ungrouped. Link distance and repulsion account for node degree, with collision
+spacing around hubs. Layout work is bounded and yields between batches; reduced
+motion paints the settled layout without animating intermediate positions.
+The initial graph fits the viewport. Wheel/pinch zoom, pan, and node dragging
+remain available; focus does not restart layout or reset a user-adjusted view.
+Overview labels are hidden to avoid overlap: zoom in to reveal them, or hover,
+keyboard-focus, or select a node to read its label.
+
+**Graph** and **List** share selection and filters on desktop and mobile.
+The desktop sidebar contains filters, hubs, unconnected pages, and the kind
+legend; its toggle hides or restores it. On mobile, use **Filters and details**.
+No control changes links or page files.
 
 ## Repair reference issues
 

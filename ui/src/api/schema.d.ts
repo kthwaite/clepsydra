@@ -3130,6 +3130,7 @@ export interface components {
         };
         GraphNode: {
             id: string;
+            kind: components["schemas"]["Kind"];
             path: string;
             title?: string | null;
         };

@@ -1,79 +1,77 @@
 import type { GraphEdge, GraphNode } from "#/api/types";
+import type { Kind } from "#/lib/kind";
 
+export type ConstellationGraph = { nodes: GraphNode[]; edges: GraphEdge[] };
 export type FilterOptions = {
   orphansVisible: boolean;
-  hideDaily: boolean;
-  hideTasks?: boolean;
-  depth: number | null; // null = unlimited
-  anchorId: string | null; // required when depth is set
+  hiddenKinds: readonly Kind[];
+  propertyRefsVisible: boolean;
+  depth: number | null;
+  anchorId: string | null;
 };
 
+/** Undirected context follows only the edges currently shown in the map. */
+export function neighborhood(
+  edges: GraphEdge[],
+  anchorId: string,
+  hops: number,
+): Set<string> {
+  const adjacency = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    for (const [from, to] of [
+      [edge.source, edge.target],
+      [edge.target, edge.source],
+    ]) {
+      const neighbors = adjacency.get(from);
+      if (neighbors) neighbors.add(to);
+      else adjacency.set(from, new Set([to]));
+    }
+  }
+  const ids = new Set([anchorId]);
+  let frontier = [anchorId];
+  for (let hop = 0; hop < hops && frontier.length > 0; hop++) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const neighbor of adjacency.get(id) ?? []) {
+        if (ids.has(neighbor)) continue;
+        ids.add(neighbor);
+        next.push(neighbor);
+      }
+    }
+    frontier = next;
+  }
+  return ids;
+}
+
 export function applyFilters(
-  graph: { nodes: GraphNode[]; edges: GraphEdge[] },
+  graph: ConstellationGraph,
   opts: FilterOptions,
-): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  let nodes = opts.hideDaily
-    ? graph.nodes.filter(
-        (node) =>
-          !node.path.startsWith("journals/") &&
-          !node.path.startsWith("ai-journals/"),
-      )
-    : graph.nodes;
-  if (opts.hideTasks) {
-    nodes = nodes.filter(
-      (node) =>
-        !node.path.startsWith("tasks/") &&
-        !node.path.startsWith("task/") &&
-        !node.path.startsWith("todos/") &&
-        !node.path.startsWith("todo/"),
+): ConstellationGraph {
+  let nodes = graph.nodes.filter(
+    (node) => !opts.hiddenKinds.includes(node.kind),
+  );
+  let ids = new Set(nodes.map((node) => node.id));
+  let edges = graph.edges.filter(
+    (edge) =>
+      (opts.propertyRefsVisible || edge.kind !== "property_ref") &&
+      ids.has(edge.source) &&
+      ids.has(edge.target),
+  );
+  if (!opts.orphansVisible) {
+    const connected = new Set(
+      edges.flatMap((edge) => [edge.source, edge.target]),
+    );
+    nodes = nodes.filter((node) => connected.has(node.id));
+    ids = new Set(nodes.map((node) => node.id));
+  }
+  // A hidden or deleted anchor must not strand the map in an empty neighborhood.
+  if (opts.depth !== null && opts.anchorId && ids.has(opts.anchorId)) {
+    const visible = neighborhood(edges, opts.anchorId, opts.depth);
+    nodes = nodes.filter((node) => visible.has(node.id));
+    ids = new Set(nodes.map((node) => node.id));
+    edges = edges.filter(
+      (edge) => ids.has(edge.source) && ids.has(edge.target),
     );
   }
-  let nodeIds = new Set(nodes.map((node) => node.id));
-  let edges = graph.edges.filter(
-    (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target),
-  );
-
-  if (!opts.orphansVisible) {
-    const connected = new Set<string>();
-    for (const edge of edges) {
-      connected.add(edge.source);
-      connected.add(edge.target);
-    }
-    nodes = nodes.filter((node) => connected.has(node.id));
-    nodeIds = new Set(nodes.map((node) => node.id));
-  }
-
-  if (opts.depth != null && opts.anchorId) {
-    const adjacency = new Map<string, Set<string>>();
-    for (const edge of edges) {
-      const sourceNeighbors = adjacency.get(edge.source);
-      if (sourceNeighbors) sourceNeighbors.add(edge.target);
-      else adjacency.set(edge.source, new Set([edge.target]));
-
-      const targetNeighbors = adjacency.get(edge.target);
-      if (targetNeighbors) targetNeighbors.add(edge.source);
-      else adjacency.set(edge.target, new Set([edge.source]));
-    }
-
-    const visibleIds = new Set<string>([opts.anchorId]);
-    let frontier = new Set<string>([opts.anchorId]);
-    for (let hop = 0; hop < opts.depth && frontier.size > 0; hop += 1) {
-      const next = new Set<string>();
-      for (const id of frontier) {
-        for (const neighbor of adjacency.get(id) ?? []) {
-          if (visibleIds.has(neighbor)) continue;
-          visibleIds.add(neighbor);
-          next.add(neighbor);
-        }
-      }
-      frontier = next;
-    }
-    nodes = nodes.filter((node) => visibleIds.has(node.id));
-    nodeIds = new Set(nodes.map((node) => node.id));
-  }
-
-  edges = edges.filter(
-    (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target),
-  );
   return { nodes, edges };
 }

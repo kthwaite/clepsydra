@@ -54,8 +54,18 @@ const {
   return {
     graph: {
       nodes: [
-        { id: "alpha-id", path: "notes/alpha.md", title: "Alpha" },
-        { id: "daily-id", path: "journals/2026-08-08.md", title: "Daily" },
+        {
+          id: "alpha-id",
+          path: "notes/alpha.md",
+          title: "Alpha",
+          kind: "NOTE",
+        },
+        {
+          id: "daily-id",
+          path: "journals/2026-08-08.md",
+          title: "Daily",
+          kind: "JOURNAL",
+        },
       ],
       edges: [{ source: "alpha-id", target: "daily-id", kind: "wikilink" }],
     },
@@ -243,7 +253,11 @@ describe("CodexFrame real breakpoint transitions", () => {
     useConstellationStore.setState({
       selectedAnchorId: null,
       depth: null,
-      hideDaily: false,
+      hiddenKinds: [],
+      propertyRefsVisible: true,
+      selectedNodeId: null,
+      focusHops: 1,
+      groupBy: "none",
       orphansVisible: true,
       mode: "graph",
     });
@@ -388,21 +402,28 @@ describe("CodexFrame real breakpoint transitions", () => {
       </CodexFrame>,
     );
 
+    await user.click(
+      screen.getByRole("button", { name: "Filters and details" }),
+    );
     const anchorTrigger = screen.getByRole("button", { name: /Anchor page/ });
     await user.click(anchorTrigger);
     await user.click(
       screen.getByRole("option", { name: "Alpha · notes/alpha.md" }),
     );
-    await user.click(screen.getByRole("switch", { name: "Hide journals" }));
+    await user.click(screen.getByRole("switch", { name: "Journal" }));
+    await user.click(screen.getByRole("button", { name: "Close details" }));
 
     act(() => matchMediaController.setMatches(false));
     expect(screen.getByRole("heading", { name: "Hubs" })).toBeVisible();
     act(() => matchMediaController.setMatches(true));
+    await user.click(
+      screen.getByRole("button", { name: "Filters and details" }),
+    );
 
     expect(
       screen.getByRole("button", { name: /Anchor page/ }),
     ).toHaveTextContent("Alpha · notes/alpha.md");
-    expect(screen.getByRole("switch", { name: "Hide journals" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Journal" })).not.toBeChecked();
   });
 
   it("preserves real Folio editor input after a rejected save and breakpoint changes", async () => {
