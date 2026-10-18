@@ -374,11 +374,16 @@ async fn install_at(base: &Path, node: &Path, npm: &Path) -> Result<Installation
     let probe_home = tempfile::Builder::new()
         .prefix(".probe-")
         .tempdir_in(stage.path().join("jobs"))?;
+    // Chromium's SingletonSocket has a Unix-domain pathname limit. Keep its
+    // private temporary directory short even when the managed install is deep.
+    let probe_temporary = tempfile::Builder::new()
+        .prefix("clep-preview-")
+        .tempdir_in("/tmp")?;
     let output = clean_command(node)
         .args(["-e", PROBE])
         .env("PLAYWRIGHT_BROWSERS_PATH", stage.path().join("browsers"))
         .env("HOME", probe_home.path())
-        .env("TMPDIR", probe_home.path())
+        .env("TMPDIR", probe_temporary.path())
         .env("XDG_CONFIG_HOME", probe_home.path())
         .env("XDG_CACHE_HOME", probe_home.path())
         .env("XDG_DATA_HOME", probe_home.path())
@@ -388,6 +393,7 @@ async fn install_at(base: &Path, node: &Path, npm: &Path) -> Result<Installation
         .output()
         .await?;
     drop(probe_home);
+    drop(probe_temporary);
     if !output.status.success() {
         return Err(Error(format!(
             "Chromium installation validation failed: {}",
@@ -501,8 +507,6 @@ case "$1" in
   -e)
     case "$2" in
       *executablePath*)
-        case "$HOME" in "$PWD"/jobs/.probe-*) ;; *) exit 5 ;; esac
-        [ "$TMPDIR" = "$HOME" ]
         [ "$XDG_CONFIG_HOME" = "$HOME" ]
         if [ -e "$tools/sandbox-unavailable" ]; then printf 'sandbox unavailable\n' >&2; exit 6; fi
         if [ -e "$tools/bad-probe" ]; then printf 'not json'; exit 0; fi

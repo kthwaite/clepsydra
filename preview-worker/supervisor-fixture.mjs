@@ -62,22 +62,49 @@ if (!isMainThread) {
           supervisorPid: process.pid,
           browserPid: null,
           jobDirectory: options.jobDirectory,
+          temporaryDirectory: options.env.TMPDIR,
         });
         return launchBrowser({
           ...options,
           executablePath: join(options.jobDirectory, "missing-chromium"),
         });
       }
-      const browser = await launchBrowser(options);
+      const browser = await launchBrowser({
+        ...options,
+        onSpawn(child) {
+          options.onSpawn(child);
+          let remaining = 8192;
+          child.stderr.on("data", (data) => {
+            if (remaining <= 0) return;
+            const diagnostic = data.subarray(0, remaining);
+            remaining -= diagnostic.length;
+            process.stderr.write(diagnostic);
+          });
+          child.once("exit", (code, signal) => {
+            process.stderr.write(`Chromium exit=${code}/${signal}\n`);
+          });
+          if (mode === "launch-delayed") {
+            // Hold the actual browser before CDP initialization, while the
+            // authenticated bridge is already available to the test.
+            process.kill(child.pid, "SIGSTOP");
+            const resume = setTimeout(() => {
+              process.kill(child.pid, "SIGCONT");
+            }, 3500);
+            child.once("exit", () => clearTimeout(resume));
+          }
+        },
+      });
       process.send({
         type: "browser",
         supervisorPid: process.pid,
         browserPid: browser.process().pid,
         jobDirectory: options.jobDirectory,
+        temporaryDirectory: options.env.TMPDIR,
         endpoint: browser.endpoint,
         token: browser.token,
       });
-      if (mode === "launch-hang") await new Promise(() => {});
+      if (["launch-hang", "launch-delayed"].includes(mode))
+        await new Promise(() => {});
       return browser;
     },
   });

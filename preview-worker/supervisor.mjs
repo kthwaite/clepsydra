@@ -21,7 +21,7 @@ function lifetime() {
     : MAX_LIFETIME_MS;
 }
 
-function browserEnvironment(jobDirectory) {
+function browserEnvironment(jobDirectory, temporaryDirectory) {
   const env = {};
   for (const key of ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"]) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
@@ -29,9 +29,9 @@ function browserEnvironment(jobDirectory) {
   return {
     ...env,
     HOME: jobDirectory,
-    TMPDIR: jobDirectory,
-    TMP: jobDirectory,
-    TEMP: jobDirectory,
+    TMPDIR: temporaryDirectory,
+    TMP: temporaryDirectory,
+    TEMP: temporaryDirectory,
     XDG_CACHE_HOME: join(jobDirectory, "cache"),
     XDG_CONFIG_HOME: join(jobDirectory, "config"),
     XDG_DATA_HOME: join(jobDirectory, "data"),
@@ -49,6 +49,7 @@ export async function supervise({
   const parentPid = process.ppid;
   const lifetimeMs = lifetime();
   let jobDirectory;
+  let temporaryDirectory;
   let browser;
   let browserPid;
   let worker;
@@ -70,12 +71,14 @@ export async function supervise({
   }
 
   function removeJobSync() {
-    if (!jobDirectory) return;
-    try {
-      rmSync(jobDirectory, { recursive: true, force: true, maxRetries: 2 });
-    } catch {
-      process.stderr.write("Could not remove preview job directory.\n");
-      process.exitCode = 1;
+    for (const directory of [jobDirectory, temporaryDirectory]) {
+      if (!directory) continue;
+      try {
+        rmSync(directory, { recursive: true, force: true, maxRetries: 2 });
+      } catch {
+        process.stderr.write("Could not remove preview job directory.\n");
+        process.exitCode = 1;
+      }
     }
   }
 
@@ -145,6 +148,8 @@ export async function supervise({
       forceStop();
       if (jobDirectory)
         await rm(jobDirectory, { recursive: true, force: true });
+      if (temporaryDirectory)
+        await rm(temporaryDirectory, { recursive: true, force: true });
       clearTimeout(forceTimer);
       clearTimeout(shutdownDeadline);
       clearTimeout(hardDeadline);
@@ -164,7 +169,7 @@ export async function supervise({
   process.stdout.on("close", () => shutdown(1));
 
   async function start(message) {
-    const env = browserEnvironment(jobDirectory);
+    const env = browserEnvironment(jobDirectory, temporaryDirectory);
     browser = await launch({
       jobDirectory,
       env,
@@ -222,6 +227,9 @@ export async function supervise({
     }
     mkdirSync(jobsRoot, { recursive: true, mode: 0o700 });
     jobDirectory = mkdtempSync(join(jobsRoot, "job-"));
+    // Chromium creates Unix-domain sockets beneath TMPDIR. A managed generation
+    // (or macOS's default temp directory) can exceed the socket pathname limit.
+    temporaryDirectory = mkdtempSync("/tmp/clep-preview-");
     for await (const message of messages(process.stdin)) {
       if (stopping) break;
       if (!launching && message?.type === "start") {

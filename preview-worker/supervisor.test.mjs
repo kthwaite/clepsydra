@@ -116,9 +116,54 @@ async function authenticatedSocket(t, info) {
   return socket;
 }
 
-async function session(t, mode = "capture", lifetimeMs = 12000) {
+async function browserVersion(s, socket, id, milliseconds, label) {
+  const controller = new AbortController();
+  const closed = () =>
+    controller.abort(new Error("Browser control websocket closed"));
+  socket.once("close", closed);
+  try {
+    if (socket.readyState !== WebSocket.OPEN)
+      throw new Error("Browser control websocket is not open");
+    const reply = once(socket, "message", { signal: controller.signal });
+    socket.send(JSON.stringify({ id, method: "Browser.getVersion" }));
+    const [frame] = await within(reply, milliseconds, label);
+    const version = JSON.parse(frame.toString());
+    assert.equal(version.id, id);
+    assert.match(version.result.product, /Chrome\//);
+  } catch (error) {
+    throw new Error(
+      `${label}: ${controller.signal.reason?.message ?? error.message}; ${s.diagnostics()}`,
+      { cause: error },
+    );
+  } finally {
+    socket.off("close", closed);
+    controller.abort();
+  }
+}
+
+async function browserReady(s, socket) {
+  // A listening authenticated bridge is not proof that Chromium has initialized
+  // CDP. Charge the first round-trip to the existing launch budget, not the
+  // steady-state command deadline; the supervisor's absolute deadline still runs.
+  await browserVersion(
+    s,
+    socket,
+    1,
+    Math.max(1, 10000 - (performance.now() - s.started)),
+    "Chromium CDP readiness",
+  );
+}
+
+async function session(
+  t,
+  mode = "capture",
+  lifetimeMs = 12000,
+  longRoot = false,
+) {
   const temporary = mkdtempSync(join(tmpdir(), "clep-supervisor-test-"));
-  const jobs = join(temporary, "jobs");
+  const jobs = longRoot
+    ? join(temporary, "managed-preview-worker-".repeat(8), "jobs")
+    : join(temporary, "jobs");
   let inputFd;
   if (mode === "parent") {
     // A separately held writer survives the host's SIGKILL, proving that ppid
@@ -170,8 +215,15 @@ async function session(t, mode = "capture", lifetimeMs = 12000) {
       kill(browser?.supervisorPid);
       if (child.exitCode === null && child.signalCode === null)
         child.kill("SIGKILL");
+      if (browser?.temporaryDirectory) {
+        rmSync(browser.temporaryDirectory, {
+          recursive: true,
+          force: true,
+          maxRetries: 2,
+        });
+      }
+      rmSync(temporary, { recursive: true, force: true, maxRetries: 2 });
     }
-    rmSync(temporary, { recursive: true, force: true, maxRetries: 2 });
   });
   const send = (message) => {
     const line = `${JSON.stringify(message)}\n`;
@@ -216,7 +268,12 @@ async function assertClean(s) {
       ({ pid, group }) =>
         pid === s.info.supervisorPid || group === s.info.browserPid,
     );
-    if (!remaining.length && !existsSync(s.info.jobDirectory)) break;
+    if (
+      !remaining.length &&
+      !existsSync(s.info.jobDirectory) &&
+      !existsSync(s.info.temporaryDirectory)
+    )
+      break;
     await delay(25);
   } while (performance.now() < deadline);
   assert.deepEqual(
@@ -228,6 +285,11 @@ async function assertClean(s) {
     existsSync(s.info.jobDirectory),
     false,
     "job directory survived",
+  );
+  assert.equal(
+    existsSync(s.info.temporaryDirectory),
+    false,
+    "browser temporary directory survived",
   );
   assert.deepEqual(readdirSync(s.jobs), [], "profile/artifact files survived");
 }
@@ -274,16 +336,43 @@ describe("native preview process lifecycle", {
     );
 
     const socket = await authenticatedSocket(t, s.info);
-    const reply = once(socket, "message");
-    socket.send(JSON.stringify({ id: 1, method: "Browser.getVersion" }));
-    const [frame] = await within(reply, 3000, "authorized browser command");
-    const version = JSON.parse(frame.toString());
-    assert.equal(version.id, 1);
-    assert.match(version.result.product, /Chrome\//);
+    await browserReady(s, socket);
+    await browserVersion(s, socket, 2, 3000, "authorized browser command");
     assert.equal(await rejectedUpgrade(s.info.endpoint, headers), 409);
     socket.terminate();
     s.child.stdin.end();
     await within(s.exit, 2500, "authenticated bridge cleanup");
+    await assertClean(s);
+  });
+
+  test("authenticated CDP readiness tolerates slow browser startup within the launch deadline", async (t) => {
+    const s = await session(t, "launch-delayed");
+    const socket = await authenticatedSocket(t, s.info);
+    await browserReady(s, socket);
+    await browserVersion(s, socket, 2, 3000, "command after delayed startup");
+    assert.equal(
+      await rejectedUpgrade(s.info.endpoint, {
+        Authorization: `Bearer ${s.info.token}`,
+      }),
+      409,
+    );
+    socket.terminate();
+    s.child.stdin.end();
+    await within(s.exit, 2500, "delayed startup cleanup");
+    await assertClean(s);
+  });
+
+  test("browser exit rejects pending CDP readiness without waiting for its deadline", async (t) => {
+    const s = await session(t, "launch-delayed");
+    const socket = await authenticatedSocket(t, s.info);
+    const ready = browserReady(s, socket);
+    kill(-s.info.browserPid);
+    await within(
+      assert.rejects(ready, /websocket closed|ECONNRESET/),
+      2500,
+      "browser exit during readiness",
+    );
+    await within(s.exit, 2500, "failed startup cleanup");
     await assertClean(s);
   });
 
@@ -300,9 +389,11 @@ describe("native preview process lifecycle", {
     await assertClean(s);
   });
 
-  test("supervised capture renders brokered CSS and removes its browser and files", async (t) => {
-    const s = await session(t);
+  test("supervised capture renders brokered CSS under a long installation path and removes its browser and files", async (t) => {
+    const s = await session(t, "capture", 12000, true);
+    assert.ok(Buffer.byteLength(s.info.jobDirectory) > 108);
     assert.equal(statSync(s.info.jobDirectory).mode & 0o777, 0o700);
+    assert.equal(statSync(s.info.temporaryDirectory).mode & 0o777, 0o700);
     assert.ok(
       (await processes()).some(
         ({ pid, group }) => pid === s.info.browserPid && group === pid,

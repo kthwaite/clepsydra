@@ -330,9 +330,12 @@ Screenshot fallback capture makes anonymous requests to the destination and its
 page resources. Clepsydra mediates captured HTTP(S) GETs through its checked
 fetcher, rejects private/non-global destinations and URL credentials, and
 validates every redirect hop. Chromium uses its native sandbox and a fresh
-temporary profile. No personal browser profile, cookies, or authorization
-headers are forwarded. This fallback returns only plain metadata and a JPEG;
-the HTML reader above uses a separate direct-embedding path.
+temporary profile. Setup and capture use separate, private directories under
+`/tmp` for Chromium's sockets so long installation paths do not exceed Unix socket
+pathname limits. These directories are removed on normal completion and supervised
+failure. No personal browser profile, cookies, or authorization headers are
+forwarded. This fallback returns only plain metadata and a JPEG; the HTML reader
+above uses a separate direct-embedding path.
 Subframes, embedded plugin documents, and dedicated/shared workers are blocked;
 pages depending on them may render incompletely. Browser control uses a private
 pipe and a per-capture authenticated loopback connection, not an open debugging

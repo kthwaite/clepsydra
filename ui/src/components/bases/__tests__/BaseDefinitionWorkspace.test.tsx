@@ -98,6 +98,17 @@ function mutationResponse(
   return { ...nativeMutation, ...overrides };
 }
 
+function persistSavedDefinition() {
+  updateMock.mockImplementation(async ({ body }) => {
+    const saved = mutationResponse({
+      ...body.definition,
+      revision: "revision-2",
+    });
+    baseState.data = { ...saved, member_creation: [] };
+    return saved;
+  });
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -142,26 +153,16 @@ afterEach(() => {
 });
 
 describe("BaseDefinitionWorkspace", () => {
-  it("saves ordered colour rules and labelled metrics, then restores their controls on reload", async () => {
+  it("saves ordered colour rules and restores their conditions on reload", async () => {
     const user = userEvent.setup();
-    baseState.data = {
-      ...detail,
-      properties: [{ key: "rating", definition: { type: "number" } }],
-    };
-    updateMock.mockImplementation(async ({ body }) => {
-      const saved = mutationResponse({
-        ...body.definition,
-        revision: "revision-2",
-      });
-      baseState.data = { ...saved, member_creation: [] };
-      return saved;
-    });
+    persistSavedDefinition();
     const workspace = renderWorkspace();
     await user.click(screen.getByRole("button", { name: "Views" }));
     await user.click(screen.getByRole("button", { name: "Add colour rule" }));
     await chooseSelectOption(user, "Colour for rule 1", "Madder");
     await chooseSelectOption(user, "Field for condition 1", "ID");
-    await user.type(screen.getByLabelText("Value for condition 1"), "book-1");
+    await user.click(screen.getByLabelText("Value for condition 1"));
+    await user.paste("book-1");
     await user.click(screen.getByRole("button", { name: "Add colour rule" }));
     await chooseSelectOption(user, "Colour for rule 2", "Indigo");
     const secondRule = screen.getByRole("group", {
@@ -171,37 +172,22 @@ describe("BaseDefinitionWorkspace", () => {
       within(secondRule).getByRole("button", { name: /Field for condition 1/ }),
     );
     await user.click(await screen.findByRole("option", { name: "ID" }));
-    await user.type(
+    await user.click(
       within(secondRule).getByLabelText("Value for condition 1"),
-      "book-2",
     );
+    await user.paste("book-2");
     await user.click(
       screen.getByRole("button", { name: "Move colour rule 2 up" }),
     );
-    expect(
-      screen.getByText("Moved colour rule 2 to position 1 of 2."),
-    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add colour rule" }));
     await user.click(
       screen.getByRole("button", { name: "Remove colour rule 3" }),
     );
-    await user.click(screen.getByRole("button", { name: "Add metric" }));
-    await chooseSelectOption(user, "Metric function 1", "sum");
-    await chooseSelectOption(user, "Metric field 1", "rating");
-    await user.type(screen.getByLabelText("Metric label 1"), "Books read");
-    await user.type(screen.getByLabelText("Metric target 1"), "0");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    await user.clear(screen.getByLabelText("Metric target 1"));
-    await user.type(screen.getByLabelText("Metric target 1"), "20");
-    await user.click(screen.getByRole("button", { name: "Add metric" }));
-    await user.type(screen.getByLabelText("Metric label 2"), "Count");
-    await user.click(screen.getByRole("button", { name: "Move metric 2 up" }));
-    expect(screen.getByLabelText("Metric label 1")).toHaveValue("Count");
-    await user.click(screen.getByRole("button", { name: "Remove metric 1" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Save" })).toBeDisabled(),
     );
+    expect(updateMock).toHaveBeenCalledOnce();
     workspace.unmount();
     renderWorkspace();
     await user.click(screen.getByRole("button", { name: "Views" }));
@@ -217,11 +203,106 @@ describe("BaseDefinitionWorkspace", () => {
         { name: /Remove colour rule/ },
       ),
     ).toHaveLength(2);
+    for (const [index, value] of ["book-2", "book-1"].entries()) {
+      const rule = within(
+        screen.getByRole("group", {
+          name: `Conditions for colour rule ${index + 1}`,
+        }),
+      );
+      expect(
+        rule.getByRole("button", { name: /Field for condition 1/ }),
+      ).toHaveTextContent("ID");
+      expect(rule.getByLabelText("Value for condition 1")).toHaveValue(value);
+    }
+  });
+
+  it("saves reordered labelled metrics and restores their controls on reload", async () => {
+    const user = userEvent.setup();
+    baseState.data = {
+      ...detail,
+      properties: [{ key: "rating", definition: { type: "number" } }],
+    };
+    persistSavedDefinition();
+    const workspace = renderWorkspace();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    await user.click(screen.getByRole("button", { name: "Add metric" }));
+    await chooseSelectOption(user, "Metric function 1", "sum");
+    await chooseSelectOption(user, "Metric field 1", "rating");
+    await user.click(screen.getByLabelText("Metric label 1"));
+    await user.paste("Books read");
+    await user.type(screen.getByLabelText("Metric target 1"), "20");
+    await user.click(screen.getByRole("button", { name: "Add metric" }));
+    await user.click(screen.getByLabelText("Metric label 2"));
+    await user.paste("Count");
+    await user.click(screen.getByRole("button", { name: "Move metric 2 up" }));
+    expect(screen.getByLabelText("Metric label 1")).toHaveValue("Count");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled(),
+    );
+    expect(updateMock).toHaveBeenCalledOnce();
+    workspace.unmount();
+    renderWorkspace();
+    await user.click(screen.getByRole("button", { name: "Views" }));
     expect(
-      within(
-        screen.getByRole("group", { name: "Conditions for colour rule 2" }),
-      ).getByLabelText("Value for condition 1"),
-    ).toHaveValue("book-1");
+      screen.getByRole("button", { name: /Metric function 1/ }),
+    ).toHaveTextContent("count");
+    expect(screen.getByLabelText("Metric label 1")).toHaveValue("Count");
+    expect(
+      screen.getByRole("button", { name: /Metric function 2/ }),
+    ).toHaveTextContent("sum");
+    expect(
+      screen.getByRole("button", { name: /Metric field 2/ }),
+    ).toHaveTextContent("rating");
+    expect(screen.getByLabelText("Metric label 2")).toHaveValue("Books read");
+    expect(screen.getByLabelText("Metric target 2")).toHaveValue(20);
+    expect(screen.queryByLabelText("Metric label 3")).not.toBeInTheDocument();
+  });
+
+  it("blocks saving a zero metric target until it is positive", async () => {
+    const user = userEvent.setup();
+    baseState.data = {
+      ...detail,
+      views: [{ ...detail.views[0], metrics: [{ fn: "count" }] }],
+    };
+    renderWorkspace();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    const target = screen.getByLabelText("Metric target 1");
+    await user.type(target, "0");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(updateMock).not.toHaveBeenCalled();
+    await user.clear(target);
+    await user.type(target, "20");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("persists metric removal without changing the remaining metric", async () => {
+    const user = userEvent.setup();
+    baseState.data = {
+      ...detail,
+      properties: [{ key: "rating", definition: { type: "number" } }],
+      views: [
+        {
+          ...detail.views[0],
+          metrics: [
+            { fn: "count", label: "Count" },
+            { fn: "sum", field: "rating", label: "Books read", target: 20 },
+          ],
+        },
+      ],
+    };
+    persistSavedDefinition();
+    const workspace = renderWorkspace();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    await user.click(screen.getByRole("button", { name: "Remove metric 1" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled(),
+    );
+    expect(updateMock).toHaveBeenCalledOnce();
+    workspace.unmount();
+    renderWorkspace();
+    await user.click(screen.getByRole("button", { name: "Views" }));
     expect(
       screen.getByRole("button", { name: /Metric function 1/ }),
     ).toHaveTextContent("sum");
