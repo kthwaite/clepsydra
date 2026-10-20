@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import type { components } from "#/api/schema";
+import { BookMeta } from "#/components/codex/BookMeta";
 import { AiJournalMeta, JournalMeta } from "#/components/codex/JournalMeta";
 import { meetingIntake } from "#/components/codex/MeetingIntake";
 import { MeetingMeta } from "#/components/codex/MeetingMeta";
@@ -67,6 +68,11 @@ const GENERIC: KindPresentation = {
  *  navigation or sidebar metadata (JOURNAL's day nav), and in the header when
  *  they are facts of the note itself (MEETING's occurred + attendees). */
 const REGISTRY: Partial<Record<Kind, KindPresentation>> = {
+  BOOK: {
+    bodyPresentation: "editor",
+    metaExtras: null,
+    headerExtras: BookMeta,
+  },
   TASK: {
     bodyPresentation: "editor",
     metaExtras: null,
