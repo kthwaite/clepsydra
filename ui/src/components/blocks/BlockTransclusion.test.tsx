@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BlockResponse } from "#/api/blocks";
@@ -185,23 +185,30 @@ describe("BlockTransclusion", () => {
     expect(screen.getByRole("group")).toHaveClass("reference-inline");
   });
 
-  it("previews the resolved block without navigating or resolving a new page", async () => {
-    mockBlock(block);
-    const onOpenSource = vi.fn();
-    render(
-      <BlockTransclusion blockId="abc123DEF0" onOpenSource={onOpenSource} />,
-    );
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Preview" }));
-    expect(usePreviewStore.getState().windows).toEqual([
-      expect.objectContaining({
-        path: "source.md",
-        blockId: "abc123DEF0",
-        mode: "reader",
-      }),
-    ]);
-    expect(onOpenSource).not.toHaveBeenCalled();
+  it("previews the resolved block on hover without navigating", () => {
+    vi.useFakeTimers();
+    try {
+      mockBlock(block);
+      const onOpenSource = vi.fn();
+      render(
+        <BlockTransclusion blockId="abc123DEF0" onOpenSource={onOpenSource} />,
+      );
+      expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+      fireEvent.mouseEnter(screen.getByRole("group"));
+      act(() => {
+        vi.advanceTimersByTime(220);
+      });
+      expect(usePreviewStore.getState().windows).toEqual([
+        expect.objectContaining({
+          path: "source.md",
+          blockId: "abc123DEF0",
+          mode: "peek",
+        }),
+      ]);
+      expect(onOpenSource).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses the source path in the accessible button name when title is absent", () => {

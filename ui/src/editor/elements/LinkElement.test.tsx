@@ -171,21 +171,6 @@ describe("LinkElement previews", () => {
     });
   });
 
-  it("provides an explicit touch Preview action without consuming editing taps", () => {
-    const link = renderLink("https://example.com");
-    fireEvent.pointerDown(link, { pointerType: "touch" });
-    fireEvent.click(link, { detail: 1 });
-    expect(usePreviewStore.getState().windows).toHaveLength(0);
-    const action = screen.getByRole("button", { name: "Preview" });
-    fireEvent.pointerDown(action, { pointerType: "touch" });
-    fireEvent.click(action);
-    expect(usePreviewStore.getState().windows[0]).toMatchObject({
-      url: "https://example.com",
-      mode: "reader",
-    });
-    expect(usePreviewStore.getState().windows[0]?.opener).toBe(action);
-  });
-
   it("does not reopen a preview on restored focus after Escape", async () => {
     const user = userEvent.setup();
     const link = renderLink("https://example.com");

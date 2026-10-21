@@ -5,12 +5,7 @@ import {
   useReadOnly,
   useSlateStatic,
 } from "slate-react";
-import { toast } from "sonner";
 import { CLink } from "#/components/codex/CLink";
-import {
-  PreviewAction,
-  usePreviewTrigger,
-} from "#/components/codex/usePreviewTrigger";
 import { InlineSourceEditor } from "#/editor/InlineSourceInput";
 import {
   isSessionAt,
@@ -19,7 +14,6 @@ import {
 import { MissingWikilinkPopover } from "#/editor/MissingWikilinkPopover";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
-import { useResolveWikilinkTarget } from "#/editor/useResolveWikilinkTarget";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
 import {
   parseWikilinkDraft,
@@ -39,7 +33,6 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   const controller = useInlineSourceEditing();
   const { lookup } = useWikilinkResolution();
   const { resolveOrCreate } = useResolveOrCreateWikilinkTarget();
-  const { resolve } = useResolveWikilinkTarget();
   const openTab = useOpenTab();
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -49,16 +42,6 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   const path = ReactEditor.findPath(editor, element);
   const activeSession = controller.active;
   const resolved = lookup(element.target);
-  const preview = usePreviewTrigger(undefined, async () => {
-    try {
-      const found = await resolve(element.target);
-      if (found) return wikilinkPreviewTarget(found.path, element.target);
-      toast.error(`No page named “${element.target}”`);
-    } catch {
-      toast.error(`Could not look up “${element.target}”`);
-    }
-    return null;
-  });
 
   const navigate = (resolvedPath: string, raw: string) => {
     const target = wikilinkPreviewTarget(resolvedPath, raw);
@@ -162,40 +145,30 @@ export function WikilinkElement({ attributes, children, element }: Props) {
             {linkContent}
           </CLink>
         ) : (
-          <span className="group/preview inline">
-            <MissingWikilinkPopover
-              target={element.target}
-              readOnly={readOnly}
-              creating={creating}
-              error={createError}
-              onCreate={() => openTarget(element.target)}
-            >
-              <a
-                ref={(element) => {
-                  preview.triggerRef.current = element;
-                }}
-                {...{
-                  role: "link" as const,
-                  onClick: handleActivation,
-                  onKeyDown: handleKeyDown,
-                }}
-                tabIndex={0}
-                data-link-resource="wikilink"
-                className={cn(
-                  "relative cursor-pointer rounded-[3px] hover:text-ink",
-                  FOCUS_RING_NATIVE,
-                  linkClassName,
-                )}
-              >
-                {linkContent}
-              </a>
-            </MissingWikilinkPopover>
-            <PreviewAction
-              onOpen={(opener) => {
-                void preview.openReader(opener);
+          <MissingWikilinkPopover
+            target={element.target}
+            readOnly={readOnly}
+            creating={creating}
+            error={createError}
+            onCreate={() => openTarget(element.target)}
+          >
+            <a
+              {...{
+                role: "link" as const,
+                onClick: handleActivation,
+                onKeyDown: handleKeyDown,
               }}
-            />
-          </span>
+              tabIndex={0}
+              data-link-resource="wikilink"
+              className={cn(
+                "relative cursor-pointer rounded-[3px] hover:text-ink",
+                FOCUS_RING_NATIVE,
+                linkClassName,
+              )}
+            >
+              {linkContent}
+            </a>
+          </MissingWikilinkPopover>
         )}
       </span>
       {children}

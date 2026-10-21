@@ -10,8 +10,6 @@ import {
   PreviewContext,
   PreviewRestrictionsContext,
 } from "#/components/codex/PreviewContext";
-import { cn } from "#/lib/cn";
-import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import type { LinkPreviewTarget } from "#/lib/previewTarget";
 import { usePreviewStore } from "#/store/preview";
 
@@ -155,39 +153,4 @@ export function usePreviewTrigger(
       }
     },
   };
-}
-
-export function PreviewAction({
-  onOpen,
-}: {
-  onOpen: (opener: HTMLElement) => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label="Preview"
-      className={cn(
-        "pointer-events-auto ml-1 inline-flex rounded px-1 text-[12px] font-sans not-italic text-mute hover:bg-sink hover:text-ink [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover/preview:opacity-100 group-focus-within/preview:opacity-100 focus:opacity-100",
-        FOCUS_RING_NATIVE,
-      )}
-      onPointerDown={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      }}
-      onMouseDown={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      }}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onOpen(event.currentTarget);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") event.stopPropagation();
-      }}
-    >
-      Preview
-    </button>
-  );
 }

@@ -8,7 +8,6 @@ import {
 import { PreviewContext } from "#/components/codex/PreviewContext";
 import {
   isModifiedLinkActivation,
-  PreviewAction,
   usePreviewTrigger,
 } from "#/components/codex/usePreviewTrigger";
 import { useOpenTab } from "#/hooks/useOpenTab";
@@ -132,11 +131,11 @@ function CLinkContent({
   };
 
   return (
-    // biome-ignore lint/a11y/useSemanticElements: Inline link/action groups are phrasing content; fieldset would invalidate editor paragraphs.
+    // biome-ignore lint/a11y/useSemanticElements: Inline references are phrasing content; fieldset would invalidate editor paragraphs.
     <span
       role="group"
       aria-label="Page reference"
-      className="group/preview inline"
+      className="inline"
       onMouseEnter={enter}
       onMouseLeave={leave}
       onFocus={preview.onFocus}
@@ -189,13 +188,6 @@ function CLinkContent({
           </span>
         )}
       </a>
-      {target && (
-        <PreviewAction
-          onOpen={(opener) => {
-            void preview.openReader(opener);
-          }}
-        />
-      )}
     </span>
   );
 }

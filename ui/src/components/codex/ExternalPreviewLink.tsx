@@ -1,7 +1,6 @@
 import type { AnchorHTMLAttributes } from "react";
 import {
   isModifiedLinkActivation,
-  PreviewAction,
   usePreviewTrigger,
 } from "#/components/codex/usePreviewTrigger";
 import { cn } from "#/lib/cn";
@@ -17,11 +16,11 @@ export function ExternalPreviewLink({
     previewOnFocus: true,
   });
   return (
-    // biome-ignore lint/a11y/useSemanticElements: Inline reference/action groups must remain phrasing content.
+    // biome-ignore lint/a11y/useSemanticElements: Inline references must remain phrasing content.
     <span
       role="group"
       aria-label="External reference"
-      className="group/preview inline"
+      className="inline"
       onMouseEnter={preview.onMouseEnter}
       onMouseLeave={preview.onMouseLeave}
       onFocus={preview.onFocus}
@@ -47,11 +46,6 @@ export function ExternalPreviewLink({
       >
         {children}
       </a>
-      <PreviewAction
-        onOpen={(opener) => {
-          void preview.openReader(opener);
-        }}
-      />
     </span>
   );
 }

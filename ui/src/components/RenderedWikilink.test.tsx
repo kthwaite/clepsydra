@@ -75,7 +75,7 @@ describe("rendered wikilink previews", () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
-  it("reports an unavailable preview without creating or navigating a missing target", async () => {
+  it("reports a missing target on keyboard activation without navigating", async () => {
     lookup.mockReturnValue(null);
     const onOpen = vi.fn();
     render(
@@ -83,7 +83,10 @@ describe("rendered wikilink previews", () => {
         Missing
       </RenderedWikilink>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("link", { name: "Missing" }), {
+      key: "Enter",
+    });
     await waitFor(() =>
       expect(error).toHaveBeenCalledWith("No page named “Missing”"),
     );

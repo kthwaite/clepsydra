@@ -29,10 +29,7 @@ import {
 import { toast } from "sonner";
 import { resolveSchemeUrl } from "#/api/deeplink";
 import { externalPreviewUrl } from "#/api/externalPreviews";
-import {
-  PreviewAction,
-  usePreviewTrigger,
-} from "#/components/codex/usePreviewTrigger";
+import { usePreviewTrigger } from "#/components/codex/usePreviewTrigger";
 import { InlineSourceEditor } from "#/editor/InlineSourceInput";
 import {
   isSessionAt,
@@ -108,7 +105,7 @@ function ExternalLinkAnchor({
     previewOnFocus: true,
   });
   return (
-    <span {...attributes} className="group/preview">
+    <span {...attributes}>
       <a
         ref={(node) => {
           preview.triggerRef.current = node;
@@ -130,7 +127,7 @@ function ExternalLinkAnchor({
             return;
           }
           event.preventDefault();
-          // Editing keeps native caret placement; touch has the Preview action.
+          // Editing keeps native caret placement.
           if (readOnly) void preview.openReader();
         }}
         onKeyDown={(event) => {
@@ -154,9 +151,6 @@ function ExternalLinkAnchor({
       >
         {children}
       </a>
-      <span contentEditable={false}>
-        <PreviewAction onOpen={preview.openReader} />
-      </span>
     </span>
   );
 }

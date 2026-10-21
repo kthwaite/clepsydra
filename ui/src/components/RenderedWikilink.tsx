@@ -7,7 +7,6 @@ import {
 import { toast } from "sonner";
 import {
   isModifiedLinkActivation,
-  PreviewAction,
   usePreviewTrigger,
 } from "#/components/codex/usePreviewTrigger";
 import {
@@ -105,11 +104,11 @@ export function RenderedWikilink({
   );
 
   return (
-    // biome-ignore lint/a11y/useSemanticElements: Inline link/action groups are phrasing content, not form fieldsets.
+    // biome-ignore lint/a11y/useSemanticElements: Inline references are phrasing content, not form fieldsets.
     <span
       role="group"
       aria-label="Page reference"
-      className="group/preview inline"
+      className="inline"
       onMouseEnter={preview.onMouseEnter}
       onMouseLeave={preview.onMouseLeave}
       onFocus={preview.onFocus}
@@ -136,11 +135,6 @@ export function RenderedWikilink({
       >
         {children}
       </a>
-      <PreviewAction
-        onOpen={(opener) => {
-          void preview.openReader(opener);
-        }}
-      />
     </span>
   );
 }

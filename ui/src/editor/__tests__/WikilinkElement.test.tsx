@@ -17,7 +17,6 @@ const {
   lookupMock,
   openTabMock,
   resolveOrCreateMock,
-  resolveOnlyMock,
   beginMock,
   commitMock,
   cancelMock,
@@ -30,7 +29,6 @@ const {
     lookupMock: vi.fn(),
     openTabMock: vi.fn(),
     resolveOrCreateMock: vi.fn(),
-    resolveOnlyMock: vi.fn(),
     beginMock: begin,
     commitMock: commit,
     cancelMock: cancel,
@@ -55,9 +53,6 @@ vi.mock("#/editor/useResolveOrCreateWikilinkTarget", () => ({
   useResolveOrCreateWikilinkTarget: () => ({
     resolveOrCreate: resolveOrCreateMock,
   }),
-}));
-vi.mock("#/editor/useResolveWikilinkTarget", () => ({
-  useResolveWikilinkTarget: () => ({ resolve: resolveOnlyMock }),
 }));
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
@@ -130,7 +125,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   editingController.active = null;
   usePreviewStore.setState({ windows: [], topZ: 200 });
-  resolveOnlyMock.mockResolvedValue(null);
   lookupMock.mockReturnValue(null);
   resolveOrCreateMock.mockResolvedValue({
     path: "notes/new-topic.md",
@@ -139,7 +133,7 @@ beforeEach(() => {
 });
 
 describe("WikilinkElement resolved", () => {
-  it("previews without changing the Slate document or selection", () => {
+  it("previews on hover without changing the Slate document or selection", async () => {
     lookupMock.mockReturnValue("notes/target.md");
     const { editor } = renderWikilink("Target#Details");
     editor.selection = {
@@ -148,15 +142,15 @@ describe("WikilinkElement resolved", () => {
     };
     const selection = structuredClone(editor.selection);
     const children = structuredClone(editor.children);
-    const action = screen.getByRole("button", { name: "Preview" });
-    expect(fireEvent.pointerDown(action)).toBe(false);
-    fireEvent.click(action);
-    expect(usePreviewStore.getState().windows).toContainEqual(
-      expect.objectContaining({
-        path: "notes/target.md",
-        heading: "Details",
-        mode: "reader",
-      }),
+    fireEvent.mouseEnter(screen.getByRole("link"));
+    await waitFor(() =>
+      expect(usePreviewStore.getState().windows).toContainEqual(
+        expect.objectContaining({
+          path: "notes/target.md",
+          heading: "Details",
+          mode: "peek",
+        }),
+      ),
     );
     expect(editor.selection).toEqual(selection);
     expect(editor.children).toEqual(children);
@@ -220,29 +214,6 @@ describe("WikilinkElement resolved", () => {
 });
 
 describe("WikilinkElement dangling", () => {
-  it("resolves an explicit preview without creating a page or changing the editor", async () => {
-    resolveOnlyMock.mockResolvedValue({
-      path: "notes/index-lag.md",
-      title: "Index Lag",
-    });
-    const { editor } = renderWikilink("Index Lag#Details");
-    const original = structuredClone(editor.children);
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
-    await waitFor(() =>
-      expect(usePreviewStore.getState().windows).toContainEqual(
-        expect.objectContaining({
-          path: "notes/index-lag.md",
-          heading: "Details",
-          mode: "reader",
-        }),
-      ),
-    );
-    expect(resolveOrCreateMock).not.toHaveBeenCalled();
-    expect(openTabMock).not.toHaveBeenCalled();
-    expect(beginMock).not.toHaveBeenCalled();
-    expect(editor.children).toEqual(original);
-  });
-
   it("renders a muted missing-page trigger instead of CLink", () => {
     renderWikilink("Unwritten Page");
 

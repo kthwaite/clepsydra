@@ -1,9 +1,6 @@
 import type { BlockResponse } from "#/api/blocks";
 import { isBlockNotFound, useBlock } from "#/api/blocks";
-import {
-  PreviewAction,
-  usePreviewTrigger,
-} from "#/components/codex/usePreviewTrigger";
+import { usePreviewTrigger } from "#/components/codex/usePreviewTrigger";
 import { cn } from "#/lib/cn";
 
 export interface BlockTransclusionProps {
@@ -102,7 +99,7 @@ export function BlockTransclusion({
       onFocus={preview.onFocus}
       onBlur={preview.onBlur}
       className={cn(
-        "group/preview inline-flex max-w-full items-baseline gap-1",
+        "inline-flex max-w-full items-baseline gap-1",
         className,
       )}
     >
@@ -119,11 +116,6 @@ export function BlockTransclusion({
       >
         Source
       </button>
-      <PreviewAction
-        onOpen={(opener) => {
-          void preview.openReader(opener);
-        }}
-      />
     </span>
   );
 }

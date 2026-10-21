@@ -135,10 +135,10 @@ committed.
 
 ### Preview a link without editing it
 
-Use the adjacent **Preview** action to read an internal link without changing
-the document or caret selection. It is keyboard reachable, appears with
-hover/focus on a mouse, and stays visible on touch devices. Ordinary wikilink
-clicks and `Enter` still enter source editing; modifier navigation is unchanged.
+Hover a resolved internal link to see a compact peek without changing the
+document or caret selection, then choose **Expand preview** to read the page.
+There is no separate button beside the link. Ordinary wikilink clicks and
+`Enter` still enter source editing; modifier navigation is unchanged.
 
 The preview reader supports nested links, scrolling, pinning, and a separate
 **Open page** action. `Escape` closes the active reader and returns focus to its
@@ -417,10 +417,10 @@ literal instead of expanding recursively. This prevents one reference from
 turning into an unbounded document tree.
 
 Choose **Source** beside the transclusion to open its source Folio and focus the
-referenced block, or **Preview** to read that block in its surrounding page
-context without leaving the current Folio. A missing or empty block shows
-**Referenced block unavailable**. A transient request failure adds **Retry**;
-a definitive 404 does not retry automatically.
+referenced block. Hover the transclusion and choose **Expand preview** to read
+that block in its surrounding page context without leaving the current Folio.
+A missing or empty block shows **Referenced block unavailable**. A transient
+request failure adds **Retry**; a definitive 404 does not retry automatically.
 
 ## Failures and conflicts
 

@@ -55,18 +55,14 @@ beforeEach(() => {
 });
 
 describe("CLink navigation", () => {
-  it("opens Preview with the keyboard without navigating the link", async () => {
+  it("navigates with the keyboard without an adjacent Preview control", async () => {
     const user = userEvent.setup();
     render(<CLink path="notes/keyboard.md">Keyboard</CLink>);
     await user.tab();
     expect(screen.getByRole("link", { name: "Keyboard" })).toHaveFocus();
-    await user.tab();
-    expect(screen.getByRole("button", { name: "Preview" })).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
     await user.keyboard("{Enter}");
-    expect(usePreviewStore.getState().windows).toContainEqual(
-      expect.objectContaining({ path: "notes/keyboard.md", mode: "reader" }),
-    );
-    expect(openTabMock).not.toHaveBeenCalled();
+    expect(openTabMock).toHaveBeenCalledWith("page", "notes/keyboard.md");
   });
 
   it("cancels a pending hover when its link unmounts", () => {
@@ -121,26 +117,6 @@ describe("CLink navigation", () => {
     expect(usePreviewStore.getState().windows).toEqual([unrelated]);
     expect(openTabMock).toHaveBeenCalledOnce();
     expect(openTabMock).toHaveBeenCalledWith("page", "notes/target.md");
-  });
-
-  it("opens an explicit reader without navigating and keeps Preview outside the link", async () => {
-    const user = userEvent.setup();
-    render(
-      <CLink target={{ path: "notes/section.md", heading: "Details" }}>
-        Section
-      </CLink>,
-    );
-    const action = screen.getByRole("button", { name: "Preview" });
-    expect(action.closest("a")).toBeNull();
-    await user.click(action);
-    expect(usePreviewStore.getState().windows).toContainEqual(
-      expect.objectContaining({
-        path: "notes/section.md",
-        heading: "Details",
-        mode: "reader",
-      }),
-    );
-    expect(openTabMock).not.toHaveBeenCalled();
   });
 
   it("follows references as child readers without replacing the parent", async () => {
