@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "clepsydra",
+  "description": "Clepsydra vault integrations for Claude Code",
+  "owner": { "name": "Kit Thwaite" },
+  "plugins": [
+    {
+      "name": "clepsydra",
+      "description": "Clepsydra vault in Claude Code: board pane, task binding, wikilink attach, session journal.",
+      "source": "./integrations/claude-code/clepsydra"
+    }
+  ]
+}
