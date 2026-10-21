@@ -6,7 +6,7 @@ description: Use when asked to add or capture something in the clepsydra vault, 
 # Working the clepsydra vault
 
 The vault is a folder of markdown pages with TOML frontmatter, served by
-`clep serve` and operated on through the `clepsydra-vault` MCP tools
+`clep serve` and operated on through the clepsydra plugin's MCP tools
 (`vault_*`). The server must be running; if tools report it unreachable,
 tell the user to start `clep serve` — don't fall back to editing vault
 files directly, which bypasses locking, link rewriting, and the index.
@@ -61,6 +61,12 @@ files directly, which bypasses locking, link rewriting, and the index.
 | New Cycle | `vault_cycle_create` |
 | Close or edit a Cycle | `vault_cycle_update` |
 | Find / read / orient | `vault_search`, `vault_get_page`, `vault_list_pages`, `vault_tree`, `vault_links`, `vault_tags` |
+| List Bases / evaluate one Base view | `vault_bases` / `vault_base_query` (`slug` + `view` name) |
+| Agenda, and calendar for a date range | `vault_agenda` (classified against `today`; calendar included when both `from` and `to` are given) |
+| Read RSS/Atom entries | `vault_feed_entries` (filter by `feed` ids, `unread`, `limit`) |
+| Mark feed entries read | `vault_feed_mark_read` (entry ids; returns `{marked, failed}`) |
+| Import an academic work | `vault_import_work` (exactly one of `doi`, `isbn`, `bibtex`; existing works are skipped) |
+| Archive a web page by URL | `vault_archive_url` (server-side fetch; lower fidelity than the browser extension; pages are tagged `server-fetch`; needs archiving enabled) |
 
 ## Workflows
 
@@ -168,12 +174,10 @@ plain text). For folders, inspect with `vault_tree` before any
 
 ## Setup (once)
 
-Register the MCP server in the project's `.mcp.json` (already present in
-this repo):
-
-```json
-{ "mcpServers": { "clepsydra": { "command": "clep", "args": ["mcp"] } } }
-```
+Install the clepsydra plugin (`/plugin install clepsydra@clepsydra`; see
+`ui/src/docs/content/claude-code.mdx`). It ships the MCP server, so no
+`.mcp.json` is needed. A leftover repo `.mcp.json` `clepsydra` entry is
+redundant; if both exist, prefer `mcp__plugin_clepsydra_clepsydra__*` tools.
 
 `clep mcp` finds the server via the usual config lookup (`./config.toml`,
 then `~/.config/clepsydra/config.toml`) and refuses non-loopback hosts

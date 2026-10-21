@@ -1,0 +1,107 @@
+export const meta = {
+  slug: "claude-code",
+  title: "Claude Code Plugin",
+  description: "Install the Claude Code plugin for vault tools, task commands, and project status."
+}
+
+The repository ships a Claude Code plugin at `integrations/claude-code/clepsydra/`.
+It bundles the [MCP](/docs/mcp) server, the `vault` and `onboard-project`
+skills, and a hooks module that ties Claude Code sessions to the Task Board.
+A repo no longer needs its own `.mcp.json`.
+
+## Prerequisites
+
+1. Put `clep` on `PATH` and start `clep serve` against the intended vault
+   (see [configuration](/docs/configuration)).
+2. Run Claude Code with plugin support.
+
+## Install
+
+The repository root holds the marketplace (`.claude-plugin/marketplace.json`).
+In Claude Code:
+
+```text
+/plugin marketplace add <path to clepsydra repo>
+/plugin install clepsydra@clepsydra
+```
+
+The plugin's MCP tools appear as `mcp__plugin_clepsydra_clepsydra__vault_*`.
+If a repo still registers a `clepsydra` server in its own `.mcp.json`, remove
+that entry; the plugin makes it redundant.
+
+## What the plugin adds
+
+### Commands
+
+| Command | Effect |
+| --- | --- |
+| `/board` | Show the Task Board. |
+| `/task [<code>\|start\|clear]` | Set, start, or clear the active Task for this session. |
+| `/journal [note]` | Write an AI journal entry. |
+
+Typing a `[[wikilink]]` in a prompt attaches that page to the turn.
+
+### Prompt context
+
+When a Task is active, the prompt carries that Task and the project hub's
+`## Status` and `## Threads` sections. Vault text is quoted as data, never
+followed as instructions.
+
+### Merge behaviour
+
+When Claude runs a completed `git merge` into the hub's `integration_branch`,
+the merged branch's Task moves to Review (`REVIEW`) and gains a `## Delivery`
+line: `- merged <short-sha> into <branch> (<YYYY-MM-DD>)`. Aborted, squash,
+no-commit, and conflicted merges do nothing. A project hub without
+`integration_branch` gets no merge automation.
+
+### Status line
+
+The status line shows vault health: `vault ✓`, `vault ✗`, or
+`vault · N conflicts` for Conflict Copies. Claude Code shows one notice at
+session start when the vault is unhealthy.
+
+### Hub frontmatter
+
+The project hub (the `PROJECT` page for the repo's slug) accepts two fields.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `integration_branch` | string | Branch whose merges move Tasks to Review. |
+| `triage_index` | wikilink string | Backlog index page, for example `"[[Clepsydra: Stray Thoughts]]"`. |
+
+The `onboard-project` skill sets both when it onboards a repo.
+
+## Permissions
+
+Plugins cannot grant permissions themselves. To stop prompts for routine
+vault tools, add this to `~/.claude/settings.json`:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_clepsydra_clepsydra__vault_search",
+      "mcp__plugin_clepsydra_clepsydra__vault_get_page",
+      "mcp__plugin_clepsydra_clepsydra__vault_list_pages",
+      "mcp__plugin_clepsydra_clepsydra__vault_tree",
+      "mcp__plugin_clepsydra_clepsydra__vault_links",
+      "mcp__plugin_clepsydra_clepsydra__vault_tags",
+      "mcp__plugin_clepsydra_clepsydra__vault_board",
+      "mcp__plugin_clepsydra_clepsydra__vault_bases",
+      "mcp__plugin_clepsydra_clepsydra__vault_base_query",
+      "mcp__plugin_clepsydra_clepsydra__vault_agenda",
+      "mcp__plugin_clepsydra_clepsydra__vault_feed_entries",
+      "mcp__plugin_clepsydra_clepsydra__vault_task_create",
+      "mcp__plugin_clepsydra_clepsydra__vault_task_update",
+      "mcp__plugin_clepsydra_clepsydra__vault_ai_journal_capture",
+      "mcp__plugin_clepsydra_clepsydra__vault_append_page",
+      "mcp__plugin_clepsydra_clepsydra__vault_edit_page",
+      "mcp__plugin_clepsydra_clepsydra__vault_import_work",
+      "mcp__plugin_clepsydra_clepsydra__vault_archive_url"
+    ]
+  }
+}
+```
+
+Destructive tools (delete, purge, move) stay off the list on purpose.
