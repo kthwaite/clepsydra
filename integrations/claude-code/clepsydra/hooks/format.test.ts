@@ -62,7 +62,7 @@ describe('activeTaskSection', () => {
     expect(text).toContain('project: clepsydra')
     expect(text).not.toContain('b'.repeat(6001))
     expect(text).toContain(
-      'This session is working on TSK-brave-finch-7q3zd. Keep work scoped to it; when it is done, say so (the user ships with /ship, which moves it to REVIEW).',
+      'This session is working on TSK-brave-finch-7q3zd. Keep work scoped to it; when it is done, say so (a merge into the integration branch, run in this session, moves it to REVIEW).',
     )
   })
   test('code alone when the board did not answer', () => {

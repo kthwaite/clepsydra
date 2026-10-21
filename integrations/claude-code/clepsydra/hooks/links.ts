@@ -1,5 +1,7 @@
 // [[wikilink]] attach: extraction outside code, exact-title pick, page truncation.
 
+import { inlineVaultText, quoteVaultText } from './format'
+
 export const MAX_LINKS = 4
 export const PAGE_CAP = 8000
 
@@ -78,9 +80,10 @@ export function truncatePage(body: string, cap = PAGE_CAP): { text: string; isTr
   return { text: body.slice(0, cap), isTruncated: true }
 }
 
+/** The page body fenced as vault data; title and path one-line, outside the fence; the cut note after it. */
 export function formatAttachment(title: string, path: string, content: string, isTruncated: boolean): string {
   const note = isTruncated ? '\n\n[truncated at ~8 KB; read the rest with vault_get_page]' : ''
-  return `Vault page [[${title}]] (${path}):\n${content}${note}`
+  return `${quoteVaultText(`Vault page [[${inlineVaultText(title)}]] (${inlineVaultText(path)})`, content)}${note}`
 }
 
 export function attachToast(attached: readonly string[], unresolved: readonly string[]): string | undefined {

@@ -18,6 +18,8 @@ export type ClepsydraRepo = {
   repoBase: string
   /** The main checkout's basename (repoBase outside a linked worktree). */
   mainBase: string
+  /** `git rev-parse --path-format=absolute --git-common-dir`: shared by every worktree of the repo; '' when git gave none. */
+  common: string
 }
 
 /** The active task: explicit (`/task`, a board press; persisted per repo+branch) or from the branch name. */

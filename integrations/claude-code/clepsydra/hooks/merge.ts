@@ -201,7 +201,8 @@ const NOT_A_BRANCH = /^(HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)([~^].*)?$|@\{/
 
 /**
  * The TSK code a merge of `mergedBranch` delivers: the branch's own code, else
- * the bound code. None for a HEAD-like ref, nor for the integration branch
+ * `bound`. The caller passes `bound` only for a binding made on the merged
+ * branch (R-T). None for a HEAD-like ref, nor for the integration branch
  * itself or `<remote>/<integration>` (bringing the integration branch in
  * delivers nothing).
  */
@@ -242,23 +243,17 @@ export function localDate(ms: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-/** True when `body` has a `## Delivery` heading outside a code fence. */
-function hasDeliveryHeading(body: string): boolean {
-  let fence: string | undefined
-  for (const line of body.split('\n')) {
-    const f = /^ {0,3}(`{3,}|~{3,})/.exec(line)
-    if (f !== null) {
-      const mark = f[1] as string
-      if (fence === undefined) fence = mark
-      else if (mark[0] === fence[0] && mark.length >= fence.length) fence = undefined
-      continue
-    }
-    if (fence === undefined && /^##[ \t]+delivery[ \t]*#*[ \t]*$/i.test(line)) return true
-  }
-  return false
+/** `vault_append_page` arguments for the line under an existing `Delivery` heading (tried first). */
+export function deliveryUnderHeading(line: string): { heading: 'Delivery'; content: string } {
+  return { heading: 'Delivery', content: line }
 }
 
-/** `vault_append_page` arguments: under an existing `## Delivery`, else a new one at the end. */
-export function deliveryAppend(body: string, line: string): { heading?: 'Delivery'; content: string } {
-  return hasDeliveryHeading(body) ? { heading: 'Delivery', content: line } : { content: `\n## Delivery\n\n${line}\n` }
+/** `vault_append_page` arguments for a new `## Delivery` section at the end (when the page has none). */
+export function deliverySection(line: string): { content: string } {
+  return { content: `\n## Delivery\n\n${line}\n` }
+}
+
+/** The append tool's error for a page without a `Delivery` heading. */
+export function isHeadingMissing(text: string): boolean {
+  return /heading "Delivery" not found/i.test(text)
 }

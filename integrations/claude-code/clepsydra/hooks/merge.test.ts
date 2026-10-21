@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { bashSucceeded, deliveryAppend, deliveryLine, isAlreadyUpToDate, localDate, mergeCode, mergeTask, parseMerge } from './merge'
+import { bashSucceeded, deliveryLine, deliverySection, deliveryUnderHeading, isAlreadyUpToDate, isHeadingMissing, localDate, mergeCode, mergeTask, parseMerge } from './merge'
 import type { BoardTask } from './tasks'
 
 const task = (code: string, status: string): BoardTask => ({
@@ -168,18 +168,15 @@ describe('delivery', () => {
     expect(deliveryLine('a1b2c3d', 'develop', '2026-10-21')).toBe('- merged a1b2c3d into develop (2026-10-21)')
   })
 
-  test('deliveryAppend existing heading', () => {
-    expect(deliveryAppend('# T\n\n## Delivery\n\n- merged 1 into develop (2026-10-01)\n', '- l')).toEqual({ heading: 'Delivery', content: '- l' })
-    expect(deliveryAppend('# T\n## delivery  \n', '- l')).toEqual({ heading: 'Delivery', content: '- l' })
+  test('deliveryUnderHeading and deliverySection', () => {
+    expect(deliveryUnderHeading('- l')).toEqual({ heading: 'Delivery', content: '- l' })
+    expect(deliverySection('- l')).toEqual({ content: '\n## Delivery\n\n- l\n' })
   })
 
-  test('deliveryAppend missing heading', () => {
-    expect(deliveryAppend('# T\n\nBody.\n', '- l')).toEqual({ content: '\n## Delivery\n\n- l\n' })
-    expect(deliveryAppend('### Delivery notes\n', '- l')).toEqual({ content: '\n## Delivery\n\n- l\n' })
-  })
-
-  test('a heading inside a code fence does not count', () => {
-    expect(deliveryAppend('```md\n## Delivery\n```\n', '- l')).toEqual({ content: '\n## Delivery\n\n- l\n' })
+  test('isHeadingMissing matches the append tool\'s "not found" error only', () => {
+    expect(isHeadingMissing('heading "Delivery" not found in the page — re-read it with vault_get_page, or omit \'heading\'')).toBe(true)
+    expect(isHeadingMissing('HTTP 409 revision conflict')).toBe(false)
+    expect(isHeadingMissing('heading "Notes" not found in the page')).toBe(false)
   })
 
   test('localDate', () => {

@@ -17,7 +17,19 @@ import {
   type PendingJournal,
 } from './journal'
 import { attachToast, extractWikilinks, formatAttachment, pageFromJson, pickExact, searchHits, truncatePage } from './links'
-import { bashSucceeded, deliveryAppend, deliveryLine, isAlreadyUpToDate, localDate, mergeCode, mergeTask, parseMerge, type MergeCall } from './merge'
+import {
+  bashSucceeded,
+  deliveryLine,
+  deliverySection,
+  deliveryUnderHeading,
+  isAlreadyUpToDate,
+  isHeadingMissing,
+  localDate,
+  mergeCode,
+  mergeTask,
+  parseMerge,
+  type MergeCall,
+} from './merge'
 import { basename, mainCheckoutOf, parseProjectMap, resolveProject } from './project'
 import { resolveVaultTool } from './tools'
 import { bindingKey, branchTaskCode, groupTasks, parseBoard, resolveTaskRef, shortCode, type BoardTask } from './tasks'
@@ -191,7 +203,7 @@ async function loadRepo($: $): Promise<ClepsydraRepo | null> {
   const branch = (await exec($, ['git', 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim() || 'HEAD'
   const common = (await exec($, ['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'])).stdout.trim()
   const main = mainCheckoutOf(common) ?? top
-  const repo: ClepsydraRepo = { top, branch, repoBase: basename(top), mainBase: basename(main) }
+  const repo: ClepsydraRepo = { top, branch, repoBase: basename(top), mainBase: basename(main), common: common.replace(/\/+$/, '') }
   await update($, repoRef, () => repo)
   return repo
 }
@@ -448,29 +460,50 @@ async function git($: $, dir: string, args: string[]): Promise<string> {
   return r.exitCode === 0 ? r.stdout.trim() : ''
 }
 
-function pageBody(text: string): string | undefined {
-  const got = parseJson(text)
-  return got.ok && isRecord(got.json) && typeof got.json.body === 'string' ? got.json.body : undefined
-}
-
-/** The checkout the merge ran in: its own dir (relative to the repo top), else the repo top. */
-async function mergeDir($: $, call: MergeCall): Promise<string | undefined> {
-  if (call.dir?.startsWith('/') === true) return call.dir
-  const repo = await currentRepo($)
-  if (repo === null) return undefined
-  return call.dir === undefined ? repo.top : `${repo.top}/${call.dir}`
+/** The session cwd, absolute; undefined when the host does not answer. */
+async function sessionCwd($: $): Promise<string | undefined> {
+  try {
+    const cwd = await $.session.cwd()
+    return cwd.startsWith('/') ? cwd : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**
- * After a completed merge: when the merge's checkout is on the hub's
- * integration branch, move the delivered task to REVIEW and add a Delivery
- * line to its page. When the vault keeps the hub from being read, or a step
- * fails once the task is known, a toast names the task.
+ * The checkout the merge ran in: an absolute `cd`/`-C` dir as given; a
+ * relative one joined to the session cwd the command started in; no dir, that
+ * cwd. Undefined when a relative or missing dir has no cwd to join (no guess).
  */
-async function afterMerge($: $, call: MergeCall): Promise<void> {
-  const dir = await mergeDir($, call)
+function mergeDir(call: MergeCall, cwd: string | undefined): string | undefined {
+  if (call.dir?.startsWith('/') === true) return call.dir
+  if (cwd === undefined) return undefined
+  return call.dir === undefined ? cwd : `${cwd.replace(/\/+$/, '')}/${call.dir}`
+}
+
+/** The task explicitly bound on `branch` in this checkout (its stored binding), else undefined (R-T). */
+async function boundOn($: $, repo: ClepsydraRepo, branch: string): Promise<string | undefined> {
+  const stored = await $.store.get(bindingKey(repo.top, branch.replace(/^refs\/heads\//, '')))
+  return typeof stored === 'string' ? stored : undefined
+}
+
+/**
+ * After a completed merge in this session's repo: when the merge's checkout is
+ * on the hub's integration branch, move the delivered task to REVIEW and add a
+ * Delivery line to its page. A checkout of another repo (another git common
+ * dir) and a merge still in progress (MERGE_HEAD) are left alone. When the
+ * vault keeps the hub from being read, or a step fails once the task is known,
+ * a toast names the task.
+ */
+async function afterMerge($: $, call: MergeCall, cwd: string | undefined): Promise<void> {
+  const dir = mergeDir(call, cwd)
   if (dir === undefined) return
-  const bound = (await read($, bindingRef))?.code
+  const repo = await currentRepo($)
+  if (repo === null || repo.common === '') return
+  const common = (await git($, dir, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).replace(/\/+$/, '')
+  if (common !== repo.common) return
+  if ((await git($, dir, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])) !== '') return
+  const bound = await boundOn($, repo, call.branch)
   const withBound = bound === undefined ? {} : { bound }
   // No hub yet (startup's board read failed): a board read loads it.
   const early = (await read($, hubRef)) === null ? await refreshBoard($) : undefined
@@ -504,12 +537,10 @@ async function afterMerge($: $, call: MergeCall): Promise<void> {
     return
   }
   const line = deliveryLine(sha, head, localDate(await $.clock.now()))
-  const page = await callVault($, 'vault_get_page', { path: t.path })
-  const body = page.ok ? pageBody(page.text) : undefined
+  // Under an existing Delivery heading first; the tool's "not found" means add the section.
+  const under = await callVault($, 'vault_append_page', { path: t.path, ...deliveryUnderHeading(line) })
   const appended =
-    body === undefined
-      ? { ok: false, text: page.ok ? 'task page has no body' : page.text }
-      : await callVault($, 'vault_append_page', { path: t.path, ...deliveryAppend(body, line) })
+    under.ok || !isHeadingMissing(under.text) ? under : await callVault($, 'vault_append_page', { path: t.path, ...deliverySection(line) })
   $.ui.toast(
     appended.ok
       ? `clepsydra: ${t.code} → REVIEW (${sha})`
@@ -755,11 +786,22 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    // A subagent's Bash runs in its own loop, maybe in its own worktree: not this session's merge.
+    if (e.agentId !== undefined) return next(e)
+    let call: MergeCall | undefined
+    let cwd: string | undefined
+    try {
+      call = parseMerge(e.command)
+      // Read before the command runs: a `cd` in it moves the session cwd.
+      if (call !== undefined) cwd = await sessionCwd($)
+    } catch {
+      call = undefined
+    }
     const r = await next(e)
     try {
-      const call = bashSucceeded(r) && !isAlreadyUpToDate(r) ? parseMerge(e.command) : undefined
+      const merged = call !== undefined && bashSucceeded(r) && !isAlreadyUpToDate(r) ? call : undefined
       // Vault work runs after the hook, so the tool result never waits on it.
-      if (call !== undefined) $.clock.after(0, () => void afterMerge($, call).catch(() => undefined))
+      if (merged !== undefined) $.clock.after(0, () => void afterMerge($, merged, cwd).catch(() => undefined))
     } catch {
       // never throw into the host
     }

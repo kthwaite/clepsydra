@@ -94,7 +94,7 @@ export function activeTaskSection(rawCode: string, t: BoardTask | undefined, bod
   }
   lines.push(
     '',
-    `This session is working on ${code}. Keep work scoped to it; when it is done, say so (the user ships with /ship, which moves it to REVIEW).`,
+    `This session is working on ${code}. Keep work scoped to it; when it is done, say so (a merge into the integration branch, run in this session, moves it to REVIEW).`,
   )
   return lines.join('\n')
 }
