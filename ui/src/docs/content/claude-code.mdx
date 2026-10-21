@@ -5,8 +5,8 @@ export const meta = {
 }
 
 The repository ships a Claude Code plugin at `integrations/claude-code/clepsydra/`.
-It bundles the [MCP](/docs/mcp) server, the `vault` and `onboard-project`
-skills, and a hooks module that ties Claude Code sessions to the Task Board.
+It bundles the [MCP](/docs/mcp) server, the `vault`, `onboard-project`, `decide`,
+`triage`, and `research-to-vault` skills, and a hooks module that ties Claude Code sessions to the Task Board.
 A repo no longer needs its own `.mcp.json`.
 
 ## Prerequisites
@@ -41,6 +41,14 @@ that entry; the plugin makes it redundant.
 
 Typing a `[[wikilink]]` in a prompt attaches that page to the turn.
 
+### Skills
+
+| Skill | Effect |
+| --- | --- |
+| `decide` | Append a dated decision to the hub's `## Decisions`. |
+| `triage` | Turn a page or journal range into Tasks and a `## Triage — <date>` section on the triage index. |
+| `research-to-vault` | Archive primary sources, then write one cited NOTE. |
+
 ### Prompt context
 
 When a Task is active, the prompt carries that Task and the project hub's
@@ -55,8 +63,8 @@ line: `- merged <short-sha> into <branch> (<YYYY-MM-DD>)`.
 
 - Task choice: the merged branch's own `TSK-…` code wins. The Task bound with
   `/task` is used only when the branch name has no code.
-- Recognised commands: `git merge`, optionally after `cd <dir> &&` or as
-  `git -C <dir> merge`, inside an `&&` chain.
+- Recognised commands: `git merge`, alone or in an `&&` chain, optionally
+  after `cd <dir> &&` or as `git -C <dir> merge`.
 - Nothing happens when:
   - the merge is aborted, `--squash`, `--no-commit`, or conflicted;
   - the command is `git pull`, is piped or `;`-chained, or runs `checkout` or
@@ -68,13 +76,15 @@ line: `- merged <short-sha> into <branch> (<YYYY-MM-DD>)`.
   - the current branch is not `integration_branch`, or the hub sets none.
 - A failed update shows a toast naming the Task.
 - A "vault unreachable" toast appears when the hub could not be loaded.
+- Both toasts appear only when a `TSK-…` code is known.
 
 ### Status line
 
 The status line shows vault health: `vault ✓`, `vault ✗`, or
 `vault · N conflicts` for Conflict Copies. Claude Code shows one notice at
 session start when the vault is unhealthy: the server is unreachable, sync
-has conflicts, or `clep doctor` reports errors.
+has conflicts, or `clep doctor` reports errors. `clep doctor` warnings alone
+do not count as unhealthy.
 
 ### Hub frontmatter
 
