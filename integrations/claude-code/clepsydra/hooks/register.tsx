@@ -16,6 +16,7 @@ import {
 } from './journal'
 import { attachToast, extractWikilinks, formatAttachment, pageFromJson, pickExact, searchHits, truncatePage } from './links'
 import { basename, mainCheckoutOf, parseProjectMap, resolveProject } from './project'
+import { resolveVaultTool } from './tools'
 import { bindingKey, branchTaskCode, groupTasks, parseBoard, resolveTaskRef, shortCode, type BoardTask } from './tasks'
 
 type $ = EngineInterface
@@ -24,8 +25,6 @@ const PANE = 'clepsydra-board'
 const POLL_MS = 30_000
 const HTTP_TIMEOUT_MS = 6000
 const GROUP_ROWS = 25
-const TASK_TOOL = 'mcp__clepsydra__vault_task_update'
-const JOURNAL_TOOL = 'mcp__clepsydra__vault_ai_journal_capture'
 const PENDING = 'pendingJournal'
 const PROMPT_CHARS = 200
 const PROMPTS_KEPT = 30
@@ -40,6 +39,7 @@ const bodyRef = atom({ plugin: 'clepsydra', key: 'activeBody' } as const, null)
 const paneOpenRef = atom({ plugin: 'clepsydra', key: 'isPaneOpen' } as const, false)
 const showAllRef = atom({ plugin: 'clepsydra', key: 'showAll' } as const, false)
 const promptsRef = atom({ plugin: 'clepsydra', key: 'prompts' } as const, [])
+const toolNamesRef = atom({ plugin: 'clepsydra', key: 'toolNames' } as const, null)
 const promptCountRef = atom({ plugin: 'clepsydra', key: 'promptCount' } as const, 0)
 
 type Config = { apiBase: string; projectMap: Record<string, string>; journalModel: string }
@@ -142,9 +142,24 @@ function isPersonOrigin(o: PromptOrigin | undefined): boolean {
   return o === undefined || o.kind === 'composer' || o.kind === 'bridge'
 }
 
-/** `$.tool.call` reduced to ok + text. */
-async function callTool($: $, tool: `mcp__${string}__${string}`, input: Record<string, unknown>, consent?: string) {
+/** Tool names for this session, listed once; a failed listing is not cached. */
+async function toolNames($: $): Promise<readonly string[]> {
+  const cached = await read($, toolNamesRef)
+  if (cached !== null) return cached
   try {
+    const names = (await $.tool.list()).map(t => t.name)
+    await update($, toolNamesRef, () => names)
+    return names
+  } catch {
+    return []
+  }
+}
+
+/** A clepsydra vault tool by suffix, called through `$.tool.call`, reduced to ok + text. */
+async function callVault($: $, suffix: string, input: Record<string, unknown>, consent?: string) {
+  try {
+    const tool = resolveVaultTool(await toolNames($), suffix)
+    if (tool === undefined) return { ok: false, text: `clepsydra MCP tool ${suffix} not available` }
     const r = await $.tool.call({ tool, ...input, ...(consent === undefined ? {} : { consent }) })
     if (r.deny !== undefined) return { ok: false, text: r.deny }
     const text = r.text ?? (typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? ''))
@@ -255,7 +270,7 @@ async function restoreBinding($: $, tasks: readonly BoardTask[]): Promise<void> 
 
 async function setField($: $, t: BoardTask, consent: string): Promise<string> {
   if (t.status === 'FIELD') return `${t.code} already FIELD`
-  const r = await callTool($, TASK_TOOL, { task: t.code, status: 'FIELD' }, consent)
+  const r = await callVault($, 'vault_task_update', { task: t.code, status: 'FIELD' }, consent)
   await refreshBoard($)
   return r.ok ? `${t.code} → FIELD` : `could not set ${t.code} FIELD: ${r.text.slice(0, 160)}`
 }
@@ -465,7 +480,7 @@ async function flushPending($: $): Promise<{ posted: number; failed?: string }> 
         ...(p.note === undefined ? {} : { note: p.note }),
         body,
       })
-      const r = await callTool($, JOURNAL_TOOL, { content, author: 'claude-code' })
+      const r = await callVault($, 'vault_ai_journal_capture', { content, author: 'claude-code' })
       if (!r.ok) return { posted, failed: r.text.slice(0, 160) }
       await $.store.set(
         PENDING,

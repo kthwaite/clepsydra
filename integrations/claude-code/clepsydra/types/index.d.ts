@@ -44,6 +44,8 @@ declare module 'claude-code' {
       /** The person's own prompts this session (cut to 200 chars, last 30). */
       prompts: string[]
       promptCount: number
+      /** Tool names `$.tool.list` returned this session; null until listed. */
+      toolNames: string[] | null
     }
   }
 }

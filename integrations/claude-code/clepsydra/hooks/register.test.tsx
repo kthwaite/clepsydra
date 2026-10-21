@@ -66,6 +66,7 @@ type World = {
   modelText?: string
   journalDeny?: string
   top?: string
+  tools?: string[]
 }
 
 function world(on: On, opts: World = {}) {
@@ -152,6 +153,8 @@ function world(on: On, opts: World = {}) {
     if (key.startsWith('diff --shortstat')) return ok(' 2 files changed, 10 insertions(+)\n')
     return ok('')
   })
+  const toolNames = opts.tools ?? ['mcp__clepsydra__vault_task_update', 'mcp__clepsydra__vault_ai_journal_capture']
+  on('tool.list', () => ({ value: toolNames.map(name => ({ name, description: '', mcp: true })) }))
   on('tool.call', { tool: 'mcp__clepsydra__vault_task_update' }, (_$, e) => {
     seen.taskCalls.push({ ...e })
     return { result: 'updated' }
@@ -159,6 +162,10 @@ function world(on: On, opts: World = {}) {
   on('tool.call', { tool: 'mcp__clepsydra__vault_ai_journal_capture' }, (_$, e) => {
     seen.journalCalls.push({ ...e })
     return opts.journalDeny === undefined ? { result: 'appended' } : { deny: opts.journalDeny }
+  })
+  on('tool.call', { tool: 'mcp__plugin_clepsydra_clepsydra__vault_task_update' }, (_$, e) => {
+    seen.taskCalls.push({ ...e })
+    return { result: 'updated' }
   })
   on('model.complete', (_$, e) => {
     seen.models.push(e.model)
@@ -246,6 +253,23 @@ describe('/task binding', () => {
     expect(cleared.text).toContain('unbound')
     const after = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] })
     expect(after.sections.map(s => s.id)).toEqual(['intro'])
+  })
+
+  test('start moves the task through the plugin-named tool', async ($, on) => {
+    const { seen } = world(on, { tools: ['mcp__plugin_clepsydra_clepsydra__vault_task_update'] })
+    await $.command.run({ ...TYPED, command: 'task', args: 'TSK-brave' })
+    const start = await $.command.run({ ...TYPED, command: 'task', args: 'start' })
+    expect(start.text).toContain('→ FIELD')
+    expect(seen.taskCalls[0]?.tool).toBe('mcp__plugin_clepsydra_clepsydra__vault_task_update')
+    expect(seen.taskCalls[0]?.status).toBe('FIELD')
+  })
+
+  test('start reports an unavailable vault tool', async ($, on) => {
+    const { seen } = world(on, { tools: [] })
+    await $.command.run({ ...TYPED, command: 'task', args: 'TSK-brave' })
+    const start = await $.command.run({ ...TYPED, command: 'task', args: 'start' })
+    expect(start.text).toContain('clepsydra MCP tool vault_task_update not available')
+    expect(seen.taskCalls).toEqual([])
   })
 
   test('ambiguous ref lists candidates', async ($, on) => {
