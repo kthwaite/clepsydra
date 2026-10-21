@@ -42,6 +42,10 @@ const MAX_REDIRECTS: usize = 10;
 /// Deepest element nesting a fetched page may have. Readability and the
 /// markdown converter recurse over the tree; deeper pages are refused.
 pub(crate) const MAX_ARCHIVE_DEPTH: usize = 512;
+/// Largest [`TreeShape::depth_cost`] Readability is run on. Release-build
+/// measurements: 20 chains of 250 divs cost 1.1e8 and take 0.96 s; a
+/// 400-deep article costs 2.8e7; a 30 KB news page about 2.3e5.
+const READABILITY_DEPTH_COST_BUDGET: u64 = 100_000_000;
 /// Wall-clock budget for the depth check's own parse. html5ever's tree
 /// builder is quadratic in nesting depth, so a page that evades the per-chunk
 /// check below still stops here.
@@ -55,6 +59,8 @@ const DEPTH_CHECK_CHUNK_BYTES: usize = 256;
 const EXTRACTION_STACK_BYTES: usize = 64 * 1024 * 1024;
 /// At most this many pages are parsed at once, server-wide.
 static EXTRACTION_PERMITS: Semaphore = Semaphore::const_new(2);
+/// How long a request waits for an extraction permit before giving up.
+const EXTRACTION_PERMIT_WAIT: Duration = Duration::from_secs(30);
 /// Tag on every page archived by a server fetch.
 const SERVER_FETCH_TAG: &str = "server-fetch";
 
@@ -95,11 +101,39 @@ pub(crate) enum ArchiveUrlError {
     TooDeep,
     #[error("no readable content")]
     NoContent,
+    #[error("archive extraction busy")]
+    Busy,
+    #[error("archive extraction failed")]
+    Internal,
 }
 
 impl From<ArchiveUrlError> for ApiError {
     fn from(error: ArchiveUrlError) -> Self {
-        ApiError::unprocessable(error.to_string())
+        match error {
+            ArchiveUrlError::Busy => ApiError::service_unavailable(error.to_string()),
+            ArchiveUrlError::Internal => ApiError::internal(error.to_string()),
+            _ => ApiError::unprocessable(error.to_string()),
+        }
+    }
+}
+
+/// What the depth check learned about a document's tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TreeShape {
+    /// Depth of the deepest node below the document.
+    deepest: usize,
+    /// Sum over all nodes of depth squared.
+    depth_cost: u64,
+}
+
+impl TreeShape {
+    /// Readability's running time grows with each node's depth squared:
+    /// on release builds, 20 chains of 500 nested divs (110 KB) take 6.2 s,
+    /// where a 300,000-node page 15 deep takes 1.2 s. Above
+    /// [`READABILITY_DEPTH_COST_BUDGET`] the page skips Readability and its
+    /// whole body becomes the markdown.
+    fn readability_affordable(&self) -> bool {
+        self.depth_cost <= READABILITY_DEPTH_COST_BUDGET
     }
 }
 
@@ -116,7 +150,8 @@ impl From<ArchiveUrlError> for ApiError {
         (status = 403, description = "Archiving disabled", body = ApiError),
         (status = 409, description = "Archive content conflict", body = ApiError),
         (status = 422, description = "Page could not be fetched, is not HTML, is nested too deeply, or has no readable content", body = ApiError),
-        (status = 500, description = "Internal server error", body = ApiError)
+        (status = 500, description = "Internal server error", body = ApiError),
+        (status = 503, description = "Archive extraction busy", body = ApiError)
     )
 )]
 pub async fn archive_url(
@@ -177,42 +212,50 @@ pub(crate) async fn fetch_page(
     if !is_html_document(&response) {
         return Err(ArchiveUrlError::NotHtml);
     }
-    on_extraction_thread(move || {
+    on_extraction_thread(&EXTRACTION_PERMITS, EXTRACTION_PERMIT_WAIT, move || {
         let content_type = response
             .headers
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok());
         let html = decode_html(&response.body, content_type).into_owned();
-        ensure_shallow(&html)?;
-        extract(response.final_url, html)
+        let shape = measure(&html)?;
+        extract(response.final_url, html, shape)
     })
     .await
 }
 
-/// Run `job` on a dedicated large-stack thread, holding one of the
-/// [`EXTRACTION_PERMITS`] until the thread ends. The permit moves into the
-/// thread, so a dropped request cannot free it while the parse still runs.
+/// Run `job` on a dedicated large-stack thread, holding one of `permits`
+/// until the thread ends. The permit moves into the thread, so a dropped
+/// request cannot free it while the parse still runs. Waiting longer than
+/// `wait` for a permit is [`ArchiveUrlError::Busy`].
 async fn on_extraction_thread<T: Send + 'static>(
+    permits: &'static Semaphore,
+    wait: Duration,
     job: impl FnOnce() -> Result<T, ArchiveUrlError> + Send + 'static,
 ) -> Result<T, ArchiveUrlError> {
-    let permit = EXTRACTION_PERMITS
-        .acquire()
+    let permit = tokio::time::timeout(wait, permits.acquire())
         .await
-        .map_err(|_| ArchiveUrlError::NoContent)?;
+        .map_err(|_| ArchiveUrlError::Busy)?
+        .map_err(|_| ArchiveUrlError::Internal)?;
     let (sender, receiver) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
         .name("archive-extract".to_owned())
         .stack_size(EXTRACTION_STACK_BYTES)
         .spawn(move || {
-            let _permit = permit;
-            let _ = sender.send(job());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                .unwrap_or_else(|_| {
+                    tracing::error!("archive extraction panicked");
+                    Err(ArchiveUrlError::Internal)
+                });
+            // Free the slot before the caller sees the result.
+            drop(permit);
+            let _ = sender.send(result);
         })
         .map_err(|error| {
-            tracing::warn!(error = %error, "could not start archive extraction thread");
-            ArchiveUrlError::NoContent
+            tracing::error!(error = %error, "could not start archive extraction thread");
+            ArchiveUrlError::Internal
         })?;
-    // A panicking job drops the sender.
-    receiver.await.unwrap_or(Err(ArchiveUrlError::NoContent))
+    receiver.await.unwrap_or(Err(ArchiveUrlError::Internal))
 }
 
 /// Refuse a document nested deeper than [`MAX_ARCHIVE_DEPTH`] before any
@@ -223,10 +266,12 @@ async fn on_extraction_thread<T: Send + 'static>(
 /// within a few kilobytes. A page that keeps its newest node shallow still
 /// meets the [`DEPTH_CHECK_BUDGET`] and the exact depth check on the
 /// finished tree.
-fn ensure_shallow(html: &str) -> Result<(), ArchiveUrlError> {
+fn measure(html: &str) -> Result<TreeShape, ArchiveUrlError> {
     let deadline = std::time::Instant::now() + DEPTH_CHECK_BUDGET;
-    let mut parser =
-        html5ever::parse_document(HtmlTreeSink::new(Html::new_document()), Default::default());
+    let mut parser = html5ever::parse_document(
+        HtmlTreeSink::new(Html::new_document()),
+        extractor_parse_opts(),
+    );
     let mut rest = html;
     while !rest.is_empty() {
         let mut end = rest.len().min(DEPTH_CHECK_CHUNK_BYTES);
@@ -241,10 +286,11 @@ fn ensure_shallow(html: &str) -> Result<(), ArchiveUrlError> {
         }
     }
     let document = parser.finish();
-    if deepest(&document) > MAX_ARCHIVE_DEPTH {
+    let shape = tree_shape(&document);
+    if shape.deepest > MAX_ARCHIVE_DEPTH {
         return Err(ArchiveUrlError::TooDeep);
     }
-    Ok(())
+    Ok(shape)
 }
 
 fn newest_node_too_deep(parser: &Parser<HtmlTreeSink>) -> bool {
@@ -254,21 +300,40 @@ fn newest_node_too_deep(parser: &Parser<HtmlTreeSink>) -> bool {
     })
 }
 
-/// Depth of the deepest node below the document root, walked iteratively.
-fn deepest(document: &Html) -> usize {
-    let mut depth = 0usize;
-    let mut deepest = 0;
+/// Parse options matching the extractors' parsers. dom_smoothie (through
+/// dom_query) parses with scripting disabled, which reads `<noscript>` as
+/// markup; the markdown converter is configured the same way.
+fn extractor_parse_opts() -> html5ever::ParseOpts {
+    html5ever::ParseOpts {
+        tree_builder: html5ever::tree_builder::TreeBuilderOpts {
+            scripting_enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// Walk the tree iteratively. Depths count from the document's children (1).
+fn tree_shape(document: &Html) -> TreeShape {
+    let mut depth = 0u64;
+    let mut shape = TreeShape {
+        deepest: 0,
+        depth_cost: 0,
+    };
     for edge in document.tree.root().traverse() {
         match edge {
+            // The document node itself is depth 0.
+            Edge::Open(node) if node.parent().is_none() => {}
             Edge::Open(_) => {
                 depth += 1;
-                deepest = deepest.max(depth);
+                shape.deepest = shape.deepest.max(depth as usize);
+                shape.depth_cost = shape.depth_cost.saturating_add(depth * depth);
             }
+            Edge::Close(node) if node.parent().is_none() => {}
             Edge::Close(_) => depth -= 1,
         }
     }
-    // The document node itself is not nested in anything.
-    deepest.saturating_sub(1)
+    shape
 }
 
 /// GET `url`, following redirects, within [`FETCH_DEADLINE`].
@@ -294,10 +359,12 @@ async fn fetch_document(
 }
 
 /// Readability article → markdown. When Readability finds no article, or an
-/// article with no text, the whole `<body>` becomes the markdown instead. A
-/// page with no text either way has no readable content.
-fn extract(final_url: Url, html: String) -> Result<FetchedPage, ArchiveUrlError> {
+/// article with no text, or the tree is too costly for it, the whole
+/// `<body>` becomes the markdown instead. A page with no text either way has
+/// no readable content.
+fn extract(final_url: Url, html: String, shape: TreeShape) -> Result<FetchedPage, ArchiveUrlError> {
     let converter = HtmlToMarkdown::builder()
+        .scripting_enabled(false)
         .skip_tags(vec!["head", "script", "style", "noscript", "template"])
         .build();
     let mut readability = Readability::new(html.as_str(), Some(final_url.as_str()), None).ok();
@@ -308,6 +375,7 @@ fn extract(final_url: Url, html: String) -> Result<FetchedPage, ArchiveUrlError>
         .unwrap_or_default();
     let article = readability
         .as_mut()
+        .filter(|_| shape.readability_affordable())
         .and_then(|readability| readability.parse().ok());
     let article_markdown = article
         .as_ref()
@@ -603,10 +671,16 @@ mod tests {
     #[test]
     fn depth_check_counts_nodes_below_the_document() {
         // html, body, then the divs, then the text node.
-        assert_eq!(deepest(&Html::parse_document(&nested(600, "x"))), 603);
-        assert_eq!(ensure_shallow(&nested(MAX_ARCHIVE_DEPTH - 3, "x")), Ok(()));
         assert_eq!(
-            ensure_shallow(&nested(MAX_ARCHIVE_DEPTH - 2, "x")),
+            tree_shape(&Html::parse_document(&nested(600, "x"))).deepest,
+            603
+        );
+        assert_eq!(
+            measure(&nested(MAX_ARCHIVE_DEPTH - 3, "x")).map(|shape| shape.deepest),
+            Ok(MAX_ARCHIVE_DEPTH)
+        );
+        assert_eq!(
+            measure(&nested(MAX_ARCHIVE_DEPTH - 2, "x")),
             Err(ArchiveUrlError::TooDeep)
         );
     }
@@ -615,7 +689,153 @@ mod tests {
     fn depth_check_follows_implied_end_tags() {
         // Unclosed `<li>` and `<p>` are closed by the parser, not nested.
         let html = format!("<ul>{}</ul>", "<li><p>item".repeat(5_000));
-        assert_eq!(ensure_shallow(&html), Ok(()));
+        assert!(measure(&html).is_ok());
+    }
+
+    #[test]
+    fn depth_check_parses_noscript_as_the_extractors_do() {
+        // dom_smoothie parses with scripting disabled, so `<noscript>` holds
+        // markup, not text. The depth check must see the same tree.
+        let html = nested(20_000, "x").replace("<body>", "<body><noscript>");
+        let error = measure(&html).unwrap_err();
+        assert_eq!(error, ArchiveUrlError::TooDeep);
+        assert_eq!(ApiError::from(error).status, 422);
+    }
+
+    #[tokio::test]
+    async fn fetch_page_refuses_deep_nesting_inside_noscript() {
+        let (server, client, url) = fixture(MAX_ARCHIVE_BYTES).await;
+        let html = nested(20_000, "x").replace("<body>", "<body><noscript>");
+        serve(&server, "/start", html, "text/html").await;
+
+        let error = fetch_page(&client, &url).await.unwrap_err();
+
+        assert_eq!(ApiError::from(error).status, 422);
+    }
+
+    /// `subtrees` chains of `depth` nested divs, each holding a sentence,
+    /// after a navigation bar.
+    fn chains(depth: usize, subtrees: usize) -> String {
+        let chain = format!(
+            "{}Water flowed through the vessel at an even rate.{}",
+            "<div>".repeat(depth),
+            "</div>".repeat(depth)
+        );
+        format!(
+            "<html><head><title>Chains</title></head><body>\
+             <nav><a href=\"/\">Navigation menu entry</a></nav>{}</body></html>",
+            chain.repeat(subtrees)
+        )
+    }
+
+    /// A news page: masthead, a long navigation list, an article of many
+    /// paragraphs inside a dozen layout wrappers, a related-links aside, and
+    /// a footer.
+    fn news_page() -> String {
+        let nav = (0..200)
+            .map(|i| format!("<li><a href=\"/section/{i}\">Section {i}</a></li>"))
+            .collect::<String>();
+        let paragraphs = (0..80)
+            .map(|i| {
+                format!(
+                    "<p>Paragraph {i} of the report. The clepsydra measured time by the \
+                     regulated flow of water, and <a href=\"/ref/{i}\">its makers</a> \
+                     refined it over centuries of careful <em>observation</em>.</p>"
+                )
+            })
+            .collect::<String>();
+        let related = (0..100)
+            .map(|i| format!("<li><a href=\"/story/{i}\">Related story {i}</a></li>"))
+            .collect::<String>();
+        let wrappers = 12;
+        format!(
+            "<html lang=\"en\"><head><title>Water clocks report</title></head><body>\
+             <header><nav class=\"site-nav\"><ul>{nav}</ul></nav></header>\
+             {open}<article><h1>Water clocks report</h1><h2>How the clepsydra kept time</h2>\
+             {paragraphs}</article>{close}\
+             <aside class=\"related\"><ul>{related}</ul></aside>\
+             <footer>Copyright footer text</footer></body></html>",
+            open = "<div class=\"layout\">".repeat(wrappers),
+            close = "</div>".repeat(wrappers),
+        )
+    }
+
+    #[test]
+    fn depth_cost_budget_separates_nesting_bombs_from_articles() {
+        let bomb = measure(&chains(500, 20)).unwrap();
+        assert!(!bomb.readability_affordable(), "{bomb:?}");
+        let deep_article = measure(&nested(400, ARTICLE_HTML)).unwrap();
+        assert!(deep_article.readability_affordable(), "{deep_article:?}");
+        let news = measure(&news_page()).unwrap();
+        assert!(news.readability_affordable(), "{news:?}");
+    }
+
+    #[tokio::test]
+    async fn fetch_page_skips_readability_when_the_tree_is_too_costly() {
+        let (server, client, url) = fixture(MAX_ARCHIVE_BYTES).await;
+        serve(&server, "/start", chains(500, 20), "text/html").await;
+
+        let page = fetch_page(&client, &url).await.unwrap();
+
+        // The whole body, navigation included: Readability did not run.
+        assert!(page.markdown.contains("Navigation menu entry"));
+        assert!(page.markdown.contains("Water flowed through the vessel"));
+        assert_eq!(page.title, "Chains");
+    }
+
+    #[tokio::test]
+    async fn fetch_page_runs_readability_on_a_news_page() {
+        let (server, client, url) = fixture(MAX_ARCHIVE_BYTES).await;
+        serve(&server, "/start", news_page(), "text/html").await;
+
+        let page = fetch_page(&client, &url).await.unwrap();
+
+        assert!(page.markdown.contains("How the clepsydra kept time"));
+        assert!(!page.markdown.contains("Section 7"), "{}", page.markdown);
+        assert!(
+            !page.markdown.contains("Related story"),
+            "{}",
+            page.markdown
+        );
+    }
+
+    static NO_PERMITS: Semaphore = Semaphore::const_new(0);
+    static CLOSED_PERMITS: Semaphore = Semaphore::const_new(1);
+    static SPARE_PERMITS: Semaphore = Semaphore::const_new(1);
+
+    #[tokio::test]
+    async fn extraction_wait_times_out_as_busy() {
+        let error = on_extraction_thread(&NO_PERMITS, Duration::from_millis(10), || Ok(()))
+            .await
+            .unwrap_err();
+        assert_eq!(error, ArchiveUrlError::Busy);
+        assert_eq!(ApiError::from(error).status, 503);
+    }
+
+    #[tokio::test]
+    async fn extraction_failures_are_internal_errors() {
+        CLOSED_PERMITS.close();
+        let closed = on_extraction_thread(&CLOSED_PERMITS, Duration::from_secs(1), || Ok(()))
+            .await
+            .unwrap_err();
+        assert_eq!(closed, ArchiveUrlError::Internal);
+
+        // `resume_unwind` unwinds without running the panic hook, so the
+        // test output stays clean.
+        let panicked = on_extraction_thread(
+            &SPARE_PERMITS,
+            Duration::from_secs(1),
+            || -> Result<(), ArchiveUrlError> { std::panic::resume_unwind(Box::new("boom")) },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(panicked, ArchiveUrlError::Internal);
+        assert_eq!(ApiError::from(panicked).status, 500);
+        assert_eq!(
+            SPARE_PERMITS.available_permits(),
+            1,
+            "the permit is returned"
+        );
     }
 
     #[tokio::test]

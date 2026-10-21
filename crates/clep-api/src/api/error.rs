@@ -125,6 +125,15 @@ impl ApiError {
         }
     }
 
+    pub fn service_unavailable(msg: impl Into<String>) -> Self {
+        Self {
+            status: 503,
+            error: msg.into(),
+            detail: None,
+            hint: None,
+        }
+    }
+
     pub fn forbidden(msg: impl Into<String>) -> Self {
         Self {
             status: 403,
