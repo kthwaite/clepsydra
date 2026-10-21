@@ -48,8 +48,8 @@ pub struct ImportWorkParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MarkReadParams {
-    /// Feed ids (see `feed_id` on `vault_feed_entries` results). Every
-    /// entry of these feeds is marked read.
+    /// Entry ids, as returned in the `id` field of `vault_feed_entries`
+    /// results. Each listed entry is marked read.
     pub ids: Vec<i64>,
 }
 
@@ -78,9 +78,16 @@ pub fn base_evaluate_path(slug: &str, view: &str) -> Result<String, String> {
     ))
 }
 
-/// Route and body for `vault_import_work`. A bibtex body is a bare JSON
-/// string: the tool sends it as the raw `text/plain` request body.
-pub fn import_route(params: &ImportWorkParams) -> Result<(&'static str, Value), String> {
+/// Request body for `vault_import_work`: the DOI and ISBN endpoints take
+/// JSON, the BibTeX endpoint takes the source as a raw `text/plain` body.
+#[derive(Debug, PartialEq)]
+pub enum ImportBody {
+    Json(Value),
+    Text(String),
+}
+
+/// Route and body for `vault_import_work`.
+pub fn import_route(params: &ImportWorkParams) -> Result<(&'static str, ImportBody), String> {
     fn given(v: &Option<String>) -> Option<&str> {
         v.as_deref().map(str::trim).filter(|v| !v.is_empty())
     }
@@ -89,22 +96,37 @@ pub fn import_route(params: &ImportWorkParams) -> Result<(&'static str, Value), 
         given(&params.isbn),
         given(&params.bibtex),
     ) {
-        (Some(doi), None, None) => Ok(("/api/vault/academic/import/doi", json!({ "doi": doi }))),
-        (None, Some(isbn), None) => {
-            Ok(("/api/vault/academic/import/isbn", json!({ "isbn": isbn })))
-        }
-        (None, None, Some(bibtex)) => Ok(("/api/vault/academic/import/bibtex", json!(bibtex))),
+        (Some(doi), None, None) => Ok((
+            "/api/vault/academic/import/doi",
+            ImportBody::Json(json!({ "doi": doi })),
+        )),
+        (None, Some(isbn), None) => Ok((
+            "/api/vault/academic/import/isbn",
+            ImportBody::Json(json!({ "isbn": isbn })),
+        )),
+        (None, None, Some(bibtex)) => Ok((
+            "/api/vault/academic/import/bibtex",
+            ImportBody::Text(bibtex.to_string()),
+        )),
         (None, None, None) => Err("provide exactly one of `doi`, `isbn` or `bibtex`".to_string()),
         _ => Err("provide only one of `doi`, `isbn` or `bibtex`, not several".to_string()),
     }
 }
 
-/// Request body for `vault_feed_mark_read`.
-pub fn mark_read_body(params: &MarkReadParams) -> Result<Value, String> {
+/// Validate `vault_feed_mark_read` input before any request.
+pub fn check_mark_read(params: &MarkReadParams) -> Result<(), String> {
     if params.ids.is_empty() {
-        return Err("`ids` must list at least one feed id".to_string());
+        return Err("`ids` must list at least one entry id".to_string());
     }
-    Ok(json!({ "feed": params.ids }))
+    Ok(())
+}
+
+/// `PATCH` path and body marking one feed entry read.
+pub fn mark_entry_read_request(id: i64) -> (String, Value) {
+    (
+        format!("/api/vault/feeds/entries/{id}"),
+        json!({ "read": true }),
+    )
 }
 
 /// Local today as `YYYY-MM-DD`.
@@ -249,21 +271,25 @@ mod tests {
     fn import_route_maps_each_field() {
         let (route, body) = import_route(&import(Some(" 10.1/x "), None, None)).unwrap();
         assert_eq!(route, "/api/vault/academic/import/doi");
-        assert_eq!(body, serde_json::json!({"doi": "10.1/x"}));
+        assert_eq!(body, ImportBody::Json(json!({"doi": "10.1/x"})));
         let (route, body) = import_route(&import(None, Some("978-0"), None)).unwrap();
         assert_eq!(route, "/api/vault/academic/import/isbn");
-        assert_eq!(body, serde_json::json!({"isbn": "978-0"}));
+        assert_eq!(body, ImportBody::Json(json!({"isbn": "978-0"})));
         let (route, body) = import_route(&import(None, None, Some("@book{a}"))).unwrap();
         assert_eq!(route, "/api/vault/academic/import/bibtex");
-        assert_eq!(body, serde_json::json!("@book{a}"));
+        assert_eq!(body, ImportBody::Text("@book{a}".to_string()));
     }
 
     #[test]
     fn mark_read_rejects_empty_ids() {
-        assert!(mark_read_body(&MarkReadParams { ids: vec![] }).is_err());
-        assert_eq!(
-            mark_read_body(&MarkReadParams { ids: vec![3, 4] }).unwrap(),
-            serde_json::json!({"feed": [3, 4]})
-        );
+        assert!(check_mark_read(&MarkReadParams { ids: vec![] }).is_err());
+        assert!(check_mark_read(&MarkReadParams { ids: vec![1] }).is_ok());
+    }
+
+    #[test]
+    fn mark_entry_read_request_patches_the_entry() {
+        let (path, body) = mark_entry_read_request(42);
+        assert_eq!(path, "/api/vault/feeds/entries/42");
+        assert_eq!(body, serde_json::json!({"read": true}));
     }
 }

@@ -18,9 +18,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::reading::{
-    AgendaParams, BaseQueryParams, FeedEntriesParams, ImportWorkParams, MarkReadParams,
-    base_evaluate_path, calendar_bounds, feed_entries_query, import_route, local_today,
-    mark_read_body,
+    AgendaParams, BaseQueryParams, FeedEntriesParams, ImportBody, ImportWorkParams, MarkReadParams,
+    base_evaluate_path, calendar_bounds, check_mark_read, feed_entries_query, import_route,
+    local_today, mark_entry_read_request,
 };
 use super::tasking::{
     BoardKind, INCLUDE_RETIRED, TaskRef, board_query, classify_ref, deserialize_tri_state,
@@ -207,7 +207,7 @@ remains binned; resolve that path before retrying. A rubbish item drift conflict
 remains binned; re-list with vault_list_rubbish and inspect it with vault_get_rubbish_item. On \
 a page revision conflict, re-read the page with vault_get_page and re-apply the change. List Bases \
 with vault_bases and evaluate one view with vault_base_query. Read the dated agenda (and, with a \
-from/to range, the calendar) with vault_agenda. Read feed entries with vault_feed_entries and mark feeds read with vault_feed_mark_read. Import works with vault_import_work (DOI, ISBN or BibTeX).";
+from/to range, the calendar) with vault_agenda. Read feed entries with vault_feed_entries and mark entries read with vault_feed_mark_read. Import works with vault_import_work (DOI, ISBN or BibTeX).";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreatePageParams {
@@ -1437,8 +1437,8 @@ impl VaultMcpServer {
     ) -> Result<String, String> {
         let (route, body) = import_route(&params)?;
         let value = match &body {
-            serde_json::Value::String(text) => self.client.post_text(route, text).await,
-            _ => self.client.post_json(route, &body).await,
+            ImportBody::Text(text) => self.client.post_text(route, text).await,
+            ImportBody::Json(json) => self.client.post_json(route, json).await,
         }
         .map_err(|e| e.to_string())?;
         render(&value)
@@ -1446,7 +1446,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_feed_mark_read",
-        description = "Mark every entry of the given feeds read. `ids` are feed ids (the `feed_id` of entries from vault_feed_entries). Returns `{marked}`, the number of entries changed.",
+        description = "Mark feed entries read. `ids` are entry ids (the `id` of entries from vault_feed_entries). Returns `{marked, failed}`: the count marked and, per entry that could not be marked, `{id, error}`.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1457,12 +1457,19 @@ impl VaultMcpServer {
         &self,
         Parameters(params): Parameters<MarkReadParams>,
     ) -> Result<String, String> {
-        let body = mark_read_body(&params)?;
-        let value = self
-            .client
-            .post_json("/api/vault/feeds/entries/mark-read", &body)
-            .await
-            .map_err(|e| e.to_string())?;
+        check_mark_read(&params)?;
+        let mut marked = 0u64;
+        let mut failed = Vec::new();
+        for id in &params.ids {
+            let (path, body) = mark_entry_read_request(*id);
+            match self.client.patch_json(&path, &body).await {
+                Ok(_) => marked += 1,
+                Err(error) => {
+                    failed.push(serde_json::json!({ "id": id, "error": error.to_string() }))
+                }
+            }
+        }
+        let value = serde_json::json!({ "marked": marked, "failed": failed });
         render(&value)
     }
 
@@ -2185,6 +2192,15 @@ mod tests {
     /// and return a `VaultMcpServer` pointed at it. The `TempDir` keeps the
     /// vault alive for the test's duration.
     async fn serve_seeded_vault() -> (VaultMcpServer, tempfile::TempDir) {
+        let (server, tmp, _state) = serve_seeded_vault_with_state().await;
+        (server, tmp)
+    }
+
+    async fn serve_seeded_vault_with_state() -> (
+        VaultMcpServer,
+        tempfile::TempDir,
+        Arc<clep_api::api::AppState>,
+    ) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
         clep_api::vault::init::init_vault(&root).unwrap();
@@ -2204,7 +2220,7 @@ mod tests {
 
         let state = clep_api::build_app_state(&root).await.unwrap();
         let app = clep_api::build_router(
-            state,
+            Arc::clone(&state),
             1024 * 1024,
             clep_api::api::archive::ArchiveViewConfig::default(),
             true,
@@ -2218,7 +2234,7 @@ mod tests {
         });
 
         let client = ApiClient::new(format!("http://{addr}"), None).unwrap();
-        (VaultMcpServer::new(Arc::new(client)), tmp)
+        (VaultMcpServer::new(Arc::new(client)), tmp, state)
     }
 
     fn parse(result: Result<String, String>) -> Value {
@@ -4459,15 +4475,111 @@ mod tests {
         assert!(err.contains("ids"), "{err}");
     }
 
+    /// Seed one feed with two unread entries; returns their ids (a, b).
+    async fn seed_two_entries(state: &clep_api::api::AppState) -> (i64, i64) {
+        use chrono::{TimeZone, Utc};
+        use clep_api::feeds::types::{
+            EntryFilters, EntryView, FetchOutcome, FetchedEntry, ManifestFeed,
+        };
+        let runtime = state.feed_runtime.as_ref().expect("feeds enabled");
+        let at = Utc.with_ymd_and_hms(2026, 8, 9, 12, 0, 0).single().unwrap();
+        let entry = |guid: &str| FetchedEntry {
+            guid: guid.to_owned(),
+            url: Some(format!("https://entries.example/{guid}")),
+            title: guid.to_owned(),
+            author: None,
+            content_html: None,
+            published_at: Some(at),
+            fetched_at: at,
+        };
+        runtime
+            .feeds
+            .reconcile(vec![ManifestFeed {
+                url: "https://fixture.example/rss".to_owned(),
+                title_override: Some("Fixture".to_owned()),
+                group: "Fixtures".to_owned(),
+                tags: vec![],
+                line: 1,
+            }])
+            .await
+            .unwrap();
+        let feed_id = runtime.feeds.list_feeds().await.unwrap()[0].id;
+        runtime
+            .feeds
+            .apply_fetch(
+                feed_id,
+                FetchOutcome::Success {
+                    fetched_at: at,
+                    next_fetch_at: Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap(),
+                    fetch_url: "https://fixture.example/rss".to_owned(),
+                    etag: None,
+                    last_modified: None,
+                    title: Some("Fixture".to_owned()),
+                    site_url: None,
+                    entries: vec![entry("one"), entry("two")],
+                },
+            )
+            .await
+            .unwrap();
+        let page = runtime
+            .feeds
+            .list_entries(EntryFilters {
+                view: EntryView::Unread,
+                feed_ids: vec![],
+                groups: vec![],
+                tag: None,
+                limit: 10,
+                cursor: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(page.entries.len(), 2);
+        (page.entries[0].id, page.entries[1].id)
+    }
+
     #[tokio::test]
-    async fn feed_mark_read_reports_marked_count() {
-        let (server, _tmp) = serve_seeded_vault().await;
+    async fn feed_mark_read_marks_only_the_named_entry() {
+        let (server, _tmp, state) = serve_seeded_vault_with_state().await;
+        let (a, b) = seed_two_entries(&state).await;
         let value = parse(
             server
-                .vault_feed_mark_read(Parameters(crate::reading::MarkReadParams { ids: vec![1] }))
+                .vault_feed_mark_read(Parameters(crate::reading::MarkReadParams { ids: vec![a] }))
                 .await,
         );
-        assert_eq!(value["marked"], 0, "{value}");
+        assert_eq!(value["marked"], 1, "{value}");
+        assert_eq!(value["failed"].as_array().map(Vec::len), Some(0), "{value}");
+        let unread = parse(
+            server
+                .vault_feed_entries(Parameters(crate::reading::FeedEntriesParams {
+                    feed: None,
+                    unread: Some(true),
+                    limit: None,
+                }))
+                .await,
+        );
+        let ids: Vec<i64> = unread["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["id"].as_i64().unwrap())
+            .collect();
+        assert_eq!(ids, vec![b], "{unread}");
+    }
+
+    #[tokio::test]
+    async fn feed_mark_read_reports_unknown_entry_in_failed() {
+        let (server, _tmp, state) = serve_seeded_vault_with_state().await;
+        let (a, _b) = seed_two_entries(&state).await;
+        let value = parse(
+            server
+                .vault_feed_mark_read(Parameters(crate::reading::MarkReadParams {
+                    ids: vec![a, 999_999],
+                }))
+                .await,
+        );
+        assert_eq!(value["marked"], 1, "{value}");
+        assert_eq!(value["failed"][0]["id"], 999_999, "{value}");
+        assert!(value["failed"][0]["error"].is_string(), "{value}");
     }
 
     #[test]
