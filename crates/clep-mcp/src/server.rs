@@ -18,8 +18,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::reading::{
-    AgendaParams, BaseQueryParams, FeedEntriesParams, calendar_bounds, feed_entries_query,
-    local_today,
+    AgendaParams, BaseQueryParams, FeedEntriesParams, ImportWorkParams, MarkReadParams,
+    base_evaluate_path, calendar_bounds, feed_entries_query, import_route, local_today,
+    mark_read_body,
 };
 use super::tasking::{
     BoardKind, INCLUDE_RETIRED, TaskRef, board_query, classify_ref, deserialize_tri_state,
@@ -206,7 +207,7 @@ remains binned; resolve that path before retrying. A rubbish item drift conflict
 remains binned; re-list with vault_list_rubbish and inspect it with vault_get_rubbish_item. On \
 a page revision conflict, re-read the page with vault_get_page and re-apply the change. List Bases \
 with vault_bases and evaluate one view with vault_base_query. Read the dated agenda (and, with a \
-from/to range, the calendar) with vault_agenda. Read feed entries with vault_feed_entries.";
+from/to range, the calendar) with vault_agenda. Read feed entries with vault_feed_entries and mark feeds read with vault_feed_mark_read. Import works with vault_import_work (DOI, ISBN or BibTeX).";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreatePageParams {
@@ -1356,11 +1357,7 @@ impl VaultMcpServer {
         &self,
         Parameters(params): Parameters<BaseQueryParams>,
     ) -> Result<String, String> {
-        let path = format!(
-            "/api/vault/bases/{}/views/{}/evaluate",
-            encode_vault_path(&params.slug),
-            encode_vault_path(&params.view)
-        );
+        let path = base_evaluate_path(&params.slug, &params.view)?;
         let value = self
             .client
             .post_json(&path, &serde_json::json!({}))
@@ -1420,6 +1417,50 @@ impl VaultMcpServer {
         let value = self
             .client
             .get_json("/api/vault/feeds/entries", &feed_entries_query(&params))
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_import_work",
+        description = "Import an academic work as a Work page from exactly one of `doi`, `isbn` or `bibtex` (one or more entries). Existing works (matched by DOI, ISBN or cite key) are reported as skipped, never duplicated. Returns per-work results.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_import_work(
+        &self,
+        Parameters(params): Parameters<ImportWorkParams>,
+    ) -> Result<String, String> {
+        let (route, body) = import_route(&params)?;
+        let value = match &body {
+            serde_json::Value::String(text) => self.client.post_text(route, text).await,
+            _ => self.client.post_json(route, &body).await,
+        }
+        .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_feed_mark_read",
+        description = "Mark every entry of the given feeds read. `ids` are feed ids (the `feed_id` of entries from vault_feed_entries). Returns `{marked}`, the number of entries changed.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_feed_mark_read(
+        &self,
+        Parameters(params): Parameters<MarkReadParams>,
+    ) -> Result<String, String> {
+        let body = mark_read_body(&params)?;
+        let value = self
+            .client
+            .post_json("/api/vault/feeds/entries/mark-read", &body)
             .await
             .map_err(|e| e.to_string())?;
         render(&value)
@@ -1904,9 +1945,11 @@ mod tests {
                 "vault_edit_page",
                 "vault_empty_rubbish",
                 "vault_feed_entries",
+                "vault_feed_mark_read",
                 "vault_folder",
                 "vault_get_page",
                 "vault_get_rubbish_item",
+                "vault_import_work",
                 "vault_journal_capture",
                 "vault_links",
                 "vault_list_pages",
@@ -4365,8 +4408,82 @@ mod tests {
                 }))
                 .await,
         );
-        let entries = value.get("entries").unwrap_or(&value);
-        assert_eq!(entries.as_array().map(Vec::len), Some(0), "{value}");
+        assert_eq!(
+            value["entries"].as_array().map(Vec::len),
+            Some(0),
+            "{value}"
+        );
+        assert!(value["next_cursor"].is_null(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn import_work_validates_before_requesting() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_import_work(Parameters(crate::reading::ImportWorkParams {
+                doi: None,
+                isbn: None,
+                bibtex: None,
+            }))
+            .await
+            .expect_err("no source must fail");
+        assert!(err.contains("doi"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn import_work_bibtex_creates_then_skips() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let params = || {
+            Parameters(crate::reading::ImportWorkParams {
+                doi: None,
+                isbn: None,
+                bibtex: Some(
+                    "@book{knuth1984, title={The TeXbook}, author={Knuth, Donald}, year={1984}}"
+                        .to_string(),
+                ),
+            })
+        };
+        let first = parse(server.vault_import_work(params()).await);
+        assert_eq!(first["results"][0]["status"], "created", "{first}");
+        let second = parse(server.vault_import_work(params()).await);
+        assert_eq!(second["results"][0]["status"], "skipped", "{second}");
+    }
+
+    #[tokio::test]
+    async fn feed_mark_read_rejects_empty_ids() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_feed_mark_read(Parameters(crate::reading::MarkReadParams { ids: vec![] }))
+            .await
+            .expect_err("empty ids must fail");
+        assert!(err.contains("ids"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn feed_mark_read_reports_marked_count() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_feed_mark_read(Parameters(crate::reading::MarkReadParams { ids: vec![1] }))
+                .await,
+        );
+        assert_eq!(value["marked"], 0, "{value}");
+    }
+
+    #[test]
+    fn write_tools_carry_their_annotations() {
+        let router = VaultMcpServer::tool_router();
+        for name in ["vault_import_work", "vault_feed_mark_read"] {
+            let tool = router
+                .list_all()
+                .into_iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("{name} missing"));
+            let a = tool.annotations.expect("annotations");
+            assert_eq!(a.read_only_hint, Some(false), "{name}");
+            assert_eq!(a.destructive_hint, Some(false), "{name}");
+            assert_eq!(a.idempotent_hint, Some(true), "{name}");
+        }
     }
 
     #[test]

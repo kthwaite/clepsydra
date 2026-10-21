@@ -36,6 +36,15 @@ pub fn encode_vault_path(path: &str) -> String {
         .join("/")
 }
 
+/// Strict set for one opaque path segment: everything but unreserved
+/// `-` and `_` and alphanumerics is encoded (so `/`, `\\`, `.`, `%`, `?`, `#`).
+const STRICT_SEGMENT: &AsciiSet = &percent_encoding::NON_ALPHANUMERIC.remove(b'-').remove(b'_');
+
+/// Percent-encode a value as exactly one URL path segment.
+pub fn encode_path_segment(segment: &str) -> String {
+    utf8_percent_encode(segment, STRICT_SEGMENT).to_string()
+}
+
 /// A failed API call, formatted for direct display to the calling agent.
 #[derive(Debug, thiserror::Error)]
 pub enum ApiCallError {
@@ -218,6 +227,17 @@ impl ApiClient {
         self.send(url, request).await
     }
 
+    /// POST a raw `text/plain` `body` to `path`, returning the parsed JSON response.
+    pub async fn post_text(&self, path: &str, body: &str) -> Result<Value, ApiCallError> {
+        let url = format!("{}{}", self.base, path);
+        let request = self
+            .http
+            .post(&url)
+            .header(reqwest::header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .body(body.to_string());
+        self.send(url, request).await
+    }
+
     /// PATCH a JSON `body` to `path`, returning the parsed JSON response.
     pub async fn patch_json(&self, path: &str, body: &Value) -> Result<Value, ApiCallError> {
         let url = format!("{}{}", self.base, path);
@@ -308,6 +328,12 @@ mod tests {
     fn encode_vault_path_preserves_slashes_and_encodes_spaces() {
         assert_eq!(encode_vault_path("notes/My Note.md"), "notes/My%20Note.md");
         assert_eq!(encode_vault_path("plain.md"), "plain.md");
+    }
+
+    #[test]
+    fn encode_path_segment_encodes_everything_but_unreserved() {
+        assert_eq!(encode_path_segment("a-b_c1"), "a-b_c1");
+        assert_eq!(encode_path_segment("a/b\\c.%?#"), "a%2Fb%5Cc%2E%25%3F%23");
     }
 
     #[test]
