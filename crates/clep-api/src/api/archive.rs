@@ -1423,6 +1423,9 @@ pub async fn ingest_archive(
     Ok((status, Json(response)).into_response())
 }
 
+/// Start of the 409 message when a URL is already archived with other content.
+pub(crate) const CONTENT_CONFLICT: &str = "archive exists with different content";
+
 /// Refuse every archive write when `archive.enabled` is off.
 pub(crate) fn ensure_archiving_enabled(state: &AppState) -> Result<(), ApiError> {
     if state.vault.config().archive.enabled {
@@ -1499,7 +1502,7 @@ pub(crate) async fn ingest(
                     ));
                 }
                 return Err(ApiError::conflict_with_detail(
-                    format!("archive exists with different content: {}", req.url),
+                    format!("{CONTENT_CONFLICT}: {}", req.url),
                     serde_json::json!({
                         "existing_hash": existing_hash,
                         "new_hash": source_hash,

@@ -13,15 +13,21 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use clep_feeds::network::{CheckedHttpClient, CheckedResponse};
 use dom_smoothie::{Metadata, Readability};
+use ego_tree::iter::Edge;
 use htmd::HtmlToMarkdown;
+use html5ever::driver::Parser;
+use html5ever::tendril::{StrTendril, TendrilSink};
+use scraper::{Html, HtmlTreeSink};
 use serde::Deserialize;
+use tokio::sync::Semaphore;
 use tokio::time::Instant;
 use url::Url;
 use utoipa::ToSchema;
 
 use super::AppState;
 use super::archive::{
-    ArchiveRequest, ArchiveResponse, ensure_archiving_enabled, ingest, validate_http_url,
+    ArchiveRequest, ArchiveResponse, CONTENT_CONFLICT, ensure_archiving_enabled, ingest,
+    validate_http_url,
 };
 use super::error::ApiError;
 use crate::external_preview_capture::{decode_html, is_html_document, redirect_target, valid_url};
@@ -33,6 +39,22 @@ pub(crate) const MAX_ARCHIVE_BYTES: usize = 8 * 1024 * 1024;
 const FETCH_DEADLINE: Duration = Duration::from_secs(20);
 /// Same hop limit as link previews.
 const MAX_REDIRECTS: usize = 10;
+/// Deepest element nesting a fetched page may have. Readability and the
+/// markdown converter recurse over the tree; deeper pages are refused.
+pub(crate) const MAX_ARCHIVE_DEPTH: usize = 512;
+/// Wall-clock budget for the depth check's own parse. html5ever's tree
+/// builder is quadratic in nesting depth, so a page that evades the per-chunk
+/// check below still stops here.
+const DEPTH_CHECK_BUDGET: Duration = Duration::from_secs(5);
+/// The depth check feeds the parser this much at a time, then looks at the
+/// newest node.
+const DEPTH_CHECK_CHUNK_BYTES: usize = 256;
+/// Stack for the extraction thread. The depth limit keeps recursion well
+/// inside it; the margin is defence in depth, because an overflow aborts the
+/// whole server.
+const EXTRACTION_STACK_BYTES: usize = 64 * 1024 * 1024;
+/// At most this many pages are parsed at once, server-wide.
+static EXTRACTION_PERMITS: Semaphore = Semaphore::const_new(2);
 /// Tag on every page archived by a server fetch.
 const SERVER_FETCH_TAG: &str = "server-fetch";
 
@@ -69,6 +91,10 @@ pub(crate) enum ArchiveUrlError {
     Fetch { host: String },
     #[error("not an HTML page")]
     NotHtml,
+    #[error("page is nested too deeply")]
+    TooDeep,
+    #[error("no readable content")]
+    NoContent,
 }
 
 impl From<ArchiveUrlError> for ApiError {
@@ -89,7 +115,7 @@ impl From<ArchiveUrlError> for ApiError {
         (status = 400, description = "Invalid URL", body = ApiError),
         (status = 403, description = "Archiving disabled", body = ApiError),
         (status = 409, description = "Archive content conflict", body = ApiError),
-        (status = 422, description = "Page could not be fetched or is not HTML", body = ApiError),
+        (status = 422, description = "Page could not be fetched, is not HTML, is nested too deeply, or has no readable content", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
@@ -113,11 +139,20 @@ async fn archive_with_client(
     let url = Url::parse(&req.url)
         .map_err(|_| ApiError::bad_request("url must be an absolute HTTP(S) URL"))?;
     let page = fetch_page(client, &url).await?;
+    let host = page.final_url.host_str().unwrap_or_default().to_owned();
     let captured_at = state
         .clock
         .now()
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    ingest(state, to_archive_request(page, req.tags, captured_at)).await
+    ingest(state, to_archive_request(page, req.tags, captured_at))
+        .await
+        .map_err(|mut error| {
+            // Ingest's conflict message carries the full URL; name only the host.
+            if error.status == 409 && error.error.starts_with(CONTENT_CONFLICT) {
+                error.error = format!("{CONTENT_CONFLICT}: {host}");
+            }
+            error
+        })
 }
 
 /// Fetch `url` as an anonymous client and extract its article.
@@ -142,16 +177,98 @@ pub(crate) async fn fetch_page(
     if !is_html_document(&response) {
         return Err(ArchiveUrlError::NotHtml);
     }
-    tokio::task::spawn_blocking(move || {
+    on_extraction_thread(move || {
         let content_type = response
             .headers
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok());
         let html = decode_html(&response.body, content_type).into_owned();
+        ensure_shallow(&html)?;
         extract(response.final_url, html)
     })
     .await
-    .map_err(|_| failed())
+}
+
+/// Run `job` on a dedicated large-stack thread, holding one of the
+/// [`EXTRACTION_PERMITS`] until the thread ends. The permit moves into the
+/// thread, so a dropped request cannot free it while the parse still runs.
+async fn on_extraction_thread<T: Send + 'static>(
+    job: impl FnOnce() -> Result<T, ArchiveUrlError> + Send + 'static,
+) -> Result<T, ArchiveUrlError> {
+    let permit = EXTRACTION_PERMITS
+        .acquire()
+        .await
+        .map_err(|_| ArchiveUrlError::NoContent)?;
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("archive-extract".to_owned())
+        .stack_size(EXTRACTION_STACK_BYTES)
+        .spawn(move || {
+            let _permit = permit;
+            let _ = sender.send(job());
+        })
+        .map_err(|error| {
+            tracing::warn!(error = %error, "could not start archive extraction thread");
+            ArchiveUrlError::NoContent
+        })?;
+    // A panicking job drops the sender.
+    receiver.await.unwrap_or(Err(ArchiveUrlError::NoContent))
+}
+
+/// Refuse a document nested deeper than [`MAX_ARCHIVE_DEPTH`] before any
+/// recursive parser sees it.
+///
+/// The document is parsed with html5ever in small chunks. After each chunk
+/// the newest node's depth is checked, which stops a plain nesting bomb
+/// within a few kilobytes. A page that keeps its newest node shallow still
+/// meets the [`DEPTH_CHECK_BUDGET`] and the exact depth check on the
+/// finished tree.
+fn ensure_shallow(html: &str) -> Result<(), ArchiveUrlError> {
+    let deadline = std::time::Instant::now() + DEPTH_CHECK_BUDGET;
+    let mut parser =
+        html5ever::parse_document(HtmlTreeSink::new(Html::new_document()), Default::default());
+    let mut rest = html;
+    while !rest.is_empty() {
+        let mut end = rest.len().min(DEPTH_CHECK_CHUNK_BYTES);
+        while !rest.is_char_boundary(end) {
+            end += 1;
+        }
+        let (chunk, tail) = rest.split_at(end);
+        parser.process(StrTendril::from_slice(chunk));
+        rest = tail;
+        if newest_node_too_deep(&parser) || std::time::Instant::now() > deadline {
+            return Err(ArchiveUrlError::TooDeep);
+        }
+    }
+    let document = parser.finish();
+    if deepest(&document) > MAX_ARCHIVE_DEPTH {
+        return Err(ArchiveUrlError::TooDeep);
+    }
+    Ok(())
+}
+
+fn newest_node_too_deep(parser: &Parser<HtmlTreeSink>) -> bool {
+    let document = parser.tokenizer.sink.sink.0.borrow();
+    document.tree.nodes().next_back().is_some_and(|node| {
+        node.ancestors().take(MAX_ARCHIVE_DEPTH + 1).count() > MAX_ARCHIVE_DEPTH
+    })
+}
+
+/// Depth of the deepest node below the document root, walked iteratively.
+fn deepest(document: &Html) -> usize {
+    let mut depth = 0usize;
+    let mut deepest = 0;
+    for edge in document.tree.root().traverse() {
+        match edge {
+            Edge::Open(_) => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            Edge::Close(_) => depth -= 1,
+        }
+    }
+    // The document node itself is not nested in anything.
+    deepest.saturating_sub(1)
 }
 
 /// GET `url`, following redirects, within [`FETCH_DEADLINE`].
@@ -177,19 +294,29 @@ async fn fetch_document(
 }
 
 /// Readability article → markdown. When Readability finds no article, or an
-/// article with no text, the whole `<body>` becomes the markdown instead.
-fn extract(final_url: Url, html: String) -> FetchedPage {
+/// article with no text, the whole `<body>` becomes the markdown instead. A
+/// page with no text either way has no readable content.
+fn extract(final_url: Url, html: String) -> Result<FetchedPage, ArchiveUrlError> {
     let converter = HtmlToMarkdown::builder()
         .skip_tags(vec!["head", "script", "style", "noscript", "template"])
         .build();
-    let article = Readability::new(html.as_str(), Some(final_url.as_str()), None)
-        .ok()
-        .and_then(|mut readability| readability.parse().ok());
+    let mut readability = Readability::new(html.as_str(), Some(final_url.as_str()), None).ok();
+    // Read before `parse`, which strips the JSON-LD scripts it reads from.
+    let page_metadata = readability
+        .as_ref()
+        .map(|readability| readability.get_article_metadata(readability.parse_json_ld()))
+        .unwrap_or_default();
+    let article = readability
+        .as_mut()
+        .and_then(|readability| readability.parse().ok());
     let article_markdown = article
         .as_ref()
         .and_then(|article| converter.convert(&article.content).ok())
         .filter(|markdown| !markdown.trim().is_empty());
-    let markdown = article_markdown.unwrap_or_else(|| converter.convert(&html).unwrap_or_default());
+    let markdown = article_markdown
+        .or_else(|| converter.convert(&html).ok())
+        .filter(|markdown| !markdown.trim().is_empty())
+        .ok_or(ArchiveUrlError::NoContent)?;
     let metadata = match article {
         Some(article) => Metadata {
             title: article.title,
@@ -199,16 +326,14 @@ fn extract(final_url: Url, html: String) -> FetchedPage {
             lang: article.lang,
             ..Metadata::default()
         },
-        None => Readability::new(html.as_str(), Some(final_url.as_str()), None)
-            .map(|readability| readability.get_article_metadata(readability.parse_json_ld()))
-            .unwrap_or_default(),
+        None => page_metadata,
     };
     let title = Some(metadata.title.trim())
         .filter(|title| !title.is_empty())
         .or(final_url.host_str())
         .unwrap_or("untitled")
         .to_owned();
-    FetchedPage {
+    Ok(FetchedPage {
         final_url,
         html,
         title,
@@ -217,7 +342,7 @@ fn extract(final_url: Url, html: String) -> FetchedPage {
         published_time: non_empty(metadata.published_time),
         lang: non_empty(metadata.lang),
         markdown,
-    }
+    })
 }
 
 fn non_empty(value: Option<String>) -> Option<String> {
@@ -431,18 +556,83 @@ mod tests {
         let (server, client, url) = fixture(MAX_ARCHIVE_BYTES).await;
         Mock::given(method("GET"))
             .and(path("/start"))
-            .respond_with(
-                ResponseTemplate::new(302)
-                    .insert_header("location", "http://127.0.0.1/secret?token=hunter2"),
-            )
+            .respond_with(ResponseTemplate::new(302).insert_header(
+                "location",
+                format!(
+                    "http://127.0.0.1:{}/secret?token=hunter2",
+                    server.address().port()
+                ),
+            ))
             .expect(1)
             .mount(&server)
             .await;
 
         let error = fetch_page(&client, &url).await.unwrap_err();
 
+        // The redirect names the mock server itself, so a second request
+        // would reach it if the policy let the hop through.
         assert_eq!(error.to_string(), "could not fetch example.test");
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    fn nested(depth: usize, inner: &str) -> String {
+        format!(
+            "<html><head><title>Nested</title></head><body>{}{inner}{}</body></html>",
+            "<div>".repeat(depth),
+            "</div>".repeat(depth)
+        )
+    }
+
+    #[tokio::test]
+    async fn fetch_page_refuses_deep_nesting_quickly() {
+        let (server, client, url) = fixture(MAX_ARCHIVE_BYTES).await;
+        serve(&server, "/start", nested(20_000, "text"), "text/html").await;
+
+        let started = std::time::Instant::now();
+        let error = fetch_page(&client, &url).await.unwrap_err();
+
+        assert_eq!(error, ArchiveUrlError::TooDeep);
+        assert_eq!(ApiError::from(error).status, 422);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "refused after {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn depth_check_counts_nodes_below_the_document() {
+        // html, body, then the divs, then the text node.
+        assert_eq!(deepest(&Html::parse_document(&nested(600, "x"))), 603);
+        assert_eq!(ensure_shallow(&nested(MAX_ARCHIVE_DEPTH - 3, "x")), Ok(()));
+        assert_eq!(
+            ensure_shallow(&nested(MAX_ARCHIVE_DEPTH - 2, "x")),
+            Err(ArchiveUrlError::TooDeep)
+        );
+    }
+
+    #[test]
+    fn depth_check_follows_implied_end_tags() {
+        // Unclosed `<li>` and `<p>` are closed by the parser, not nested.
+        let html = format!("<ul>{}</ul>", "<li><p>item".repeat(5_000));
+        assert_eq!(ensure_shallow(&html), Ok(()));
+    }
+
+    #[tokio::test]
+    async fn fetch_page_refuses_empty_pages() {
+        let (server, client, url) = fixture(MAX_ARCHIVE_BYTES).await;
+        serve(
+            &server,
+            "/start",
+            "<html><head><title>Empty</title></head><body> </body></html>",
+            "text/html",
+        )
+        .await;
+
+        let error = fetch_page(&client, &url).await.unwrap_err();
+
+        assert_eq!(error, ArchiveUrlError::NoContent);
+        assert_eq!(ApiError::from(error).status, 422);
     }
 
     #[tokio::test]
@@ -568,6 +758,71 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert!(matches!(again.status, ArchiveStatus::AlreadyExists));
         assert_eq!(again.page_id, created.page_id);
+    }
+
+    #[tokio::test]
+    async fn archive_with_client_archives_a_400_deep_page() {
+        let (_temp, state) = app_state();
+        let (server, client, url) = fixture(MAX_ARCHIVE_BYTES).await;
+        let article = ARTICLE_HTML
+            .split_once("<body>")
+            .and_then(|(_, body)| body.split_once("</body>"))
+            .map(|(body, _)| body)
+            .unwrap();
+        serve(&server, "/start", nested(400, article), "text/html").await;
+
+        let (status, created) = archive_with_client(
+            &state,
+            &client,
+            ArchiveUrlRequest {
+                url: url.to_string(),
+                tags: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(status, StatusCode::CREATED);
+        let page = fs::read_to_string(state.vault.root().join(&created.vault_path)).unwrap();
+        assert!(page.contains("How the clepsydra kept time"), "{page}");
+    }
+
+    #[tokio::test]
+    async fn archive_with_client_conflict_names_only_the_host() {
+        let (_temp, state) = app_state();
+        let (server, client, mut url) = fixture(MAX_ARCHIVE_BYTES).await;
+        url.set_query(Some("token=hunter2"));
+        Mock::given(method("GET"))
+            .and(path("/start"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(ARTICLE_HTML, "text/html"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        serve(
+            &server,
+            "/start",
+            ARTICLE_HTML.replace("Greek engineers", "Roman engineers"),
+            "text/html",
+        )
+        .await;
+        let request = || ArchiveUrlRequest {
+            url: url.to_string(),
+            tags: Vec::new(),
+        };
+        archive_with_client(&state, &client, request())
+            .await
+            .unwrap();
+
+        let error = archive_with_client(&state, &client, request())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.status, 409);
+        assert_eq!(
+            error.error,
+            "archive exists with different content: example.test"
+        );
+        assert!(error.detail.is_some(), "conflict detail is kept");
     }
 
     #[tokio::test]

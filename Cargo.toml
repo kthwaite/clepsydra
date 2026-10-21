@@ -38,12 +38,15 @@ csv = "1"
 dirs = "6"
 docx-rs = { version = "0.4.22", default-features = false }
 dom_smoothie = "0.18"
+ego-tree = "0.11"
 encoding_rs = "0.8"
 feed-rs = "2"
 fs4 = "1.1"
 gethostname = "1"
 glob = "0.3"
 htmd = "0.5"
+# Must match the html5ever that `scraper` builds on: `HtmlTreeSink` implements its `TreeSink`.
+html5ever = "0.39"
 image = { version = "0.25", default-features = false, features = [
   "png",
   "jpeg",

@@ -5290,7 +5290,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description Page could not be fetched or is not HTML */
+            /** @description Page could not be fetched, is not HTML, is nested too deeply, or has no readable content */
             422: {
                 headers: {
                     [name: string]: unknown;
