@@ -67,6 +67,7 @@ type World = {
   journalDeny?: string
   top?: string
   tools?: string[]
+  isListEmptyFirst?: boolean
 }
 
 function world(on: On, opts: World = {}) {
@@ -154,7 +155,8 @@ function world(on: On, opts: World = {}) {
     return ok('')
   })
   const toolNames = opts.tools ?? ['mcp__clepsydra__vault_task_update', 'mcp__clepsydra__vault_ai_journal_capture']
-  on('tool.list', () => ({ value: toolNames.map(name => ({ name, description: '', mcp: true })) }))
+  let lists = 0
+  on('tool.list', () => ({ value: (opts.isListEmptyFirst === true && lists++ === 0 ? [] : toolNames).map(name => ({ name, description: '', mcp: true })) }))
   on('tool.call', { tool: 'mcp__clepsydra__vault_task_update' }, (_$, e) => {
     seen.taskCalls.push({ ...e })
     return { result: 'updated' }
@@ -262,6 +264,16 @@ describe('/task binding', () => {
     expect(start.text).toContain('→ FIELD')
     expect(seen.taskCalls[0]?.tool).toBe('mcp__plugin_clepsydra_clepsydra__vault_task_update')
     expect(seen.taskCalls[0]?.status).toBe('FIELD')
+  })
+
+  test('a tool list taken before the server connected is not kept', async ($, on) => {
+    const { seen } = world(on, { isListEmptyFirst: true })
+    await $.command.run({ ...TYPED, command: 'task', args: 'TSK-brave' })
+    const early = await $.command.run({ ...TYPED, command: 'task', args: 'start' })
+    expect(early.text).toContain('not available')
+    const start = await $.command.run({ ...TYPED, command: 'task', args: 'start' })
+    expect(start.text).toContain('→ FIELD')
+    expect(seen.taskCalls.length).toBe(1)
   })
 
   test('start reports an unavailable vault tool', async ($, on) => {

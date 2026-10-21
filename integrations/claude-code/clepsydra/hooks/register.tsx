@@ -142,23 +142,24 @@ function isPersonOrigin(o: PromptOrigin | undefined): boolean {
   return o === undefined || o.kind === 'composer' || o.kind === 'bridge'
 }
 
-/** Tool names for this session, listed once; a failed listing is not cached. */
-async function toolNames($: $): Promise<readonly string[]> {
+/**
+ * The full name of vault tool `suffix`. Only a list that holds it is cached:
+ * the MCP server may not have connected yet, so a miss re-lists next time.
+ */
+async function findVaultTool($: $, suffix: string) {
   const cached = await read($, toolNamesRef)
-  if (cached !== null) return cached
-  try {
-    const names = (await $.tool.list()).map(t => t.name)
-    await update($, toolNamesRef, () => names)
-    return names
-  } catch {
-    return []
-  }
+  const known = cached === null ? undefined : resolveVaultTool(cached, suffix)
+  if (known !== undefined) return known
+  const names = (await $.tool.list()).map(t => t.name)
+  const found = resolveVaultTool(names, suffix)
+  if (found !== undefined) await update($, toolNamesRef, () => names)
+  return found
 }
 
 /** A clepsydra vault tool by suffix, called through `$.tool.call`, reduced to ok + text. */
 async function callVault($: $, suffix: string, input: Record<string, unknown>, consent?: string) {
   try {
-    const tool = resolveVaultTool(await toolNames($), suffix)
+    const tool = await findVaultTool($, suffix)
     if (tool === undefined) return { ok: false, text: `clepsydra MCP tool ${suffix} not available` }
     const r = await $.tool.call({ tool, ...input, ...(consent === undefined ? {} : { consent }) })
     if (r.deny !== undefined) return { ok: false, text: r.deny }
