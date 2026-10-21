@@ -30,7 +30,8 @@ files directly, which bypasses locking, link rewriting, and the index.
   unquoted TOML date-time (`2026-08-27T14:00:00Z`, or a bare date). Quoted, it
   is refused: a string never sorts or filters as a date.
 - **Wikilinks** — `[[Canonical Name]]` links pages by title-derived name or
-  alias. The server rewrites inbound links on moves/renames/deletes.
+  alias. The server rewrites inbound links on moves and renames. Links to an
+  archived page stay as written and are unresolved until it is restored.
 - **Filenames** — authored pages use `yyyymmdd.slug.shortid.md`
   (docs/adr/0002). Never construct these by hand; `vault_create_page`
   derives them.
@@ -53,8 +54,10 @@ files directly, which bypasses locking, link rewriting, and the index.
 | File pages (kind/project) | `vault_assign` — not move |
 | Explicit rename/relocate | `vault_move_page` |
 | Folder create/delete/move | `vault_folder` |
-| Remove a page | `vault_delete_page` |
-| See what a move/delete would rewrite | `vault_preview_mutation` |
+| Remove a page | `vault_archive_page` (to the Rubbish Bin; restorable) |
+| Find / inspect / restore a binned page | `vault_list_rubbish`, `vault_get_rubbish_item`, `vault_restore_page` |
+| Erase a binned page for good | `vault_purge_page` — user-confirmed only |
+| See what a move would rewrite | `vault_preview_mutation` |
 | See the Task Board / look up codes | `vault_board` |
 | New Task | `vault_task_create` — not create |
 | Move a Task through the board / edit fields | `vault_task_update` |
@@ -156,11 +159,14 @@ Close a finished Cycle with `vault_cycle_update` using state `CLOSED`. Pass
 `carry_to` to move unfinished Tasks: `"BACKLOG"` moves them to Backlog, while
 a Cycle code or unique prefix reassigns them.
 
-**Delete.** `vault_delete_page` without `force` first. If it refuses with a
-backlink list, show the user what links there and confirm before re-running
-with `force: true` (default rewrite `plain_text` turns inbound links into
-plain text). For folders, inspect with `vault_tree` before any
-`recursive: true` delete.
+**Remove.** `vault_archive_page` moves a page to the Rubbish Bin. Inbound
+links stay as written and go unresolved, so check `vault_links` (backlinks)
+first and show the user what links there. `vault_restore_page` takes the
+item UUID (from the archive result or `vault_list_rubbish`) and restores to
+the original path only; an occupied path conflicts and the item stays
+binned. `vault_purge_page` and `vault_empty_rubbish` erase for good: run
+them only on the user's explicit request. For folders, inspect with
+`vault_tree` before any `vault_folder` delete with `recursive: true`.
 
 ## Don'ts
 
@@ -169,8 +175,8 @@ plain text). For folders, inspect with `vault_tree` before any
 - Don't create near-duplicate pages — search, then extend or link instead.
 - Don't use `vault_create_page` for a current conversation; it cannot provide
   conversation identity, verified-prefix, or safe suffix-append semantics.
-- Don't force-delete or recursively delete without surfacing what will be
-  affected to the user first.
+- Don't purge, empty the bin, or recursively delete a folder without
+  surfacing what will be affected to the user first.
 
 ## Setup (once)
 

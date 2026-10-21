@@ -2,7 +2,7 @@
   "name": "clepsydra",
   "version": "0.2.0",
   "author": { "name": "Kit Thwaite" },
-  "description": "Clepsydra vault in Claude Code: /board pane, /task active-task binding, [[wikilink]] page attach, and an automatic session journal entry (/journal).",
+  "description": "Clepsydra vault in Claude Code: the vault MCP server (clep mcp); vault, onboard-project, decide, triage and research-to-vault skills; /board pane and /task binding; a Claude-run merge into the hub's integration branch moves the Task to Review with a Delivery line; vault health in the status line; [[wikilink]] page attach; and a session journal entry (/journal).",
   "types": "./types/index.d.ts",
   "userConfig": {
     "apiBase": {

@@ -13,9 +13,11 @@ and tool rules come from the vault skill.
 1. **Resolve the project slug.** The plugin's `projectMap` option maps this
    repo to a slug; without a mapping, use the board project named like the
    repo (`vault_board`). No slug resolves: ask the user, then stop.
-2. **Find the hub.** `vault_search "kind:project project:<slug>"`. When two
-   PROJECT pages share the slug, the one with `board = true` is the hub.
-   No hub: tell the user and stop (`onboard-project` creates one).
+2. **Find the hub.** `vault_board` with `project: <slug>`: the hub is the
+   `operations[]` row whose `project` is the slug, and its `path` is the
+   hub page. The board lists one row per slug, so this is the hub the
+   plugin uses. No row: tell the user and stop (`onboard-project` creates
+   one).
 3. **Compose one entry** from the user's words and the conversation. The
    decision and the reason must both be stated; ask for the missing one.
    Reference is a `[[TSK-…]]` code (the active Task, or one the user names)
