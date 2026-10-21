@@ -17,6 +17,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::reading::{
+    AgendaParams, BaseQueryParams, FeedEntriesParams, calendar_bounds, feed_entries_query,
+    local_today,
+};
 use super::tasking::{
     BoardKind, INCLUDE_RETIRED, TaskRef, board_query, classify_ref, deserialize_tri_state,
     filter_board_project, find_board_id, insert_tri_state, page_meta_id, resolve_project_patch,
@@ -200,7 +204,9 @@ vault_cycle_update, passing carry_to to move their unfinished Tasks. Page paths 
 folders. An occupied-path restore conflict means the original path is occupied and the item \
 remains binned; resolve that path before retrying. A rubbish item drift conflict means the item \
 remains binned; re-list with vault_list_rubbish and inspect it with vault_get_rubbish_item. On \
-a page revision conflict, re-read the page with vault_get_page and re-apply the change.";
+a page revision conflict, re-read the page with vault_get_page and re-apply the change. List Bases \
+with vault_bases and evaluate one view with vault_base_query. Read the dated agenda (and, with a \
+from/to range, the calendar) with vault_agenda. Read feed entries with vault_feed_entries.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreatePageParams {
@@ -1320,6 +1326,106 @@ impl VaultMcpServer {
     }
 
     #[tool(
+        name = "vault_bases",
+        description = "List Bases (saved `.base` queries over vault pages) with their slugs and views. Use a slug and view name with vault_base_query.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_bases(&self) -> Result<String, String> {
+        let value = self
+            .client
+            .get_json("/api/vault/bases", &[])
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_base_query",
+        description = "Evaluate one view of a Base with its saved filter, sort and grouping. Returns `output` (rows or groups), `revision` and `member_creation`. Read-only.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_base_query(
+        &self,
+        Parameters(params): Parameters<BaseQueryParams>,
+    ) -> Result<String, String> {
+        let path = format!(
+            "/api/vault/bases/{}/views/{}/evaluate",
+            encode_vault_path(&params.slug),
+            encode_vault_path(&params.view)
+        );
+        let value = self
+            .client
+            .post_json(&path, &serde_json::json!({}))
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_agenda",
+        description = "Read the dated agenda (overdue, today and upcoming Tasks and todos) classified against `today` (local `YYYY-MM-DD`, default local today). With both `from` and `to` (local dates, inclusive) the result also carries `calendar`: dated pages in that window.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_agenda(
+        &self,
+        Parameters(params): Parameters<AgendaParams>,
+    ) -> Result<String, String> {
+        // Validate the range before any network call.
+        let bounds = match (&params.from, &params.to) {
+            (Some(from), Some(to)) => Some(calendar_bounds(from, to)?),
+            _ => None,
+        };
+        let today = params.today.clone().unwrap_or_else(local_today);
+        let agenda = self
+            .client
+            .get_json("/api/vault/agenda", &[("today", today)])
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut result = serde_json::json!({ "agenda": agenda });
+        if let Some((from, to)) = bounds {
+            result["calendar"] = self
+                .client
+                .get_json("/api/vault/index/calendar", &[("from", from), ("to", to)])
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        render(&result)
+    }
+
+    #[tool(
+        name = "vault_feed_entries",
+        description = "List RSS/Atom feed entries, newest first. Optional `feed` ids narrow to those feeds, `unread: true` keeps only unread entries, `limit` caps the count.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_feed_entries(
+        &self,
+        Parameters(params): Parameters<FeedEntriesParams>,
+    ) -> Result<String, String> {
+        let value = self
+            .client
+            .get_json("/api/vault/feeds/entries", &feed_entries_query(&params))
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
         name = "vault_task_create",
         description = "Create a Task on the Task Board — preferred over vault_create_page because it mints a TSK-<adjective>-<noun>-<tail> code (the server assigns it; never invent one) and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); `task_type` is optional and one of FEATURE, FIX, TASK, STORY, SPIKE; a Cycle must match an existing code or unique prefix of one (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. `blocked_by` lists its Blockers (the Tasks it waits on) as TSK codes or unique prefixes. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
         annotations(
@@ -1783,10 +1889,13 @@ mod tests {
         assert_eq!(
             names,
             [
+                "vault_agenda",
                 "vault_ai_journal_capture",
                 "vault_append_page",
                 "vault_archive_page",
                 "vault_assign",
+                "vault_base_query",
+                "vault_bases",
                 "vault_board",
                 "vault_capture_conversation",
                 "vault_create_page",
@@ -1794,6 +1903,7 @@ mod tests {
                 "vault_cycle_update",
                 "vault_edit_page",
                 "vault_empty_rubbish",
+                "vault_feed_entries",
                 "vault_folder",
                 "vault_get_page",
                 "vault_get_rubbish_item",
@@ -4154,5 +4264,115 @@ mod tests {
             .await
             .expect_err("dead server should error");
         assert!(err.contains("clep serve"), "missing start hint: {err}");
+    }
+
+    async fn create_reading_base(server: &VaultMcpServer) {
+        server
+            .client
+            .post_json(
+                "/api/vault/bases",
+                &json!({
+                    "slug": "reading",
+                    "definition": {
+                        "name": "Reading",
+                        "views": [{ "name": "All", "layout": "table" }]
+                    }
+                }),
+            )
+            .await
+            .expect("base create should succeed");
+    }
+
+    #[tokio::test]
+    async fn bases_lists_seeded_bases() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        create_reading_base(&server).await;
+        let listing = server.vault_bases().await.expect("vault_bases");
+        assert!(listing.contains("\"reading\""), "{listing}");
+    }
+
+    #[tokio::test]
+    async fn base_query_evaluates_a_view() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        create_reading_base(&server).await;
+        let value = parse(
+            server
+                .vault_base_query(Parameters(crate::reading::BaseQueryParams {
+                    slug: "reading".to_string(),
+                    view: "All".to_string(),
+                }))
+                .await,
+        );
+        assert!(value["output"].is_object(), "{value}");
+        assert!(value["revision"].is_string(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn agenda_without_range_has_no_calendar() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_agenda(Parameters(crate::reading::AgendaParams {
+                    today: Some("2026-10-21".to_string()),
+                    from: None,
+                    to: None,
+                }))
+                .await,
+        );
+        assert!(value["agenda"]["overdue"].is_array(), "{value}");
+        assert!(value.get("calendar").is_none(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn agenda_with_range_has_calendar() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_agenda(Parameters(crate::reading::AgendaParams {
+                    today: Some("2026-10-21".to_string()),
+                    from: Some("2026-10-01".to_string()),
+                    to: Some("2026-10-31".to_string()),
+                }))
+                .await,
+        );
+        assert!(value["agenda"].is_object(), "{value}");
+        assert!(!value["calendar"].is_null(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn agenda_rejects_bad_range_before_calling_the_server() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_agenda(Parameters(crate::reading::AgendaParams {
+                today: None,
+                from: Some("2026-10-31".to_string()),
+                to: Some("2026-10-01".to_string()),
+            }))
+            .await
+            .expect_err("from > to must fail");
+        assert!(err.contains("from"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn feed_entries_empty_vault() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_feed_entries(Parameters(crate::reading::FeedEntriesParams {
+                    feed: Some(vec![1, 2]),
+                    unread: Some(true),
+                    limit: Some(5),
+                }))
+                .await,
+        );
+        let entries = value.get("entries").unwrap_or(&value);
+        assert_eq!(entries.as_array().map(Vec::len), Some(0), "{value}");
+    }
+
+    #[test]
+    fn server_instructions_mention_reading_tools() {
+        for tool in ["vault_bases", "vault_agenda", "vault_feed_entries"] {
+            assert!(MCP_INSTRUCTIONS.contains(tool), "missing {tool}");
+        }
     }
 }
