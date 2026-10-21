@@ -227,6 +227,19 @@ impl ApiClient {
         self.send(url, request).await
     }
 
+    /// POST a JSON `body` to `path` under `timeout` instead of the client's
+    /// own, for the one call whose server-side work can honestly outlast it.
+    pub async fn post_json_timeout(
+        &self,
+        path: &str,
+        body: &Value,
+        timeout: Duration,
+    ) -> Result<Value, ApiCallError> {
+        let url = format!("{}{}", self.base, path);
+        let request = self.http.post(&url).json(body).timeout(timeout);
+        self.send(url, request).await
+    }
+
     /// POST a raw `text/plain` `body` to `path`, returning the parsed JSON response.
     pub async fn post_text(&self, path: &str, body: &str) -> Result<Value, ApiCallError> {
         let url = format!("{}{}", self.base, path);
@@ -362,6 +375,41 @@ mod tests {
         let client = ApiClient::new(server.uri(), None).unwrap();
         let response = client
             .patch_json("/api/vault/board/tasks/abc", &body)
+            .await
+            .unwrap();
+        assert_eq!(response, serde_json::json!({"ok": true}));
+    }
+
+    #[tokio::test]
+    async fn post_json_timeout_outlasts_the_client_timeout() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // Its own server, not one from wiremock's shared pool: the delayed
+        // response the timeout abandons must not reach another test.
+        let server = MockServer::builder().start().await;
+        Mock::given(method("POST"))
+            .and(path("/slow"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"ok": true}))
+                    .set_delay(Duration::from_millis(400)),
+            )
+            .mount(&server)
+            .await;
+
+        let client = ApiClient::new(server.uri(), None)
+            .unwrap()
+            .with_timeout(Duration::from_millis(100))
+            .unwrap();
+        let body = serde_json::json!({});
+        let err = client.post_json("/slow", &body).await.unwrap_err();
+        assert!(
+            matches!(err, ApiCallError::Unreachable { .. }),
+            "the client timeout must still bound post_json: {err:?}"
+        );
+        let response = client
+            .post_json_timeout("/slow", &body, Duration::from_secs(5))
             .await
             .unwrap();
         assert_eq!(response, serde_json::json!({"ok": true}));

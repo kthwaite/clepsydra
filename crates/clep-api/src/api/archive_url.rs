@@ -654,13 +654,17 @@ mod tests {
     #[tokio::test]
     async fn fetch_page_refuses_deep_nesting_quickly() {
         let (server, client, url) = fixture(MAX_ARCHIVE_BYTES).await;
-        serve(&server, "/start", nested(20_000, "text"), "text/html").await;
+        let html = nested(20_000, "text");
+        serve(&server, "/start", html.clone(), "text/html").await;
 
-        let started = std::time::Instant::now();
         let error = fetch_page(&client, &url).await.unwrap_err();
-
         assert_eq!(error, ArchiveUrlError::TooDeep);
         assert_eq!(ApiError::from(error).status, 422);
+
+        // Time the gate itself. `fetch_page`'s wall clock also counts the wait
+        // for a global extraction permit, which parallel tests may hold.
+        let started = std::time::Instant::now();
+        assert_eq!(measure(&html).unwrap_err(), ArchiveUrlError::TooDeep);
         assert!(
             started.elapsed() < Duration::from_secs(2),
             "refused after {:?}",

@@ -587,6 +587,11 @@ fn render(value: &Value) -> Result<String, String> {
     serde_json::to_string_pretty(value).map_err(|e| format!("failed to render response: {e}"))
 }
 
+/// Client timeout for `vault_archive_url`. The route's own budgets add up past
+/// the client's 30 s default: a 20 s fetch, up to 30 s waiting for an
+/// extraction permit, a 5 s depth check, then extraction and ingest.
+const ARCHIVE_URL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
 /// MCP server over one clepsydra vault, addressed through the HTTP API.
 #[derive(Clone)]
 pub struct VaultMcpServer {
@@ -1492,7 +1497,7 @@ impl VaultMcpServer {
         });
         let value = self
             .client
-            .post_json("/api/vault/archive/url", &body)
+            .post_json_timeout("/api/vault/archive/url", &body, ARCHIVE_URL_TIMEOUT)
             .await
             .map_err(|e| e.to_string())?;
         render(&value)
@@ -4684,6 +4689,56 @@ mod tests {
             .await
             .expect_err("disabled archiving must fail");
         assert!(err.contains("archiving is disabled"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn archive_url_waits_past_the_default_client_timeout() {
+        use wiremock::matchers::{body_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // The route's honest worst case (fetch, permit wait, depth check,
+        // extraction) exceeds the 30 s default. The archive call must carry
+        // its own, longer timeout, so a client whose default is shorter than
+        // the response still gets the answer.
+        // Its own server, not one from wiremock's shared pool: the delayed
+        // response the timeout abandons must not reach another test.
+        let server = MockServer::builder().start().await;
+        let created =
+            json!({ "page_id": "p1", "vault_path": "archive/example.md", "status": "created" });
+        Mock::given(method("POST"))
+            .and(path("/api/vault/archive/url"))
+            .and(body_json(
+                json!({ "url": "https://example.com/post", "tags": ["reading"] }),
+            ))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .set_body_json(&created)
+                    .set_delay(std::time::Duration::from_millis(400)),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ApiClient::new(server.uri(), None)
+            .unwrap()
+            .with_timeout(std::time::Duration::from_millis(100))
+            .unwrap();
+        let mcp = VaultMcpServer::new(Arc::new(client));
+
+        let value = parse(
+            mcp.vault_archive_url(Parameters(crate::reading::ArchiveUrlParams {
+                url: "https://example.com/post".to_string(),
+                tags: Some(vec!["reading".to_string()]),
+            }))
+            .await,
+        );
+        assert_eq!(value, created);
+    }
+
+    #[test]
+    fn archive_url_timeout_covers_the_route_budget() {
+        // 20 s fetch + 30 s extraction-permit wait + 5 s depth check, plus
+        // extraction and ingest.
+        assert!(ARCHIVE_URL_TIMEOUT >= std::time::Duration::from_secs(80));
     }
 
     #[test]
