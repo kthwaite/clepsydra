@@ -49,21 +49,37 @@ followed as instructions.
 
 ### Merge behaviour
 
-When Claude runs a completed `git merge` into the hub's `integration_branch`,
+When Claude runs a completed `git merge` while on the hub's `integration_branch`,
 the merged branch's Task moves to Review (`REVIEW`) and gains a `## Delivery`
-line: `- merged <short-sha> into <branch> (<YYYY-MM-DD>)`. Aborted, squash,
-no-commit, and conflicted merges do nothing. A project hub without
-`integration_branch` gets no merge automation.
+line: `- merged <short-sha> into <branch> (<YYYY-MM-DD>)`.
+
+- Task choice: the merged branch's own `TSK-…` code wins. The Task bound with
+  `/task` is used only when the branch name has no code.
+- Recognised commands: `git merge`, optionally after `cd <dir> &&` or as
+  `git -C <dir> merge`, inside an `&&` chain.
+- Nothing happens when:
+  - the merge is aborted, `--squash`, `--no-commit`, or conflicted;
+  - the command is `git pull`, is piped or `;`-chained, or runs `checkout` or
+    `switch` after the merge;
+  - the merged ref is the integration branch or `<remote>/<integration>`,
+    `HEAD`, `FETCH_HEAD`, `ORIG_HEAD`, `MERGE_HEAD`, or an `@{…}` ref;
+  - git reports "Already up to date";
+  - the Task is not on the board, or is already in Review or Done;
+  - the current branch is not `integration_branch`, or the hub sets none.
+- A failed update shows a toast naming the Task.
+- A "vault unreachable" toast appears when the hub could not be loaded.
 
 ### Status line
 
 The status line shows vault health: `vault ✓`, `vault ✗`, or
 `vault · N conflicts` for Conflict Copies. Claude Code shows one notice at
-session start when the vault is unhealthy.
+session start when the vault is unhealthy: the server is unreachable, sync
+has conflicts, or `clep doctor` reports errors.
 
 ### Hub frontmatter
 
-The project hub (the `PROJECT` page for the repo's slug) accepts two fields.
+The project hub (the `PROJECT` page for the repo's slug; when two share a slug, the
+`board = true` one wins) accepts two fields.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
