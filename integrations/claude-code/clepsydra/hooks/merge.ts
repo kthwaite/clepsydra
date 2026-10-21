@@ -1,0 +1,219 @@
+// A completed `git merge` in a Bash command: which branch, in which directory,
+// which board task it delivers, and the Delivery line for the task page.
+
+import { branchTaskCode, type BoardTask } from './tasks'
+
+export type MergeCall = { dir?: string; branch: string }
+
+type Token = { op: '&&' } | { word: string }
+
+/**
+ * Shell words split on `&&`. Undefined when the exit status may not be the
+ * last `&&` command's own (`|`, `;`, `||`, `&`, a newline, a subshell, a
+ * heredoc) or a quote is left open. Redirections are dropped with their target.
+ */
+function tokenize(cmd: string): Token[] | undefined {
+  const out: Token[] = []
+  let word = ''
+  let hasWord = false
+  let dropNext = false
+  const push = () => {
+    if (hasWord) {
+      if (dropNext) dropNext = false
+      else out.push({ word })
+    }
+    word = ''
+    hasWord = false
+  }
+  let i = 0
+  while (i < cmd.length) {
+    const c = cmd[i] as string
+    const n = cmd[i + 1]
+    if (c === "'") {
+      const end = cmd.indexOf("'", i + 1)
+      if (end < 0) return undefined
+      word += cmd.slice(i + 1, end)
+      hasWord = true
+      i = end + 1
+    } else if (c === '"') {
+      i += 1
+      while (i < cmd.length && cmd[i] !== '"') {
+        if (cmd[i] === '\\' && i + 1 < cmd.length) i += 1
+        word += cmd[i]
+        i += 1
+      }
+      if (i >= cmd.length) return undefined
+      hasWord = true
+      i += 1
+    } else if (c === '\\') {
+      if (n !== '\n' && n !== undefined) {
+        word += n
+        hasWord = true
+      }
+      i += 2
+    } else if (c === ' ' || c === '\t') {
+      push()
+      i += 1
+    } else if (c === '#' && !hasWord) {
+      break
+    } else if (c === '&' && n === '&') {
+      push()
+      out.push({ op: '&&' })
+      i += 2
+    } else if (c === '>' || c === '<' || (c === '&' && n === '>')) {
+      if (c === '<' && n === '<') return undefined
+      // `2>`: the fd digits are not a word.
+      if (/^\d+$/.test(word)) {
+        word = ''
+        hasWord = false
+      } else push()
+      i += c === '&' ? 2 : 1
+      if (cmd[i] === '>' || cmd[i] === '|') i += 1
+      if (cmd[i] === '&') {
+        i += 1
+        while (i < cmd.length && /[\d-]/.test(cmd[i] as string)) i += 1
+      } else dropNext = true
+    } else if (c === '|' || c === ';' || c === '&' || c === '\n' || c === '\r' || c === '(' || c === ')' || c === '`') {
+      return undefined
+    } else {
+      word += c
+      hasWord = true
+      i += 1
+    }
+  }
+  push()
+  return dropNext ? undefined : out
+}
+
+const joinDir = (base: string | undefined, next: string) =>
+  base === undefined || next.startsWith('/') ? next : `${base.replace(/\/+$/, '')}/${next}`
+
+/** `git merge` options that take the next word as their value. */
+const VALUE_OPTS = new Set(['-m', '-F', '-s', '-X', '--message', '--file', '--strategy', '--strategy-option', '--into-name', '--cleanup'])
+/** Merges that do not complete one: control verbs, and merges that leave no merge commit. */
+const NOT_A_MERGE = new Set(['--abort', '--continue', '--quit', '--squash', '--no-commit'])
+
+type GitMerge = MergeCall | 'other' | 'refused'
+
+/** One `&&` command's words: `git [-C dir | -c kv | --flag]… merge …`. */
+function gitMerge(words: readonly string[]): GitMerge {
+  let i = 1
+  let dir: string | undefined
+  while (i < words.length && (words[i] as string).startsWith('-')) {
+    const w = words[i] as string
+    if (w === '-C' || w === '-c') {
+      const v = words[i + 1]
+      if (v === undefined) return 'other'
+      if (w === '-C') dir = joinDir(dir, v)
+      i += 2
+    } else i += 1
+  }
+  if (words[i] !== 'merge') return 'other'
+  const branches: string[] = []
+  for (let j = i + 1; j < words.length; j += 1) {
+    const w = words[j] as string
+    if (w === '--') {
+      branches.push(...words.slice(j + 1))
+      break
+    }
+    if (NOT_A_MERGE.has(w)) return 'refused'
+    if (VALUE_OPTS.has(w)) j += 1
+    else if (!w.startsWith('-')) branches.push(w)
+  }
+  if (branches.length !== 1) return 'refused'
+  return { ...(dir === undefined ? {} : { dir }), branch: branches[0] as string }
+}
+
+/**
+ * The completed merge a Bash command runs: `git merge <opts> <branch>`, after
+ * `cd <dir> &&` or as `git -C <dir> merge …`, inside an `&&` chain. Undefined
+ * for control verbs, `--squash`, `--no-commit`, `git pull`, no or several
+ * branches, several merges, and any command whose exit status may not be the
+ * merge's.
+ */
+export function parseMerge(command: string): MergeCall | undefined {
+  const tokens = tokenize(command)
+  if (tokens === undefined) return undefined
+  const segments: string[][] = [[]]
+  for (const t of tokens) {
+    if ('op' in t) segments.push([])
+    else segments[segments.length - 1]?.push(t.word)
+  }
+  let cwd: string | undefined
+  let found: MergeCall | undefined
+  for (const seg of segments) {
+    // `GIT_EDITOR=true git merge …`: assignments lead the command.
+    const at = seg.findIndex(w => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w))
+    if (at < 0) continue
+    const words = seg.slice(at)
+    const head = words[0]
+    if (head === 'cd' || head === 'pushd' || head === 'popd') {
+      if (found !== undefined) continue
+      const to = words[1]
+      if (head === 'popd' || words.length !== 2 || to === undefined || to === '-') return undefined
+      cwd = joinDir(cwd, to)
+      continue
+    }
+    if (head !== 'git') continue
+    const m = gitMerge(words)
+    if (m === 'other') continue
+    if (m === 'refused' || found !== undefined) return undefined
+    const dir = m.dir === undefined ? cwd : joinDir(cwd, m.dir)
+    found = { ...(dir === undefined ? {} : { dir }), branch: m.branch }
+  }
+  return found
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/**
+ * A Bash `tool.call` result that ran to the end with exit 0. The host exposes
+ * no exit code: a non-zero exit, an interrupt or a throw sets `isError`; a
+ * deny means it never ran; a background run has not finished yet.
+ */
+export function bashSucceeded(r: { deny?: string; isError?: boolean; result?: unknown }): boolean {
+  if (r.deny !== undefined || r.isError === true || !isRecord(r.result)) return false
+  return r.result.interrupted !== true && r.result.backgroundTaskId === undefined
+}
+
+const DONE = new Set(['REVIEW', 'SEALED'])
+
+/** The board task a merge delivers: the bound code, else the merged branch's; not one already in REVIEW or SEALED. */
+export function mergeTask(input: { bound?: string; mergedBranch: string; tasks: readonly BoardTask[] }): BoardTask | undefined {
+  const code = input.bound ?? branchTaskCode(input.mergedBranch)
+  if (code === undefined) return undefined
+  const t = input.tasks.find(x => x.code.toLowerCase() === code.toLowerCase())
+  return t === undefined || DONE.has(t.status) ? undefined : t
+}
+
+export function deliveryLine(sha: string, branch: string, date: string): string {
+  return `- merged ${sha} into ${branch} (${date})`
+}
+
+/** `YYYY-MM-DD` of `ms` in local time. */
+export function localDate(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** True when `body` has a `## Delivery` heading outside a code fence. */
+function hasDeliveryHeading(body: string): boolean {
+  let fence: string | undefined
+  for (const line of body.split('\n')) {
+    const f = /^ {0,3}(`{3,}|~{3,})/.exec(line)
+    if (f !== null) {
+      const mark = f[1] as string
+      if (fence === undefined) fence = mark
+      else if (mark[0] === fence[0] && mark.length >= fence.length) fence = undefined
+      continue
+    }
+    if (fence === undefined && /^##[ \t]+delivery[ \t]*#*[ \t]*$/i.test(line)) return true
+  }
+  return false
+}
+
+/** `vault_append_page` arguments: under an existing `## Delivery`, else a new one at the end. */
+export function deliveryAppend(body: string, line: string): { heading?: 'Delivery'; content: string } {
+  return hasDeliveryHeading(body) ? { heading: 'Delivery', content: line } : { content: `\n## Delivery\n\n${line}\n` }
+}

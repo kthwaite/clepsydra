@@ -16,6 +16,7 @@ import {
   type PendingJournal,
 } from './journal'
 import { attachToast, extractWikilinks, formatAttachment, pageFromJson, pickExact, searchHits, truncatePage } from './links'
+import { bashSucceeded, deliveryAppend, deliveryLine, localDate, mergeTask, parseMerge, type MergeCall } from './merge'
 import { basename, mainCheckoutOf, parseProjectMap, resolveProject } from './project'
 import { resolveVaultTool } from './tools'
 import { bindingKey, branchTaskCode, groupTasks, parseBoard, resolveTaskRef, shortCode, type BoardTask } from './tasks'
@@ -226,11 +227,14 @@ async function refreshBoard($: $): Promise<BoardTask[] | null> {
     repo === null
       ? undefined
       : resolveProject({ repoBase: repo.repoBase, mainBase: repo.mainBase, map: cfg.projectMap, projects: board.projects })
+  const before = await read($, projectRef)
   await update($, boardRef, () => board.tasks)
   await update($, hubsRef, () => board.hubs)
   hubRows = board.hubRows
   await update($, projectRef, () => project ?? null)
   await update($, boardErrorRef, () => null)
+  // The hub loads on the first good board read, and again when the project changes.
+  if ((await read($, hubRef)) === null || before !== (project ?? null)) await loadHub($)
   await showStatus($)
   return board.tasks
 }
@@ -398,6 +402,77 @@ async function taskCommand($: $, args: string): Promise<string> {
   return `clepsydra: bound ${r.task.code} · ${r.task.status} · ${r.task.title}`
 }
 
+// ---------- merge → REVIEW ----------
+
+async function git($: $, dir: string, args: string[]): Promise<string> {
+  const r = await exec($, ['git', '-C', dir, ...args], 5000)
+  return r.exitCode === 0 ? r.stdout.trim() : ''
+}
+
+function pageBody(text: string): string | undefined {
+  const got = parseJson(text)
+  return got.ok && isRecord(got.json) && typeof got.json.body === 'string' ? got.json.body : undefined
+}
+
+/** The checkout the merge ran in: its own dir (relative to the repo top), else the repo top. */
+async function mergeDir($: $, call: MergeCall): Promise<string | undefined> {
+  if (call.dir?.startsWith('/') === true) return call.dir
+  const repo = await currentRepo($)
+  if (repo === null) return undefined
+  return call.dir === undefined ? repo.top : `${repo.top}/${call.dir}`
+}
+
+/**
+ * After a completed merge: when the merge's checkout is on the hub's
+ * integration branch, move the delivered task to REVIEW and add a Delivery
+ * line to its page. A failure after the task is known toasts it.
+ */
+async function afterMerge($: $, call: MergeCall): Promise<void> {
+  const dir = await mergeDir($, call)
+  if (dir === undefined) return
+  // No hub yet (startup's board read failed): a board read loads it.
+  const early = (await read($, hubRef)) === null ? await refreshBoard($) : undefined
+  const integration = (await read($, hubRef))?.settings.integrationBranch
+  if (integration === undefined) return
+  const head = await git($, dir, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  if (head !== integration) return
+  const sha = await git($, dir, ['rev-parse', '--short', 'HEAD'])
+  // Current statuses; the cached board when the vault does not answer.
+  const tasks = (early ?? (await refreshBoard($))) ?? (await read($, boardRef))
+  const bound = (await read($, bindingRef))?.code
+  if (tasks === null) {
+    const code = bound ?? branchTaskCode(call.branch)
+    const why = (await read($, boardErrorRef)) ?? 'board unreachable'
+    if (code !== undefined) $.ui.toast(`clepsydra: could not update ${code}: ${why.slice(0, 160)}`)
+    return
+  }
+  const t = mergeTask({ ...(bound === undefined ? {} : { bound }), mergedBranch: call.branch, tasks })
+  if (t === undefined) return
+  if (sha === '') {
+    $.ui.toast(`clepsydra: could not update ${t.code}: no commit sha for ${dir}`)
+    return
+  }
+  const moved = await callVault($, 'vault_task_update', { task: t.code, status: 'REVIEW' })
+  if (!moved.ok) {
+    $.ui.toast(`clepsydra: could not update ${t.code}: ${moved.text.slice(0, 160)}`)
+    await refreshBoard($)
+    return
+  }
+  const line = deliveryLine(sha, head, localDate(await $.clock.now()))
+  const page = await callVault($, 'vault_get_page', { path: t.path })
+  const body = page.ok ? pageBody(page.text) : undefined
+  const appended =
+    body === undefined
+      ? { ok: false, text: page.ok ? 'task page has no body' : page.text }
+      : await callVault($, 'vault_append_page', { path: t.path, ...deliveryAppend(body, line) })
+  $.ui.toast(
+    appended.ok
+      ? `clepsydra: ${t.code} → REVIEW (${sha})`
+      : `clepsydra: could not update ${t.code}: moved to REVIEW, delivery line not added: ${appended.text.slice(0, 160)}`,
+  )
+  await refreshBoard($)
+}
+
 // ---------- [[wikilink]] attach ----------
 
 type Resolved = { target: string; block?: string; title?: string; isUnreachable?: boolean }
@@ -545,7 +620,6 @@ async function startup($: $): Promise<void> {
   await loadRepo($)
   const tasks = await refreshBoard($)
   if (tasks !== null && (await read($, bindingRef)) === null) await restoreBinding($, tasks)
-  await loadHub($)
   await flushAndToast($)
 }
 
@@ -624,6 +698,18 @@ export const register: Register = (on, options) => {
     const blocks = await attachLinks($, e.text)
     if (blocks.length === 0) return next(e)
     return next({ ...e, context: [...(e.context ?? []), ...blocks] })
+  })
+
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const r = await next(e)
+    try {
+      const call = bashSucceeded(r) ? parseMerge(e.command) : undefined
+      // Vault work runs after the hook, so the tool result never waits on it.
+      if (call !== undefined) $.clock.after(0, () => void afterMerge($, call).catch(() => undefined))
+    } catch {
+      // never throw into the host
+    }
+    return r
   })
 
   on('session.end', async ($, e, next) => {

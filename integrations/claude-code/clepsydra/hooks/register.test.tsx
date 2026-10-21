@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'claude-code/testing'
+import { describe, expect, mock, test, type Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 const TYPED = { origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } } as const
@@ -66,6 +66,10 @@ const SEARCH: Record<string, unknown> = {
   Nope: [{ page_id: '3', path: 'notes/nopeish.md', title: 'Nope-ish', snippet: '' }],
 }
 
+/** What core answers a Bash call with: a completed run, and a non-zero exit. */
+const BASH_OK = { result: { stdout: 'Merge made by the ort strategy.\n', stderr: '', interrupted: false } }
+const BASH_FAILED = { isError: true as const, result: 'Exit code 1\nCONFLICT (content): Merge conflict in a.ts' }
+
 type World = {
   branch?: string
   commits?: string
@@ -76,6 +80,13 @@ type World = {
   tools?: string[]
   isListEmptyFirst?: boolean
   isHubBroken?: boolean
+  /** Branch `git -C <dir> rev-parse --abbrev-ref HEAD` reports (default: `branch`). */
+  dirBranch?: string
+  isBashError?: boolean
+  taskDeny?: string
+  /** /board answers 500 this many times first. */
+  boardFailures?: number
+  boardTasks?: ReturnType<typeof task>[]
 }
 
 function world(on: On, opts: World = {}) {
@@ -89,6 +100,9 @@ function world(on: On, opts: World = {}) {
     fetched: [] as string[],
     curled: [] as string[],
     models: [] as string[],
+    git: [] as string[],
+    pageCalls: [] as Record<string, unknown>[],
+    appendCalls: [] as Record<string, unknown>[],
   }
   const clock = mock.clock(on, { now: NOW })
   const store = new Map<string, unknown>()
@@ -126,9 +140,19 @@ function world(on: On, opts: World = {}) {
     seen.opened.push(e.id)
     return { value: { isPlaced: true as const } }
   })
+  let boardFailures = opts.boardFailures ?? 0
+  /** Set `isDown` to make the vault fail every request from then on. */
+  const vault = { isDown: false }
   const answer = (url: string): { status: number; text: string } => {
     const path = url.slice(API.length)
-    if (path === '/board') return { status: 200, text: JSON.stringify(BOARD) }
+    if (vault.isDown) return { status: 503, text: '{}' }
+    if (path === '/board') {
+      if (boardFailures > 0) {
+        boardFailures -= 1
+        return { status: 500, text: '{}' }
+      }
+      return { status: 200, text: JSON.stringify(opts.boardTasks === undefined ? BOARD : { ...BOARD, tasks: opts.boardTasks }) }
+    }
     if (path.startsWith('/index/search?')) {
       const q = new URL(url).searchParams.get('q') ?? ''
       return { status: 200, text: JSON.stringify(SEARCH[q] ?? []) }
@@ -155,7 +179,11 @@ function world(on: On, opts: World = {}) {
       const a = answer(url)
       return ok(`${a.text}\n${a.status}`)
     }
-    const key = argv.slice(1).join(' ')
+    const inDir = argv[1] === '-C'
+    if (inDir) seen.git.push(argv.join(' '))
+    const key = argv.slice(inDir ? 3 : 1).join(' ')
+    if (inDir && key === 'rev-parse --abbrev-ref HEAD') return ok(`${opts.dirBranch ?? opts.branch ?? 'develop'}\n`)
+    if (inDir && key === 'rev-parse --short HEAD') return ok('a1b2c3d\n')
     if (key === 'rev-parse --show-toplevel') return ok(`${opts.top ?? REPO}\n`)
     if (key === 'rev-parse --abbrev-ref HEAD') return ok(`${opts.branch ?? 'develop'}\n`)
     if (key === 'rev-parse --path-format=absolute --git-common-dir') return ok(`${opts.top ?? REPO}/.git\n`)
@@ -163,13 +191,29 @@ function world(on: On, opts: World = {}) {
     if (key.startsWith('diff --shortstat')) return ok(' 2 files changed, 10 insertions(+)\n')
     return ok('')
   })
-  const toolNames = opts.tools ?? ['mcp__clepsydra__vault_task_update', 'mcp__clepsydra__vault_ai_journal_capture']
+  const toolNames = opts.tools ?? [
+    'mcp__clepsydra__vault_task_update',
+    'mcp__clepsydra__vault_ai_journal_capture',
+    'mcp__clepsydra__vault_get_page',
+    'mcp__clepsydra__vault_append_page',
+  ]
   let lists = 0
   on('tool.list', () => ({ value: (opts.isListEmptyFirst === true && lists++ === 0 ? [] : toolNames).map(name => ({ name, description: '', mcp: true })) }))
   on('tool.call', { tool: 'mcp__clepsydra__vault_task_update' }, (_$, e) => {
     seen.taskCalls.push({ ...e })
-    return { result: 'updated' }
+    if (vault.isDown) return { deny: 'connection refused' }
+    return opts.taskDeny === undefined ? { result: 'updated' } : { deny: opts.taskDeny }
   })
+  on('tool.call', { tool: 'mcp__clepsydra__vault_get_page' }, (_$, e) => {
+    seen.pageCalls.push({ ...e })
+    const page = PAGES[String(e.path)]
+    return page === undefined ? { deny: 'HTTP 404' } : { result: JSON.stringify(page, null, 2) }
+  })
+  on('tool.call', { tool: 'mcp__clepsydra__vault_append_page' }, (_$, e) => {
+    seen.appendCalls.push({ ...e })
+    return { result: JSON.stringify({ path: e.path, appended: true }) }
+  })
+  on('tool.call', { tool: 'Bash' }, () => structuredClone(opts.isBashError === true ? BASH_FAILED : BASH_OK))
   on('tool.call', { tool: 'mcp__clepsydra__vault_ai_journal_capture' }, (_$, e) => {
     seen.journalCalls.push({ ...e })
     return opts.journalDeny === undefined ? { result: 'appended' } : { deny: opts.journalDeny }
@@ -187,7 +231,7 @@ function world(on: On, opts: World = {}) {
           : { isAnswered: true as const, text: opts.modelText, usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
     }
   })
-  return { seen, clock, store }
+  return { seen, clock, store, vault }
 }
 
 describe('/board pane', () => {
@@ -263,7 +307,8 @@ describe('/task binding', () => {
     const cleared = await $.command.run({ ...TYPED, command: 'task', args: 'clear' })
     expect(cleared.text).toContain('unbound')
     const after = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] })
-    expect(after.sections.map(s => s.id)).toEqual(['intro'])
+    // The /task board read also loaded the hub (R-F); only the task section goes.
+    expect(after.sections.map(s => s.id)).toEqual(['intro', 'clepsydra:hub'])
   })
 
   test('start moves the task through the plugin-named tool', async ($, on) => {
@@ -339,7 +384,7 @@ describe('/task binding', () => {
     const { seen } = world(on, { isFetchBroken: true })
     const r = await $.command.run({ ...TYPED, command: 'board', args: '' })
     expect(r.text).toBe('board · clepsydra: 1 field · 1 triage')
-    expect(seen.curled).toEqual([`${API}/board`])
+    expect(seen.curled).toEqual([`${API}/board`, `${API}/pages/${HUB}`])
   })
 })
 
@@ -403,5 +448,135 @@ describe('session journal', () => {
     expect(String(seen.journalCalls[0]?.content)).toContain('Note: wrapped up')
     expect(String(seen.journalCalls[0]?.content)).toContain('- no commits')
     expect((store.get('pendingJournal') as unknown[]).length).toBe(1)
+  })
+})
+
+describe('merge → Review', () => {
+  const MERGE = 'git merge --no-ff feature/TSK-brave-finch-7q3zd'
+  const merged = (codes: [string, string][]) => BOARD.tasks.map(t => ({ ...t, status: codes.find(c => c[0] === t.code)?.[1] ?? t.status }))
+
+  async function started($: Engine, clock: { advance: (ms: number) => Promise<void> }) {
+    await $.session.start({ cwd: REPO, surface: 'terminal', isInteractive: true })
+    await clock.advance(10)
+  }
+
+  test('a merge into the integration branch moves the task to REVIEW and appends the delivery line', async ($, on) => {
+    const { seen, clock } = world(on)
+    await started($, clock)
+    const r = await $.tool.call({ tool: 'Bash', command: `cd ${REPO} && ${MERGE}` })
+    expect(r).toEqual(BASH_OK)
+    expect(seen.taskCalls).toEqual([])
+    await clock.advance(10)
+    expect(seen.git).toEqual([`git -C ${REPO} rev-parse --abbrev-ref HEAD`, `git -C ${REPO} rev-parse --short HEAD`])
+    expect(seen.taskCalls.map(c => [c.task, c.status])).toEqual([['TSK-brave-finch-7q3zd', 'REVIEW']])
+    expect(seen.pageCalls.map(c => c.path)).toEqual(['tasks/clepsydra/TSK-brave-finch-7q3zd.md'])
+    expect(seen.appendCalls.length).toBe(1)
+    expect(seen.appendCalls[0]?.path).toBe('tasks/clepsydra/TSK-brave-finch-7q3zd.md')
+    expect(seen.appendCalls[0]?.heading).toBeUndefined()
+    expect(seen.appendCalls[0]?.content).toBe('\n## Delivery\n\n- merged a1b2c3d into develop (2026-10-04)\n')
+    expect(seen.toasts).toContain('clepsydra: TSK-brave-finch-7q3zd → REVIEW (a1b2c3d)')
+  })
+
+  test('without a dir the merge is checked in the repo top', async ($, on) => {
+    const { seen, clock } = world(on)
+    await started($, clock)
+    await $.tool.call({ tool: 'Bash', command: MERGE })
+    await clock.advance(10)
+    expect(seen.git[0]).toBe(`git -C ${REPO} rev-parse --abbrev-ref HEAD`)
+    expect(seen.taskCalls.length).toBe(1)
+  })
+
+  test('a failed merge (exit 1) updates nothing', async ($, on) => {
+    const { seen, clock } = world(on, { isBashError: true })
+    await started($, clock)
+    const r = await $.tool.call({ tool: 'Bash', command: MERGE })
+    expect(r).toEqual(BASH_FAILED)
+    await clock.advance(10)
+    expect(seen.git).toEqual([])
+    expect(seen.taskCalls).toEqual([])
+    expect(seen.appendCalls).toEqual([])
+  })
+
+  test('a merge on another branch than the integration branch updates nothing', async ($, on) => {
+    const { seen, clock } = world(on, { dirBranch: 'main' })
+    await started($, clock)
+    await $.tool.call({ tool: 'Bash', command: `git -C ${REPO} ${MERGE.slice(4)}` })
+    await clock.advance(10)
+    expect(seen.git).toEqual([`git -C ${REPO} rev-parse --abbrev-ref HEAD`])
+    expect(seen.taskCalls).toEqual([])
+    expect(seen.appendCalls).toEqual([])
+    expect(seen.toasts).toEqual([])
+  })
+
+  test('a refused task update toasts the task and returns the Bash result unchanged', async ($, on) => {
+    const { seen, clock } = world(on, { taskDeny: 'connection refused' })
+    await started($, clock)
+    const r = await $.tool.call({ tool: 'Bash', command: MERGE })
+    expect(r).toEqual(BASH_OK)
+    await clock.advance(10)
+    expect(seen.toasts.some(t => t.includes('could not update TSK-brave-finch-7q3zd') && t.includes('connection refused'))).toBe(true)
+    expect(seen.appendCalls).toEqual([])
+  })
+
+  test('an existing Delivery heading gets the line under it', async ($, on) => {
+    const { seen, clock } = world(on)
+    const path = 'tasks/clepsydra/TSK-brave-finch-7q3zd.md'
+    const before = PAGES[path]
+    PAGES[path] = { path, meta: { title: 'Board pane' }, body: 'Build it.\n\n## Delivery\n\n- merged 0000000 into develop (2026-10-01)\n' }
+    try {
+      await started($, clock)
+      await $.tool.call({ tool: 'Bash', command: MERGE })
+      await clock.advance(10)
+    } finally {
+      PAGES[path] = before
+    }
+    expect(seen.appendCalls[0]?.heading).toBe('Delivery')
+    expect(seen.appendCalls[0]?.content).toBe('- merged a1b2c3d into develop (2026-10-04)')
+  })
+
+  test('a task already in REVIEW is left alone', async ($, on) => {
+    const { seen, clock } = world(on, { boardTasks: merged([['TSK-brave-finch-7q3zd', 'REVIEW']]) })
+    await started($, clock)
+    await $.tool.call({ tool: 'Bash', command: MERGE })
+    await clock.advance(10)
+    expect(seen.taskCalls).toEqual([])
+    expect(seen.toasts).toEqual([])
+  })
+
+  test('other commands and excluded merges do nothing', async ($, on) => {
+    const { seen, clock } = world(on)
+    await started($, clock)
+    for (const command of ['git status', 'git merge --abort', 'git pull', `${MERGE} | tail -3`]) {
+      const r = await $.tool.call({ tool: 'Bash', command })
+      expect(r).toEqual(BASH_OK)
+    }
+    await clock.advance(10)
+    expect(seen.git).toEqual([])
+    expect(seen.taskCalls).toEqual([])
+  })
+
+  test('the vault going down after startup: a toast names the task, nothing throws', async ($, on) => {
+    const { seen, clock, vault } = world(on)
+    await started($, clock)
+    vault.isDown = true
+    const r = await $.tool.call({ tool: 'Bash', command: MERGE })
+    expect(r).toEqual(BASH_OK)
+    await clock.advance(10)
+    expect(seen.toasts.some(t => t.includes('could not update TSK-brave-finch-7q3zd'))).toBe(true)
+    expect(seen.appendCalls).toEqual([])
+  })
+
+  test('a hub missed at startup loads after a later good board read (R-F)', async ($, on) => {
+    const { seen, clock } = world(on, { boardFailures: 1 })
+    await started($, clock)
+    const before = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] })
+    expect(before.sections.map(s => s.id)).toEqual(['intro'])
+    const r = await $.command.run({ ...TYPED, command: 'board', args: '' })
+    expect(r.text).toBe('board · clepsydra: 1 field · 1 triage')
+    const after = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] })
+    expect(after.sections.map(s => s.id)).toContain('clepsydra:hub')
+    await $.tool.call({ tool: 'Bash', command: MERGE })
+    await clock.advance(10)
+    expect(seen.taskCalls.map(c => c.status)).toEqual(['REVIEW'])
   })
 })
