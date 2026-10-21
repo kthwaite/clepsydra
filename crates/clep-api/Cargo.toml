@@ -32,7 +32,11 @@ clep-vault = { workspace = true }
 csv = { workspace = true }
 dirs = { workspace = true }
 docx-rs = { workspace = true }
+dom_smoothie = { workspace = true }
+ego-tree = { workspace = true }
 encoding_rs = { workspace = true }
+htmd = { workspace = true }
+html5ever = { workspace = true }
 image = { workspace = true }
 mime_guess = { workspace = true }
 parking_lot = { workspace = true }

@@ -17,6 +17,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::reading::{
+    AgendaParams, ArchiveUrlParams, BaseQueryParams, FeedEntriesParams, ImportBody,
+    ImportWorkParams, MarkReadParams, base_evaluate_path, calendar_bounds, check_mark_read,
+    feed_entries_query, import_route, local_today, mark_entry_read_request,
+};
 use super::tasking::{
     BoardKind, INCLUDE_RETIRED, TaskRef, board_query, classify_ref, deserialize_tri_state,
     filter_board_project, find_board_id, insert_tri_state, page_meta_id, resolve_project_patch,
@@ -200,7 +205,9 @@ vault_cycle_update, passing carry_to to move their unfinished Tasks. Page paths 
 folders. An occupied-path restore conflict means the original path is occupied and the item \
 remains binned; resolve that path before retrying. A rubbish item drift conflict means the item \
 remains binned; re-list with vault_list_rubbish and inspect it with vault_get_rubbish_item. On \
-a page revision conflict, re-read the page with vault_get_page and re-apply the change.";
+a page revision conflict, re-read the page with vault_get_page and re-apply the change. List Bases \
+with vault_bases and evaluate one view with vault_base_query. Read the dated agenda (and, with a \
+from/to range, the calendar) with vault_agenda. Read feed entries with vault_feed_entries and mark entries read with vault_feed_mark_read. Import works with vault_import_work (DOI, ISBN or BibTeX). Archive a web page by URL with vault_archive_url (server-side fetch, lower fidelity than the browser extension).";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreatePageParams {
@@ -579,6 +586,11 @@ pub(crate) fn truncate_body(value: &mut Value, max_bytes: usize) {
 fn render(value: &Value) -> Result<String, String> {
     serde_json::to_string_pretty(value).map_err(|e| format!("failed to render response: {e}"))
 }
+
+/// Client timeout for `vault_archive_url`. The route's own budgets add up past
+/// the client's 30 s default: a 20 s fetch, up to 30 s waiting for an
+/// extraction permit, a 5 s depth check, then extraction and ingest.
+const ARCHIVE_URL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
 /// MCP server over one clepsydra vault, addressed through the HTTP API.
 #[derive(Clone)]
@@ -1320,6 +1332,178 @@ impl VaultMcpServer {
     }
 
     #[tool(
+        name = "vault_bases",
+        description = "List Bases (saved `.base` queries over vault pages) with their slugs and views. Use a slug and view name with vault_base_query.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_bases(&self) -> Result<String, String> {
+        let value = self
+            .client
+            .get_json("/api/vault/bases", &[])
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_base_query",
+        description = "Evaluate one view of a Base with its saved filter, sort and grouping. Returns `output` (rows or groups), `revision` and `member_creation`. Read-only.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_base_query(
+        &self,
+        Parameters(params): Parameters<BaseQueryParams>,
+    ) -> Result<String, String> {
+        let path = base_evaluate_path(&params.slug, &params.view)?;
+        let value = self
+            .client
+            .post_json(&path, &serde_json::json!({}))
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_agenda",
+        description = "Read the dated agenda (overdue, today and upcoming Tasks and todos) classified against `today` (local `YYYY-MM-DD`, default local today). With both `from` and `to` (local dates, inclusive) the result also carries `calendar`: dated pages in that window.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_agenda(
+        &self,
+        Parameters(params): Parameters<AgendaParams>,
+    ) -> Result<String, String> {
+        // Validate the range before any network call.
+        let bounds = match (&params.from, &params.to) {
+            (Some(from), Some(to)) => Some(calendar_bounds(from, to)?),
+            _ => None,
+        };
+        let today = params.today.clone().unwrap_or_else(local_today);
+        let agenda = self
+            .client
+            .get_json("/api/vault/agenda", &[("today", today)])
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut result = serde_json::json!({ "agenda": agenda });
+        if let Some((from, to)) = bounds {
+            result["calendar"] = self
+                .client
+                .get_json("/api/vault/index/calendar", &[("from", from), ("to", to)])
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        render(&result)
+    }
+
+    #[tool(
+        name = "vault_feed_entries",
+        description = "List RSS/Atom feed entries, newest first. Optional `feed` ids narrow to those feeds, `unread: true` keeps only unread entries, `limit` caps the count.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_feed_entries(
+        &self,
+        Parameters(params): Parameters<FeedEntriesParams>,
+    ) -> Result<String, String> {
+        let value = self
+            .client
+            .get_json("/api/vault/feeds/entries", &feed_entries_query(&params))
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_import_work",
+        description = "Import an academic work as a Work page from exactly one of `doi`, `isbn` or `bibtex` (one or more entries). Existing works (matched by DOI, ISBN or cite key) are reported as skipped, never duplicated. Returns per-work results.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_import_work(
+        &self,
+        Parameters(params): Parameters<ImportWorkParams>,
+    ) -> Result<String, String> {
+        let (route, body) = import_route(&params)?;
+        let value = match &body {
+            ImportBody::Text(text) => self.client.post_text(route, text).await,
+            ImportBody::Json(json) => self.client.post_json(route, json).await,
+        }
+        .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_feed_mark_read",
+        description = "Mark feed entries read. `ids` are entry ids (the `id` of entries from vault_feed_entries). Returns `{marked, failed}`: the count marked and, per entry that could not be marked, `{id, error}`.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_feed_mark_read(
+        &self,
+        Parameters(params): Parameters<MarkReadParams>,
+    ) -> Result<String, String> {
+        check_mark_read(&params)?;
+        let mut marked = 0u64;
+        let mut failed = Vec::new();
+        for id in &params.ids {
+            let (path, body) = mark_entry_read_request(*id);
+            match self.client.patch_json(&path, &body).await {
+                Ok(_) => marked += 1,
+                Err(error) => {
+                    failed.push(serde_json::json!({ "id": id, "error": error.to_string() }))
+                }
+            }
+        }
+        let value = serde_json::json!({ "marked": marked, "failed": failed });
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_archive_url",
+        description = "Archive a web page by URL using a server-side fetch (no browser). Lower fidelity than the browser extension's SingleFile capture; the page is tagged `server-fetch`. Requires archiving to be enabled on the server. `tags` are extra tags. Returns the archived page; an already-archived URL returns the existing page.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_archive_url(
+        &self,
+        Parameters(params): Parameters<ArchiveUrlParams>,
+    ) -> Result<String, String> {
+        let body = serde_json::json!({
+            "url": params.url,
+            "tags": params.tags.unwrap_or_default(),
+        });
+        let value = self
+            .client
+            .post_json_timeout("/api/vault/archive/url", &body, ARCHIVE_URL_TIMEOUT)
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
         name = "vault_task_create",
         description = "Create a Task on the Task Board — preferred over vault_create_page because it mints a TSK-<adjective>-<noun>-<tail> code (the server assigns it; never invent one) and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); `task_type` is optional and one of FEATURE, FIX, TASK, STORY, SPIKE; a Cycle must match an existing code or unique prefix of one (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. `blocked_by` lists its Blockers (the Tasks it waits on) as TSK codes or unique prefixes. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
         annotations(
@@ -1783,10 +1967,14 @@ mod tests {
         assert_eq!(
             names,
             [
+                "vault_agenda",
                 "vault_ai_journal_capture",
                 "vault_append_page",
                 "vault_archive_page",
+                "vault_archive_url",
                 "vault_assign",
+                "vault_base_query",
+                "vault_bases",
                 "vault_board",
                 "vault_capture_conversation",
                 "vault_create_page",
@@ -1794,9 +1982,12 @@ mod tests {
                 "vault_cycle_update",
                 "vault_edit_page",
                 "vault_empty_rubbish",
+                "vault_feed_entries",
+                "vault_feed_mark_read",
                 "vault_folder",
                 "vault_get_page",
                 "vault_get_rubbish_item",
+                "vault_import_work",
                 "vault_journal_capture",
                 "vault_links",
                 "vault_list_pages",
@@ -2032,9 +2223,34 @@ mod tests {
     /// and return a `VaultMcpServer` pointed at it. The `TempDir` keeps the
     /// vault alive for the test's duration.
     async fn serve_seeded_vault() -> (VaultMcpServer, tempfile::TempDir) {
+        let (server, tmp, _state) = serve_seeded_vault_with_state().await;
+        (server, tmp)
+    }
+
+    async fn serve_seeded_vault_with_state() -> (
+        VaultMcpServer,
+        tempfile::TempDir,
+        Arc<clep_api::api::AppState>,
+    ) {
+        serve_seeded_vault_with_config(None).await
+    }
+
+    /// Like `serve_seeded_vault_with_state`, writing `config_toml` to the
+    /// vault's `.clepsydra/config.toml` before the app state is built.
+    async fn serve_seeded_vault_with_config(
+        config_toml: Option<&str>,
+    ) -> (
+        VaultMcpServer,
+        tempfile::TempDir,
+        Arc<clep_api::api::AppState>,
+    ) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
         clep_api::vault::init::init_vault(&root).unwrap();
+
+        if let Some(config_toml) = config_toml {
+            std::fs::write(root.join(".clepsydra/config.toml"), config_toml).unwrap();
+        }
 
         let notes = root.join("notes");
         std::fs::create_dir_all(&notes).unwrap();
@@ -2051,7 +2267,7 @@ mod tests {
 
         let state = clep_api::build_app_state(&root).await.unwrap();
         let app = clep_api::build_router(
-            state,
+            Arc::clone(&state),
             1024 * 1024,
             clep_api::api::archive::ArchiveViewConfig::default(),
             true,
@@ -2065,7 +2281,7 @@ mod tests {
         });
 
         let client = ApiClient::new(format!("http://{addr}"), None).unwrap();
-        (VaultMcpServer::new(Arc::new(client)), tmp)
+        (VaultMcpServer::new(Arc::new(client)), tmp, state)
     }
 
     fn parse(result: Result<String, String>) -> Value {
@@ -4154,5 +4370,381 @@ mod tests {
             .await
             .expect_err("dead server should error");
         assert!(err.contains("clep serve"), "missing start hint: {err}");
+    }
+
+    async fn create_reading_base(server: &VaultMcpServer) {
+        server
+            .client
+            .post_json(
+                "/api/vault/bases",
+                &json!({
+                    "slug": "reading",
+                    "definition": {
+                        "name": "Reading",
+                        "views": [{ "name": "All", "layout": "table" }]
+                    }
+                }),
+            )
+            .await
+            .expect("base create should succeed");
+    }
+
+    #[tokio::test]
+    async fn bases_lists_seeded_bases() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        create_reading_base(&server).await;
+        let listing = server.vault_bases().await.expect("vault_bases");
+        assert!(listing.contains("\"reading\""), "{listing}");
+    }
+
+    #[tokio::test]
+    async fn base_query_evaluates_a_view() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        create_reading_base(&server).await;
+        let value = parse(
+            server
+                .vault_base_query(Parameters(crate::reading::BaseQueryParams {
+                    slug: "reading".to_string(),
+                    view: "All".to_string(),
+                }))
+                .await,
+        );
+        assert!(value["output"].is_object(), "{value}");
+        assert!(value["revision"].is_string(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn agenda_without_range_has_no_calendar() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_agenda(Parameters(crate::reading::AgendaParams {
+                    today: Some("2026-10-21".to_string()),
+                    from: None,
+                    to: None,
+                }))
+                .await,
+        );
+        assert!(value["agenda"]["overdue"].is_array(), "{value}");
+        assert!(value.get("calendar").is_none(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn agenda_with_range_has_calendar() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_agenda(Parameters(crate::reading::AgendaParams {
+                    today: Some("2026-10-21".to_string()),
+                    from: Some("2026-10-01".to_string()),
+                    to: Some("2026-10-31".to_string()),
+                }))
+                .await,
+        );
+        assert!(value["agenda"].is_object(), "{value}");
+        assert!(!value["calendar"].is_null(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn agenda_rejects_bad_range_before_calling_the_server() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_agenda(Parameters(crate::reading::AgendaParams {
+                today: None,
+                from: Some("2026-10-31".to_string()),
+                to: Some("2026-10-01".to_string()),
+            }))
+            .await
+            .expect_err("from > to must fail");
+        assert!(err.contains("from"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn feed_entries_empty_vault() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_feed_entries(Parameters(crate::reading::FeedEntriesParams {
+                    feed: Some(vec![1, 2]),
+                    unread: Some(true),
+                    limit: Some(5),
+                }))
+                .await,
+        );
+        assert_eq!(
+            value["entries"].as_array().map(Vec::len),
+            Some(0),
+            "{value}"
+        );
+        assert!(value["next_cursor"].is_null(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn import_work_validates_before_requesting() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_import_work(Parameters(crate::reading::ImportWorkParams {
+                doi: None,
+                isbn: None,
+                bibtex: None,
+            }))
+            .await
+            .expect_err("no source must fail");
+        assert!(err.contains("doi"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn import_work_bibtex_creates_then_skips() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let params = || {
+            Parameters(crate::reading::ImportWorkParams {
+                doi: None,
+                isbn: None,
+                bibtex: Some(
+                    "@book{knuth1984, title={The TeXbook}, author={Knuth, Donald}, year={1984}}"
+                        .to_string(),
+                ),
+            })
+        };
+        let first = parse(server.vault_import_work(params()).await);
+        assert_eq!(first["results"][0]["status"], "created", "{first}");
+        let second = parse(server.vault_import_work(params()).await);
+        assert_eq!(second["results"][0]["status"], "skipped", "{second}");
+    }
+
+    #[tokio::test]
+    async fn feed_mark_read_rejects_empty_ids() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_feed_mark_read(Parameters(crate::reading::MarkReadParams { ids: vec![] }))
+            .await
+            .expect_err("empty ids must fail");
+        assert!(err.contains("ids"), "{err}");
+    }
+
+    /// Seed one feed with two unread entries; returns their ids (a, b).
+    async fn seed_two_entries(state: &clep_api::api::AppState) -> (i64, i64) {
+        use chrono::{TimeZone, Utc};
+        use clep_api::feeds::types::{
+            EntryFilters, EntryView, FetchOutcome, FetchedEntry, ManifestFeed,
+        };
+        let runtime = state.feed_runtime.as_ref().expect("feeds enabled");
+        let at = Utc.with_ymd_and_hms(2026, 8, 9, 12, 0, 0).single().unwrap();
+        let entry = |guid: &str| FetchedEntry {
+            guid: guid.to_owned(),
+            url: Some(format!("https://entries.example/{guid}")),
+            title: guid.to_owned(),
+            author: None,
+            content_html: None,
+            published_at: Some(at),
+            fetched_at: at,
+        };
+        runtime
+            .feeds
+            .reconcile(vec![ManifestFeed {
+                url: "https://fixture.example/rss".to_owned(),
+                title_override: Some("Fixture".to_owned()),
+                group: "Fixtures".to_owned(),
+                tags: vec![],
+                line: 1,
+            }])
+            .await
+            .unwrap();
+        let feed_id = runtime.feeds.list_feeds().await.unwrap()[0].id;
+        runtime
+            .feeds
+            .apply_fetch(
+                feed_id,
+                FetchOutcome::Success {
+                    fetched_at: at,
+                    next_fetch_at: Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap(),
+                    fetch_url: "https://fixture.example/rss".to_owned(),
+                    etag: None,
+                    last_modified: None,
+                    title: Some("Fixture".to_owned()),
+                    site_url: None,
+                    entries: vec![entry("one"), entry("two")],
+                },
+            )
+            .await
+            .unwrap();
+        let page = runtime
+            .feeds
+            .list_entries(EntryFilters {
+                view: EntryView::Unread,
+                feed_ids: vec![],
+                groups: vec![],
+                tag: None,
+                limit: 10,
+                cursor: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(page.entries.len(), 2);
+        (page.entries[0].id, page.entries[1].id)
+    }
+
+    #[tokio::test]
+    async fn feed_mark_read_marks_only_the_named_entry() {
+        let (server, _tmp, state) = serve_seeded_vault_with_state().await;
+        let (a, b) = seed_two_entries(&state).await;
+        let value = parse(
+            server
+                .vault_feed_mark_read(Parameters(crate::reading::MarkReadParams { ids: vec![a] }))
+                .await,
+        );
+        assert_eq!(value["marked"], 1, "{value}");
+        assert_eq!(value["failed"].as_array().map(Vec::len), Some(0), "{value}");
+        let unread = parse(
+            server
+                .vault_feed_entries(Parameters(crate::reading::FeedEntriesParams {
+                    feed: None,
+                    unread: Some(true),
+                    limit: None,
+                }))
+                .await,
+        );
+        let ids: Vec<i64> = unread["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["id"].as_i64().unwrap())
+            .collect();
+        assert_eq!(ids, vec![b], "{unread}");
+    }
+
+    #[tokio::test]
+    async fn feed_mark_read_reports_unknown_entry_in_failed() {
+        let (server, _tmp, state) = serve_seeded_vault_with_state().await;
+        let (a, _b) = seed_two_entries(&state).await;
+        let value = parse(
+            server
+                .vault_feed_mark_read(Parameters(crate::reading::MarkReadParams {
+                    ids: vec![a, 999_999],
+                }))
+                .await,
+        );
+        assert_eq!(value["marked"], 1, "{value}");
+        assert_eq!(value["failed"][0]["id"], 999_999, "{value}");
+        assert!(value["failed"][0]["error"].is_string(), "{value}");
+    }
+
+    #[test]
+    fn write_tools_carry_their_annotations() {
+        let router = VaultMcpServer::tool_router();
+        for name in ["vault_import_work", "vault_feed_mark_read"] {
+            let tool = router
+                .list_all()
+                .into_iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("{name} missing"));
+            let a = tool.annotations.expect("annotations");
+            assert_eq!(a.read_only_hint, Some(false), "{name}");
+            assert_eq!(a.destructive_hint, Some(false), "{name}");
+            assert_eq!(a.idempotent_hint, Some(true), "{name}");
+        }
+    }
+
+    #[test]
+    fn server_instructions_mention_reading_tools() {
+        for tool in ["vault_bases", "vault_agenda", "vault_feed_entries"] {
+            assert!(MCP_INSTRUCTIONS.contains(tool), "missing {tool}");
+        }
+    }
+
+    #[test]
+    fn archive_url_tool_is_a_non_destructive_idempotent_write() {
+        let tool = VaultMcpServer::tool_router()
+            .list_all()
+            .into_iter()
+            .find(|t| t.name == "vault_archive_url")
+            .expect("vault_archive_url missing");
+        let a = tool.annotations.expect("annotations");
+        assert_eq!(a.read_only_hint, Some(false));
+        assert_eq!(a.destructive_hint, Some(false));
+        assert_eq!(a.idempotent_hint, Some(true));
+        let description = tool.description.expect("description");
+        for clause in [
+            "server-side",
+            "browser extension",
+            "server-fetch",
+            "enabled",
+        ] {
+            assert!(
+                description.contains(clause),
+                "missing {clause}: {description}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn archive_url_reports_archiving_disabled() {
+        let (server, _tmp, _state) =
+            serve_seeded_vault_with_config(Some("[archive]\nenabled = false\n")).await;
+        let err = server
+            .vault_archive_url(Parameters(crate::reading::ArchiveUrlParams {
+                url: "https://example.com/post".to_string(),
+                tags: None,
+            }))
+            .await
+            .expect_err("disabled archiving must fail");
+        assert!(err.contains("archiving is disabled"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn archive_url_waits_past_the_default_client_timeout() {
+        use wiremock::matchers::{body_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // The route's honest worst case (fetch, permit wait, depth check,
+        // extraction) exceeds the 30 s default. The archive call must carry
+        // its own, longer timeout, so a client whose default is shorter than
+        // the response still gets the answer.
+        // Its own server, not one from wiremock's shared pool: the delayed
+        // response the timeout abandons must not reach another test.
+        let server = MockServer::builder().start().await;
+        let created =
+            json!({ "page_id": "p1", "vault_path": "archive/example.md", "status": "created" });
+        Mock::given(method("POST"))
+            .and(path("/api/vault/archive/url"))
+            .and(body_json(
+                json!({ "url": "https://example.com/post", "tags": ["reading"] }),
+            ))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .set_body_json(&created)
+                    .set_delay(std::time::Duration::from_millis(400)),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ApiClient::new(server.uri(), None)
+            .unwrap()
+            .with_timeout(std::time::Duration::from_millis(100))
+            .unwrap();
+        let mcp = VaultMcpServer::new(Arc::new(client));
+
+        let value = parse(
+            mcp.vault_archive_url(Parameters(crate::reading::ArchiveUrlParams {
+                url: "https://example.com/post".to_string(),
+                tags: Some(vec!["reading".to_string()]),
+            }))
+            .await,
+        );
+        assert_eq!(value, created);
+    }
+
+    #[test]
+    fn archive_url_timeout_covers_the_route_budget() {
+        // 20 s fetch + 30 s extraction-permit wait + 5 s depth check, plus
+        // extraction and ingest.
+        assert!(ARCHIVE_URL_TIMEOUT >= std::time::Duration::from_secs(80));
+    }
+
+    #[test]
+    fn server_instructions_mention_archive_url_and_import_work() {
+        for tool in ["vault_archive_url", "vault_import_work"] {
+            assert!(MCP_INSTRUCTIONS.contains(tool), "missing {tool}");
+        }
     }
 }

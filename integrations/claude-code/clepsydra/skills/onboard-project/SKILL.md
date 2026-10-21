@@ -8,50 +8,28 @@ description: Use when adding a project or repo to clepsydra as a PM/documentatio
 Make the vault the system of record for a repo's project state. The recipe is
 three artifacts plus one conditional migration — nothing else. Do not
 reconstruct conventions from previously onboarded repos; this file is the
-convention. Requires the vault MCP (`clep serve` running); page conventions
-(search-before-create, `ai-generated`, wikilinks) come from the vault skill.
+convention. Requires the clepsydra plugin installed and `clep serve`
+running; page conventions (search-before-create, `ai-generated`, wikilinks)
+come from the vault skill.
 
 ## Recipe
 
-**1. Repo: `.mcp.json`** at the repo root, exactly:
-
-```json
-{
-  "mcpServers": {
-    "clepsydra": {
-      "command": "clep",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-**2. Repo: guidance section** appended to the repo's agent-guidance file
+**1. Repo: guidance pointer** appended to the repo's agent-guidance file
 (`CLAUDE.md`, or `AGENTS.md` where that is the file that exists — do not add
-symlinks or new files):
+symlinks or new files). Exactly these two lines, with the slug and hub title
+filled in:
 
 ```markdown
 ## Project management: clepsydra vault
 
-<Name>'s project state — status, backlog, decisions, session logs — lives in
-the clepsydra vault, reached via the `clepsydra` MCP server (`vault_*` tools;
-requires `clep serve` running locally). The vault is the system of record for
-project state; this repo keeps only code-adjacent/contractual docs.
-
-- **Session start:** read the hub — search the vault for the "<Name>" project
-  page — and check open tasks under project `<slug>` (`vault_board`).
-- **Durable output:** decisions and status notes go to vault pages under
-  project `<slug>`, wikilinked to the hub; update the hub's Status/Threads
-  sections when they change.
-- **Session end:** log what changed and what's next with
-  `vault_ai_journal_capture` (pass `author`). `vault_journal_capture` is the
-  user's own journal — only on their explicit request.
+Project state lives in the clepsydra vault (project `<slug>`, hub [[<Hub Title>]]); the clepsydra plugin supplies the tools and skills.
 ```
 
-Name the repo's contractual artifacts (spec, design corpus, plan dirs) in the
-first paragraph when they exist.
+The plugin supplies the MCP server; a repo `.mcp.json` is no longer needed. When the repo has contractual
+artifacts (spec, design corpus, plan dirs), list them under the hub's
+`## Repo pointers`.
 
-**3. Vault: hub page.** `vault_search` for the project name first; extend an
+**2. Vault: hub page.** `vault_search` for the project name first; extend an
 existing hub rather than duplicating. Otherwise `vault_create_page` with
 title = project name, kind `PROJECT`, project = slug, tags `["ai-generated"]`
 plus existing vocabulary only (check `vault_tags`; onboarding never mints new
@@ -64,6 +42,19 @@ tags). Body shape, in order:
   PM/documentation layer on <date> (dogfooding)."
 - `## Threads` — open work and next steps.
 - `## Repo pointers (stay in repo)` — the contractual docs.
+
+**3. Hub frontmatter.** Set two TOML keys on the hub page:
+
+- `integration_branch` — a string. Ask the user which branch merges land on;
+  offer the integration branch named in the repo's `CLAUDE.md` as the default.
+  The plugin moves a Task to Review when Claude merges into this branch.
+  Without it, merge automation is off.
+- `triage_index` — optional wikilink string such as
+  `"[[<Name> Backlog]]"`. Ask; omit when the user has no backlog index.
+
+The vault tools do not write arbitrary frontmatter keys. Give the user the
+exact lines to add to the hub's frontmatter, and confirm with `vault_get_page`
+once they have.
 
 **4. Backlog migration — only if the repo tracks work in files** (FIXME.md,
 ISSUES.md, TODO/BACKLOG-style documents). Find the *authoritative* tracker

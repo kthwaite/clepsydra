@@ -64,6 +64,9 @@ TLS verifies the server and protects transport; it does not add an agent login.
 | Task Board | `vault_board`, `vault_task_create`, `vault_task_update`, `vault_cycle_create`, `vault_cycle_update` | Inspect the board, create or update Tasks, and create or atomically close and carry over Cycles. |
 | Organize | `vault_assign`, `vault_move_page`, `vault_folder` | Declare kind/project, explicitly move a page, or create/move/delete folders. |
 | Page lifecycle | `vault_archive_page`, `vault_list_rubbish`, `vault_get_rubbish_item`, `vault_restore_page`, `vault_purge_page`, `vault_empty_rubbish` | Archive without rewriting links; inspect retained items; restore to the original path; or permanently purge one/all retained items. |
+| Bases and agenda | `vault_bases`, `vault_base_query`, `vault_agenda` | List Bases, evaluate one Base view, and read the agenda (and calendar for a date range). |
+| Feeds and imports | `vault_feed_entries`, `vault_feed_mark_read`, `vault_import_work` | Read RSS/Atom entries, mark them read, and import academic works by DOI, ISBN or BibTeX. |
+| Web archive | `vault_archive_url` | Archive a web page by URL with a server-side fetch. |
 
 Search before creating. Prefer `vault_edit_page` for a targeted unique body
 change, `vault_append_page` for additive capture, and `vault_update_page` only
@@ -103,6 +106,13 @@ for an explicit destination that assignment cannot express.
 | `vault_purge_page` | destructive | Permanently remove one retained item |
 | `vault_empty_rubbish` | destructive | Permanently purge the current valid-item snapshot with ordered outcomes |
 | `vault_preview_mutation` | read | Dry-run page/folder moves and inspect link rewrites |
+| `vault_bases` | read | List Bases (`.base` definitions) with their views |
+| `vault_base_query` | read | Evaluate one Base view by `slug` and `view` name |
+| `vault_agenda` | read | Agenda classified against `today`; the calendar is included when both `from` and `to` are given |
+| `vault_feed_entries` | read | List RSS/Atom feed entries, newest first; filter by `feed` ids, `unread`, and `limit` |
+| `vault_feed_mark_read` | write | Mark feed entries read by entry id; returns `{marked, failed}` |
+| `vault_import_work` | write | Import a Work page from exactly one of `doi`, `isbn` or `bibtex`; existing works are skipped, never duplicated |
+| `vault_archive_url` | write | Archive a web page by URL via server-side fetch; lower fidelity than the browser extension, tagged `server-fetch`, requires archiving enabled |
 
 ### Author pages safely
 

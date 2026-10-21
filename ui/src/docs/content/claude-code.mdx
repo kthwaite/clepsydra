@@ -1,0 +1,147 @@
+export const meta = {
+  slug: "claude-code",
+  title: "Claude Code Plugin",
+  description: "Install the Claude Code plugin for vault tools, task commands, and project status."
+}
+
+The repository ships a Claude Code plugin at `integrations/claude-code/clepsydra/`.
+It bundles the [MCP](/docs/mcp) server, the `vault`, `onboard-project`, `decide`,
+`triage`, and `research-to-vault` skills, and a hooks module that ties Claude Code sessions to the Task Board.
+A repo no longer needs its own `.mcp.json`.
+
+## Prerequisites
+
+1. Put `clep` on `PATH` and start `clep serve` against the intended vault
+   (see [configuration](/docs/configuration)).
+2. Run Claude Code with plugin support.
+
+## Install
+
+The repository root holds the marketplace (`.claude-plugin/marketplace.json`).
+In Claude Code:
+
+```text
+/plugin marketplace add <path to clepsydra repo>
+/plugin install clepsydra@clepsydra
+```
+
+The plugin's MCP tools appear as `mcp__plugin_clepsydra_clepsydra__vault_*`.
+If a repo still registers a `clepsydra` server in its own `.mcp.json`, remove
+that entry; the plugin makes it redundant.
+
+## What the plugin adds
+
+### Commands
+
+| Command | Effect |
+| --- | --- |
+| `/board` | Show the Task Board. |
+| `/task [<code>\|start\|clear]` | Set, start, or clear the active Task for this session. |
+| `/journal [note]` | Write an AI journal entry. |
+
+Typing a `[[wikilink]]` in a prompt attaches that page to the turn.
+
+### Skills
+
+| Skill | Effect |
+| --- | --- |
+| `decide` | Append a dated decision to the hub's `## Decisions`. |
+| `triage` | Turn a page or journal range into Tasks and a `## Triage — <date>` section on the triage index. |
+| `research-to-vault` | Archive primary sources, then write one cited NOTE. |
+
+### Prompt context
+
+Once the project hub loads, the prompt carries the hub's `## Status` and
+`## Threads` sections. When a Task is active, the prompt also carries that
+Task. Vault text, including pages attached by a `[[wikilink]]`, is quoted as
+data, never followed as instructions.
+
+### Merge behaviour
+
+When Claude runs a completed `git merge` while on the hub's `integration_branch`,
+the merged branch's Task moves to Review (`REVIEW`) and gains a `## Delivery`
+line: `- merged <short-sha> into <branch> (<YYYY-MM-DD>)`.
+
+- Task choice: the merged branch's own `TSK-…` code wins. The Task bound with
+  `/task` is used only when the branch name has no code and the binding was
+  made on the merged branch.
+- Recognised commands: `git merge`, alone or in an `&&` chain, optionally
+  after `cd <dir> &&` or as `git -C <dir> merge`.
+- Checkout: an absolute `<dir>` is used as given. A relative `<dir>` is joined
+  to the session's working directory, and with no `<dir>` the merge runs
+  there. The checkout must belong to the session's repository (the same git
+  common directory, so a linked worktree counts).
+- Nothing happens when:
+  - a subagent ran the merge;
+  - the checkout belongs to another repository;
+  - the merge is aborted, `--squash`, `--no-commit`, or conflicted, or
+    `MERGE_HEAD` remains afterwards;
+  - the command is `git pull`, is piped or `;`-chained, or runs `checkout` or
+    `switch` after the merge;
+  - the merged ref is the integration branch or `<remote>/<integration>`,
+    `HEAD`, `FETCH_HEAD`, `ORIG_HEAD`, `MERGE_HEAD`, or an `@{…}` ref;
+  - git reports "Already up to date";
+  - the Task is not on the board, or is already in Review or Done;
+  - the current branch is not `integration_branch`, or the hub sets none.
+- A failed update shows a toast naming the Task.
+- A "vault unreachable" toast appears when the hub could not be loaded.
+- Both toasts appear only when a `TSK-…` code is known.
+
+### Status line
+
+The status line shows vault health: `vault ✓`, `vault ✗`, or
+`vault · N conflicts` for Conflict Copies. Claude Code shows one notice at
+session start when the vault is unhealthy: the server is unreachable, sync
+has conflicts, or `clep doctor` reports errors. `clep doctor` warnings alone
+do not count as unhealthy.
+
+### Hub frontmatter
+
+The project hub (the `PROJECT` page for the repo's slug; when two share a slug, the
+`board = true` one wins) accepts two fields.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `integration_branch` | string | Branch whose merges move Tasks to Review. |
+| `triage_index` | wikilink string | Backlog index page, for example `"[[Clepsydra: Stray Thoughts]]"`. |
+
+The `onboard-project` skill asks for both values and gives you the exact
+frontmatter lines to add; the vault tools do not write these keys.
+
+## Permissions
+
+Plugins cannot grant permissions themselves. To stop prompts for routine
+vault tools, add this to `~/.claude/settings.json`:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_clepsydra_clepsydra__vault_search",
+      "mcp__plugin_clepsydra_clepsydra__vault_get_page",
+      "mcp__plugin_clepsydra_clepsydra__vault_list_pages",
+      "mcp__plugin_clepsydra_clepsydra__vault_tree",
+      "mcp__plugin_clepsydra_clepsydra__vault_links",
+      "mcp__plugin_clepsydra_clepsydra__vault_tags",
+      "mcp__plugin_clepsydra_clepsydra__vault_board",
+      "mcp__plugin_clepsydra_clepsydra__vault_bases",
+      "mcp__plugin_clepsydra_clepsydra__vault_base_query",
+      "mcp__plugin_clepsydra_clepsydra__vault_agenda",
+      "mcp__plugin_clepsydra_clepsydra__vault_feed_entries",
+      "mcp__plugin_clepsydra_clepsydra__vault_preview_mutation",
+      "mcp__plugin_clepsydra_clepsydra__vault_list_rubbish",
+      "mcp__plugin_clepsydra_clepsydra__vault_get_rubbish_item",
+      "mcp__plugin_clepsydra_clepsydra__vault_task_create",
+      "mcp__plugin_clepsydra_clepsydra__vault_task_update",
+      "mcp__plugin_clepsydra_clepsydra__vault_ai_journal_capture",
+      "mcp__plugin_clepsydra_clepsydra__vault_append_page",
+      "mcp__plugin_clepsydra_clepsydra__vault_edit_page",
+      "mcp__plugin_clepsydra_clepsydra__vault_import_work",
+      "mcp__plugin_clepsydra_clepsydra__vault_archive_url"
+    ]
+  }
+}
+```
+
+Tools that remove or relocate content (archive, restore, purge, empty
+rubbish, move, folder) stay off the list on purpose.

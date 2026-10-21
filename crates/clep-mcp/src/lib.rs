@@ -6,6 +6,7 @@
 //! for the design and milestones.
 
 mod edit;
+mod reading;
 pub mod server;
 pub mod tasking;
 

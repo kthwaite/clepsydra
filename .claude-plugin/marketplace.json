@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "clepsydra",
+  "description": "Clepsydra vault integrations for Claude Code",
+  "owner": { "name": "Kit Thwaite" },
+  "plugins": [
+    {
+      "name": "clepsydra",
+      "description": "Clepsydra vault in Claude Code: the vault MCP server, vault and project skills, a Task Board pane with task binding, merges into the integration branch moving Tasks to Review, vault health in the status line, wikilink attach, and a session journal.",
+      "source": "./integrations/claude-code/clepsydra"
+    }
+  ]
+}

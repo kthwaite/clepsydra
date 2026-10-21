@@ -37,6 +37,7 @@ const AI_INTEGRATION_GUIDE_SLUGS = [
   "lsp",
   "neovim",
   "mcp",
+  "claude-code",
 ] as const;
 
 it("declares the approved user-intent hierarchy", () => {
@@ -60,7 +61,7 @@ it("declares the approved user-intent hierarchy", () => {
 });
 
 it("registers each existing guide exactly once with discovery metadata", () => {
-  expect(DOC_PAGES).toHaveLength(23);
+  expect(DOC_PAGES).toHaveLength(24);
   expect(new Set(DOC_PAGES.map((page) => page.slug)).size).toBe(
     DOC_PAGES.length,
   );
@@ -173,10 +174,14 @@ it("derives previous and next guides across group boundaries", () => {
   });
   expect(getDocNeighbors("mcp")).toMatchObject({
     previous: { slug: "neovim" },
+    next: { slug: "claude-code" },
+  });
+  expect(getDocNeighbors("claude-code")).toMatchObject({
+    previous: { slug: "mcp" },
     next: { slug: "configuration" },
   });
   expect(getDocNeighbors("configuration")).toMatchObject({
-    previous: { slug: "mcp" },
+    previous: { slug: "claude-code" },
     next: { slug: "sync" },
   });
   expect(getDocNeighbors("sync")).toMatchObject({

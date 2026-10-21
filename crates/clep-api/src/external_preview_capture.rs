@@ -1,6 +1,6 @@
 //! Anonymous screenshots through a supervised native browser and checked HTTP broker.
 
-use std::{collections::BTreeMap, process::Stdio, time::Duration};
+use std::{borrow::Cow, collections::BTreeMap, process::Stdio, time::Duration};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use clep_feeds::network::{CheckedHttpClient, CheckedResponse};
@@ -36,7 +36,8 @@ struct Budget {
     bytes: usize,
 }
 
-fn valid_url(url: &Url) -> bool {
+/// An anonymous, absolute http(s) URL of bounded length.
+pub(crate) fn valid_url(url: &Url) -> bool {
     matches!(url.scheme(), "http" | "https")
         && url.host_str().is_some()
         && url.username().is_empty()
@@ -71,7 +72,11 @@ async fn checked_get(
     Ok(response)
 }
 
-fn redirect_target(response: &CheckedResponse) -> Result<Option<Url>, String> {
+/// The next hop of an HTTP redirect, resolved against the response URL.
+///
+/// `Ok(None)` for a non-redirect status. A redirect without a usable
+/// `Location`, or to a URL [`valid_url`] refuses, is an error.
+pub(crate) fn redirect_target(response: &CheckedResponse) -> Result<Option<Url>, String> {
     if !matches!(response.status.as_u16(), 301 | 302 | 303 | 307 | 308) {
         return Ok(None);
     }
@@ -104,23 +109,26 @@ async fn document(
             url = next;
             continue;
         }
-        let content_type = response
-            .headers
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(';').next())
-            .map(str::trim);
-        if response.status.as_u16() != 200
-            || !content_type.is_some_and(|value| {
-                value.eq_ignore_ascii_case("text/html")
-                    || value.eq_ignore_ascii_case("application/xhtml+xml")
-            })
-        {
+        if response.status.as_u16() != 200 || !is_html_document(&response) {
             return Err(FAILURE.into());
         }
         return Ok(response);
     }
     Err(FAILURE.into())
+}
+
+/// Does the response declare an HTML (or XHTML) document?
+pub(crate) fn is_html_document(response: &CheckedResponse) -> bool {
+    response
+        .headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim)
+        .is_some_and(|value| {
+            value.eq_ignore_ascii_case("text/html")
+                || value.eq_ignore_ascii_case("application/xhtml+xml")
+        })
 }
 
 fn clean_text<'a>(parts: impl Iterator<Item = &'a str>, limit: usize) -> Option<String> {
@@ -195,8 +203,9 @@ fn html_encoding(body: &[u8]) -> Option<&'static Encoding> {
     })
 }
 
-fn metadata(body: &[u8], content_type: Option<&str>) -> (Option<String>, Option<String>) {
-    let body = &body[..body.len().min(MAX_RESOURCE_BYTES)];
+/// Decode an HTML body: a BOM wins, then the `Content-Type` charset, then the
+/// document's own `<meta>` declaration, then UTF-8.
+pub(crate) fn decode_html<'a>(body: &'a [u8], content_type: Option<&str>) -> Cow<'a, str> {
     let (encoding, bom_len) = Encoding::for_bom(body).unwrap_or_else(|| {
         (
             content_type
@@ -207,6 +216,12 @@ fn metadata(body: &[u8], content_type: Option<&str>) -> (Option<String>, Option<
         )
     });
     let (decoded, _) = encoding.decode_without_bom_handling(&body[bom_len..]);
+    decoded
+}
+
+fn metadata(body: &[u8], content_type: Option<&str>) -> (Option<String>, Option<String>) {
+    let body = &body[..body.len().min(MAX_RESOURCE_BYTES)];
+    let decoded = decode_html(body, content_type);
     let html = Html::parse_document(&decoded);
     let title_selector = Selector::parse("title").expect("static selector");
     let meta_selector = Selector::parse("meta").expect("static selector");

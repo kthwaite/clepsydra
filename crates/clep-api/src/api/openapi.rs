@@ -168,6 +168,7 @@ impl Modify for SchemaOverrides {
         crate::api::academic::import_zotero_handler,
         // Archive / CAS
         crate::api::archive::ingest_archive,
+        crate::api::archive_url::archive_url,
         crate::api::archive::archive_status,
         crate::api::archive::lookup_archive,
         crate::api::archive::view_snapshot,
@@ -460,6 +461,7 @@ impl Modify for SchemaOverrides {
             crate::vault::import_zotero::ImportZoteroRequest,
             // Archive / CAS
             crate::api::archive::ArchiveRequest,
+            crate::api::archive_url::ArchiveUrlRequest,
             crate::api::archive::ArchiveResponse,
             crate::api::archive::ArchiveStatus,
             crate::api::archive::ArchiveStatsResponse,

@@ -7,6 +7,7 @@ import blockReferencesAndTransclusionSource from "#/docs/content/block-reference
 import booksAndReadingSource from "#/docs/content/books-and-reading.mdx?raw";
 import browserExtensionSource from "#/docs/content/browser-extension.mdx?raw";
 import captureFeedsAndArchivesSource from "#/docs/content/capture-feeds-and-archives.mdx?raw";
+import claudeCodeSource from "#/docs/content/claude-code.mdx?raw";
 import cliSource from "#/docs/content/cli.mdx?raw";
 import codexAndConversationCaptureSource from "#/docs/content/codex-and-conversation-capture.mdx?raw";
 import configurationSource from "#/docs/content/configuration.mdx?raw";
@@ -75,6 +76,7 @@ const CodexAndConversationCaptureGuide = lazy(
 );
 const LspGuide = lazy(() => import("#/docs/content/lsp.mdx"));
 const McpGuide = lazy(() => import("#/docs/content/mcp.mdx"));
+const ClaudeCodeGuide = lazy(() => import("#/docs/content/claude-code.mdx"));
 const NeovimGuide = lazy(() => import("#/docs/content/neovim.mdx"));
 const BrowserExtensionGuide = lazy(
   () => import("#/docs/content/browser-extension.mdx"),
@@ -295,6 +297,20 @@ const mcpMeta = {
     "stale revision",
   ],
 } satisfies DocMeta;
+const claudeCodeMeta = {
+  slug: "claude-code",
+  title: "Claude Code Plugin",
+  description:
+    "Install the Claude Code plugin for vault tools, task commands, and project status.",
+  keywords: [
+    "Claude Code",
+    "plugin",
+    "marketplace",
+    "slash commands",
+    "permissions",
+    "allowlist",
+  ],
+} satisfies DocMeta;
 const browserExtensionMeta = {
   slug: "browser-extension",
   title: "Browser Extension",
@@ -421,6 +437,12 @@ const codexAndConversationCapture = page(
 const lsp = page("ai-integrations", lspMeta, LspGuide, lspSource);
 const neovim = page("ai-integrations", neovimMeta, NeovimGuide, neovimSource);
 const mcp = page("ai-integrations", mcpMeta, McpGuide, mcpSource);
+const claudeCode = page(
+  "ai-integrations",
+  claudeCodeMeta,
+  ClaudeCodeGuide,
+  claudeCodeSource,
+);
 const browserExtension = page(
   "capture-feeds-archives",
   browserExtensionMeta,
@@ -473,7 +495,7 @@ export const DOC_GROUPS = [
   {
     id: "ai-integrations",
     label: "AI and integrations",
-    pages: [codexAndConversationCapture, lsp, neovim, mcp],
+    pages: [codexAndConversationCapture, lsp, neovim, mcp, claudeCode],
   },
   {
     id: "operations-reference",
