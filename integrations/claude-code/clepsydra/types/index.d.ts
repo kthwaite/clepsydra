@@ -23,6 +23,16 @@ export type ClepsydraRepo = {
 /** The active task: explicit (`/task`, a board press; persisted per repo+branch) or from the branch name. */
 export type ClepsydraBinding = { code: string; source: 'explicit' | 'branch' }
 
+/** The project hub page the session starts with. */
+export type ClepsydraHub = {
+  path: string
+  title: string
+  /** From the hub's frontmatter: `integration_branch`, `triage_index`. */
+  settings: { integrationBranch?: string; triageIndex?: string }
+  /** The hub's Status and Threads sections (max 2000 chars); absent when it has neither. */
+  section?: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
     clepsydra: {
@@ -35,6 +45,8 @@ declare module 'claude-code' {
       hubs: Record<string, string>
       /** Why the last board read failed; null after a good one. */
       boardError: string | null
+      /** The project's hub page; null when none was found or it could not be read. */
+      hub: ClepsydraHub | null
       binding: ClepsydraBinding | null
       /** The bound task's page body (for the system-prompt section). */
       activeBody: { code: string; body: string } | null

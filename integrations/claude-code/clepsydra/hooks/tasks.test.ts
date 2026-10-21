@@ -25,6 +25,18 @@ function task(code: string, over: Partial<BoardTask> = {}): BoardTask {
 }
 
 describe('parseBoard', () => {
+  test('hubRows: operations with a project and a path (the server lists only non-retired pages)', () => {
+    const b = parseBoard({
+      tasks: [],
+      operations: [
+        { project: 'clepsydra', path: 'projects/clepsydra/hq.md' },
+        { project: 'clepsydra' },
+        { project: null, path: 'x.md' },
+      ],
+    })
+    expect(b?.hubRows).toEqual([{ project: 'clepsydra', path: 'projects/clepsydra/hq.md', board: true }])
+  })
+
   test('keeps well-formed tasks and project slugs, drops junk', () => {
     const b = parseBoard({
       operations: [{ project: 'clepsydra', name: 'Clepsydra' }, { project: null, name: 'Shipping' }, { name: 'x' }],

@@ -1,5 +1,7 @@
 // Board tasks: parsing GET /board, grouping, short codes, ref resolution, branch codes.
 
+import type { HubRow } from './hub'
+
 export type BoardTask = {
   code: string
   title: string
@@ -13,7 +15,16 @@ export type BoardTask = {
 }
 
 /** `projects`: `operations[].project`; `hubs`: project slug → its hub page name (`operations[].name`). */
-export type Board = { tasks: BoardTask[]; projects: (string | null)[]; hubs: Record<string, string> }
+export type Board = {
+  tasks: BoardTask[]
+  projects: (string | null)[]
+  hubs: Record<string, string>
+  /**
+   * Hub candidates from `operations[]`. The server omits `board: false` pages and
+   * lists one operation per slug (board: true first), so every row counts as `board: true`.
+   */
+  hubRows: HubRow[]
+}
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -47,12 +58,15 @@ export function parseBoard(json: unknown): Board | undefined {
   const ops = Array.isArray(json.operations) ? json.operations : []
   const projects = ops.map(o => (isRecord(o) ? (str(o.project) ?? null) : null))
   const hubs: Record<string, string> = {}
+  const hubRows: HubRow[] = []
   for (const o of ops) {
     const slug = isRecord(o) ? str(o.project) : undefined
     const name = isRecord(o) ? str(o.name) : undefined
     if (slug !== undefined && name !== undefined) hubs[slug] = name
+    const path = isRecord(o) ? str(o.path) : undefined
+    if (slug !== undefined && path !== undefined) hubRows.push({ project: slug, path, board: true })
   }
-  return { tasks, projects, hubs }
+  return { tasks, projects, hubs, hubRows }
 }
 
 export const GROUP_ORDER = ['FIELD', 'REVIEW', 'TRIAGE', 'INTAKE'] as const

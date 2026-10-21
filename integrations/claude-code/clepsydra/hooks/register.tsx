@@ -2,7 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, PromptOrigin, Register } from 'claude-code'
 
 import type { ClepsydraBinding, ClepsydraRepo } from '../types'
-import { activeTaskSection, boardRowText, groupLabel, statusEntry, taskSummary } from './format'
+import { activeTaskSection, boardRowText, groupLabel, HUB_CAP, hubSection, statusEntry, taskSummary } from './format'
+import { hubSections, hubSettings, pickHub, type HubRow } from './hub'
 import {
   asPending,
   buildDigest,
@@ -34,6 +35,7 @@ const projectRef = atom({ plugin: 'clepsydra', key: 'project' } as const, null)
 const boardRef = atom({ plugin: 'clepsydra', key: 'board' } as const, null)
 const hubsRef = atom({ plugin: 'clepsydra', key: 'hubs' } as const, {})
 const boardErrorRef = atom({ plugin: 'clepsydra', key: 'boardError' } as const, null)
+const hubRef = atom({ plugin: 'clepsydra', key: 'hub' } as const, null)
 const bindingRef = atom({ plugin: 'clepsydra', key: 'binding' } as const, null)
 const bodyRef = atom({ plugin: 'clepsydra', key: 'activeBody' } as const, null)
 const paneOpenRef = atom({ plugin: 'clepsydra', key: 'isPaneOpen' } as const, false)
@@ -56,6 +58,8 @@ let cfg: Config = DEFAULTS
 let transport: 'http' | 'curl' = 'http'
 let poll: { cancel: () => void } | undefined
 let isFlushing = false
+// The last board answer's hub candidates; `loadHub` reads them.
+let hubRows: HubRow[] = []
 
 function readConfig(o: PluginOptions): Config {
   const s = (k: string, d: string) => {
@@ -224,10 +228,37 @@ async function refreshBoard($: $): Promise<BoardTask[] | null> {
       : resolveProject({ repoBase: repo.repoBase, mainBase: repo.mainBase, map: cfg.projectMap, projects: board.projects })
   await update($, boardRef, () => board.tasks)
   await update($, hubsRef, () => board.hubs)
+  hubRows = board.hubRows
   await update($, projectRef, () => project ?? null)
   await update($, boardErrorRef, () => null)
   await showStatus($)
   return board.tasks
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/** Reads the project's hub page into `hubRef`; null (and nothing added) on any failure. */
+async function loadHub($: $): Promise<void> {
+  try {
+    const project = await read($, projectRef)
+    const row = project === null ? undefined : pickHub(hubRows, project)
+    const got = row === undefined ? undefined : await getJson($, pagePath(row.path))
+    const page = got?.ok === true && isRecord(got.json) ? got.json : undefined
+    if (row === undefined || page === undefined || typeof page.body !== 'string') {
+      await update($, hubRef, () => null)
+      return
+    }
+    const meta = isRecord(page.meta) ? page.meta : {}
+    const section = hubSections(page.body, ['Status', 'Threads'], HUB_CAP)
+    await update($, hubRef, () => ({
+      path: row.path,
+      title: typeof meta.title === 'string' ? meta.title : row.path,
+      settings: hubSettings(meta),
+      ...(section === undefined ? {} : { section }),
+    }))
+  } catch {
+    await update($, hubRef, () => null)
+  }
 }
 
 async function boardTasks($: $): Promise<BoardTask[] | null> {
@@ -514,6 +545,7 @@ async function startup($: $): Promise<void> {
   await loadRepo($)
   const tasks = await refreshBoard($)
   if (tasks !== null && (await read($, bindingRef)) === null) await restoreBinding($, tasks)
+  await loadHub($)
   await flushAndToast($)
 }
 
@@ -571,12 +603,19 @@ export const register: Register = (on, options) => {
 
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
+    const sections = [...composed.sections]
+    const hub = await read($, hubRef)
+    if (hub?.section !== undefined) {
+      sections.push({ id: 'clepsydra:hub', text: hubSection(hub.title, hub.path, hub.section), scope: 'session' as const })
+    }
     const binding = await read($, bindingRef)
-    if (binding === null) return composed
-    const t = ((await read($, boardRef)) ?? []).find(x => x.code === binding.code)
-    const body = await read($, bodyRef)
-    const text = activeTaskSection(binding.code, t, body?.code === binding.code ? body.body : undefined)
-    return { sections: [...composed.sections, { id: 'clepsydra:active-task', text, scope: 'session' as const }] }
+    if (binding !== null) {
+      const t = ((await read($, boardRef)) ?? []).find(x => x.code === binding.code)
+      const body = await read($, bodyRef)
+      const text = activeTaskSection(binding.code, t, body?.code === binding.code ? body.body : undefined)
+      sections.push({ id: 'clepsydra:active-task', text, scope: 'session' as const })
+    }
+    return { sections }
   })
 
   on('prompt.submit', async ($, e, next) => {
