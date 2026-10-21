@@ -3,6 +3,7 @@ import type { EngineInterface, PluginOptions, PromptOrigin, Register } from 'cla
 
 import type { ClepsydraBinding, ClepsydraRepo } from '../types'
 import { activeTaskSection, boardRowText, groupLabel, HUB_CAP, hubSection, statusEntry, taskSummary } from './format'
+import { conflictCount, doctorCounts, healthNotice, healthSegment, statusText, type Health } from './health'
 import { hubSections, hubSettings, pickHub, type HubRow } from './hub'
 import {
   asPending,
@@ -37,6 +38,7 @@ const boardRef = atom({ plugin: 'clepsydra', key: 'board' } as const, null)
 const hubsRef = atom({ plugin: 'clepsydra', key: 'hubs' } as const, {})
 const boardErrorRef = atom({ plugin: 'clepsydra', key: 'boardError' } as const, null)
 const hubRef = atom({ plugin: 'clepsydra', key: 'hub' } as const, null)
+const healthRef = atom({ plugin: 'clepsydra', key: 'health' } as const, { reachable: true, conflicts: 0 })
 const bindingRef = atom({ plugin: 'clepsydra', key: 'binding' } as const, null)
 const bodyRef = atom({ plugin: 'clepsydra', key: 'activeBody' } as const, null)
 const paneOpenRef = atom({ plugin: 'clepsydra', key: 'isPaneOpen' } as const, false)
@@ -196,27 +198,53 @@ async function currentRepo($: $): Promise<ClepsydraRepo | null> {
 }
 
 async function showStatus($: $): Promise<void> {
+  const health = healthSegment(await read($, healthRef))
   const binding = await read($, bindingRef)
   if (binding === null) {
-    $.ui.status(undefined)
+    $.ui.status(statusText(undefined, health))
     return
   }
   const tasks = (await read($, boardRef)) ?? []
   const t = tasks.find(x => x.code === binding.code)
-  $.ui.status(
-    statusEntry(
-      shortCode(
-        binding.code,
-        tasks.map(x => x.code),
-      ),
-      t?.status,
+  const entry = statusEntry(
+    shortCode(
+      binding.code,
+      tasks.map(x => x.code),
     ),
+    t?.status,
   )
+  $.ui.status(statusText(entry, health))
+}
+
+async function setHealth($: $, patch: Partial<Health>): Promise<void> {
+  await update($, healthRef, h => ({ ...h, ...patch }))
+}
+
+/** Sync conflicts from GET /sync/status; a failed read keeps the last count (the board read decides reachability). */
+async function probeConflicts($: $): Promise<void> {
+  if (!(await read($, healthRef)).reachable) return
+  const got = await getJson($, '/sync/status')
+  if (got.ok) await setHealth($, { conflicts: conflictCount(got.json) })
+  await showStatus($)
+}
+
+/** `clep doctor --json` on the real config (read-only); undefined when it does not answer. */
+async function probeDoctor($: $): Promise<void> {
+  const r = await exec($, ['clep', 'doctor', '--json'], 10_000)
+  const doctor = doctorCounts(r.stdout)
+  if (doctor !== undefined) await setHealth($, { doctor })
+}
+
+/** The one health notice of the session; later probes only move the status line. */
+async function noticeHealth($: $): Promise<void> {
+  const text = healthNotice(await read($, healthRef))
+  if (text !== undefined) $.ui.log(text)
 }
 
 async function refreshBoard($: $): Promise<BoardTask[] | null> {
   const got = await getJson($, '/board')
   const board = got.ok ? parseBoard(got.json) : undefined
+  await setHealth($, { reachable: got.ok })
   if (board === undefined) {
     await update($, boardErrorRef, () => (got.ok ? 'not a board reply' : got.error))
     await showStatus($)
@@ -337,6 +365,7 @@ async function tick($: $): Promise<void> {
     return
   }
   await refreshBoard($)
+  await probeConflicts($)
 }
 
 function ensurePoll($: $): void {
@@ -626,7 +655,14 @@ async function startup($: $): Promise<void> {
   await loadRepo($)
   const tasks = await refreshBoard($)
   if (tasks !== null && (await read($, bindingRef)) === null) await restoreBinding($, tasks)
-  await flushAndToast($)
+  try {
+    await flushAndToast($)
+  } finally {
+    await probeConflicts($)
+    await probeDoctor($)
+    await showStatus($)
+    await noticeHealth($)
+  }
 }
 
 async function endSession($: $, reason: string): Promise<void> {

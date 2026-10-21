@@ -33,6 +33,9 @@ export type ClepsydraHub = {
   section?: string
 }
 
+/** The vault's health: the board read answered, sync conflict copies, and `clep doctor --json`'s error and warning checks. */
+export type ClepsydraHealth = { reachable: boolean; conflicts: number; doctor?: { errors: number; warnings: number } }
+
 declare module 'claude-code' {
   interface PluginState {
     clepsydra: {
@@ -47,6 +50,8 @@ declare module 'claude-code' {
       boardError: string | null
       /** The project's hub page; null when none was found or it could not be read. */
       hub: ClepsydraHub | null
+      /** Updated by every board read (reachable) and poll (conflicts); `doctor` once, at startup. */
+      health: ClepsydraHealth
       binding: ClepsydraBinding | null
       /** The bound task's page body (for the system-prompt section). */
       activeBody: { code: string; body: string } | null

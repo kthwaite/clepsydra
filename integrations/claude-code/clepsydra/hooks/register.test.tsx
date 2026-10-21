@@ -70,6 +70,9 @@ const SEARCH: Record<string, unknown> = {
 const BASH_OK = { result: { stdout: 'Merge made by the ort strategy.\n', stderr: '', interrupted: false } }
 const BASH_FAILED = { isError: true as const, result: 'Exit code 1\nCONFLICT (content): Merge conflict in a.ts' }
 
+const doctorReport = (...statuses: string[]) => JSON.stringify({ checks: statuses.map(status => ({ section: 's', name: 'n', status, detail: 'd' })) })
+const DOCTOR_CLEAN = doctorReport('ok', 'info')
+
 type World = {
   branch?: string
   commits?: string
@@ -88,11 +91,17 @@ type World = {
   /** /board answers 500 this many times first. */
   boardFailures?: number
   boardTasks?: ReturnType<typeof task>[]
+  /** `conflict_copies` GET /sync/status answers (default 0). */
+  conflicts?: number
+  /** What `clep doctor --json` prints (default: no findings). */
+  doctorStdout?: string
 }
 
 function world(on: On, opts: World = {}) {
   const seen = {
     toasts: [] as string[],
+    logs: [] as string[],
+    doctorRuns: [] as string[][],
     status: undefined as string | undefined,
     opened: [] as string[],
     filled: [] as string[],
@@ -133,6 +142,10 @@ function world(on: On, opts: World = {}) {
     seen.toasts.push(e.text)
     return { value: undefined }
   })
+  on('ui.log', (_$, e) => {
+    seen.logs.push(e.text)
+    return { value: undefined }
+  })
   on('ui.status', (_$, e) => {
     seen.status = e.text
     return { value: undefined }
@@ -144,6 +157,7 @@ function world(on: On, opts: World = {}) {
   let boardFailures = opts.boardFailures ?? 0
   /** Set `isDown` to make the vault fail every request from then on. */
   const vault = { isDown: false }
+  const conflicts = { count: opts.conflicts ?? 0 }
   const answer = (url: string): { status: number; text: string } => {
     const path = url.slice(API.length)
     if (vault.isDown) return { status: 503, text: '{}' }
@@ -154,6 +168,7 @@ function world(on: On, opts: World = {}) {
       }
       return { status: 200, text: JSON.stringify(opts.boardTasks === undefined ? BOARD : { ...BOARD, tasks: opts.boardTasks }) }
     }
+    if (path === '/sync/status') return { status: 200, text: JSON.stringify({ initialised: true, conflict_copies: conflicts.count }) }
     if (path.startsWith('/index/search?')) {
       const q = new URL(url).searchParams.get('q') ?? ''
       return { status: 200, text: JSON.stringify(SEARCH[q] ?? []) }
@@ -179,6 +194,10 @@ function world(on: On, opts: World = {}) {
       seen.curled.push(url)
       const a = answer(url)
       return ok(`${a.text}\n${a.status}`)
+    }
+    if (argv[0] === 'clep') {
+      seen.doctorRuns.push(argv)
+      return ok(opts.doctorStdout ?? DOCTOR_CLEAN)
     }
     const inDir = argv[1] === '-C'
     if (inDir) seen.git.push(argv.join(' '))
@@ -235,7 +254,7 @@ function world(on: On, opts: World = {}) {
           : { isAnswered: true as const, text: opts.modelText, usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
     }
   })
-  return { seen, clock, store, vault }
+  return { seen, clock, store, vault, conflicts }
 }
 
 describe('/board pane', () => {
@@ -259,11 +278,11 @@ describe('/board pane', () => {
     expect(seen.taskCalls[0]?.task).toBe('TSK-brave-finch-7q3zd')
     expect(seen.taskCalls[0]?.status).toBe('FIELD')
     expect(seen.filled).toEqual(['work on TSK-brave-finch-7q3zd: Board pane'])
-    expect(seen.status).toBe('TSK-brave-finch · TRIAGE')
+    expect(seen.status).toBe('TSK-brave-finch · TRIAGE · vault ✓')
     expect((await ui.find({ type: 'Text', text: /TSK-brave-finch P1/ }))?.text.startsWith('●')).toBe(true)
     await ui.press({ key: 'bind-TSK-calm-owl-bbbbb' })
     expect(seen.taskCalls.length).toBe(1)
-    expect(seen.status).toBe('TSK-calm-owl · FIELD')
+    expect(seen.status).toBe('TSK-calm-owl · FIELD · vault ✓')
     await ui.unmount()
   })
 
@@ -297,7 +316,7 @@ describe('/task binding', () => {
     const { seen } = world(on)
     const r = await $.command.run({ ...TYPED, command: 'task', args: 'TSK-brave' })
     expect(r.text).toContain('bound TSK-brave-finch-7q3zd')
-    expect(seen.status).toBe('TSK-brave-finch · TRIAGE')
+    expect(seen.status).toBe('TSK-brave-finch · TRIAGE · vault ✓')
     const composed = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] })
     const section = composed.sections.find(s => s.id === 'clepsydra:active-task')
     expect(section?.scope).toBe('session')
@@ -352,7 +371,7 @@ describe('/task binding', () => {
     const { seen, clock } = world(on, { branch: 'feature/tsk-calm-owl-bbbbb-journal' })
     await $.session.start({ cwd: REPO, surface: 'terminal', isInteractive: true })
     await clock.advance(10)
-    expect(seen.status).toBe('TSK-calm-owl · FIELD')
+    expect(seen.status).toBe('TSK-calm-owl · FIELD · vault ✓')
   })
 
   test('session start adds the hub section; vault text only inside the data block', async ($, on) => {
@@ -630,5 +649,81 @@ describe('merge → Review', () => {
     await $.tool.call({ tool: 'Bash', command: MERGE })
     await clock.advance(10)
     expect(seen.taskCalls.map(c => c.status)).toEqual(['REVIEW'])
+  })
+})
+
+describe('vault health', () => {
+  async function started($: Engine, clock: { advance: (ms: number) => Promise<void> }) {
+    await $.session.start({ cwd: REPO, surface: 'terminal', isInteractive: true })
+    await clock.advance(10)
+  }
+
+  test('healthy start: vault ✓ alone, no notice, doctor ran once', async ($, on) => {
+    const { seen, clock } = world(on)
+    await started($, clock)
+    expect(seen.status).toBe('vault ✓')
+    expect(seen.logs).toEqual([])
+    expect(seen.doctorRuns).toEqual([['clep', 'doctor', '--json']])
+  })
+
+  test('the board failing at start: vault ✗ and exactly one notice', async ($, on) => {
+    const { seen, clock } = world(on, { boardFailures: 99 })
+    await started($, clock)
+    expect(seen.status).toBe('vault ✗')
+    expect(seen.logs).toEqual(['clepsydra: server unreachable — start clep serve'])
+  })
+
+  test('a later poll that fails does not raise a second notice', async ($, on) => {
+    const { seen, clock, vault } = world(on)
+    await started($, clock)
+    await $.command.run({ ...TYPED, command: 'board', args: '' })
+    vault.isDown = true
+    await clock.advance(30_000)
+    expect(seen.status).toBe('vault ✗')
+    expect(seen.logs).toEqual([])
+  })
+
+  test('sync conflicts show in the segment and the notice, beside the task', async ($, on) => {
+    const { seen, clock } = world(on, { conflicts: 2, branch: 'feature/TSK-calm-owl-bbbbb' })
+    await started($, clock)
+    expect(seen.status).toBe('TSK-calm-owl · FIELD · vault · 2 conflicts')
+    expect(seen.logs).toEqual(['clepsydra: 2 sync conflicts — open /conflicts'])
+  })
+
+  test('a conflict arriving on a poll updates the segment, not the notice', async ($, on) => {
+    const clepWorld = world(on)
+    await started($, clepWorld.clock)
+    await $.command.run({ ...TYPED, command: 'board', args: '' })
+    expect(clepWorld.seen.status).toBe('vault ✓')
+    clepWorld.conflicts.count = 3
+    await clepWorld.clock.advance(30_000)
+    expect(clepWorld.seen.status).toBe('vault · 3 conflicts')
+    expect(clepWorld.seen.logs).toEqual([])
+  })
+
+  test('doctor errors raise the notice; the segment stays ✓', async ($, on) => {
+    const { seen, clock } = world(on, { doctorStdout: doctorReport('err', 'warn', 'ok') })
+    await started($, clock)
+    expect(seen.status).toBe('vault ✓')
+    expect(seen.logs).toEqual(['clepsydra: clep doctor reports 1 error'])
+  })
+
+  test('doctor warnings or unparsable output raise nothing', async ($, on) => {
+    const warned = world(on, { doctorStdout: doctorReport('warn') })
+    await started($, warned.clock)
+    expect(warned.seen.logs).toEqual([])
+  })
+
+  test('unreachable plus a doctor error: one notice naming both', async ($, on) => {
+    const { seen, clock } = world(on, { boardFailures: 99, doctorStdout: doctorReport('err') })
+    await started($, clock)
+    expect(seen.logs).toEqual(['clepsydra: server unreachable — start clep serve; clep doctor reports 1 error'])
+  })
+
+  test('garbage doctor output raises nothing', async ($, on) => {
+    const { seen, clock } = world(on, { doctorStdout: 'not json' })
+    await started($, clock)
+    expect(seen.logs).toEqual([])
+    expect(seen.status).toBe('vault ✓')
   })
 })
