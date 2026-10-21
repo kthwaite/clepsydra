@@ -18,9 +18,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::reading::{
-    AgendaParams, BaseQueryParams, FeedEntriesParams, ImportBody, ImportWorkParams, MarkReadParams,
-    base_evaluate_path, calendar_bounds, check_mark_read, feed_entries_query, import_route,
-    local_today, mark_entry_read_request,
+    AgendaParams, ArchiveUrlParams, BaseQueryParams, FeedEntriesParams, ImportBody,
+    ImportWorkParams, MarkReadParams, base_evaluate_path, calendar_bounds, check_mark_read,
+    feed_entries_query, import_route, local_today, mark_entry_read_request,
 };
 use super::tasking::{
     BoardKind, INCLUDE_RETIRED, TaskRef, board_query, classify_ref, deserialize_tri_state,
@@ -207,7 +207,7 @@ remains binned; resolve that path before retrying. A rubbish item drift conflict
 remains binned; re-list with vault_list_rubbish and inspect it with vault_get_rubbish_item. On \
 a page revision conflict, re-read the page with vault_get_page and re-apply the change. List Bases \
 with vault_bases and evaluate one view with vault_base_query. Read the dated agenda (and, with a \
-from/to range, the calendar) with vault_agenda. Read feed entries with vault_feed_entries and mark entries read with vault_feed_mark_read. Import works with vault_import_work (DOI, ISBN or BibTeX).";
+from/to range, the calendar) with vault_agenda. Read feed entries with vault_feed_entries and mark entries read with vault_feed_mark_read. Import works with vault_import_work (DOI, ISBN or BibTeX). Archive a web page by URL with vault_archive_url (server-side fetch, lower fidelity than the browser extension).";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreatePageParams {
@@ -1474,6 +1474,31 @@ impl VaultMcpServer {
     }
 
     #[tool(
+        name = "vault_archive_url",
+        description = "Archive a web page by URL using a server-side fetch (no browser). Lower fidelity than the browser extension's SingleFile capture; the page is tagged `server-fetch`. Requires archiving to be enabled on the server. `tags` are extra tags. Returns the archived page; an already-archived URL returns the existing page.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_archive_url(
+        &self,
+        Parameters(params): Parameters<ArchiveUrlParams>,
+    ) -> Result<String, String> {
+        let body = serde_json::json!({
+            "url": params.url,
+            "tags": params.tags.unwrap_or_default(),
+        });
+        let value = self
+            .client
+            .post_json("/api/vault/archive/url", &body)
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
         name = "vault_task_create",
         description = "Create a Task on the Task Board — preferred over vault_create_page because it mints a TSK-<adjective>-<noun>-<tail> code (the server assigns it; never invent one) and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); `task_type` is optional and one of FEATURE, FIX, TASK, STORY, SPIKE; a Cycle must match an existing code or unique prefix of one (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. `blocked_by` lists its Blockers (the Tasks it waits on) as TSK codes or unique prefixes. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
         annotations(
@@ -1941,6 +1966,7 @@ mod tests {
                 "vault_ai_journal_capture",
                 "vault_append_page",
                 "vault_archive_page",
+                "vault_archive_url",
                 "vault_assign",
                 "vault_base_query",
                 "vault_bases",
@@ -2201,9 +2227,25 @@ mod tests {
         tempfile::TempDir,
         Arc<clep_api::api::AppState>,
     ) {
+        serve_seeded_vault_with_config(None).await
+    }
+
+    /// Like `serve_seeded_vault_with_state`, writing `config_toml` to the
+    /// vault's `.clepsydra/config.toml` before the app state is built.
+    async fn serve_seeded_vault_with_config(
+        config_toml: Option<&str>,
+    ) -> (
+        VaultMcpServer,
+        tempfile::TempDir,
+        Arc<clep_api::api::AppState>,
+    ) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
         clep_api::vault::init::init_vault(&root).unwrap();
+
+        if let Some(config_toml) = config_toml {
+            std::fs::write(root.join(".clepsydra/config.toml"), config_toml).unwrap();
+        }
 
         let notes = root.join("notes");
         std::fs::create_dir_all(&notes).unwrap();
@@ -4601,6 +4643,52 @@ mod tests {
     #[test]
     fn server_instructions_mention_reading_tools() {
         for tool in ["vault_bases", "vault_agenda", "vault_feed_entries"] {
+            assert!(MCP_INSTRUCTIONS.contains(tool), "missing {tool}");
+        }
+    }
+
+    #[test]
+    fn archive_url_tool_is_a_non_destructive_idempotent_write() {
+        let tool = VaultMcpServer::tool_router()
+            .list_all()
+            .into_iter()
+            .find(|t| t.name == "vault_archive_url")
+            .expect("vault_archive_url missing");
+        let a = tool.annotations.expect("annotations");
+        assert_eq!(a.read_only_hint, Some(false));
+        assert_eq!(a.destructive_hint, Some(false));
+        assert_eq!(a.idempotent_hint, Some(true));
+        let description = tool.description.expect("description");
+        for clause in [
+            "server-side",
+            "browser extension",
+            "server-fetch",
+            "enabled",
+        ] {
+            assert!(
+                description.contains(clause),
+                "missing {clause}: {description}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn archive_url_reports_archiving_disabled() {
+        let (server, _tmp, _state) =
+            serve_seeded_vault_with_config(Some("[archive]\nenabled = false\n")).await;
+        let err = server
+            .vault_archive_url(Parameters(crate::reading::ArchiveUrlParams {
+                url: "https://example.com/post".to_string(),
+                tags: None,
+            }))
+            .await
+            .expect_err("disabled archiving must fail");
+        assert!(err.contains("archiving is disabled"), "{err}");
+    }
+
+    #[test]
+    fn server_instructions_mention_archive_url_and_import_work() {
+        for tool in ["vault_archive_url", "vault_import_work"] {
             assert!(MCP_INSTRUCTIONS.contains(tool), "missing {tool}");
         }
     }

@@ -53,6 +53,14 @@ pub struct MarkReadParams {
     pub ids: Vec<i64>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ArchiveUrlParams {
+    /// http(s) URL of the page to archive.
+    pub url: String,
+    /// Extra tags for the archived page (`server-fetch` is always added).
+    pub tags: Option<Vec<String>>,
+}
+
 /// Validate one opaque URL path segment (slug, view name) and encode it so
 /// it cannot change the route.
 pub fn path_segment(label: &str, value: &str) -> Result<String, String> {
