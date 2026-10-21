@@ -107,6 +107,15 @@ impl ApiError {
         )
     }
 
+    pub fn unprocessable(msg: impl Into<String>) -> Self {
+        Self {
+            status: 422,
+            error: msg.into(),
+            detail: None,
+            hint: None,
+        }
+    }
+
     pub fn unprocessable_with_detail(msg: impl Into<String>, detail: serde_json::Value) -> Self {
         Self {
             status: 422,

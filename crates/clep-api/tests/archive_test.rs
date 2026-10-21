@@ -2289,3 +2289,52 @@ async fn cas_blobs_allow_cross_origin_reads_but_snapshot_views_do_not() {
         "snapshot documents must stay unreadable cross-origin"
     );
 }
+
+#[tokio::test]
+async fn archive_url_is_forbidden_when_archiving_is_disabled() {
+    let (server, _tmp, _state) = ApiFixture::builder()
+        .configure(|root| {
+            fs::write(
+                root.join(".clepsydra/config.toml"),
+                "[archive]\nenabled = false\n",
+            )
+            .unwrap();
+        })
+        .build()
+        .into_parts();
+
+    let res = server
+        .post("/api/vault/archive/url")
+        .json(&serde_json::json!({ "url": "https://example.com/post" }))
+        .await;
+
+    res.assert_status(StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn archive_url_refuses_private_destinations_without_echoing_the_url() {
+    let (server, _tmp, _state) = setup_server();
+
+    let res = server
+        .post("/api/vault/archive/url")
+        .json(&serde_json::json!({ "url": "http://127.0.0.1/x?token=hunter2" }))
+        .await;
+
+    res.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    let body = res.text();
+    assert!(body.contains("could not fetch 127.0.0.1"), "{body}");
+    assert!(!body.contains("/x"), "{body}");
+    assert!(!body.contains("hunter2"), "{body}");
+}
+
+#[tokio::test]
+async fn archive_url_rejects_non_http_urls() {
+    let (server, _tmp, _state) = setup_server();
+
+    let res = server
+        .post("/api/vault/archive/url")
+        .json(&serde_json::json!({ "url": "ftp://x", "tags": ["reading"] }))
+        .await;
+
+    res.assert_status(StatusCode::BAD_REQUEST);
+}

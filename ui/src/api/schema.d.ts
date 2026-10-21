@@ -320,6 +320,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/archive/url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["archive_url"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/archive/view/{snapshot_hash}": {
         parameters: {
             query?: never;
@@ -2196,6 +2212,12 @@ export interface components {
         };
         /** @enum {string} */
         ArchiveStatus: "created" | "already_exists" | "content_changed";
+        ArchiveUrlRequest: {
+            /** @description Tags for the archived page. `server-fetch` is always added. */
+            tags?: string[];
+            /** @description Absolute http(s) URL of the page to fetch and archive. */
+            url: string;
+        };
         AssignIdRequest: {
             page_path: string;
             /** Format: int64 */
@@ -5197,6 +5219,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ArchiveStatsResponse"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    archive_url: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveUrlRequest"];
+            };
+        };
+        responses: {
+            /** @description Archive already exists */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveResponse"];
+                };
+            };
+            /** @description Archive created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveResponse"];
+                };
+            };
+            /** @description Invalid URL */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Archiving disabled */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Archive content conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page could not be fetched or is not HTML */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
             /** @description Internal server error */

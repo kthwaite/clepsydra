@@ -2,6 +2,7 @@ pub mod academic;
 pub mod agenda;
 pub mod ai_journal;
 pub mod archive;
+pub mod archive_url;
 pub mod attachments;
 pub mod base_csv;
 pub mod base_members;

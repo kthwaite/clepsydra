@@ -116,6 +116,8 @@ Capture into today's AI journal. Responses: `200` Updated AI journal; `400` Inva
 
 ### `POST /api/vault/archive`
 Ingest archive. Responses: `200` Archive already exists; `201` Archive created; `400` Invalid archive payload; `403` Archiving disabled; `409` Archive content conflict; `500` Internal server error.
+### `POST /api/vault/archive/url`
+Archive `{ url, tags? }` by fetching the page server-side as an anonymous client (no script, no inlined resources), then ingesting it like `POST /api/vault/archive`. Redirects are followed with the same non-global-destination refusal as link previews; bodies over 8 MiB and fetches over 20 s fail. Markdown is the Readability article, or the whole `<body>` when no article is found. The page is tagged `server-fetch`. Errors name only the host, never the URL's path or query. Responses: `200` Archive already exists; `201` Archive created; `400` Invalid URL; `403` Archiving disabled; `409` Archive content conflict; `422` Page could not be fetched or is not HTML; `500` Internal server error.
 ### `GET /api/vault/archive/status`
 Get archive status. Responses: `200` Archive service status; `500` Internal server error.
 ### `GET /api/vault/archive/lookup`

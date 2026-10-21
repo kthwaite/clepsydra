@@ -465,6 +465,7 @@ pub fn router_with_body_limit(
             "/",
             post(ingest_archive).layer(axum::extract::DefaultBodyLimit::max(max_bytes)),
         )
+        .route("/url", post(super::archive_url::archive_url))
         .route("/status", get(archive_status))
         .route("/lookup", get(lookup_archive))
         .route(
@@ -516,7 +517,7 @@ fn framable_content_type(content_type: &str) -> bool {
         .eq_ignore_ascii_case("text/html")
 }
 
-fn validate_http_url(field: &str, raw: &str) -> Result<(), ApiError> {
+pub(crate) fn validate_http_url(field: &str, raw: &str) -> Result<(), ApiError> {
     let has_http_prefix = raw
         .get(..7)
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
@@ -1417,13 +1418,30 @@ pub async fn ingest_archive(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ArchiveRequest>,
 ) -> Result<Response, ApiError> {
-    let archive_config = &state.vault.config().archive;
+    ensure_archiving_enabled(&state)?;
+    let (status, response) = ingest(&state, req).await?;
+    Ok((status, Json(response)).into_response())
+}
 
-    if !archive_config.enabled {
-        return Err(ApiError::forbidden(
+/// Refuse every archive write when `archive.enabled` is off.
+pub(crate) fn ensure_archiving_enabled(state: &AppState) -> Result<(), ApiError> {
+    if state.vault.config().archive.enabled {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden(
             "archiving is disabled in server configuration".to_string(),
-        ));
+        ))
     }
+}
+
+/// Archive one capture: dedupe by URL, deconstruct the snapshot into the CAS,
+/// and create the page. The caller has already checked that archiving is
+/// enabled.
+pub(crate) async fn ingest(
+    state: &AppState,
+    req: ArchiveRequest,
+) -> Result<(StatusCode, ArchiveResponse), ApiError> {
+    let archive_config = &state.vault.config().archive;
 
     validate_http_url("url", &req.url)?;
     if let Some(canonical_url) = req.canonical_url.as_deref() {
@@ -1470,16 +1488,15 @@ pub async fn ingest_archive(
                 if existing_hash == source_hash {
                     return Ok((
                         StatusCode::OK,
-                        Json(ArchiveResponse {
+                        ArchiveResponse {
                             page_id,
                             vault_path: path,
                             rubbish_item_id: None,
                             blobs_stored: 0,
                             blobs_deduped: 0,
                             status: ArchiveStatus::AlreadyExists,
-                        }),
-                    )
-                        .into_response());
+                        },
+                    ));
                 }
                 return Err(ApiError::conflict_with_detail(
                     format!("archive exists with different content: {}", req.url),
@@ -1498,16 +1515,15 @@ pub async fn ingest_archive(
             } => {
                 return Ok((
                     StatusCode::OK,
-                    Json(ArchiveResponse {
+                    ArchiveResponse {
                         page_id,
                         vault_path: original_path,
                         rubbish_item_id: Some(item_id),
                         blobs_stored: 0,
                         blobs_deduped: 0,
                         status: ArchiveStatus::AlreadyExists,
-                    }),
-                )
-                    .into_response());
+                    },
+                ));
             }
         }
     }
@@ -1571,7 +1587,7 @@ pub async fn ingest_archive(
         match store_decoded_blobs(&state.cas, &to_store) {
             Ok(stored) => stored,
             Err(failure) => {
-                return Err(rollback_cas(failure.primary, &state, &failure.ref_hashes));
+                return Err(rollback_cas(failure.primary, state, &failure.ref_hashes));
             }
         };
 
@@ -1587,7 +1603,7 @@ pub async fn ingest_archive(
     );
     let page_id = meta.id.to_string();
     let expected_page_content = write_page_content(&meta, &markdown_body);
-    let notify = super::mutation_notifier(state.as_ref());
+    let notify = super::mutation_notifier(state);
     if let Err(error) = state
         .mutation_coordinator
         .create_page(
@@ -1609,7 +1625,7 @@ pub async fn ingest_archive(
             let absolute = state.vault.resolve(&vault_path);
             let path = vault_path.as_str().to_string();
             let index_path = vault_path.clone();
-            let repair_state = Arc::clone(&state);
+            let repair_index = state.index.clone();
             compensation_failures.extend(
                 compensate_page_with(
                     &path,
@@ -1633,8 +1649,7 @@ pub async fn ingest_archive(
                             PageCompensationAction::DeleteIndex => IndexMutation::Deleted,
                             PageCompensationAction::RebuildIndex => IndexMutation::Created,
                         };
-                        repair_state
-                            .index
+                        repair_index
                             .apply_mutation(index_path, mutation)
                             .await
                             .map_err(|error| error.to_string())
@@ -1667,16 +1682,15 @@ pub async fn ingest_archive(
     // 5. Return response
     Ok((
         StatusCode::CREATED,
-        Json(ArchiveResponse {
+        ArchiveResponse {
             page_id,
             vault_path: vault_path.as_str().to_string(),
             rubbish_item_id: None,
             blobs_stored,
             blobs_deduped,
             status: ArchiveStatus::Created,
-        }),
-    )
-        .into_response())
+        },
+    ))
 }
 
 #[cfg(test)]
