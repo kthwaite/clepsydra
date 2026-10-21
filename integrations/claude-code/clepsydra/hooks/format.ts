@@ -61,11 +61,13 @@ const CONTROLS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u20
 /**
  * Vault metadata (a title, a path) for a prompt line outside the data block:
  * one line, no control characters, the vault-content tag defused, at most
- * `max` chars.
+ * `max` code points.
  */
 export function inlineVaultText(text: string, max = 200): string {
   const one = defuseTag(text.replace(CONTROLS, ' ').replace(/\s+/g, ' ').trim())
-  return one.length > max ? `${one.slice(0, max - 1)}…` : one
+  // Code points, so the cut never splits a surrogate pair.
+  const points = Array.from(one)
+  return points.length > max ? `${points.slice(0, max - 1).join('')}…` : one
 }
 
 export const HUB_CAP = 2000

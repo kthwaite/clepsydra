@@ -93,42 +93,55 @@ const VALUE_OPTS = new Set(['-m', '-F', '-s', '-X', '--message', '--file', '--st
 /** Merges that do not complete one: control verbs, and merges that leave no merge commit. */
 const NOT_A_MERGE = new Set(['--abort', '--continue', '--quit', '--squash', '--no-commit'])
 
-type GitMerge = MergeCall | 'other' | 'refused'
+type GitCommand = { sub?: string; dir?: string; args: string[]; isElsewhere: boolean }
 
-/** One `&&` command's words: `git [-C dir | -c kv | --flag]… merge …`. */
-function gitMerge(words: readonly string[]): GitMerge {
+/**
+ * One `&&` command's words as `git [-C dir | -c kv | --flag]… <sub> <args>`.
+ * `isElsewhere`: `--git-dir`/`--work-tree` point git away from the dir.
+ */
+function gitCommand(words: readonly string[]): GitCommand {
   let i = 1
   let dir: string | undefined
+  let isElsewhere = false
   while (i < words.length && (words[i] as string).startsWith('-')) {
     const w = words[i] as string
-    if (w === '-C' || w === '-c') {
+    if (w.startsWith('--git-dir') || w.startsWith('--work-tree')) isElsewhere = true
+    if (w === '-C' || w === '-c' || w === '--git-dir' || w === '--work-tree') {
       const v = words[i + 1]
-      if (v === undefined) return 'other'
+      if (v === undefined) return { args: [], isElsewhere }
       if (w === '-C') dir = joinDir(dir, v)
       i += 2
     } else i += 1
   }
-  if (words[i] !== 'merge') return 'other'
+  const sub = words[i]
+  return { ...(sub === undefined ? {} : { sub }), ...(dir === undefined ? {} : { dir }), args: words.slice(i + 1), isElsewhere }
+}
+
+/** The one branch a completing `git merge`'s args name; undefined for anything else. */
+function mergedBranch(args: readonly string[]): string | undefined {
   const branches: string[] = []
-  for (let j = i + 1; j < words.length; j += 1) {
-    const w = words[j] as string
+  for (let j = 0; j < args.length; j += 1) {
+    const w = args[j] as string
     if (w === '--') {
-      branches.push(...words.slice(j + 1))
+      branches.push(...args.slice(j + 1))
       break
     }
-    if (NOT_A_MERGE.has(w)) return 'refused'
+    if (NOT_A_MERGE.has(w)) return undefined
     if (VALUE_OPTS.has(w)) j += 1
     else if (!w.startsWith('-')) branches.push(w)
   }
-  if (branches.length !== 1) return 'refused'
-  return { ...(dir === undefined ? {} : { dir }), branch: branches[0] as string }
+  return branches.length === 1 ? branches[0] : undefined
 }
+
+/** Commands that move HEAD after the merge; the mod reads HEAD after the whole command. */
+const MOVES_HEAD = new Set(['checkout', 'switch'])
 
 /**
  * The completed merge a Bash command runs: `git merge <opts> <branch>`, after
  * `cd <dir> &&` or as `git -C <dir> merge …`, inside an `&&` chain. Undefined
  * for control verbs, `--squash`, `--no-commit`, `git pull`, no or several
- * branches, several merges, and any command whose exit status may not be the
+ * branches, several merges, a `checkout`/`switch` after the merge,
+ * `--git-dir`/`--work-tree`, and any command whose exit status may not be the
  * merge's.
  */
 export function parseMerge(command: string): MergeCall | undefined {
@@ -155,11 +168,13 @@ export function parseMerge(command: string): MergeCall | undefined {
       continue
     }
     if (head !== 'git') continue
-    const m = gitMerge(words)
-    if (m === 'other') continue
-    if (m === 'refused' || found !== undefined) return undefined
-    const dir = m.dir === undefined ? cwd : joinDir(cwd, m.dir)
-    found = { ...(dir === undefined ? {} : { dir }), branch: m.branch }
+    const g = gitCommand(words)
+    if (found !== undefined && g.sub !== undefined && MOVES_HEAD.has(g.sub)) return undefined
+    if (g.sub !== 'merge') continue
+    const branch = mergedBranch(g.args)
+    if (branch === undefined || g.isElsewhere || found !== undefined) return undefined
+    const dir = g.dir === undefined ? cwd : joinDir(cwd, g.dir)
+    found = { ...(dir === undefined ? {} : { dir }), branch }
   }
   return found
 }
@@ -176,11 +191,41 @@ export function bashSucceeded(r: { deny?: string; isError?: boolean; result?: un
   return r.result.interrupted !== true && r.result.backgroundTaskId === undefined
 }
 
+/** git's "Already up to date." (older: "Already up-to-date."): the merge made no commit. */
+export function isAlreadyUpToDate(r: { result?: unknown }): boolean {
+  return isRecord(r.result) && typeof r.result.stdout === 'string' && /Already up[ -]to[ -]date/i.test(r.result.stdout)
+}
+
+/** HEAD-like refs and `@{…}` (upstream, reflog): never a feature branch. */
+const NOT_A_BRANCH = /^(HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)([~^].*)?$|@\{/
+
+/**
+ * The TSK code a merge of `mergedBranch` delivers: the branch's own code, else
+ * the bound code. None for a HEAD-like ref, nor for the integration branch
+ * itself or `<remote>/<integration>` (bringing the integration branch in
+ * delivers nothing).
+ */
+export function mergeCode(input: { bound?: string; mergedBranch: string; integrationBranch?: string }): string | undefined {
+  const ref = input.mergedBranch.replace(/^refs\/(heads|remotes)\//, '')
+  if (NOT_A_BRANCH.test(ref)) return undefined
+  const integ = input.integrationBranch
+  if (integ !== undefined) {
+    const isRemote = ref.endsWith(`/${integ}`) && ref.split('/').length === integ.split('/').length + 1
+    if (ref === integ || isRemote) return undefined
+  }
+  return branchTaskCode(ref) ?? input.bound
+}
+
 const DONE = new Set(['REVIEW', 'SEALED'])
 
-/** The board task a merge delivers: the bound code, else the merged branch's; not one already in REVIEW or SEALED. */
-export function mergeTask(input: { bound?: string; mergedBranch: string; tasks: readonly BoardTask[] }): BoardTask | undefined {
-  const code = input.bound ?? branchTaskCode(input.mergedBranch)
+/** The board task `mergeCode` names; undefined when it is not on the board or is already REVIEW or SEALED. */
+export function mergeTask(input: {
+  bound?: string
+  mergedBranch: string
+  integrationBranch?: string
+  tasks: readonly BoardTask[]
+}): BoardTask | undefined {
+  const code = mergeCode(input)
   if (code === undefined) return undefined
   const t = input.tasks.find(x => x.code.toLowerCase() === code.toLowerCase())
   return t === undefined || DONE.has(t.status) ? undefined : t

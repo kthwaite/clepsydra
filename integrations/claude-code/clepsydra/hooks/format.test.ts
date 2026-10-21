@@ -120,6 +120,12 @@ describe('inlineVaultText', () => {
     expect(inlineVaultText('abcdef', 4)).toBe('abc…')
     expect(inlineVaultText('abcd', 4)).toBe('abcd')
   })
+  test('the cap counts code points and never splits a surrogate pair', () => {
+    const out = inlineVaultText(`${'a'.repeat(198)}😀😀😀`)
+    expect(out).toBe(`${'a'.repeat(198)}😀…`)
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(out)).toBe(false)
+    expect(inlineVaultText('😀😀😀😀', 4)).toBe('😀😀😀😀')
+  })
 })
 
 describe('metadata outside the block is one clean line', () => {

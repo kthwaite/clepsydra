@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { bashSucceeded, deliveryAppend, deliveryLine, localDate, mergeTask, parseMerge } from './merge'
+import { bashSucceeded, deliveryAppend, deliveryLine, isAlreadyUpToDate, localDate, mergeCode, mergeTask, parseMerge } from './merge'
 import type { BoardTask } from './tasks'
 
 const task = (code: string, status: string): BoardTask => ({
@@ -72,6 +72,19 @@ describe('parseMerge', () => {
     }
   })
 
+  test('a checkout or switch after the merge is refused (HEAD is read after the command)', () => {
+    for (const c of ['git merge x && git checkout main', 'git merge x && git -C /r switch main', 'cd /r && git merge x && git switch -']) {
+      expect(parseMerge(c)).toBeUndefined()
+    }
+    expect(parseMerge('git switch develop && git merge x')).toEqual({ branch: 'x' })
+  })
+
+  test('--git-dir / --work-tree are refused', () => {
+    for (const c of ['git --git-dir=/r/.git merge x', 'git --work-tree=/r merge x', 'git --git-dir /r/.git merge x', 'git --work-tree /r merge x']) {
+      expect(parseMerge(c)).toBeUndefined()
+    }
+  })
+
   test('a quoted operator is part of a word', () => {
     expect(parseMerge('git merge -m "a; b | c && d" x')).toEqual({ branch: 'x' })
   })
@@ -89,11 +102,49 @@ describe('bashSucceeded', () => {
   })
 })
 
+describe('isAlreadyUpToDate', () => {
+  test('git said the merge made no commit', () => {
+    expect(isAlreadyUpToDate({ result: { stdout: 'Already up to date.\n' } })).toBe(true)
+    expect(isAlreadyUpToDate({ result: { stdout: 'Already up-to-date.\n' } })).toBe(true)
+    expect(isAlreadyUpToDate({ result: { stdout: 'Merge made by the ort strategy.\n' } })).toBe(false)
+    expect(isAlreadyUpToDate({ result: 'Already up to date.' })).toBe(false)
+  })
+})
+
+describe('mergeCode', () => {
+  const integrationBranch = 'develop'
+  test('the merged branch code wins over the bound one', () => {
+    expect(mergeCode({ bound: 'TSK-a-b-1', mergedBranch: 'feature/TSK-c-d-2', integrationBranch })).toBe('TSK-c-d-2')
+  })
+  test('the bound code when the branch has none', () => {
+    expect(mergeCode({ bound: 'TSK-a-b-1', mergedBranch: 'feature/foo', integrationBranch })).toBe('TSK-a-b-1')
+    expect(mergeCode({ mergedBranch: 'feature/foo', integrationBranch })).toBeUndefined()
+  })
+  test('the integration branch, its remote copy, and HEAD-like refs deliver nothing', () => {
+    for (const mergedBranch of ['develop', 'origin/develop', 'upstream/develop', 'refs/remotes/origin/develop', 'refs/heads/develop', 'FETCH_HEAD', 'ORIG_HEAD', 'HEAD', 'HEAD~1', 'MERGE_HEAD', '@{u}', 'develop@{upstream}']) {
+      expect(mergeCode({ bound: 'TSK-a-b-1', mergedBranch, integrationBranch })).toBeUndefined()
+    }
+  })
+  test('without a known integration branch only HEAD-like refs are excluded', () => {
+    expect(mergeCode({ bound: 'TSK-a-b-1', mergedBranch: 'FETCH_HEAD' })).toBeUndefined()
+    expect(mergeCode({ bound: 'TSK-a-b-1', mergedBranch: 'feature/TSK-c-d-2' })).toBe('TSK-c-d-2')
+  })
+})
+
 describe('mergeTask', () => {
   const tasks = [task('TSK-a-b-1', 'FIELD'), task('TSK-c-d-2', 'FIELD'), task('TSK-e-f-3', 'REVIEW'), task('TSK-g-h-4', 'SEALED')]
 
-  test('mergeTask bound wins', () => {
-    expect(mergeTask({ bound: 'TSK-a-b-1', mergedBranch: 'feature/TSK-c-d-2', tasks })?.code).toBe('TSK-a-b-1')
+  test('the merged branch beats the binding (R-H)', () => {
+    expect(mergeTask({ bound: 'TSK-a-b-1', mergedBranch: 'feature/TSK-c-d-2', tasks })?.code).toBe('TSK-c-d-2')
+  })
+
+  test('bound task when the branch has no code', () => {
+    expect(mergeTask({ bound: 'TSK-a-b-1', mergedBranch: 'feature/foo', integrationBranch: 'develop', tasks })?.code).toBe('TSK-a-b-1')
+  })
+
+  test('bound task is not delivered by the integration branch or FETCH_HEAD', () => {
+    expect(mergeTask({ bound: 'TSK-a-b-1', mergedBranch: 'origin/develop', integrationBranch: 'develop', tasks })).toBeUndefined()
+    expect(mergeTask({ bound: 'TSK-a-b-1', mergedBranch: 'FETCH_HEAD', integrationBranch: 'develop', tasks })).toBeUndefined()
   })
 
   test('mergeTask from branch', () => {

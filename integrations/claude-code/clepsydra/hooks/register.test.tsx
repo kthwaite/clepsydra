@@ -83,6 +83,7 @@ type World = {
   /** Branch `git -C <dir> rev-parse --abbrev-ref HEAD` reports (default: `branch`). */
   dirBranch?: string
   isBashError?: boolean
+  bashStdout?: string
   taskDeny?: string
   /** /board answers 500 this many times first. */
   boardFailures?: number
@@ -213,7 +214,10 @@ function world(on: On, opts: World = {}) {
     seen.appendCalls.push({ ...e })
     return { result: JSON.stringify({ path: e.path, appended: true }) }
   })
-  on('tool.call', { tool: 'Bash' }, () => structuredClone(opts.isBashError === true ? BASH_FAILED : BASH_OK))
+  on('tool.call', { tool: 'Bash' }, () => {
+    if (opts.isBashError === true) return structuredClone(BASH_FAILED)
+    return opts.bashStdout === undefined ? structuredClone(BASH_OK) : { result: { ...BASH_OK.result, stdout: opts.bashStdout } }
+  })
   on('tool.call', { tool: 'mcp__clepsydra__vault_ai_journal_capture' }, (_$, e) => {
     seen.journalCalls.push({ ...e })
     return opts.journalDeny === undefined ? { result: 'appended' } : { deny: opts.journalDeny }
@@ -564,6 +568,54 @@ describe('merge → Review', () => {
     await clock.advance(10)
     expect(seen.toasts.some(t => t.includes('could not update TSK-brave-finch-7q3zd'))).toBe(true)
     expect(seen.appendCalls).toEqual([])
+  })
+
+  test('"Already up to date." makes no update', async ($, on) => {
+    const { seen, clock } = world(on, { bashStdout: 'Already up to date.\n' })
+    await started($, clock)
+    await $.tool.call({ tool: 'Bash', command: MERGE })
+    await clock.advance(10)
+    expect(seen.git).toEqual([])
+    expect(seen.taskCalls).toEqual([])
+    expect(seen.appendCalls).toEqual([])
+  })
+
+  test('a bound task is not delivered by pulling in origin/develop', async ($, on) => {
+    const { seen, clock } = world(on)
+    await started($, clock)
+    await $.command.run({ ...TYPED, command: 'task', args: 'TSK-calm' })
+    await $.tool.call({ tool: 'Bash', command: 'git merge --ff-only origin/develop' })
+    await clock.advance(10)
+    expect(seen.taskCalls).toEqual([])
+    expect(seen.toasts).toEqual([])
+  })
+
+  test('the merged branch beats the bound task', async ($, on) => {
+    const { seen, clock } = world(on)
+    await started($, clock)
+    await $.command.run({ ...TYPED, command: 'task', args: 'TSK-calm' })
+    await $.tool.call({ tool: 'Bash', command: MERGE })
+    await clock.advance(10)
+    expect(seen.taskCalls.map(c => [c.task, c.status])).toEqual([['TSK-brave-finch-7q3zd', 'REVIEW']])
+  })
+
+  test('no hub because the vault is unreachable: a toast names the task', async ($, on) => {
+    const { seen, clock } = world(on, { boardFailures: 99 })
+    await started($, clock)
+    await $.tool.call({ tool: 'Bash', command: MERGE })
+    await clock.advance(10)
+    expect(seen.toasts).toContain('clepsydra: could not check TSK-brave-finch-7q3zd: vault unreachable')
+    expect(seen.git).toEqual([])
+    expect(seen.taskCalls).toEqual([])
+  })
+
+  test('a project without a hub: no merge automation, no toast', { options: { projectMap: 'logseq=xxii' } }, async ($, on) => {
+    const { seen, clock } = world(on, { top: '/work/logseq' })
+    await started($, clock)
+    await $.tool.call({ tool: 'Bash', command: 'git merge feature/TSK-eager-yak-ddddd' })
+    await clock.advance(10)
+    expect(seen.toasts).toEqual([])
+    expect(seen.taskCalls).toEqual([])
   })
 
   test('a hub missed at startup loads after a later good board read (R-F)', async ($, on) => {

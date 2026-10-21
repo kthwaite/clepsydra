@@ -16,7 +16,7 @@ import {
   type PendingJournal,
 } from './journal'
 import { attachToast, extractWikilinks, formatAttachment, pageFromJson, pickExact, searchHits, truncatePage } from './links'
-import { bashSucceeded, deliveryAppend, deliveryLine, localDate, mergeTask, parseMerge, type MergeCall } from './merge'
+import { bashSucceeded, deliveryAppend, deliveryLine, isAlreadyUpToDate, localDate, mergeCode, mergeTask, parseMerge, type MergeCall } from './merge'
 import { basename, mainCheckoutOf, parseProjectMap, resolveProject } from './project'
 import { resolveVaultTool } from './tools'
 import { bindingKey, branchTaskCode, groupTasks, parseBoard, resolveTaskRef, shortCode, type BoardTask } from './tasks'
@@ -425,28 +425,34 @@ async function mergeDir($: $, call: MergeCall): Promise<string | undefined> {
 /**
  * After a completed merge: when the merge's checkout is on the hub's
  * integration branch, move the delivered task to REVIEW and add a Delivery
- * line to its page. A failure after the task is known toasts it.
+ * line to its page. When the vault keeps the hub from being read, or a step
+ * fails once the task is known, a toast names the task.
  */
 async function afterMerge($: $, call: MergeCall): Promise<void> {
   const dir = await mergeDir($, call)
   if (dir === undefined) return
+  const bound = (await read($, bindingRef))?.code
+  const withBound = bound === undefined ? {} : { bound }
   // No hub yet (startup's board read failed): a board read loads it.
   const early = (await read($, hubRef)) === null ? await refreshBoard($) : undefined
-  const integration = (await read($, hubRef))?.settings.integrationBranch
+  const hub = await read($, hubRef)
+  if (hub === null) {
+    // Unreachable: the board read failed, or the project has a hub that could not be read.
+    const project = await read($, projectRef)
+    const isUnreachable = early === null || (project !== null && pickHub(hubRows, project) !== undefined)
+    const code = mergeCode({ ...withBound, mergedBranch: call.branch })
+    if (isUnreachable && code !== undefined) $.ui.toast(`clepsydra: could not check ${code}: vault unreachable`)
+    return
+  }
+  const integration = hub.settings.integrationBranch
   if (integration === undefined) return
   const head = await git($, dir, ['rev-parse', '--abbrev-ref', 'HEAD'])
   if (head !== integration) return
   const sha = await git($, dir, ['rev-parse', '--short', 'HEAD'])
-  // Current statuses; the cached board when the vault does not answer.
-  const tasks = (early ?? (await refreshBoard($))) ?? (await read($, boardRef))
-  const bound = (await read($, bindingRef))?.code
-  if (tasks === null) {
-    const code = bound ?? branchTaskCode(call.branch)
-    const why = (await read($, boardErrorRef)) ?? 'board unreachable'
-    if (code !== undefined) $.ui.toast(`clepsydra: could not update ${code}: ${why.slice(0, 160)}`)
-    return
-  }
-  const t = mergeTask({ ...(bound === undefined ? {} : { bound }), mergedBranch: call.branch, tasks })
+  // Current statuses; the cached board when the vault does not answer. A hub
+  // only loads after a good board read, so the cache is set here.
+  const tasks = (early ?? (await refreshBoard($))) ?? (await read($, boardRef)) ?? []
+  const t = mergeTask({ ...withBound, mergedBranch: call.branch, integrationBranch: integration, tasks })
   if (t === undefined) return
   if (sha === '') {
     $.ui.toast(`clepsydra: could not update ${t.code}: no commit sha for ${dir}`)
@@ -703,7 +709,7 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const r = await next(e)
     try {
-      const call = bashSucceeded(r) ? parseMerge(e.command) : undefined
+      const call = bashSucceeded(r) && !isAlreadyUpToDate(r) ? parseMerge(e.command) : undefined
       // Vault work runs after the hook, so the tool result never waits on it.
       if (call !== undefined) $.clock.after(0, () => void afterMerge($, call).catch(() => undefined))
     } catch {
