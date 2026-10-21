@@ -8,7 +8,7 @@
     "apiBase": {
       "type": "string",
       "title": "Vault API base",
-      "description": "Base URL of the clepsydra vault HTTP API (read-only GETs go here).",
+      "description": "http(s) URL of the clepsydra vault HTTP API (read-only GETs go here) — not the vault folder. Anything else falls back to the default.",
       "default": "https://clepsydra.localhost/api/vault"
     },
     "projectMap": {

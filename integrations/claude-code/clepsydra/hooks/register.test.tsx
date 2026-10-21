@@ -77,6 +77,10 @@ type World = {
   branch?: string
   commits?: string
   isFetchBroken?: boolean
+  /** The engine fetch never settles (a stalled TLS handshake, a policy prompt). */
+  isFetchHung?: boolean
+  /** curl cannot connect at all (exit 7). */
+  isCurlDown?: boolean
   modelText?: string
   journalDeny?: string
   top?: string
@@ -192,6 +196,7 @@ function world(on: On, opts: World = {}) {
   on('http.fetch', (_$, e) => {
     seen.fetched.push(e.url)
     if (opts.isFetchBroken === true) throw new Error('self signed certificate in certificate chain')
+    if (opts.isFetchHung === true) return new Promise<never>(() => undefined)
     const a = answer(e.url)
     return { value: { status: a.status, ok: a.status < 300, headers: {}, text: a.text } }
   })
@@ -201,6 +206,7 @@ function world(on: On, opts: World = {}) {
     if (argv[0] === 'curl') {
       const url = argv[argv.length - 1] ?? ''
       seen.curled.push(url)
+      if (opts.isCurlDown === true) return { value: { ...ok('').value, exitCode: 7, stderr: 'curl: (7) Failed to connect' } }
       const a = answer(url)
       return ok(`${a.text}\n${a.status}`)
     }
@@ -426,6 +432,41 @@ describe('/task binding', () => {
     const r = await $.command.run({ ...TYPED, command: 'board', args: '' })
     expect(r.text).toBe('board · clepsydra: 1 field · 1 triage')
     expect(seen.curled).toEqual([`${API}/board`, `${API}/pages/${HUB}`])
+  })
+
+  test('a hung engine fetch times out to curl, which answers, so curl is kept', async ($, on) => {
+    const { seen, clock } = world(on, { isFetchHung: true })
+    await $.session.start({ cwd: REPO, surface: 'terminal', isInteractive: true })
+    await clock.advance(10)
+    await clock.advance(6000)
+    expect(seen.fetched).toEqual([`${API}/board`])
+    expect(seen.curled).toContain(`${API}/board`)
+    expect(seen.curled).toContain(`${API}/sync/status`)
+    expect(seen.status).toBe('vault ✓')
+    expect(seen.logs).toEqual([])
+  })
+
+  test('a hung fetch with curl down too stays unreachable and keeps the engine fetch', async ($, on) => {
+    const { seen, clock } = world(on, { isFetchHung: true, isCurlDown: true })
+    await $.session.start({ cwd: REPO, surface: 'terminal', isInteractive: true })
+    await clock.advance(10)
+    await clock.advance(6000)
+    expect(seen.status).toBe('vault ✗')
+    expect(seen.logs).toEqual(['clepsydra: server unreachable — start clep serve'])
+    await clock.advance(60_000)
+    await clock.advance(6000)
+    expect(seen.fetched).toEqual([`${API}/board`, `${API}/sync/status`])
+  })
+})
+
+describe('apiBase option', () => {
+  test('a vault folder path is rejected: the default URL is used and one line says so', { options: { apiBase: '~/Documents/vault' } }, async ($, on) => {
+    const { seen, clock } = world(on)
+    await $.session.start({ cwd: REPO, surface: 'terminal', isInteractive: true })
+    await clock.advance(10)
+    expect(seen.fetched[0]).toBe(`${API}/board`)
+    expect(seen.status).toBe('vault ✓')
+    expect(seen.logs).toEqual([`clepsydra: apiBase "~/Documents/vault" is not an http(s) URL — using ${API}`])
   })
 })
 
