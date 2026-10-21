@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, PromptOrigin, Register } from 'claude-code'
 
 import type { ClepsydraBinding, ClepsydraRepo } from '../types'
+import { apiBaseOf, DEFAULT_API_BASE } from './config'
 import { activeTaskSection, boardRowText, groupLabel, HUB_CAP, hubSection, statusEntry, taskSummary } from './format'
 import { conflictCount, doctorCounts, healthNotice, healthSegment, statusText, type Health } from './health'
 import { hubSections, hubSettings, pickHub, type HubRow } from './hub'
@@ -60,10 +61,11 @@ const promptsRef = atom({ plugin: 'clepsydra', key: 'prompts' } as const, [])
 const toolNamesRef = atom({ plugin: 'clepsydra', key: 'toolNames' } as const, null)
 const promptCountRef = atom({ plugin: 'clepsydra', key: 'promptCount' } as const, 0)
 
-type Config = { apiBase: string; projectMap: Record<string, string>; journalModel: string }
+/** `rejectedApiBase`: an `apiBase` option that is not an http(s) URL; the default is used instead. */
+type Config = { apiBase: string; rejectedApiBase?: string; projectMap: Record<string, string>; journalModel: string }
 
 const DEFAULTS: Config = {
-  apiBase: 'https://clepsydra.localhost/api/vault',
+  apiBase: DEFAULT_API_BASE,
   projectMap: {},
   journalModel: 'claude-haiku-5-5',
 }
@@ -84,8 +86,10 @@ function readConfig(o: PluginOptions): Config {
     const v = o[k]
     return typeof v === 'string' && v.trim() !== '' ? v.trim() : d
   }
+  const api = apiBaseOf(s('apiBase', ''))
   return {
-    apiBase: s('apiBase', DEFAULTS.apiBase).replace(/\/+$/, ''),
+    apiBase: api.base,
+    ...(api.rejected === undefined ? {} : { rejectedApiBase: api.rejected }),
     projectMap: parseProjectMap(s('projectMap', '')),
     journalModel: s('journalModel', DEFAULTS.journalModel),
   }
@@ -118,7 +122,8 @@ function withTimeout<T>($: $, p: Promise<T>, ms: number): Promise<T | undefined>
   })
 }
 
-type Got = { ok: true; json: unknown } | { ok: false; error: string }
+/** `isUnsent`: the request never reached a server (curl could not connect), as opposed to an HTTP answer. */
+type Got = { ok: true; json: unknown } | { ok: false; error: string; isUnsent?: true }
 
 function parseJson(text: string): Got {
   try {
@@ -130,7 +135,7 @@ function parseJson(text: string): Got {
 
 async function curlJson($: $, url: string): Promise<Got> {
   const r = await exec($, ['curl', '-sS', '--max-time', '5', '-H', 'Accept: application/json', '-w', '\n%{http_code}', url], 8000)
-  if (r.exitCode !== 0) return { ok: false, error: `curl exit ${r.exitCode}: ${r.stderr.trim().slice(0, 120)}` }
+  if (r.exitCode !== 0) return { ok: false, error: `curl exit ${r.exitCode}: ${r.stderr.trim().slice(0, 120)}`, isUnsent: true }
   const at = r.stdout.lastIndexOf('\n')
   const code = Number(r.stdout.slice(at + 1).trim())
   if (!(code >= 200 && code < 300)) return { ok: false, error: `HTTP ${code}` }
@@ -140,15 +145,20 @@ async function curlJson($: $, url: string): Promise<Got> {
 /**
  * Read-only GET against the vault API. `$.http.fetch` first; when it throws
  * (TLS against Caddy's local CA, a fetch policy) the module switches to curl,
- * which reads the macOS keychain. An HTTP error status is an answer, not a
- * transport failure.
+ * which reads the macOS keychain. When it hangs, curl gets this one request,
+ * and the module switches only if curl reached a server. An HTTP error status
+ * is an answer, not a transport failure.
  */
 async function getJson($: $, path: string): Promise<Got> {
   const url = `${cfg.apiBase}${path}`
   if (transport === 'http') {
     try {
       const r = await withTimeout($, $.http.fetch(url, { headers: { Accept: 'application/json' } }), HTTP_TIMEOUT_MS)
-      if (r === undefined) return { ok: false, error: 'timed out' }
+      if (r === undefined) {
+        const got = await curlJson($, url)
+        if (got.ok || got.isUnsent !== true) transport = 'curl'
+        return got
+      }
       if (!r.ok) return { ok: false, error: `HTTP ${r.status}` }
       return parseJson(r.text)
     } catch {
@@ -693,6 +703,7 @@ async function journalCommand($: $, note: string): Promise<string> {
 }
 
 async function startup($: $): Promise<void> {
+  if (cfg.rejectedApiBase !== undefined) $.ui.log(`clepsydra: apiBase "${cfg.rejectedApiBase}" is not an http(s) URL — using ${cfg.apiBase}`)
   await loadRepo($)
   const tasks = await refreshBoard($)
   if (tasks !== null && (await read($, bindingRef)) === null) await restoreBinding($, tasks)
