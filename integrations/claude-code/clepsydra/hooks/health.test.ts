@@ -9,7 +9,7 @@ describe('healthSegment', () => {
     expect(healthSegment({ reachable: false, conflicts: 0 })).toBe('vault ✗')
     expect(healthSegment({ reachable: false, conflicts: 3 })).toBe('vault ✗')
     expect(healthSegment({ reachable: true, conflicts: 2 })).toBe('vault · 2 conflicts')
-    expect(healthSegment({ reachable: true, conflicts: 1 })).toBe('vault · 1 conflicts')
+    expect(healthSegment({ reachable: true, conflicts: 1 })).toBe('vault · 1 conflict')
     expect(healthSegment(OK)).toBe('vault ✓')
   })
 

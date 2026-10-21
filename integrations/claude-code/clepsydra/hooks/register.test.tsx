@@ -95,6 +95,8 @@ type World = {
   conflicts?: number
   /** What `clep doctor --json` prints (default: no findings). */
   doctorStdout?: string
+  /** Exit code of `clep doctor --json` (default 0; it exits 1 when a check errs). */
+  doctorExit?: number
 }
 
 function world(on: On, opts: World = {}) {
@@ -197,7 +199,7 @@ function world(on: On, opts: World = {}) {
     }
     if (argv[0] === 'clep') {
       seen.doctorRuns.push(argv)
-      return ok(opts.doctorStdout ?? DOCTOR_CLEAN)
+      return { value: { ...ok(opts.doctorStdout ?? DOCTOR_CLEAN).value, exitCode: opts.doctorExit ?? 0 } }
     }
     const inDir = argv[1] === '-C'
     if (inDir) seen.git.push(argv.join(' '))
@@ -708,7 +710,7 @@ describe('vault health', () => {
     expect(seen.logs).toEqual(['clepsydra: clep doctor reports 1 error'])
   })
 
-  test('doctor warnings or unparsable output raise nothing', async ($, on) => {
+  test('doctor warnings alone raise nothing', async ($, on) => {
     const warned = world(on, { doctorStdout: doctorReport('warn') })
     await started($, warned.clock)
     expect(warned.seen.logs).toEqual([])
@@ -725,5 +727,25 @@ describe('vault health', () => {
     await started($, clock)
     expect(seen.logs).toEqual([])
     expect(seen.status).toBe('vault ✓')
+  })
+
+  test('doctor exiting 1 with an error report still raises the notice (stdout is kept)', async ($, on) => {
+    const { seen, clock } = world(on, { doctorStdout: doctorReport('err', 'err'), doctorExit: 1 })
+    await started($, clock)
+    expect(seen.logs).toEqual(['clepsydra: clep doctor reports 2 errors'])
+  })
+
+  test('pane closed: the health timer notices the server going down and recovering, with no second log', async ($, on) => {
+    const { seen, clock, vault, conflicts } = world(on)
+    await started($, clock)
+    expect(seen.status).toBe('vault ✓')
+    vault.isDown = true
+    await clock.advance(60_000)
+    expect(seen.status).toBe('vault ✗')
+    vault.isDown = false
+    conflicts.count = 1
+    await clock.advance(60_000)
+    expect(seen.status).toBe('vault · 1 conflict')
+    expect(seen.logs).toEqual([])
   })
 })

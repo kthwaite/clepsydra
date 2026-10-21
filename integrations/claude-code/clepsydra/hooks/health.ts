@@ -5,7 +5,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 export function healthSegment(h: Health): string {
   if (!h.reachable) return 'vault ✗'
-  if (h.conflicts > 0) return `vault · ${h.conflicts} conflicts`
+  if (h.conflicts > 0) return `vault · ${plural(h.conflicts, 'conflict', 'conflicts')}`
   return 'vault ✓'
 }
 

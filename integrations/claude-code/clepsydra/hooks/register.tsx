@@ -26,6 +26,7 @@ type $ = EngineInterface
 
 const PANE = 'clepsydra-board'
 const POLL_MS = 30_000
+const HEALTH_MS = 60_000
 const HTTP_TIMEOUT_MS = 6000
 const GROUP_ROWS = 25
 const PENDING = 'pendingJournal'
@@ -60,6 +61,8 @@ const DEFAULTS: Config = {
 let cfg: Config = DEFAULTS
 let transport: 'http' | 'curl' = 'http'
 let poll: { cancel: () => void } | undefined
+// The health timer runs with the pane closed too; a reload replaces it.
+let healthTimer: { cancel: () => void } | undefined
 let isFlushing = false
 // The last board answer's hub candidates; `loadHub` reads them.
 let hubRows: HubRow[] = []
@@ -225,6 +228,13 @@ async function probeConflicts($: $): Promise<void> {
   if (!(await read($, healthRef)).reachable) return
   const got = await getJson($, '/sync/status')
   if (got.ok) await setHealth($, { conflicts: conflictCount(got.json) })
+  await showStatus($)
+}
+
+/** Timer tick: `/sync/status` is the cheap vault GET. It answering decides `reachable`, and its conflict count is kept. Never a notice. */
+async function healthTick($: $): Promise<void> {
+  const got = await getJson($, '/sync/status')
+  await setHealth($, got.ok ? { reachable: true, conflicts: conflictCount(got.json) } : { reachable: false })
   await showStatus($)
 }
 
@@ -698,6 +708,8 @@ export const register: Register = (on, options) => {
       description: 'write a session entry to the clepsydra AI journal now',
       argumentHint: '[note]',
     })
+    healthTimer?.cancel()
+    healthTimer = $.clock.every(HEALTH_MS, () => void healthTick($).catch(() => undefined))
     const ran = await next(e)
     // Network work runs after the hook, so the first prompt never waits on the vault.
     $.clock.after(0, () => void startup($).catch(() => undefined))
