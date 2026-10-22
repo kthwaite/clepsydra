@@ -1,6 +1,6 @@
 {
   "name": "clepsydra",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": { "name": "Kit Thwaite" },
   "description": "Clepsydra vault in Claude Code: the vault MCP server (clep mcp); vault, onboard-project, decide, triage and research-to-vault skills; /board pane and /task binding; a Claude-run merge into the hub's integration branch moves the Task to Review with a Delivery line; vault health in the status line; [[wikilink]] page attach; and a session journal entry (/journal).",
   "types": "./types/index.d.ts",
@@ -14,7 +14,7 @@
     "projectMap": {
       "type": "string",
       "title": "Project map",
-      "description": "dir=slug pairs, comma separated, matched on the repo (or main checkout) basename, e.g. viii=xxii.",
+      "description": "dir=slug pairs, comma separated, matched on the repo (or main checkout) basename, e.g. website-repo=acme.",
       "default": ""
     },
     "journalModel": {
