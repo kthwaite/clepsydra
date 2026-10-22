@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="ui/public/favicon.svg" alt="Clepsydra icon" width="128" height="128">
+</p>
+
 # clepsydra
 
 a bespoke personal knowledge management system.
