@@ -9,14 +9,12 @@ export function BoolCell({
   onCancel,
   ariaLabel,
   ariaDescribedBy,
-  commitOnBlur,
 }: CellEditorProps) {
   const current = value === true ? "true" : value === false ? "false" : "";
   return (
     <div
       onKeyDownCapture={(event) => {
         const tabSubmit = tabCommit(event, {
-          commitOnBlur,
           onCommitNext,
           onCommitPrevious,
         });

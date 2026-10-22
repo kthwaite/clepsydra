@@ -10,7 +10,6 @@ export function SelectCell({
   onCancel,
   ariaLabel,
   ariaDescribedBy,
-  commitOnBlur,
 }: CellEditorProps) {
   const current = typeof value === "string" ? value : "";
   const options = definition.options ?? [];
@@ -35,7 +34,6 @@ export function SelectCell({
     <div
       onKeyDownCapture={(event) => {
         const tabSubmit = tabCommit(event, {
-          commitOnBlur,
           onCommitNext,
           onCommitPrevious,
         });

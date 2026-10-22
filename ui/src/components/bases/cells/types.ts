@@ -32,8 +32,8 @@ export interface CellEditorProps {
    * declared type when the wire value needs disambiguation (dates).
    */
   onCommit: (value: CellValue, hint?: PropertyType) => void;
-  /** Commit the edited value and advance to the next editable cell. */
-  onCommitNext: (value: CellValue, hint?: PropertyType) => void;
+  /** Commit and advance. Absent: Tab is left to the browser. */
+  onCommitNext?: (value: CellValue, hint?: PropertyType) => void;
   /**
    * Commit the edited value and move back to the previous editable cell.
    * Absent: Shift+Tab is left to the browser.
@@ -51,21 +51,17 @@ export const CELL_INPUT_CLASS =
 
 /**
  * The commit an inline editor's Tab key performs: Tab commits forward,
- * Shift+Tab commits backward. `undefined` leaves the key to the browser, as
- * draft editors (`commitOnBlur`) always do.
+ * Shift+Tab commits backward. An absent callback leaves the key to the
+ * browser, independently of whether the editor saves on blur.
  */
 export function tabCommit(
   event: React.KeyboardEvent,
   {
-    commitOnBlur,
     onCommitNext,
     onCommitPrevious,
-  }: Pick<
-    CellEditorProps,
-    "commitOnBlur" | "onCommitNext" | "onCommitPrevious"
-  >,
+  }: Pick<CellEditorProps, "onCommitNext" | "onCommitPrevious">,
 ): CellEditorProps["onCommit"] | undefined {
-  if (commitOnBlur || event.key !== "Tab") return undefined;
+  if (event.key !== "Tab") return undefined;
   return event.shiftKey ? onCommitPrevious : onCommitNext;
 }
 

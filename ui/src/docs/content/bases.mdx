@@ -125,6 +125,12 @@ The `[properties]` table describes keys stored in page frontmatter; it does not 
 
 Schemas are advisory. A page whose value disagrees with a declaration still indexes, and the declaration does not rewrite or reject it. Clepsydra reports a warning instead. Likewise, a non-empty `options` list constrains diagnostics and completions rather than blocking an unfamiliar value, and `many = false` on a relation warns about multiple targets rather than enforcing a write constraint. An empty `options` list means an open vocabulary: the LSP can offer values already observed in the vault and does not warn about new ones.
 
+In a note's **Base properties** panel, **Tab** commits the active field and opens
+the next visible, editable property; **Shift+Tab** moves backward. Navigation
+waits for the save to succeed and skips hidden or read-only properties. A failed
+save keeps the draft available. At either end, focus returns to the property's
+edit button; another Tab or Shift+Tab leaves the panel in normal keyboard order.
+
 ### Descriptions, defaults, and number presentation
 
 Each property may declare `description` and a typed `default`. Descriptions appear

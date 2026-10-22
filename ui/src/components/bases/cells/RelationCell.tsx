@@ -84,7 +84,6 @@ export function RelationCell({
         }}
         onKeyDown={(e) => {
           const tabSubmit = tabCommit(e, {
-            commitOnBlur,
             onCommitNext,
             onCommitPrevious,
           });

@@ -98,14 +98,16 @@ export function EditableCell({
           else setLocalEditing(false);
           onCommit(next, hint);
         }}
-        onCommitNext={(next, hint) => {
-          if (controlled) {
-            onCommitNext?.(next, hint);
-          } else {
-            setLocalEditing(false);
-            onCommit(next, hint);
-          }
-        }}
+        onCommitNext={
+          controlled
+            ? onCommitNext
+            : commitOnBlur
+              ? undefined
+              : (next, hint) => {
+                  setLocalEditing(false);
+                  onCommit(next, hint);
+                }
+        }
         onCommitPrevious={controlled ? onCommitPrevious : undefined}
         onCancel={() => {
           if (controlled) onCancel?.();

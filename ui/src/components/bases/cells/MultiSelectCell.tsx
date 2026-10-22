@@ -78,7 +78,6 @@ export function MultiSelectCell({
       className="m-0 min-w-0 border-0 p-0"
       onKeyDownCapture={(event) => {
         const tabSubmit = tabCommit(event, {
-          commitOnBlur,
           onCommitNext,
           onCommitPrevious,
         });

@@ -142,6 +142,14 @@ function sameCellValue(a: CellValue, b: CellValue): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function isEditableProperty(property: PageBaseProperty): boolean {
+  return (
+    property.compatibility === "compatible" &&
+    property.patchable &&
+    property.definition !== null
+  );
+}
+
 function displayPropertyValue(property: PageBaseProperty): string {
   if (property.blockers.includes("reserved_key")) return "Not exposed";
   if (!property.present) return "Not set";
@@ -206,12 +214,36 @@ function PageFolioProperties({
     property: PageBaseProperty,
     value: CellValue,
     hint?: PropertyType,
+    direction?: 1 | -1,
   ) => {
     const current = projection.data;
     if (!current || savingKey !== null) return;
     if (openKeyRef.current !== property.key) return;
+    // Follow displayed group order, not the projection's interleaved key order.
+    const ordered = groups.flatMap((group) => group.properties);
+    const index = ordered.findIndex(({ key }) => key === property.key);
+    const candidates =
+      direction === 1
+        ? ordered.slice(index + 1)
+        : direction === -1
+          ? ordered.slice(0, index).reverse()
+          : [];
+    const finish = (updated: PageBasePropertiesResponse) => {
+      // Do not steal focus if the user left this editor while saving.
+      if (openKeyRef.current !== property.key) return;
+      const next = candidates.find((candidate) =>
+        updated.properties.some(
+          (field) =>
+            field.key === candidate.key &&
+            isEditableProperty(field) &&
+            (showHidden || !isHiddenByDefault(field)),
+        ),
+      );
+      if (next && !locked && !readOnly) openEditor(next.key);
+      else discardDraft(property.key);
+    };
     if (sameCellValue(value, propertyCellValue(property))) {
-      discardDraft(property.key);
+      finish(current);
       return;
     }
 
@@ -225,10 +257,8 @@ function PageFolioProperties({
         hint,
         current.revision,
       );
-      await projection.refetch();
-      openKeyRef.current = null;
-      setEditingKey(null);
-      setFocusReturnKey(property.key);
+      const refreshed = await projection.refetch();
+      finish(refreshed.data ?? current);
     } catch (error) {
       setFailedSave({
         key: property.key,
@@ -354,11 +384,7 @@ function PageFolioProperties({
                     ? `${provenanceId} ${errorId}`
                     : provenanceId;
                   const canEdit =
-                    !locked &&
-                    !readOnly &&
-                    property.compatibility === "compatible" &&
-                    property.patchable &&
-                    property.definition !== null;
+                    !locked && !readOnly && isEditableProperty(property);
                   const readOnlyReason = locked
                     ? "Page is locked"
                     : readOnly
@@ -442,7 +468,10 @@ function PageFolioProperties({
                               void saveProperty(property, value, hint);
                             }}
                             onCommitNext={(value, hint) => {
-                              void saveProperty(property, value, hint);
+                              void saveProperty(property, value, hint, 1);
+                            }}
+                            onCommitPrevious={(value, hint) => {
+                              void saveProperty(property, value, hint, -1);
                             }}
                           />
                         ) : (

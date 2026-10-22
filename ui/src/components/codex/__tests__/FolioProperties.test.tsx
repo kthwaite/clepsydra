@@ -758,8 +758,14 @@ describe("FolioProperties", () => {
     });
   });
 
-  it("saves a changed draft on blur and leaves focus where the user moved it", async () => {
+  it("commits Tab once and opens the next property after saving", async () => {
     const user = userEvent.setup();
+    let finishSave!: () => void;
+    commitMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishSave = resolve;
+      }),
+    );
     projectionState.data = projection([
       property("status", "text", { value: "reading" }),
       property("author", "text", { value: "Herbert" }),
@@ -772,25 +778,138 @@ describe("FolioProperties", () => {
     const input = screen.getByRole("textbox", { name: "status property" });
     await user.clear(input);
     await user.type(input, "finished");
-    const author = screen.getByRole("button", { name: "Edit author property" });
     await user.tab();
-    expect(author).toHaveFocus();
+    expect(input).toHaveFocus();
+    expect(commitMock).toHaveBeenCalledExactlyOnceWith(
+      PAGE,
+      "status",
+      "finished",
+      undefined,
+      "projection-rev-1",
+    );
+    await act(async () => finishSave());
+    expect(
+      screen.getByRole("textbox", { name: "author property" }),
+    ).toHaveFocus();
+  });
 
-    await waitFor(() => {
-      expect(commitMock).toHaveBeenCalledWith(
-        PAGE,
-        "status",
-        "finished",
-        undefined,
-        "projection-rev-1",
-      );
+  it("tabs unchanged fields in displayed group order, skipping hidden and read-only fields", async () => {
+    const user = userEvent.setup();
+    const reviews = { slug: "reviews", name: "Reviews" };
+    projectionState.data = projection(
+      [
+        property("first"),
+        property("shared", "text", {
+          declarations: [
+            {
+              base: { slug: "library", name: "Library" },
+              definition: definition("text"),
+            },
+            { base: reviews, definition: definition("text") },
+          ],
+        }),
+        property("readonly", "text", { patchable: false }),
+        property("hidden", "text", {
+          declarations: [
+            { base: HIDDEN_LIBRARY, definition: definition("text") },
+          ],
+        }),
+        property("second"),
+      ],
+      [{ slug: "library", name: "Library" }, reviews],
+    );
+    renderPanel();
+    await user.click(
+      screen.getByRole("button", { name: "Edit first property" }),
+    );
+    await user.tab();
+    expect(
+      screen.getByRole("textbox", { name: "second property" }),
+    ).toHaveFocus();
+    await user.tab();
+    expect(
+      screen.getByRole("textbox", { name: "shared property" }),
+    ).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(
+      screen.getByRole("textbox", { name: "second property" }),
+    ).toHaveFocus();
+    expect(commitMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed Tab save in its editor instead of advancing", async () => {
+    const user = userEvent.setup();
+    projectionState.data = projection([property("first"), property("second")]);
+    commitMock.mockRejectedValueOnce(new Error("network unavailable"));
+    renderPanel();
+    await user.click(
+      screen.getByRole("button", { name: "Edit first property" }),
+    );
+    const input = screen.getByRole("textbox", { name: "first property" });
+    await user.clear(input);
+    await user.type(input, "keep this draft");
+    await user.tab();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "network unavailable",
+    );
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("keep this draft");
+    expect(
+      screen.queryByRole("textbox", { name: "second property" }),
+    ).toBeNull();
+  });
+
+  it("skips a property removed by the save's membership refresh", async () => {
+    const user = userEvent.setup();
+    projectionState.data = projection([
+      property("first"),
+      property("removed"),
+      property("remaining"),
+    ]);
+    projectionState.refetch.mockImplementation(async () => {
+      projectionState.data = projection([
+        property("first"),
+        property("remaining"),
+      ]);
+      return { data: projectionState.data };
     });
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("textbox", { name: "status property" }),
-      ).toBeNull();
-    });
-    expect(author).toHaveFocus();
+    renderPanel();
+    await user.click(
+      screen.getByRole("button", { name: "Edit first property" }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "first property" }),
+      " changed",
+    );
+    await user.tab();
+    expect(
+      screen.getByRole("textbox", { name: "remaining property" }),
+    ).toHaveFocus();
+  });
+
+  it("returns to the boundary field without trapping subsequent native Tab", async () => {
+    const user = userEvent.setup();
+    projectionState.data = projection([property("only")]);
+    render(
+      <>
+        <FolioProperties
+          pageId={PAGE.id}
+          path={PAGE.path}
+          locked={false}
+          readOnly={false}
+        />
+        <textarea aria-label="Note body" />
+      </>,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Edit only property" }),
+    );
+    await user.tab();
+    expect(
+      screen.getByRole("button", { name: "Edit only property" }),
+    ).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("textbox", { name: "Note body" })).toHaveFocus();
   });
 
   it("closes an unchanged draft on blur without saving", async () => {

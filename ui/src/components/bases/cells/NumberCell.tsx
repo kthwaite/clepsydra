@@ -51,7 +51,6 @@ export function NumberCell({
       }}
       onKeyDown={(e) => {
         const tabSubmit = tabCommit(e, {
-          commitOnBlur,
           onCommitNext,
           onCommitPrevious,
         });
