@@ -25,3 +25,6 @@ lcov.info
 
 # local (testing) config
 config.toml
+
+# claude config
+.claude/skills
