@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="ui/public/favicon.svg" alt="Clepsydra icon" width="128" height="128">
-</p>
-
-# clepsydra
+<h1 align="center">
+  <img src="ui/public/favicon.svg" alt="Clepsydra icon" width="128" height="128"><br/>
+  clepsydra
+</h1>
 
 a bespoke personal knowledge management system.
 
@@ -52,7 +51,6 @@ to investigate; do not assume a configuration error or retry a mutation blindly.
 - Encrypted notes and security model: [docs/encrypted-notes.md](docs/encrypted-notes.md)
 - Browser extension install/dev guide: [extension/README.md](extension/README.md)
 
-
 ## RSS/Atom reader
 
 Subscriptions live in the reserved, human-editable `<vault>/feeds.md` manifest.
@@ -61,6 +59,7 @@ and trailing hashtags for feed-level tags:
 
 ```markdown
 ## Engineering
+
 - [Rust Blog](https://blog.rust-lang.org/feed.xml) #rust
 ```
 
