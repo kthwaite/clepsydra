@@ -268,16 +268,53 @@ export const ListItemTask: Story = {
             }),
             makeListItem({
               checked: false,
-              children: [makeParagraph({ children: [{ text: "Open task" }] })],
+              children: [
+                makeParagraph({ children: [{ text: "Open task" }] }),
+                makeBulletedList({
+                  children: [
+                    makeListItem({
+                      checked: false,
+                      children: [
+                        makeParagraph({ children: [{ text: "Nested open task" }] }),
+                      ],
+                    }),
+                    makeListItem({
+                      checked: true,
+                      children: [
+                        makeParagraph({ children: [{ text: "Nested done task" }] }),
+                      ],
+                    }),
+                  ],
+                }),
+              ],
             }),
             makeListItem({
               children: [makeParagraph({ children: [{ text: "Regular item" }] })],
             }),
           ],
         }),
+        makeNumberedList({
+          children: [
+            makeListItem({
+              checked: false,
+              children: [makeParagraph({ children: [{ text: "Numbered task" }] })],
+            }),
+            makeListItem({
+              children: [makeParagraph({ children: [{ text: "Regular step" }] })],
+            }),
+          ],
+        }),
       ],
       true,
     ),
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "On a cold load in Safari/WebKit, markers must stay left of checkboxes before any edit or resize. Check nested tasks, numbering, completed-task strikes, and narrow viewports.",
+      },
+    },
+  },
 };
 
 export const ThematicBreak: Story = {

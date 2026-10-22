@@ -230,7 +230,9 @@ function ListItem({
       data-block-id={element.blockId}
       className={cn("group", checked === true && "text-mute line-through")}
     >
-      <div className="flex items-baseline max-md:items-start">
+      {/* An inline-level row keeps WebKit's initial outside marker in the gutter.
+          Atomic inline boxes must explicitly inherit the completed-task strike. */}
+      <div className="inline-flex w-full items-baseline align-top [text-decoration:inherit] max-md:items-start">
         <label
           contentEditable={false}
           className="mr-3 inline-flex size-4 shrink-0 cursor-pointer select-none max-md:-ml-3.5 max-md:min-h-11 max-md:min-w-11 max-md:items-start max-md:justify-start max-md:pt-1 max-md:pl-3.5"
