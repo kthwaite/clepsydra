@@ -24,7 +24,7 @@ After implementing any change, always run typecheck, lint, and the test suite be
 
 ## Feature Workflow
 
-For any feature implementation: (1) grill/clarify scope and design first, (2) write a TDD task plan, (3) execute via subagents, (4) review each task, (5) verify gates, (6) commit and merge to develop.
+For any feature implementation: (1) grill/clarify scope and design first, (2) write a TDD task plan, (3) execute via subagents, (4) review each task, (5) verify gates, (6) commit and merge to dev.
 
 ## Architecture
 
@@ -70,6 +70,8 @@ UI conventions — stack, path alias, editor (Slate) architecture, the Stone & L
 
 ## Git Workflow
 
-- `main` is the primary branch; `develop` is the integration branch
-- Feature branches off `develop`
-- Merge completed feature branches into `develop` and clean up worktrees afterward
+- `prod` is the protected primary/default branch; `dev` is the active development and integration branch.
+- Create feature branches and worktrees from `dev`; target feature PRs at `dev` explicitly, since GitHub defaults to `prod`.
+- Merge completed feature branches into `dev` and clean up worktrees afterward.
+- Promote releases from `dev` to `prod`. Production protection blocks branch deletion and force-pushes.
+- `main` and `develop` are retained legacy branches; use `dev` for new work.

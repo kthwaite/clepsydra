@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [prod, dev]
   pull_request:
 
 # A newer push to the same branch makes the in-flight run redundant.

@@ -1,6 +1,6 @@
 ---
 name: feature
-description: Use when implementing a feature or non-trivial bugfix end-to-end in this project, from scoping through merge to develop. Invoked via /feature.
+description: Use when implementing a feature or non-trivial bugfix end-to-end in this project, from scoping through merge to dev. Invoked via /feature.
 ---
 
 # Feature
@@ -9,4 +9,4 @@ description: Use when implementing a feature or non-trivial bugfix end-to-end in
 2. Write a TDD task plan.
 3. Execute via subagents, reviewing each task.
 4. Run typecheck, lint, tests.
-5. Commit and merge to develop, clean up worktree.
+5. Commit and merge to dev, clean up worktree.
