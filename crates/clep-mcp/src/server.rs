@@ -17,6 +17,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::properties::{
+    GetPropertiesParams, PatchPropertiesParams, get_properties, patch_properties,
+};
 use super::reading::{
     AgendaParams, ArchiveUrlParams, BaseQueryParams, FeedEntriesParams, ImportBody,
     ImportWorkParams, MarkReadParams, base_evaluate_path, calendar_bounds, check_mark_read,
@@ -205,8 +208,12 @@ vault_cycle_update, passing carry_to to move their unfinished Tasks. Page paths 
 folders. An occupied-path restore conflict means the original path is occupied and the item \
 remains binned; resolve that path before retrying. A rubbish item drift conflict means the item \
 remains binned; re-list with vault_list_rubbish and inspect it with vault_get_rubbish_item. On \
-a page revision conflict, re-read the page with vault_get_page and re-apply the change. List Bases \
-with vault_bases and evaluate one view with vault_base_query. Read the dated agenda (and, with a \
+a page revision conflict, re-read the page with vault_get_page and re-apply the change. \
+Read custom frontmatter with vault_get_properties, then use vault_patch_properties with explicit \
+typed values and expected_revision set to the returned revision. Custom keys need no Base declaration. On conflict, \
+re-read and reconsider the patch; never retry blindly. Use clear to remove keys, not null. \
+Keep title, tags, aliases, kind/project, and Task/Cycle workflows on their dedicated tools. \
+List Bases with vault_bases and evaluate one view with vault_base_query. Read the dated agenda (and, with a \
 from/to range, the calendar) with vault_agenda. Read feed entries with vault_feed_entries and mark entries read with vault_feed_mark_read. Import works with vault_import_work (DOI, ISBN or BibTeX). Archive a web page by URL with vault_archive_url (server-side fetch, lower fidelity than the browser extension).";
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -650,6 +657,34 @@ impl VaultMcpServer {
             .map_err(|e| e.to_string())?;
         truncate_body(&mut value, MAX_BODY_BYTES);
         render(&value)
+    }
+
+    #[tool(
+        name = "vault_get_properties",
+        description = "Read all frontmatter values, including undeclared custom keys, alongside matching Base definitions and conflicts. Provide exactly one page path or UUID. Returns id, path, revision, values (full page metadata), matching_bases, properties (Base declarations), encrypted, and preview. A concurrent page change returns a conflict, never a mixed snapshot.",
+        annotations(read_only_hint = true, idempotent_hint = true)
+    )]
+    pub async fn vault_get_properties(
+        &self,
+        Parameters(params): Parameters<GetPropertiesParams>,
+    ) -> Result<String, String> {
+        render(&get_properties(&self.client, params).await?)
+    }
+
+    #[tool(
+        name = "vault_patch_properties",
+        description = "Set or clear arbitrary custom frontmatter keys; no Base declaration is required. Provide exactly one page path or UUID and an explicit expected_revision from a read. Each set value is tagged with type and value; date/datetime become native TOML, array/object contain untagged nested values without null. Clear removes keys; set and clear cannot overlap. Preserves untouched TOML and body. Legacy YAML heals to TOML and may lose comments. System fields and Task/Cycle workflows belong to dedicated tools. Returns id, path, revision and properties (custom values). Conflicts require re-reading and reconsidering; never retry blindly.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_patch_properties(
+        &self,
+        Parameters(params): Parameters<PatchPropertiesParams>,
+    ) -> Result<String, String> {
+        render(&patch_properties(&self.client, params).await?)
     }
 
     #[tool(
@@ -1986,6 +2021,7 @@ mod tests {
                 "vault_feed_mark_read",
                 "vault_folder",
                 "vault_get_page",
+                "vault_get_properties",
                 "vault_get_rubbish_item",
                 "vault_import_work",
                 "vault_journal_capture",
@@ -1993,6 +2029,7 @@ mod tests {
                 "vault_list_pages",
                 "vault_list_rubbish",
                 "vault_move_page",
+                "vault_patch_properties",
                 "vault_preview_mutation",
                 "vault_purge_page",
                 "vault_restore_page",
@@ -2286,6 +2323,452 @@ mod tests {
 
     fn parse(result: Result<String, String>) -> Value {
         serde_json::from_str(&result.expect("tool call should succeed")).unwrap()
+    }
+
+    /// Exercise rmcp registration and argument deserialization over its real transport.
+    async fn property_tool(server: &VaultMcpServer, name: &str, arguments: Value) -> Value {
+        use rmcp::ServiceExt;
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let server = server.clone();
+        let serving = tokio::spawn(async move {
+            server
+                .serve(server_io)
+                .await
+                .unwrap()
+                .waiting()
+                .await
+                .unwrap();
+        });
+        let (reader, mut writer) = tokio::io::split(client_io);
+        let mut reader = BufReader::new(reader);
+        let initialize = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05", "capabilities": {},
+                "clientInfo": {"name": "property-test", "version": "1"}
+            }
+        });
+        writer
+            .write_all(format!("{initialize}\n").as_bytes())
+            .await
+            .unwrap();
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let initialized: Value = serde_json::from_str(&line).unwrap();
+        assert!(initialized.get("error").is_none(), "{initialized}");
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+            .await
+            .unwrap();
+        let request = json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": name, "arguments": arguments}
+        });
+        writer
+            .write_all(format!("{request}\n").as_bytes())
+            .await
+            .unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        let response = serde_json::from_str(&line).unwrap();
+        serving.abort();
+        response
+    }
+
+    fn property_result(response: Value) -> Value {
+        assert!(response.get("error").is_none(), "{response}");
+        assert_ne!(response["result"]["isError"], true, "{response}");
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn properties_patch_undeclared_custom_value_through_registered_tools() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let before = property_result(
+            property_tool(
+                &server,
+                "vault_get_properties",
+                json!({"path": "notes/alpha.md"}),
+            )
+            .await,
+        );
+        let patched = property_result(
+            property_tool(
+                &server,
+                "vault_patch_properties",
+                json!({
+                    "id": before["id"], "expected_revision": before["revision"],
+                    "set": {"rating": {"type": "number", "value": 4.5}}
+                }),
+            )
+            .await,
+        );
+        assert_eq!(patched["properties"]["rating"], 4.5);
+        assert_ne!(patched["revision"], before["revision"]);
+        let after = property_result(
+            property_tool(&server, "vault_get_properties", json!({"id": before["id"]})).await,
+        );
+        assert_eq!(after["values"]["rating"], 4.5);
+        assert_eq!(after["revision"], patched["revision"]);
+        assert_eq!(after["path"], "notes/alpha.md");
+    }
+
+    fn property_error(response: Value) -> String {
+        assert!(
+            response.get("error").is_some() || response["result"]["isError"] == true,
+            "expected a failed tool call: {response}"
+        );
+        response.to_string()
+    }
+
+    #[tokio::test]
+    async fn properties_typed_patch_and_clear_preserve_native_dates_comments_and_body() {
+        let (server, tmp) = serve_seeded_vault().await;
+        let path = tmp.path().join("vault/notes/alpha.md");
+        let body = "\n# Original body\n\n- Keep **formatting** and [[Beta]].\n";
+        std::fs::write(
+            &path,
+            format!(
+                "+++\nid = \"0190f8a0-0000-7000-8000-0000000000a1\"\n\
+             title = \"Alpha\"\n\
+             created_at = 2026-10-24T00:00:00Z\n\
+             updated_at = 2026-10-24T00:00:00Z\n# Keep this comment\n\
+             retained = \"verbatim\" # and this inline comment\n\
+             existing_date = 2024-02-29\nremove_me = \"old\"\n+++\n{body}"
+            ),
+        )
+        .unwrap();
+        let before = property_result(
+            property_tool(
+                &server,
+                "vault_get_properties",
+                json!({"path": "notes/alpha.md"}),
+            )
+            .await,
+        );
+        let patched = property_result(property_tool(
+            &server, "vault_patch_properties", json!({
+                "path": "notes/alpha.md", "expected_revision": before["revision"],
+                "set": {
+                    "text_value": {"type": "text", "value": "hello"},
+                    "integer_value": {"type": "number", "value": 9223372036854775807_i64},
+                    "negative_value": {"type": "number", "value": -9223372036854775808_i64},
+                    "bool_value": {"type": "bool", "value": false},
+                    "date_value": {"type": "date", "value": "2028-02-29"},
+                    "datetime_value": {"type": "datetime", "value": "2026-10-24T12:34:56Z"},
+                    "local_datetime": {"type": "datetime", "value": "2026-10-24T12:34:56"},
+                    "selection": {"type": "select", "value": "reading"},
+                    "selections": {"type": "multi_select", "value": ["one", "two"]},
+                    "url_value": {"type": "url", "value": "https://example.com/a"},
+                    "relation_one": {"type": "relation", "value": "[[Beta]]"},
+                    "relation_many": {"type": "relation", "value": ["[[Beta]]"]},
+                    "relation_empty": {"type": "relation", "value": []},
+                    "array_value": {"type": "array", "value": ["text", 2, true, {"x": [3]}]},
+                    "object_value": {"type": "object", "value": {"nested": {"n": 1.5}, "empty": []}}
+                },
+                "clear": ["remove_me"]
+            }),
+        ).await);
+        let values = &patched["properties"];
+        assert_eq!(values["text_value"], "hello");
+        assert_eq!(values["integer_value"], json!(9223372036854775807_i64));
+        assert_eq!(values["negative_value"], json!(-9223372036854775808_i64));
+        assert_eq!(values["bool_value"], false);
+        assert_eq!(values["selection"], "reading");
+        assert_eq!(values["selections"], json!(["one", "two"]));
+        assert_eq!(values["url_value"], "https://example.com/a");
+        assert_eq!(values["relation_one"], "[[Beta]]");
+        assert_eq!(values["relation_many"], json!(["[[Beta]]"]));
+        assert_eq!(values["relation_empty"], json!([]));
+        assert_eq!(values["array_value"], json!(["text", 2, true, {"x": [3]}]));
+        assert_eq!(
+            values["object_value"],
+            json!({"nested": {"n": 1.5}, "empty": []})
+        );
+        assert!(values.get("remove_me").is_none());
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            raw.contains(
+                "# Keep this comment\nretained = \"verbatim\" # and this inline comment\n"
+            )
+        );
+        let (frontmatter, actual_body) = raw
+            .strip_prefix("+++\n")
+            .unwrap()
+            .split_once("+++\n")
+            .unwrap();
+        assert_eq!(actual_body, body);
+        let frontmatter: toml::Table = toml::from_str(frontmatter).unwrap();
+        for (key, expected) in [
+            ("existing_date", "2024-02-29"),
+            ("date_value", "2028-02-29"),
+            ("datetime_value", "2026-10-24T12:34:56Z"),
+            ("local_datetime", "2026-10-24T12:34:56"),
+        ] {
+            assert_eq!(
+                frontmatter[key].as_datetime().unwrap().to_string(),
+                expected
+            );
+        }
+        let after = property_result(
+            property_tool(&server, "vault_get_properties", json!({"id": before["id"]})).await,
+        );
+        assert_eq!(after["revision"], patched["revision"]);
+        assert_eq!(after["values"]["existing_date"], "2024-02-29");
+        assert_eq!(after["values"]["datetime_value"], "2026-10-24T12:34:56Z");
+        let cleared = property_result(
+            property_tool(
+                &server,
+                "vault_patch_properties",
+                json!({
+                    "id": before["id"], "expected_revision": after["revision"],
+                    "clear": ["text_value", "relation_many"]
+                }),
+            )
+            .await,
+        );
+        assert!(cleared["properties"].get("text_value").is_none());
+        assert!(cleared["properties"].get("relation_many").is_none());
+        assert_eq!(cleared["properties"]["existing_date"], "2024-02-29");
+    }
+
+    #[tokio::test]
+    async fn properties_preserve_reserved_fields_and_reject_stale_revisions() {
+        let (server, tmp) = serve_seeded_vault().await;
+        let before = property_result(
+            property_tool(
+                &server,
+                "vault_get_properties",
+                json!({"path": "notes/alpha.md"}),
+            )
+            .await,
+        );
+        let path = tmp.path().join("vault/notes/alpha.md");
+        let original = std::fs::read(&path).unwrap();
+        for key in [
+            "id",
+            "title",
+            "type",
+            "project",
+            "tags",
+            "aliases",
+            "created_at",
+            "updated_at",
+            "encryption",
+            "conversation",
+        ] {
+            for patch in [
+                json!({"set": {(key): {"type": "text", "value": "forbidden"}}}),
+                json!({"clear": [key]}),
+            ] {
+                let mut args = json!({"id": before["id"], "expected_revision": before["revision"]});
+                args.as_object_mut()
+                    .unwrap()
+                    .extend(patch.as_object().unwrap().clone());
+                let error =
+                    property_error(property_tool(&server, "vault_patch_properties", args).await);
+                assert!(error.contains("system frontmatter key"), "{error}");
+                assert_eq!(std::fs::read(&path).unwrap(), original);
+            }
+        }
+        let committed = property_result(
+            property_tool(
+                &server,
+                "vault_patch_properties",
+                json!({
+                    "id": before["id"], "expected_revision": before["revision"],
+                    "set": {"custom": {"type": "text", "value": "committed"}}
+                }),
+            )
+            .await,
+        );
+        let stale = property_error(
+            property_tool(
+                &server,
+                "vault_patch_properties",
+                json!({
+                    "path": "notes/alpha.md", "expected_revision": before["revision"],
+                    "set": {"custom": {"type": "text", "value": "lost update"}}
+                }),
+            )
+            .await,
+        );
+        assert!(stale.contains("409"), "{stale}");
+        let after = property_result(
+            property_tool(&server, "vault_get_properties", json!({"id": before["id"]})).await,
+        );
+        assert_eq!(after["revision"], committed["revision"]);
+        assert_eq!(after["values"]["custom"], "committed");
+    }
+
+    #[tokio::test]
+    async fn properties_reject_consumer_invalid_shapes_without_mutation() {
+        let (server, tmp) = serve_seeded_vault().await;
+        let before = property_result(
+            property_tool(
+                &server,
+                "vault_get_properties",
+                json!({"path": "notes/alpha.md"}),
+            )
+            .await,
+        );
+        let path = tmp.path().join("vault/notes/alpha.md");
+        let original = std::fs::read(&path).unwrap();
+        for selector in [
+            json!({}),
+            json!({"id": before["id"], "path": "notes/alpha.md"}),
+            json!({"id": "../alpha"}),
+        ] {
+            property_error(property_tool(&server, "vault_get_properties", selector.clone()).await);
+            let mut args = selector;
+            args["expected_revision"] = before["revision"].clone();
+            args["set"] = json!({"x": {"type": "text", "value": "x"}});
+            property_error(property_tool(&server, "vault_patch_properties", args).await);
+        }
+        for patch in [
+            json!({}),
+            json!({"set": {}, "clear": []}),
+            json!({"set": {"x": {"type": "text", "value": "x"}}, "clear": ["x"]}),
+            json!({"set": {"x": {"type": "text", "value": 1}}}),
+            json!({"set": {"x": {"type": "number", "value": "1"}}}),
+            json!({"set": {"x": {"type": "bool", "value": "false"}}}),
+            json!({"set": {"x": {"type": "date", "value": "2026-02-30"}}}),
+            json!({"set": {"x": {"type": "date", "value": "2026-10-24T12:00:00Z"}}}),
+            json!({"set": {"x": {"type": "datetime", "value": "2026-10-24"}}}),
+            json!({"set": {"x": {"type": "datetime", "value": "12:00:00"}}}),
+            json!({"set": {"x": {"type": "datetime", "value": "not a datetime"}}}),
+            json!({"set": {"x": {"type": "select", "value": ["one"]}}}),
+            json!({"set": {"x": {"type": "multi_select", "value": ["one", 2]}}}),
+            json!({"set": {"x": {"type": "url", "value": false}}}),
+            json!({"set": {"x": {"type": "relation", "value": [2]}}}),
+            json!({"set": {"x": {"type": "array", "value": {"x": 2}}}}),
+            json!({"set": {"x": {"type": "object", "value": []}}}),
+            json!({"set": {"x": {"type": "array", "value": [{"deep": [null]}]}}}),
+            json!({"set": {"x": {"type": "object", "value": {"deep": null}}}}),
+            json!({"set": {"x": {"type": "number", "value": 9223372036854775808_u64}}}),
+            json!({"set": {"x": {"type": "object", "value": {"deep": [18446744073709551615_u64]}}}}),
+            json!({"set": {"x": {"type": "text", "value": null}}}),
+            json!({"set": {"x": {"type": "text"}}}),
+            json!({"set": {"x": {"type": "unknown", "value": "x"}}}),
+            json!({"set": {"x": {"type": "text", "value": "x", "ignored": true}}}),
+            json!({"set": {"x": {"type": "text", "value": "x"}}, "expected_revision": ""}),
+            json!({"clear": [null]}),
+        ] {
+            let mut args = json!({"id": before["id"], "expected_revision": before["revision"]});
+            args.as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            property_error(property_tool(&server, "vault_patch_properties", args).await);
+            assert_eq!(std::fs::read(&path).unwrap(), original, "{patch}");
+        }
+        property_error(
+            property_tool(
+                &server,
+                "vault_patch_properties",
+                json!({
+                    "id": before["id"], "set": {"x": {"type": "text", "value": "x"}}
+                }),
+            )
+            .await,
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+
+    #[tokio::test]
+    async fn properties_expose_base_conflicts_without_restricting_custom_writes() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        for (slug, property_type) in [("first", "text"), ("second", "number")] {
+            server
+                .client
+                .post_json(
+                    "/api/vault/bases",
+                    &json!({
+                        "slug": slug, "definition": {
+                            "name": slug,
+                            "properties": [{"key": "rating", "definition": {"type": property_type}}],
+                            "views": [{"name": "All", "layout": "table"}]
+                        }
+                    }),
+                )
+                .await
+                .unwrap();
+        }
+        let before = property_result(
+            property_tool(
+                &server,
+                "vault_get_properties",
+                json!({"path": "notes/alpha.md"}),
+            )
+            .await,
+        );
+        assert_eq!(before["matching_bases"].as_array().unwrap().len(), 2);
+        let rating = before["properties"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|property| property["key"] == "rating")
+            .unwrap();
+        assert_eq!(rating["compatibility"], "conflict");
+        assert_eq!(rating["blockers"], json!(["schema_conflict"]));
+        assert_eq!(rating["declarations"].as_array().unwrap().len(), 2);
+        let patched = property_result(
+            property_tool(
+                &server,
+                "vault_patch_properties",
+                json!({
+                    "id": before["id"], "expected_revision": before["revision"],
+                    "set": {"rating": {"type": "number", "value": 5}}
+                }),
+            )
+            .await,
+        );
+        assert_eq!(patched["properties"]["rating"], 5);
+    }
+
+    #[tokio::test]
+    async fn properties_get_rejects_a_page_changed_between_its_two_api_reads() {
+        let (_server, tmp, state) = serve_seeded_vault_with_state().await;
+        let path = tmp.path().join("vault/notes/alpha.md");
+        let changed = std::fs::read_to_string(&path).unwrap() + "\nConcurrent edit.\n";
+        let app = clep_api::build_router(
+            state,
+            1024 * 1024,
+            clep_api::api::archive::ArchiveViewConfig::default(),
+            true,
+            None,
+        )
+        .layer(axum::middleware::from_fn(
+            move |request: axum::extract::Request, next: axum::middleware::Next| {
+                let path = path.clone();
+                let changed = changed.clone();
+                async move {
+                    if request.uri().path().ends_with("/properties") {
+                        std::fs::write(path, changed).unwrap();
+                    }
+                    next.run(request).await
+                }
+            },
+        ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let serving = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let server = VaultMcpServer::new(Arc::new(
+            ApiClient::new(format!("http://{address}"), None).unwrap(),
+        ));
+        let error = property_error(
+            property_tool(
+                &server,
+                "vault_get_properties",
+                json!({"path": "notes/alpha.md"}),
+            )
+            .await,
+        );
+        assert!(error.contains("409"), "{error}");
+        serving.abort();
     }
 
     /// Declare `slug` through a PROJECT page so ordinary pages may name it.

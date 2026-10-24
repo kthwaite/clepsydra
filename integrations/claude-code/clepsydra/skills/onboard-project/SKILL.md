@@ -52,9 +52,13 @@ tags). Body shape, in order:
 - `triage_index` — optional wikilink string such as
   `"[[<Name> Backlog]]"`. Ask; omit when the user has no backlog index.
 
-The vault tools do not write arbitrary frontmatter keys. Give the user the
-exact lines to add to the hub's frontmatter, and confirm with `vault_get_page`
-once they have.
+Use the vault skill's **Custom properties** workflow: `vault_get_properties`
+the hub, then `vault_patch_properties` with its exact `revision` as
+`expected_revision`. Set `integration_branch` as `{ "type": "text", "value":
+"<branch>" }`; set `triage_index`, when supplied, as `{ "type": "relation",
+"value": "[[<Name> Backlog]]" }`. These custom names need no Base declaration.
+Re-read on conflict and reconcile before resubmitting. Confirm the saved
+values with `vault_get_properties`.
 
 **4. Backlog migration — only if the repo tracks work in files** (FIXME.md,
 ISSUES.md, TODO/BACKLOG-style documents). Find the *authoritative* tracker

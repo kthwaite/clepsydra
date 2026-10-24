@@ -1,6 +1,6 @@
 ---
 name: vault
-description: Use when asked to add or capture something in the clepsydra vault, create or edit pages, search or read notes, tag or file pages, reorganise vault content, or send the current conversation to Clepsydra.
+description: Use when asked to add or capture something in the clepsydra vault, create or edit pages, set or clear custom frontmatter properties, search or read notes, tag or file pages, reorganise vault content, or send the current conversation to Clepsydra.
 ---
 
 # Working the clepsydra vault
@@ -20,8 +20,10 @@ files directly, which bypasses locking, link rewriting, and the index.
   CAPTURE→`captures/`, CODE→`code/`, PERSON→`people/`, TASK→`tasks/`, CYCLE→`cycles/`,
   RECIPE→`recipes/`, MEETING→`meetings/`, AI_CONVERSATION→`conversations/`.
   There is no 1:1 kind: a 1:1 is a MEETING tagged `1:1`.
-- **Frontmatter** — `id` (UUID, never touch), `title`, `type`, `tags`,
-  `aliases`, `project`, `created_at`/`updated_at`.
+- **Frontmatter** — system fields (`id`, `title`, `type`, `tags`, `aliases`,
+  `project`, `created_at`/`updated_at`) and custom properties. Any custom key,
+  including a new name, can be written without a Base or property declaration.
+  Identity and timestamps are server-owned; dedicated tools own system fields.
 - **Attendees** — MEETING pages name people in `attendees`, a list of
   wikilinks to person pages. A MEETING names any number; a 1:1 is a MEETING
   tagged `1:1`. `vault_search` counts them: `attendees:1`, `attendees:>1`,
@@ -51,6 +53,7 @@ files directly, which bypasses locking, link rewriting, and the index.
 | Targeted body change | `vault_edit_page` |
 | Add to a page or a section | `vault_append_page` |
 | Retitle / retag / rewrite wholesale | `vault_update_page` |
+| Read / set / clear custom frontmatter | `vault_get_properties` / `vault_patch_properties` |
 | File pages (kind/project) | `vault_assign` — not move |
 | Explicit rename/relocate | `vault_move_page` |
 | Folder create/delete/move | `vault_folder` |
@@ -114,6 +117,55 @@ unique `old_string` (or `vault_append_page` to add). If the body came back
 `body_truncated: true`, don't edit blind — narrow the target first. On a
 conflict error, re-read and re-apply; never blindly retry the same payload.
 An edit does not add `ai-generated` merely because an LLM performed it.
+
+**Custom properties.** Read `vault_get_properties` with exactly one of `path`
+or `id`. Keep its `revision`, inspect the current values, then call
+`vault_patch_properties` with exactly one selector and that revision as
+`expected_revision`. On conflict, re-read, reconcile the intended change with
+the latest values, and submit with the new revision; never blindly retry.
+Use `set` entries tagged with `type` and `value`, and `clear` for key names to
+remove. Omitted keys stay unchanged. A patch must set or clear at least one
+key, and a key cannot appear in both.
+
+Example `vault_patch_properties` arguments (replace the path and revision
+with those returned by the read):
+
+```json
+{
+  "path": "projects/example.md",
+  "expected_revision": "<revision from vault_get_properties>",
+  "set": {
+    "integration_branch": { "type": "text", "value": "dev" },
+    "review_on": { "type": "date", "value": "2026-10-24" },
+    "needs_review": { "type": "bool", "value": true }
+  },
+  "clear": ["legacy_branch"]
+}
+```
+
+Types: `text`, `select`, and `url` take strings; `number` takes a JSON
+number; `bool` takes a boolean; `date` and `datetime` take ISO date/date-time
+strings and write native TOML dates/date-times; `multi_select` takes string
+arrays; `relation` takes a string or string array. `array` and `object` take
+recursive JSON-compatible values (strings, numbers, booleans, arrays, objects;
+no `null`). Only the outer property value is tagged. Use `clear`, not `null`,
+to remove a property. These types do not require Base declarations.
+Integers must fit signed 64-bit TOML values, including inside arrays/objects.
+`date` requires a date only; `datetime` requires date and time (local or with
+a UTC offset). Invalid date/date-time strings are rejected.
+
+Use this workflow for hub settings and other custom frontmatter, not body
+edits. Keep title/tags/aliases on `vault_update_page`, kind/project on
+`vault_assign`, and Task/Cycle workflow fields on their dedicated tools.
+Existing server protections still apply.
+
+The read's `values` is the full page metadata object, including undeclared
+custom keys and system fields. `matching_bases` and the `properties` array
+describe matching Base definitions, compatibility, and blockers; they are
+context, not a prerequisite for custom keys. A concurrent change during the
+read returns a conflict rather than a mixed values/revision snapshot.
+The patch returns `id`, `path`, a new `revision`, and `properties` as a map
+of custom values; re-read for refreshed Base information.
 
 **Organise.** Filing means declaring metadata: `vault_assign` with `kind`
 and/or `project` (bulk-capable via `paths`) — the vault relocates files

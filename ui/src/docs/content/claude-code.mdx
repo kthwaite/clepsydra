@@ -105,8 +105,12 @@ The project hub (the `PROJECT` page for the repo's slug; when two share a slug, 
 | `integration_branch` | string | Branch whose merges move Tasks to Review. |
 | `triage_index` | wikilink string | Backlog index page, for example `"[[Clepsydra: Stray Thoughts]]"`. |
 
-The `onboard-project` skill asks for both values and gives you the exact
-frontmatter lines to add; the vault tools do not write these keys.
+The `onboard-project` skill asks for both values, reads the hub with
+`vault_get_properties`, then saves them with `vault_patch_properties` using
+the returned revision. `integration_branch` uses the `text` type;
+`triage_index` uses `relation` with a single wikilink string. No Base or
+property declaration is required. See [custom frontmatter properties](/docs/mcp#custom-frontmatter-properties)
+for the typed payload and conflict workflow.
 
 ## Permissions
 
@@ -119,6 +123,7 @@ vault tools, add this to `~/.claude/settings.json`:
     "allow": [
       "mcp__plugin_clepsydra_clepsydra__vault_search",
       "mcp__plugin_clepsydra_clepsydra__vault_get_page",
+      "mcp__plugin_clepsydra_clepsydra__vault_get_properties",
       "mcp__plugin_clepsydra_clepsydra__vault_list_pages",
       "mcp__plugin_clepsydra_clepsydra__vault_tree",
       "mcp__plugin_clepsydra_clepsydra__vault_links",

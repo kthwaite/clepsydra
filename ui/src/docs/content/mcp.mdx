@@ -60,6 +60,7 @@ TLS verifies the server and protects transport; it does not add an agent login.
 | --- | --- | --- |
 | Discover and read | `vault_search`, `vault_get_page`, `vault_list_pages`, `vault_tree`, `vault_links`, `vault_tags` | Locate a page before acting; inspect content, structure, graph, and vocabulary. Oversized `vault_get_page` bodies are truncated and flagged. |
 | Create and edit | `vault_create_page`, `vault_update_page`, `vault_edit_page`, `vault_append_page` | Create in one projected mutation; replace whole fields; exact-match a body span; or append to the page/a heading section. |
+| Custom frontmatter | `vault_get_properties`, `vault_patch_properties` | Read values and Base declarations; set typed values or clear any custom keys, including new names without Base declarations. |
 | Capture | `vault_journal_capture`, `vault_ai_journal_capture`, `vault_capture_conversation` | Add a fleeting entry to the user's journal or the AI journal, or capture complete visible conversation turns. |
 | Task Board | `vault_board`, `vault_task_create`, `vault_task_update`, `vault_cycle_create`, `vault_cycle_update` | Inspect the board, create or update Tasks, and create or atomically close and carry over Cycles. |
 | Organize | `vault_assign`, `vault_move_page`, `vault_folder` | Declare kind/project, explicitly move a page, or create/move/delete folders. |
@@ -80,6 +81,8 @@ for an explicit destination that assignment cannot express.
 | --- | --- | --- |
 | `vault_search` | read | Full-text search (FTS5) over titles and bodies |
 | `vault_get_page` | read | One page by path or id: meta, kind, project, body |
+| `vault_get_properties` | read | Read frontmatter values, revision, and matching Base definitions/conflicts by exactly one of path or id |
+| `vault_patch_properties` | write | Set typed custom properties or clear keys, with an explicit `expected_revision`; no automatic retry |
 | `vault_list_pages` | read | Paginated page listing, filterable by kind, tag, and project |
 | `vault_tree` | read | Folder tree, or one folder's contents |
 | `vault_links` | read | Backlinks, outlinks, or similar pages |
@@ -142,6 +145,81 @@ Move preview is read-only and is a snapshot, not a reservation. Re-read before
 the real mutation. Bulk assignment is all-or-none. Recursive folder deletion
 is a separate permanent operation; folder contents do not enter the Rubbish
 Bin.
+
+### Custom frontmatter properties
+
+Custom properties are not limited to fields declared by a Base. You can add
+a new property name, change an existing value, or remove a custom key without
+creating or editing any Base definition.
+
+1. Call `vault_get_properties` with exactly one selector: `path` (vault-relative
+   page path) or `id` (page UUID).
+2. Inspect the values and retain the returned `revision`.
+3. Call `vault_patch_properties` with exactly one selector, the unchanged
+   revision as `expected_revision`, and `set`, `clear`, or both. The revision
+   is required; the tool never retries a stale write automatically.
+4. On a conflict, re-read the properties, reconcile your intended changes
+   with the latest values, and submit with the fresh revision.
+
+The read response includes `id`, `path`, `revision`, and `values`: the full
+page metadata object, with undeclared custom keys alongside system metadata.
+It also retains `encrypted`, `matching_bases`, `properties`, and `preview`
+from the properties API. The `properties` array describes Base-declared keys,
+their current values, definitions/declarations, compatibility, and patch
+blockers; use `values` to inspect custom keys absent from that array.
+If the page changes between the underlying reads, the tool reports a conflict
+instead of returning values paired with a different revision.
+
+The patch response contains `id`, `path`, the new `revision`, and
+`properties` as a map of custom frontmatter values (not the read response's
+Base-property array). Re-read when you need refreshed Base definitions or
+compatibility information.
+
+For example, pass these arguments to `vault_patch_properties`, replacing the
+path and revision with those from your read:
+
+```json
+{
+  "path": "projects/example.md",
+  "expected_revision": "<revision from vault_get_properties>",
+  "set": {
+    "integration_branch": { "type": "text", "value": "dev" },
+    "review_on": { "type": "date", "value": "2026-10-24" },
+    "needs_review": { "type": "bool", "value": true }
+  },
+  "clear": ["legacy_branch"]
+}
+```
+
+Each `set` entry is a tagged value:
+
+| `type` | JSON `value` |
+| --- | --- |
+| `text`, `select`, `url` | String |
+| `number` | Number |
+| `bool` | Boolean |
+| `date` | ISO date string, e.g. `"2026-10-24"` |
+| `datetime` | ISO date-time string, e.g. `"2026-10-24T14:00:00Z"` |
+| `multi_select` | Array of strings |
+| `relation` | String or array of strings, e.g. `"[[Project Hub]]"` |
+| `array` | Array of recursive JSON-compatible values |
+| `object` | Object of recursive JSON-compatible values |
+
+`array` and `object` may nest strings, numbers, booleans, arrays, and objects;
+only the outer property is tagged. `null` is not a TOML value and is rejected,
+including inside arrays and objects. Use `clear: ["key"]` to remove a property.
+Integers must fit TOML's signed 64-bit range, including nested values;
+floating-point numbers are also supported. Date and datetime tags write native
+TOML dates/date-times, rather than quoted strings. `date` requires a date only;
+`datetime` requires both date and time, either local or with a UTC offset.
+Invalid date/date-time strings are rejected.
+
+Omitted keys remain unchanged. Empty patches and keys present in both `set`
+and `clear` are rejected. The tools reuse the existing property API and its
+server protections; they do not require custom fields to have Base declarations.
+Keep title, tags, and aliases on `vault_update_page`, kind/project on
+`vault_assign`, and Task/Cycle workflow fields on their dedicated tools.
+Property updates change frontmatter, not the page body.
 
 ### Task Board
 
