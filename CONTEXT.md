@@ -8,6 +8,14 @@ Clepsydra organises planned work as tasks on a project-oriented board.
 A page-backed unit of planned work tracked on the Task Board. A Task may belong to a Project and a Cycle.
 _Avoid_: Tasking, work item
 
+**Epic**:
+A Task representing an outcome delivered through child Tasks. An Epic may span Cycles but is not itself scheduled into one or estimated as executable work. Its completion is explicit, independent of child completion.
+_Avoid_: Project, parent blocker
+
+**Child Task**:
+An independently actionable Task belonging to at most one Epic, retaining its own type, status, estimate, and Cycle. Epics cannot be children; Checklist Items remain small steps within a Task.
+_Avoid_: Subtask type, nested Epic
+
 **Todo**:
 A Markdown checkbox item, whether open, done, or cancelled.
 _Avoid_: Markdown task, checkbox task
@@ -77,7 +85,7 @@ The stable identifier of a Task or Cycle: two short words and a five-character t
 _Avoid_: TSK number, sequential code, ticket number
 
 **Task Fields**:
-The structured attributes a Task carries beyond its title and body: status, priority, task type, cycle, assignee, estimate, due, start, hold, blocked_by, link, and project. Task type is optional and closed: `FEATURE`, `FIX`, `TASK`, `STORY`, or `SPIKE` (frontmatter `task_type`). `blocked_by` lists the task's Blockers as wikilinks to their codes.
+The structured attributes a Task carries beyond its title and body: status, priority, task type, parent Epic, cycle, assignee, estimate, due, start, hold, blocked_by, link, and project. Task type is optional and closed: `FEATURE`, `FIX`, `TASK`, `STORY`, `SPIKE`, or `EPIC` (frontmatter `task_type`). `parent_epic` references a Task's Epic as a wikilink to its code. `blocked_by` lists the task's Blockers as wikilinks to their codes.
 _Avoid_: task properties, task metadata
 
 **Task Patch**:

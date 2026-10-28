@@ -182,6 +182,7 @@ pub async fn get_task_completion_history(
             let is_sealed = event.status == "SEALED";
             if is_sealed
                 && !was_sealed
+                && !event.is_epic()
                 && matches_project_scope(
                     event.project.as_deref(),
                     project.as_deref(),

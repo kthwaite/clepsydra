@@ -1,7 +1,7 @@
 // A completed `git merge` in a Bash command: which branch, in which directory,
 // which board task it delivers, and the Delivery line for the task page.
 
-import { branchTaskCode, type BoardTask } from './tasks'
+import { branchTaskCode, isExecutableTask, type BoardTask } from './tasks'
 
 export type MergeCall = { dir?: string; branch: string }
 
@@ -219,7 +219,7 @@ export function mergeCode(input: { bound?: string; mergedBranch: string; integra
 
 const DONE = new Set(['REVIEW', 'SEALED'])
 
-/** The board task `mergeCode` names; undefined when it is not on the board or is already REVIEW or SEALED. */
+/** The executable task `mergeCode` names; Epics and REVIEW/SEALED tasks stay untouched. */
 export function mergeTask(input: {
   bound?: string
   mergedBranch: string
@@ -229,7 +229,7 @@ export function mergeTask(input: {
   const code = mergeCode(input)
   if (code === undefined) return undefined
   const t = input.tasks.find(x => x.code.toLowerCase() === code.toLowerCase())
-  return t === undefined || DONE.has(t.status) ? undefined : t
+  return t === undefined || !isExecutableTask(t) || DONE.has(t.status) ? undefined : t
 }
 
 export function deliveryLine(sha: string, branch: string, date: string): string {

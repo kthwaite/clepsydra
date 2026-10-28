@@ -6,6 +6,9 @@ const task = (patch: Partial<BoardTask> = {}): BoardTask => ({
   blocked_by: [],
   blocks: [],
   blocked: false,
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   id: "t-1",
   code: "T-001",
   title: "Test",
@@ -16,6 +19,8 @@ const task = (patch: Partial<BoardTask> = {}): BoardTask => ({
   cycle: "C-01",
   assignee: null,
   estimate: null,
+  task_type: null,
+  start: null,
   due: null,
   tags: [],
   checks: [],
@@ -51,6 +56,46 @@ describe("checklistProgress", () => {
 });
 
 describe("cycleStats", () => {
+  it("counts executable children, not Epic containers or their checklists", () => {
+    const items = [
+      task({
+        task_type: "EPIC",
+        status: "SEALED",
+        checks: [20, 20],
+        estimate: "99d",
+      }),
+      task({ id: "epic-open", task_type: "EPIC", blocked: true }),
+      task({
+        id: "child-done",
+        parent_epic: "T-001",
+        status: "SEALED",
+        checks: [1, 2],
+      }),
+      task({
+        id: "child-open",
+        parent_epic: "T-001",
+        status: "FIELD",
+        checks: [2, 3],
+        blocked: true,
+      }),
+    ];
+    expect(cycleStats(items)).toEqual({
+      committed: 2,
+      sealed: 1,
+      field: 1,
+      hold: 1,
+      checkDone: 3,
+      checkTot: 5,
+      pct: 50,
+    });
+    expect(sealStats(items, "C-01")).toEqual({
+      committed: 2,
+      sealed: 1,
+      carryover: 1,
+      pct: 50,
+    });
+  });
+
   it("aggregates statuses, blocked tasks, and checklist tuples", () => {
     expect(
       cycleStats([

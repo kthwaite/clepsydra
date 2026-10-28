@@ -37,6 +37,7 @@ export interface TaskDraft {
 export interface NewTaskDraft extends Omit<TaskDraft, "hold"> {
   body: string;
   project: string;
+  parent_epic: string;
   /** A Cycle code, or BACKLOG_CYCLE. */
   cycle: string;
   status: string;
@@ -82,12 +83,18 @@ export function fromTask(task: BoardTask): TaskDraft {
 
 /** A blank new-Task draft with the board's defaults and any presets. */
 export function newTaskDraft(
-  preset: { project?: string; status?: string; cycle?: string } = {},
+  preset: {
+    project?: string;
+    status?: string;
+    cycle?: string;
+    parent_epic?: string;
+  } = {},
 ): NewTaskDraft {
   return {
     title: "",
     body: "",
     project: preset.project ?? "",
+    parent_epic: preset.parent_epic ?? "",
     cycle: preset.cycle ?? BACKLOG_CYCLE,
     status: preset.status ?? DEFAULT_STATUS,
     priority: DEFAULT_PRIORITY,
@@ -111,6 +118,7 @@ export function toCreatePayload(draft: NewTaskDraft): CreateTaskRequest | null {
   return {
     title,
     project: draft.project || null,
+    parent_epic: blankToNull(draft.parent_epic),
     status: draft.status || null,
     priority: draft.priority || null,
     task_type: draft.taskType,

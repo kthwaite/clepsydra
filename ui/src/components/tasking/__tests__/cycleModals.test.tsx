@@ -72,6 +72,9 @@ const CYCLE_PLANNED_2: BoardCycle = {
 const TASKS: BoardTask[] = [
   {
     blocked_by: [],
+    parent_epic: null,
+    child_tasks: [],
+    child_progress: [0, 0],
     blocks: [],
     blocked: false,
     id: "t1",
@@ -89,6 +92,9 @@ const TASKS: BoardTask[] = [
   },
   {
     blocked_by: [],
+    parent_epic: null,
+    child_tasks: [],
+    child_progress: [0, 0],
     blocks: [],
     blocked: false,
     id: "t2",
@@ -106,6 +112,9 @@ const TASKS: BoardTask[] = [
   },
   {
     blocked_by: [],
+    parent_epic: null,
+    child_tasks: [],
+    child_progress: [0, 0],
     blocks: [],
     blocked: false,
     id: "t3",

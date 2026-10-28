@@ -55,12 +55,14 @@ import { BlockerField } from "./BlockerField";
 import {
   type ColLabelFn,
   cycleStateLabel,
+  isEpic,
   PRI_LABEL,
   priColor,
 } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
 import { type ProjectScope, scopeLabel } from "./board-projects";
 import { checklistProgress } from "./board-stats";
+import { EpicPicker } from "./EpicPicker";
 import {
   DispositionRow,
   EdField,
@@ -91,6 +93,7 @@ type PatchIntentLane =
   | "status"
   | "priority"
   | "taskType"
+  | "parentEpic"
   | "project"
   | "cycle"
   | "holdToggle"
@@ -109,6 +112,7 @@ export interface TaskEditPanelProps {
   onClose: () => void;
   onOpenPage?: (path: string, label?: string, target?: OpenTabTarget) => void;
   onOpenDossier?: (link: string) => void;
+  onCreateChild?: (task: BoardTask) => void;
 }
 
 export function TaskEditPanel(props: TaskEditPanelProps) {
@@ -139,6 +143,7 @@ function TaskEditor({
   readOnly = false,
   sendPatch,
   onOpenTask,
+  onCreateChild,
 }: TaskEditPanelProps & {
   metadataOnly?: boolean;
   readOnly?: boolean;
@@ -304,6 +309,22 @@ function TaskEditor({
   // so it never holds back archive, and show the server message instead.
   const [blockedByError, setBlockedByError] = useState<string | null>(null);
   const [blocksError, setBlocksError] = useState<string | null>(null);
+  const [hierarchyError, setHierarchyError] = useState<string | null>(null);
+  const [convertEpic, setConvertEpic] = useState(false);
+  const saveParent = (child: BoardTask, parent: string | null) => {
+    if (readOnly) return;
+    setHierarchyError(null);
+    const saving =
+      child.id === task.id
+        ? queue.enqueue("parentEpic", { parent_epic: parent })
+        : patchAsync({ id: child.id, patch: { parent_epic: parent } });
+    saving.catch((error) => {
+      queue.clearFailure("parentEpic");
+      setHierarchyError(
+        formatApiError(error, "Couldn’t save Epic relationship"),
+      );
+    });
+  };
   const saveBlockedBy = (next: string[]) => {
     if (readOnly) return;
     setBlockedByError(null);
@@ -445,12 +466,164 @@ function TaskEditor({
 
       <EdField label="Type">
         <TypeRow
-          value={task.task_type}
+          value={isEpic(task.task_type) ? "EPIC" : task.task_type}
           isDisabled={archiving || readOnly}
-          onChange={(t) => queue.patchNow("taskType", { task_type: t })}
+          onChange={(t) => {
+            if (
+              t === "EPIC" &&
+              (task.cycle ||
+                task.estimate ||
+                draft.estimate ||
+                task.parent_epic)
+            ) {
+              setConvertEpic(true);
+            } else if (
+              t !== "EPIC" &&
+              isEpic(task.task_type) &&
+              task.child_tasks.length
+            ) {
+              setHierarchyError(
+                "Detach all children before changing an Epic’s type.",
+              );
+            } else {
+              queue.patchNow("taskType", { task_type: t });
+            }
+          }}
           testIdPrefix="edit-panel"
         />
       </EdField>
+      {convertEpic && (
+        <div role="alert" className="flex flex-col gap-2 text-sm text-ink-2">
+          <p>
+            Converting to an Epic clears its Cycle, estimate and parent Epic.
+            Its description becomes the outcome and acceptance prose.
+          </p>
+          <Button
+            isDisabled={readOnly || archiving}
+            onPress={() => {
+              setConvertEpic(false);
+              setField("estimate", "");
+              queue.patchNow("taskType", {
+                task_type: "EPIC",
+                cycle: null,
+                estimate: null,
+                parent_epic: null,
+              });
+            }}
+          >
+            Clear incompatible fields and convert
+          </Button>
+          <Button onPress={() => setConvertEpic(false)}>
+            Cancel conversion
+          </Button>
+        </div>
+      )}
+      {hierarchyError && (
+        <p role="alert" className="text-sm text-hot">
+          {hierarchyError}
+        </p>
+      )}
+      {isEpic(task.task_type) ? (
+        <EdField label="Child tasks">
+          <p className="text-sm text-mute">
+            {task.child_progress[0]} / {task.child_progress[1]} children done
+          </p>
+          {task.child_progress[0] < task.child_progress[1] && (
+            <p className="text-sm text-mute">
+              Children remain open. Completing this Epic does not complete them.
+            </p>
+          )}
+          <ul className="m-0 flex list-none flex-col gap-2 p-0">
+            {task.child_tasks.map((code) => {
+              const child = tasks.find((candidate) => candidate.code === code);
+              return (
+                <li key={code} className="flex items-center gap-2">
+                  {child ? (
+                    <Button size="sm" onPress={() => openTask(child)}>
+                      {child.title}
+                    </Button>
+                  ) : (
+                    <span>{code}</span>
+                  )}
+                  {child && (
+                    <Button
+                      size="sm"
+                      isDisabled={readOnly || archiving}
+                      aria-label={`Detach ${child.title}`}
+                      onPress={() => saveParent(child, null)}
+                    >
+                      Detach
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <Select
+            aria-label="Attach existing task"
+            value=""
+            isDisabled={readOnly || archiving}
+            onChange={(key) => {
+              const child = tasks.find((candidate) => candidate.id === key);
+              if (child) saveParent(child, task.code);
+            }}
+          >
+            <SelectItem id="">Attach existing task…</SelectItem>
+            {tasks
+              .filter(
+                (candidate) =>
+                  !isEpic(candidate.task_type) &&
+                  !candidate.parent_epic &&
+                  candidate.id !== task.id,
+              )
+              .map((child) => (
+                <SelectItem
+                  key={child.id}
+                  id={child.id}
+                  textValue={`${child.code} · ${child.title}`}
+                >
+                  {child.code} · {child.title}
+                </SelectItem>
+              ))}
+          </Select>
+          <Button
+            isDisabled={readOnly || archiving}
+            onPress={() => {
+              if (onCreateChild) onCreateChild(task);
+              else
+                useBoardStore.getState().openTaskModal({
+                  parent_epic: task.code,
+                  project: task.project ?? undefined,
+                });
+            }}
+          >
+            Create child
+          </Button>
+        </EdField>
+      ) : (
+        <EdField label="Parent Epic">
+          <EpicPicker
+            tasks={tasks}
+            value={task.parent_epic}
+            isDisabled={readOnly || archiving}
+            onChange={(parent) => saveParent(task, parent)}
+          />
+          {task.parent_epic &&
+            tasks.find((candidate) => candidate.code === task.parent_epic) && (
+              <Button
+                size="sm"
+                onPress={() => {
+                  const parent = tasks.find(
+                    (candidate) => candidate.code === task.parent_epic,
+                  );
+                  if (parent) openTask(parent);
+                }}
+              >
+                Open parent Epic
+              </Button>
+            )}
+        </EdField>
+      )}
 
       {/* Project + cycle */}
       <div className="grid grid-cols-2 gap-3.5">
@@ -490,7 +663,7 @@ function TaskEditor({
                 cycle: value === "BACKLOG" ? null : value,
               });
             }}
-            isDisabled={archiving || readOnly}
+            isDisabled={archiving || readOnly || isEpic(task.task_type)}
             data-testid="edit-panel-cycle"
           >
             <SelectItem id="BACKLOG">Backlog</SelectItem>
@@ -523,6 +696,7 @@ function TaskEditor({
           <input
             type="text"
             aria-label="Estimate"
+            disabled={isEpic(task.task_type)}
             className={INPUT_CLS}
             value={draft.estimate}
             onChange={(e) => setField("estimate", e.target.value)}

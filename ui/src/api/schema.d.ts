@@ -2537,6 +2537,10 @@ export interface components {
             blocks: string[];
             body_excerpt: string | null;
             checks: number[];
+            /** @description Derived [SEALED children, total children], before board scoping. */
+            child_progress: number[];
+            /** @description Derived child Task codes, never stored on the Epic. */
+            child_tasks: string[];
             code: string;
             cycle?: string | null;
             /**
@@ -2551,6 +2555,8 @@ export interface components {
             /** Format: uuid */
             id: string;
             link?: string | null;
+            /** @description Parent Epic's canonical Task code; dangling manually authored references are retained. */
+            parent_epic: string | null;
             path: string;
             priority: string;
             project?: string | null;
@@ -2915,12 +2921,14 @@ export interface components {
             due?: string | null;
             estimate?: string | null;
             link?: string | null;
+            /** @description Parent Epic: Task code, unique code prefix, or `[[CODE]]` wikilink. */
+            parent_epic?: string | null;
             priority?: string | null;
             project?: string | null;
             start?: string | null;
             status?: string | null;
             tags?: string[] | null;
-            /** @description One of FEATURE, FIX, TASK, STORY, SPIKE (case-insensitive). */
+            /** @description One of FEATURE, FIX, TASK, STORY, SPIKE, EPIC (case-insensitive). */
             task_type?: string | null;
             title: string;
         };
@@ -3494,6 +3502,8 @@ export interface components {
             hold?: string | null;
             /** @description Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set. */
             link?: string | null;
+            /** @description Parent Epic: absent = keep, null or blank = clear; code, unique prefix, or wikilink = set. */
+            parent_epic?: string | null;
             /** @description Leave absent to keep current priority. */
             priority?: string | null;
             /**
@@ -3509,7 +3519,7 @@ export interface components {
             tags?: string[] | null;
             /**
              * @description Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
-             *     A value must be FEATURE, FIX, TASK, STORY, or SPIKE (case-insensitive).
+             *     A value must be FEATURE, FIX, TASK, STORY, SPIKE, or EPIC (case-insensitive).
              */
             task_type?: string | null;
             /** @description Leave absent to keep current title. */

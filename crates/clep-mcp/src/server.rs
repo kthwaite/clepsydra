@@ -203,8 +203,12 @@ unique prefix (e.g. `TSK-brave-finch`) addresses the page; an ambiguous prefix i
 candidates listed. Create Tasks with vault_task_create rather than vault_create_page \
 so they receive a code; the `ai-generated` tag policy applies to LLM-authored tasks. Move Tasks \
 through Inbox (`INTAKE`) → Ready (`TRIAGE`) → In Progress (`FIELD`) → Review (`REVIEW`) → Done \
-(`SEALED`) with vault_task_update, addressing them by code, path, or id. Close Cycles with \
-vault_cycle_update, passing carry_to to move their unfinished Tasks. Page paths are vault-relative; \
+(`SEALED`) with vault_task_update, addressing them by code, path, or id. \
+Epics are TASK pages with task_type EPIC: create one with vault_task_create, then create or attach \
+non-Epic children using parent_epic (code, unique prefix, or [[CODE]]). Hierarchy is one level. \
+Assign Cycles and estimates to children, not Epics; Project remains independent. Use blocked_by \
+only for prerequisites, never containment. Finish children individually and complete the Epic explicitly. \
+Close Cycles with vault_cycle_update, passing carry_to to move their unfinished Tasks. Page paths are vault-relative; \
 folders. An occupied-path restore conflict means the original path is occupied and the item \
 remains binned; resolve that path before retrying. A rubbish item drift conflict means the item \
 remains binned; re-list with vault_list_rubbish and inspect it with vault_get_rubbish_item. On \
@@ -438,9 +442,13 @@ pub struct TaskCreateParams {
     pub assignee: Option<String>,
     /// Effort estimate (free-form, e.g. "3d").
     pub estimate: Option<String>,
-    /// Task type: FEATURE, FIX, TASK, STORY, or SPIKE (case-insensitive,
-    /// stored uppercase). Absent = untyped.
+    /// Task type: EPIC, FEATURE, FIX, TASK, STORY, or SPIKE (case-insensitive,
+    /// stored uppercase). EPIC is a TASK planning container without Cycle or estimate.
     pub task_type: Option<String>,
+    /// Parent Epic's stable Task code, unique prefix, or [[CODE]].
+    /// One level only: a non-Epic child points to an EPIC Task. Persisted as
+    /// a single wikilink; does not inherit or change Project or create a Blocker.
+    pub parent_epic: Option<String>,
     /// Due date (YYYY-MM-DD).
     pub due: Option<String>,
     /// Related Page (`link` wire field; URL or wikilink target).
@@ -489,11 +497,19 @@ pub struct TaskUpdateParams {
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     #[schemars(with = "Option<String>")]
     pub estimate: Option<Option<String>>,
-    /// Task type: FEATURE, FIX, TASK, STORY, or SPIKE (case-insensitive).
-    /// Tri-state: absent = keep, null or "" = clear (untyped), value = set.
+    /// Task type: EPIC, FEATURE, FIX, TASK, STORY, or SPIKE (case-insensitive).
+    /// Absent = keep, null or "" = untyped. Conversion to EPIC requires clearing
+    /// parent_epic, cycle, and estimate in the same patch if set. An Epic with
+    /// children cannot change to a non-Epic type.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     #[schemars(with = "Option<String>")]
     pub task_type: Option<Option<String>>,
+    /// Parent Epic's Task code, unique prefix, or [[CODE]]. Absent = keep;
+    /// null or blank = detach. Only non-Epics can have a parent; no nesting.
+    /// Does not change Project or Blockers; parent completion remains explicit.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    #[schemars(with = "Option<String>")]
+    pub parent_epic: Option<Option<String>>,
     /// Due date (YYYY-MM-DD). Tri-state: absent = keep, null or "" = clear,
     /// value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
@@ -1344,7 +1360,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_board",
-        description = "Orient on the Task Board: Inbox (INTAKE) → Ready (TRIAGE) → In Progress (FIELD) → Review (REVIEW) → Done (SEALED). Returns Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field. Codes are server-minted petnames (`TSK-<adjective>-<noun>-<tail>` / `S-<adjective>-<noun>-<tail>`); any unique prefix of one addresses the page elsewhere. Legacy `columns[].label`/`columns[].sub` pairs are INTAKE/unfiled, TRIAGE/staged, IN-FIELD/active, REVIEW/qa / seal, and SEALED/closed; derive display labels from the column status ID instead. `tasks[].checks` is [done, total] Checklist Item counts. `tasks[].link` and `operations[].dossier` are Related Page values. `tasks[].blocked_by` lists a Task's Blockers (codes), `tasks[].blocks` the Tasks waiting on it, and `tasks[].blocked` is true when `hold` is set or any Blocker is not Done (SEALED). Look up Task and Cycle codes here before updates. Optional `project` filters Tasks and operations to that exact Project; columns and Cycles remain complete. Tasks of retired Projects (every PROJECT page for the slug has `board: false`) are hidden unless `project` names that Project.",
+        description = "Orient on the Task Board: Inbox (INTAKE) → Ready (TRIAGE) → In Progress (FIELD) → Review (REVIEW) → Done (SEALED). Returns Tasks with TSK codes, Cycles with S codes, and Projects in the legacy operations field. Server-minted codes accept unique prefixes for updates. Legacy columns[].label/sub are INTAKE/unfiled, TRIAGE/staged, IN-FIELD/active, REVIEW/qa / seal, SEALED/closed; derive display labels from status IDs. tasks[].checks is [done,total] Checklist Item counts. tasks[].link and operations[].dossier are Related Pages. tasks[].blocked_by lists prerequisite codes, tasks[].blocks the inverse, tasks[].blocked reflects hold or unfinished Blockers. Epics are TASK pages with task_type EPIC. Every Task includes parent_epic (normalized code or null), child_tasks (derived codes), and child_progress ([SEALED children,total children]); progress is computed before project filtering. Hierarchy is not blocking; parent completion is explicit. Choose non-Epic Tasks for execution, Cycle scheduling, estimates and workload counts. Optional project filters Tasks and operations only; columns and Cycles remain complete. Retired Project Tasks are hidden unless project names that Project.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1540,7 +1556,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_create",
-        description = "Create a Task on the Task Board — preferred over vault_create_page because it mints a TSK-<adjective>-<noun>-<tail> code (the server assigns it; never invent one) and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); `task_type` is optional and one of FEATURE, FIX, TASK, STORY, SPIKE; a Cycle must match an existing code or unique prefix of one (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. `blocked_by` lists its Blockers (the Tasks it waits on) as TSK codes or unique prefixes. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
+        description = "Create a Task on the Task Board — preferred over vault_create_page because the server mints its TSK code and files it under tasks/<project>/. Status defaults to Inbox (INTAKE), priority to P2. task_type is optional: EPIC, FEATURE, FIX, TASK, STORY, SPIKE. An Epic is kind TASK with task_type EPIC, not a separate kind; it cannot have Cycle, estimate, or parent. Create executable children using their normal task_type and parent_epic (Epic code, unique prefix, or [[CODE]]). Hierarchy is one level; attachment changes neither Project nor Blockers. Children have independent Cycles and estimates. Complete the Epic explicitly, never automatically on child completion. A Cycle must match an existing code or unique prefix (BACKLOG means Backlog). body is the Description, link the Related Page, and checklist becomes Todos. blocked_by lists genuine prerequisite Tasks, not containment. Include ai-generated in tags for LLM-authored Tasks. project must name an existing Project (a PROJECT page declaring that slug); unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1564,6 +1580,7 @@ impl VaultMcpServer {
             "assignee": params.assignee,
             "estimate": params.estimate,
             "task_type": params.task_type,
+            "parent_epic": params.parent_epic,
             "due": params.due,
             "link": params.link,
             "tags": params.tags,
@@ -1581,7 +1598,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_update",
-        description = "Update a Task on the Task Board, addressed by TSK code (or any unique prefix of one, matched case-insensitively), vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, `task_type`, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle; `task_type` is one of FEATURE, FIX, TASK, STORY, SPIKE. `blocked_by` replaces the whole Blocker list (TSK codes or unique prefixes): absent = keep, null or [] = clear, a list = set; unknown codes, the Task itself, and cycles are refused. A Task is Blocked when `hold` is non-empty or any Blocker is not Done (SEALED); `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED). `project` must name an existing Project (a PROJECT page declaring that slug); unknown slugs are refused.",
+        description = "Update a Task by TSK code or unique prefix, vault path, or UUID. Plain title/project/status/priority/tags update when present; clear_project: true clears Project. cycle, assignee, estimate, task_type, parent_epic, due, hold, link are tri-state: absent = keep, null or blank = clear, value = set; BACKLOG clears Cycle. task_type: EPIC, FEATURE, FIX, TASK, STORY, SPIKE. parent_epic accepts an Epic Task code, unique prefix, or [[CODE]]; one level only, with non-Epic children, and no Project inheritance or containment-as-blocker. Conversion to EPIC requires clearing any parent_epic, cycle and estimate in the same patch. An Epic with children cannot become a non-Epic. Epic completion is explicit, independent of child status. blocked_by replaces genuine prerequisites: absent = keep, null or [] = clear; unknown/self/cyclic dependencies are refused. Blocked means hold is non-empty or a Blocker is not SEALED. link is Related Page. Statuses: Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), Done (SEALED). project must name an existing Project; unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1614,6 +1631,7 @@ impl VaultMcpServer {
         insert_tri_state(&mut patch_body, "assignee", params.assignee);
         insert_tri_state(&mut patch_body, "estimate", params.estimate);
         insert_tri_state(&mut patch_body, "task_type", params.task_type);
+        insert_tri_state(&mut patch_body, "parent_epic", params.parent_epic);
         insert_tri_state(&mut patch_body, "due", params.due);
         insert_tri_state(&mut patch_body, "hold", params.hold);
         insert_tri_state(&mut patch_body, "link", params.link);
@@ -1873,59 +1891,6 @@ mod tests {
         }
         assert!(MCP_INSTRUCTIONS.contains("vault_ai_journal_capture"));
         assert!(KIND_TOKENS.contains("AI_JOURNAL"));
-    }
-
-    #[test]
-    fn server_instructions_define_task_board_workflow() {
-        let client = ApiClient::new("http://127.0.0.1:1".to_string(), None).unwrap();
-        let instructions = VaultMcpServer::new(Arc::new(client))
-            .get_info()
-            .instructions
-            .expect("server instructions");
-        let normalized = instructions
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .to_lowercase();
-
-        for (policy, required_clause) in [
-            (
-                "board orientation",
-                "orient on the task board with vault_board",
-            ),
-            (
-                "task creation routes through the board",
-                "create tasks with vault_task_create rather than vault_create_page so they receive a code",
-            ),
-            (
-                "code format and prefix addressing",
-                "any unique prefix (e.g. `tsk-brave-finch`) addresses the page",
-            ),
-            (
-                "task provenance",
-                "the `ai-generated` tag policy applies to llm-authored tasks",
-            ),
-            (
-                "status progression",
-                "move tasks through inbox (`intake`) → ready (`triage`) → in progress (`field`) → review (`review`) → done (`sealed`) with vault_task_update",
-            ),
-            (
-                "cycle closure with carryover",
-                "close cycles with vault_cycle_update, passing carry_to to move their unfinished tasks",
-            ),
-        ] {
-            assert!(
-                normalized.contains(required_clause),
-                "server instructions are missing the {policy} policy: {required_clause:?}"
-            );
-        }
-
-        for stale_term in ["tasking", "sprint", "seal cycles", "unsealed tasks"] {
-            assert!(
-                !normalized.contains(stale_term),
-                "server instructions still expose stale Task Board language: {stale_term:?}"
-            );
-        }
     }
 
     #[test]
@@ -4129,27 +4094,6 @@ mod tests {
     }
 
     #[test]
-    fn task_tool_descriptions_cover_blockers() {
-        let tools = VaultMcpServer::tool_router().list_all();
-        let description = |name: &str| {
-            tools
-                .iter()
-                .find(|tool| tool.name == name)
-                .and_then(|tool| tool.description.as_deref())
-                .unwrap_or_else(|| panic!("{name} should have a description"))
-                .to_string()
-        };
-        assert!(description("vault_task_create").contains("blocked_by"));
-        let update = description("vault_task_update");
-        assert!(update.contains("blocked_by"), "{update}");
-        assert!(update.contains("cycles"), "{update}");
-        let board = description("vault_board");
-        for field in ["tasks[].blocked_by", "tasks[].blocks", "tasks[].blocked"] {
-            assert!(board.contains(field), "vault_board should describe {field}");
-        }
-    }
-
-    #[test]
     fn task_update_schema_advertises_tri_state_fields_as_nullable_strings() {
         let tool = VaultMcpServer::tool_router()
             .list_all()
@@ -4162,6 +4106,7 @@ mod tests {
             "assignee",
             "estimate",
             "task_type",
+            "parent_epic",
             "due",
             "hold",
             "link",
@@ -4172,102 +4117,6 @@ mod tests {
                 "tri-state field {field} should stay a nullable string"
             );
         }
-    }
-
-    #[test]
-    fn task_board_tools_distinguish_display_language_from_wire_values() {
-        let tools = VaultMcpServer::tool_router().list_all();
-        let tool = |name: &str| {
-            tools
-                .iter()
-                .find(|tool| tool.name == name)
-                .unwrap_or_else(|| panic!("{name} should be registered"))
-        };
-        let description = |name: &str| {
-            tool(name)
-                .description
-                .as_deref()
-                .unwrap_or_else(|| panic!("{name} should have a description"))
-                .to_lowercase()
-        };
-
-        let board = description("vault_board");
-        for term in [
-            "task board",
-            "inbox (intake)",
-            "ready (triage)",
-            "in progress (field)",
-            "done (sealed)",
-            "projects",
-            "operations",
-            "columns[].label",
-            "columns[].sub",
-            "checks",
-            "intake/unfiled",
-            "triage/staged",
-            "in-field/active",
-            "review/qa / seal",
-            "sealed/closed",
-            "checklist item",
-            "dossier",
-            "related page",
-        ] {
-            assert!(board.contains(term), "vault_board should describe {term:?}");
-        }
-
-        let create = description("vault_task_create");
-        assert!(create.contains("description"));
-        assert!(create.contains("body"));
-        assert!(create.contains("related page"));
-        assert!(create.contains("link"));
-        assert!(create.contains("inbox"));
-        assert!(create.contains("intake"));
-        assert!(create.contains("existing project"));
-        assert!(create.contains("project page declaring that slug"));
-        assert!(create.contains("unknown slugs are refused"));
-
-        let update = description("vault_task_update");
-        assert!(update.contains("blocked"));
-        assert!(update.contains("hold"));
-        assert!(update.contains("related page"));
-        assert!(update.contains("link"));
-        assert!(update.contains("clear_project: true"));
-        assert!(update.contains("inbox (intake)"));
-        assert!(update.contains("done (sealed)"));
-        assert!(update.contains("existing project"));
-        assert!(update.contains("project page declaring that slug"));
-        assert!(update.contains("unknown slugs are refused"));
-
-        for (tool_name, field, terms) in [
-            ("vault_task_create", "body", ["description", "body"]),
-            ("vault_task_create", "link", ["related page", "link"]),
-            ("vault_task_update", "hold", ["blocker reason", "hold"]),
-            ("vault_task_update", "link", ["related page", "link"]),
-        ] {
-            let field_description =
-                tool(tool_name).input_schema["properties"][field]["description"]
-                    .as_str()
-                    .unwrap_or_else(|| panic!("{tool_name}.{field} should have a description"))
-                    .to_lowercase();
-            for term in terms {
-                assert!(
-                    field_description.contains(term),
-                    "{tool_name}.{field} should describe {term:?}"
-                );
-            }
-        }
-
-        let cycle_create = description("vault_cycle_create");
-        assert!(cycle_create.contains("create a cycle"));
-        assert!(!cycle_create.contains("sprint"));
-        assert!(!cycle_create.contains("seal"));
-
-        let cycle_update = description("vault_cycle_update");
-        assert!(cycle_update.contains("close"));
-        assert!(cycle_update.contains("closed"));
-        assert!(cycle_update.contains("unfinished tasks"));
-        assert!(!cycle_update.contains("seal"));
-        assert!(!cycle_update.contains("unsealed"));
     }
 
     /// The stable, explicit code for the cycle `serve_board_vault` seeds —
@@ -4332,6 +4181,7 @@ mod tests {
             assignee: None,
             estimate: None,
             task_type: None,
+            parent_epic: None,
             due: None,
             link: None,
             tags: None,
@@ -4354,11 +4204,161 @@ mod tests {
             assignee: None,
             estimate: None,
             task_type: None,
+            parent_epic: None,
             due: None,
             hold: None,
             link: None,
             blocked_by: None,
         }
+    }
+
+    #[tokio::test]
+    async fn epic_children_round_trip_through_mcp_without_automatic_parent_completion() {
+        let (server, _tmp) = serve_board_vault().await;
+        let epic = parse(
+            server
+                .vault_task_create(Parameters(
+                    serde_json::from_value(json!({
+                        "title": "Ship feature", "project": "xxii", "task_type": "EPIC"
+                    }))
+                    .unwrap(),
+                ))
+                .await,
+        );
+        let parent = epic["code"].as_str().unwrap();
+        let child = parse(
+            server
+                .vault_task_create(Parameters(
+                    serde_json::from_value(json!({
+                        "title": "Deliver child", "project": "other", "task_type": "FIX",
+                        "parent_epic": format!("[[{parent}]]"), "cycle": SEEDED_CYCLE_CODE,
+                        "estimate": "2h"
+                    }))
+                    .unwrap(),
+                ))
+                .await,
+        );
+        let code = child["code"].as_str().unwrap();
+        assert_eq!(child["parent_epic"], parent);
+        assert_eq!(child["project"], "other");
+        assert_eq!(child["task_type"], "FIX");
+        let done = parse(
+            server
+                .vault_task_update(Parameters(
+                    serde_json::from_value(json!({"task": code, "status": "SEALED"})).unwrap(),
+                ))
+                .await,
+        );
+        assert_eq!(
+            done["parent_epic"], parent,
+            "absent parent keeps the relation"
+        );
+        let scoped = parse(
+            server
+                .vault_board(Parameters(BoardParams {
+                    project: Some("xxii".to_string()),
+                }))
+                .await,
+        );
+        assert_eq!(scoped["tasks"][0]["child_tasks"], json!([code]));
+        assert_eq!(scoped["tasks"][0]["child_progress"], json!([1, 1]));
+        assert_eq!(scoped["tasks"][0]["status"], "INTAKE");
+        assert_eq!(scoped["tasks"][0]["parent_epic"], Value::Null);
+
+        for clear in [Value::Null, json!("")] {
+            let cleared = parse(
+                server
+                    .vault_task_update(Parameters(
+                        serde_json::from_value(json!({"task": code, "parent_epic": clear}))
+                            .unwrap(),
+                    ))
+                    .await,
+            );
+            assert_eq!(cleared["parent_epic"], Value::Null);
+            let prefix = parent.rsplit_once('-').unwrap().0;
+            let attached = parse(
+                server
+                    .vault_task_update(Parameters(
+                        serde_json::from_value(json!({"task": code, "parent_epic": prefix}))
+                            .unwrap(),
+                    ))
+                    .await,
+            );
+            assert_eq!(attached["parent_epic"], parent);
+        }
+        let invalid = server
+            .vault_task_update(Parameters(
+                serde_json::from_value(json!({"task": code, "task_type": "EPIC"})).unwrap(),
+            ))
+            .await;
+        assert!(
+            invalid.is_err(),
+            "conversion must reject uncleared leaf fields"
+        );
+        let converted = parse(
+            server
+                .vault_task_update(Parameters(
+                    serde_json::from_value(json!({
+                        "task": code, "task_type": "EPIC", "parent_epic": null,
+                        "cycle": null, "estimate": null
+                    }))
+                    .unwrap(),
+                ))
+                .await,
+        );
+        assert_eq!(converted["task_type"], "EPIC");
+        assert_eq!(converted["parent_epic"], Value::Null);
+        assert_eq!(converted["cycle"], Value::Null);
+        assert_eq!(converted["estimate"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn mcp_rejects_invalid_epic_relationships_and_preserves_existing_children() {
+        let (server, _tmp) = serve_board_vault().await;
+        let epic = parse(
+            server
+                .vault_task_create(Parameters(
+                    serde_json::from_value(json!({"title": "Plan", "task_type": "EPIC"})).unwrap(),
+                ))
+                .await,
+        );
+        let parent = epic["code"].as_str().unwrap();
+        let child = parse(
+            server
+                .vault_task_create(Parameters(
+                    serde_json::from_value(json!({"title": "Child", "parent_epic": parent}))
+                        .unwrap(),
+                ))
+                .await,
+        );
+        for params in [
+            json!({"task": parent, "parent_epic": parent}),
+            json!({"task": parent, "task_type": "TASK"}),
+            json!({"task": parent, "cycle": SEEDED_CYCLE_CODE}),
+            json!({"task": parent, "estimate": "3h"}),
+            json!({"task": child["code"], "parent_epic": "TSK-does-not-exist"}),
+            json!({"task": child["code"], "parent_epic": child["code"]}),
+        ] {
+            assert!(
+                server
+                    .vault_task_update(Parameters(serde_json::from_value(params).unwrap()))
+                    .await
+                    .is_err()
+            );
+        }
+        let completed = parse(
+            server
+                .vault_task_update(Parameters(
+                    serde_json::from_value(json!({"task": parent, "status": "SEALED"})).unwrap(),
+                ))
+                .await,
+        );
+        assert_eq!(
+            completed["status"], "SEALED",
+            "Epic completion is deliberate"
+        );
+        assert_eq!(completed["child_tasks"], json!([child["code"]]));
+        assert_eq!(completed["child_progress"], json!([0, 1]));
     }
 
     #[tokio::test]

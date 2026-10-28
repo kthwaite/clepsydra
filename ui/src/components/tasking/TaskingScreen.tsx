@@ -20,6 +20,7 @@ import {
   type ColLabelFn,
   findActiveCycle,
   isDone,
+  isEpic,
   TYPE_NONE,
   taskStatusLabel,
 } from "./board-constants";
@@ -69,7 +70,7 @@ export const BOARD_FILTER_CONFIG: ClientFilterConfig<BoardTask> = {
     project: (t) => (t.project ? [t.project] : []),
     tags: (t) => t.tags,
     pri: (t) => [t.priority],
-    type: (t) => [t.task_type || TYPE_NONE],
+    type: (t) => [isEpic(t.task_type) ? "EPIC" : t.task_type || TYPE_NONE],
     status: (t) => [t.status],
     // "Blocked" = an open Blocker or a hold (server-derived).
     hold: (t) => (t.blocked ? [FLAG_ON] : []),
@@ -262,7 +263,12 @@ export function TaskingScreen({
     <>
       {/* Creation modal — rendered at root level so it's not clipped */}
       {taskModal !== null && (
-        <NewTaskModal projects={projects} cycles={cycles} colLabel={colLabel} />
+        <NewTaskModal
+          projects={projects}
+          cycles={cycles}
+          tasks={tasks}
+          colLabel={colLabel}
+        />
       )}
 
       {/* Cycle lifecycle modals */}

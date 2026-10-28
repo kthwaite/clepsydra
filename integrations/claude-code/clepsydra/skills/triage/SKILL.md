@@ -1,6 +1,6 @@
 ---
 name: triage
-description: Use when asked to "/triage", or to triage a vault page or a journal date range into Tasks — turns each item of the source into a TSK and records the pass on the project's triage index.
+description: Use when asked to "/triage", or to triage a vault page or journal date range into Tasks and Epics — creates executable Tasks, groups multi-delivery outcomes under Epics, and records the pass on the project's triage index.
 ---
 
 # Triaging a source into Tasks
@@ -34,14 +34,19 @@ them, never write to them.
 3. **List the items.** One entry per actionable item in the source. Check
    `vault_board` and the index first; an item that already has a TSK is
    skipped and reported.
-4. **Create the Tasks.** One `vault_task_create` per item: `project` = slug,
-   tags include `ai-generated`, `link` = the source page. For a journal
-   source, `link` = the index page, never the journal. Group items into one
-   Task only when they share one delivery surface (the same file, screen, or
-   endpoint changes); every other item gets its own Task.
-5. **Place on the board.** P1s and quick wins go to Ready (`TRIAGE`), a
-   handful at most. Everything else stays Inbox (`INTAKE`). Set the status
-   at creation or with `vault_task_update`.
+4. **Create the Tasks.** One executable Task per delivery surface (file,
+   screen, or endpoint change), with `project` = slug, tags including
+   `ai-generated`, and `link` = source page. For a journal source, use the
+   index page as `link`, never the journal. For one outcome spanning multiple
+   deliveries, follow the vault skill's **Epics and executable children**:
+   create or reuse the Epic first, then set each child's `parent_epic` to its
+   returned code. Preserve existing child task types and attach existing Tasks
+   instead of duplicating them. The Epic records outcome-level acceptance;
+   each child records its own deliverable.
+5. **Place on the board.** Move a handful of executable P1s and quick wins
+   to Ready (`TRIAGE`); the rest stay Inbox (`INTAKE`). Schedule and estimate
+   children individually. Parent status remains an explicit planning decision,
+   not a consequence of starting, merging, or completing a child.
 6. **Mirror into the standing lists.** The index has standing top-level
    `Bugfixes`, `Improvements`, and `Features` lists. Add each item to its
    list as `- <note> — [[Title]] (TSK-…)`, where `Title` is the Task's
@@ -67,7 +72,7 @@ them, never write to them.
      "new_string": "## Triage — 2026-10-21\n\nSource: [[Stray Thoughts]]. Tasks: TSK-brave-finch-7q3zd, TSK-calm-owl-bbbbb.\n\n## Triage — 2026-10-14"
    }
    ```
-8. **Report** a table: Task code, title, status, list.
+8. **Report** a table: Task code, title, type, parent Epic, status, list.
 
 ## Rules
 

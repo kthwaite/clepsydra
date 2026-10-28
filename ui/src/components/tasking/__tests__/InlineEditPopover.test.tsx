@@ -21,6 +21,9 @@ import { BOARD_FIXTURE, FIXTURE_COL_LABEL } from "./fixtures";
 
 const TASK: BoardTask = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: false,
   id: "t-inline",

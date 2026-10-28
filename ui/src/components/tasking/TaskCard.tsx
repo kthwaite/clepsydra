@@ -14,7 +14,13 @@ import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { useBoardStore } from "#/store/board";
 import type { OpenTabTarget } from "#/store/workspace";
 import { type CardBlocker, cardBlockers } from "./blockers";
-import { type ColLabelFn, isDone, priColor, StatePip } from "./board-constants";
+import {
+  type ColLabelFn,
+  isDone,
+  isEpic,
+  priColor,
+  StatePip,
+} from "./board-constants";
 import { ChecklistBar, TypeChip } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
 import { InlineEditPopover } from "./InlineEditPopover";
@@ -124,6 +130,16 @@ export function TaskCard({
           </span>
         </InlineEditPopover>
         <TypeChip type={t.task_type} />
+        {isEpic(t.task_type) && (
+          <span className="text-xs text-mute">
+            {t.child_progress[0]}/{t.child_progress[1]} children done
+          </span>
+        )}
+        {t.parent_epic && (
+          <span className="text-xs text-mute" title="Parent Epic">
+            ↳ {t.parent_epic}
+          </span>
+        )}
         <InlineEditPopover
           task={t}
           field="status"

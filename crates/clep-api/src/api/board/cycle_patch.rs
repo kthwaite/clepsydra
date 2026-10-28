@@ -45,6 +45,11 @@ pub(crate) fn load_cycle_tasks(
         .filter_map(|(path, meta_json)| {
             let meta: serde_json::Value =
                 serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
+            if extra_str(&meta, "task_type")
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("EPIC"))
+            {
+                return None;
+            }
             let cycle = extra_str(&meta, "cycle")?;
             let status = extra_str(&meta, "status").unwrap_or_default();
             Some(CycleTask {

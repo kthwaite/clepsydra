@@ -23,6 +23,8 @@ const task = (code: string, status: string, priority: string | null, title: stri
   project,
   status,
   priority,
+  task_type: null as string | null,
+  parent_epic: null as string | null,
   checks: [1, 2],
   updated_at: '2026-10-01T00:00:00Z',
 })
@@ -336,6 +338,28 @@ describe('/board pane', () => {
 })
 
 describe('/task binding', () => {
+  test('Epics cannot bind or start; their children remain executable', async ($, on) => {
+    const epic = { ...task('TSK-parent-plan-1', 'TRIAGE', 'P1', 'Plan'), task_type: 'EPIC' }
+    const child = { ...task('TSK-child-work-2', 'TRIAGE', 'P1', 'Deliver'), parent_epic: epic.code }
+    const { seen } = world(on, { boardTasks: [epic, child] })
+    await $.command.run({ ...TYPED, command: 'task', args: epic.code })
+    await $.command.run({ ...TYPED, command: 'task', args: 'start' })
+    expect(seen.taskCalls).toEqual([])
+    await $.command.run({ ...TYPED, command: 'task', args: child.code })
+    await $.command.run({ ...TYPED, command: 'task', args: 'start' })
+    expect(seen.taskCalls.map(call => [call.task, call.status])).toEqual([[child.code, 'FIELD']])
+  })
+
+  test('conversion of a bound leaf to Epic clears execution binding', async ($, on) => {
+    const leaf = task('TSK-convert-plan-1', 'TRIAGE', 'P1', 'Plan')
+    const { seen } = world(on, { boardTasks: [leaf] })
+    await $.command.run({ ...TYPED, command: 'task', args: leaf.code })
+    leaf.task_type = 'EPIC'
+    await $.command.run({ ...TYPED, command: 'task', args: 'start' })
+    expect(seen.taskCalls).toEqual([])
+    const composed = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] })
+    expect(composed.sections.some(section => section.id === 'clepsydra:active-task')).toBe(false)
+  })
   test('binds by prefix, adds the compose section with the page body, clears', async ($, on) => {
     const { seen } = world(on)
     const r = await $.command.run({ ...TYPED, command: 'task', args: 'TSK-brave' })
@@ -396,6 +420,30 @@ describe('/task binding', () => {
     await $.session.start({ cwd: REPO, surface: 'terminal', isInteractive: true })
     await clock.advance(10)
     expect(seen.status).toBe('TSK-calm-owl · FIELD · vault ✓')
+  })
+
+  test('resume ignores an Epic branch and stored Epic binding', async ($, on) => {
+    const epic = { ...task('TSK-parent-plan-1', 'FIELD', 'P1', 'Plan'), task_type: 'EPIC' }
+    const branch = `feature/${epic.code}`
+    const { clock, seen, store } = world(on, { branch, boardTasks: [epic] })
+    store.set(`binding:${REPO}@${branch}`, epic.code)
+    await $.session.start({ cwd: REPO, surface: 'terminal', isInteractive: true })
+    await clock.advance(10)
+    await $.command.run({ ...TYPED, command: 'task', args: 'start' })
+    expect(seen.taskCalls).toEqual([])
+    const composed = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] })
+    expect(composed.sections.some(section => section.id === 'clepsydra:active-task')).toBe(false)
+  })
+
+  test('resume restores a child without starting or completing its parent', async ($, on) => {
+    const epic = { ...task('TSK-parent-plan-1', 'FIELD', 'P1', 'Plan'), task_type: 'EPIC' }
+    const child = { ...task('TSK-child-work-2', 'FIELD', 'P1', 'Deliver'), parent_epic: epic.code }
+    const { clock, seen } = world(on, { branch: `feature/${child.code}`, boardTasks: [epic, child] })
+    await $.session.start({ cwd: REPO, surface: 'terminal', isInteractive: true })
+    await clock.advance(10)
+    const bound = await $.command.run({ ...TYPED, command: 'task', args: '' })
+    expect(bound.text).toContain(child.code)
+    expect(seen.taskCalls).toEqual([])
   })
 
   test('session start adds the hub section; vault text only inside the data block', async ($, on) => {

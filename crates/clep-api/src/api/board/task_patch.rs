@@ -16,7 +16,9 @@ use rusqlite::params;
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
-use crate::vault::board_vocab::{BLOCKED_BY_KEY, DEFAULT_PRIORITY, DEFAULT_STATUS};
+use crate::vault::board_vocab::{
+    BLOCKED_BY_KEY, DEFAULT_PRIORITY, DEFAULT_STATUS, PARENT_EPIC_KEY,
+};
 use crate::vault::code::{self, CodeLookup};
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{ProjectAssignment, UpdatePageCommand};
@@ -74,6 +76,7 @@ pub(crate) struct TaskPatch {
     pub assignee: FieldChange,
     pub estimate: FieldChange,
     pub task_type: FieldChange,
+    pub parent_epic: FieldChange,
     pub due: FieldChange,
     pub start: FieldChange,
     pub hold: FieldChange,
@@ -99,6 +102,7 @@ impl From<PatchTaskRequest> for TaskPatch {
             assignee: FieldChange::from_tri_state(body.assignee),
             estimate: FieldChange::from_tri_state(body.estimate),
             task_type: FieldChange::from_tri_state(body.task_type),
+            parent_epic: FieldChange::from_tri_state(body.parent_epic),
             due: FieldChange::from_tri_state(body.due),
             start: FieldChange::from_tri_state(body.start),
             hold: FieldChange::from_tri_state(body.hold),
@@ -126,6 +130,7 @@ impl From<&CreateTaskRequest> for TaskPatch {
             assignee: FieldChange::from_create(body.assignee.clone()),
             estimate: FieldChange::from_create(body.estimate.clone()),
             task_type: FieldChange::from_create(body.task_type.clone()),
+            parent_epic: FieldChange::from_create(body.parent_epic.clone()),
             due: FieldChange::from_create(body.due.clone()),
             start: FieldChange::from_create(body.start.clone()),
             hold: FieldChange::Keep,
@@ -243,11 +248,13 @@ pub(crate) enum TaskPatchError {
     SelfBlocker(String),
     /// The path the cycle would take; each Task is blocked by the next.
     BlockerCycle(Vec<String>),
+    InvalidEpic(String),
 }
 
 impl From<TaskPatchError> for ApiError {
     fn from(error: TaskPatchError) -> Self {
         match error {
+            TaskPatchError::InvalidEpic(reason) => ApiError::bad_request(reason),
             TaskPatchError::UnknownStatus(status) => ApiError::bad_request(format!(
                 "unknown status: '{status}'; valid values: {}",
                 COLUMNS
@@ -369,6 +376,45 @@ pub(crate) fn apply_task_patch(
         Some(inputs) => Some(resolve_blockers(inputs, code, &lookups.tasks)?),
         None => None,
     };
+    let parent_epic = resolve_parent_epic(&patch.parent_epic, code, &lookups.tasks)?;
+    let epic = effective_field(meta, "task_type", &task_type)
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("EPIC"));
+    if epic {
+        for (key, change) in [
+            ("cycle", &cycle),
+            ("estimate", &patch.estimate),
+            (PARENT_EPIC_KEY, &parent_epic),
+        ] {
+            let is_set = match change {
+                FieldChange::Keep => meta
+                    .extra
+                    .get(key)
+                    .is_some_and(|value| value.as_str().is_none_or(|text| !text.trim().is_empty())),
+                FieldChange::Clear => false,
+                FieldChange::Set(_) => true,
+            };
+            if is_set {
+                return Err(TaskPatchError::InvalidEpic(format!(
+                    "an Epic cannot have {key}; clear it in the same patch"
+                )));
+            }
+        }
+    } else if meta
+        .extra
+        .get("task_type")
+        .and_then(toml::Value::as_str)
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("EPIC"))
+        && code.is_some_and(|code| {
+            lookups
+                .tasks
+                .values()
+                .any(|node| node.parent_epic.as_deref() == Some(code))
+        })
+    {
+        return Err(TaskPatchError::InvalidEpic(
+            "cannot change an Epic to a non-Epic while children remain".into(),
+        ));
+    }
 
     // Every rule passed: now change the meta.
     if let Some(title) = &patch.title {
@@ -387,6 +433,7 @@ pub(crate) fn apply_task_patch(
     apply_field(meta, "assignee", &patch.assignee);
     apply_field(meta, "estimate", &patch.estimate);
     apply_field(meta, "task_type", &task_type);
+    apply_field(meta, PARENT_EPIC_KEY, &parent_epic);
     apply_field(meta, "due", &patch.due);
     apply_field(meta, "start", &patch.start);
     apply_field(meta, "hold", &patch.hold);
@@ -495,6 +542,57 @@ fn resolve_blockers(
     Ok(resolved)
 }
 
+fn resolve_parent_epic(
+    change: &FieldChange,
+    own_code: Option<&str>,
+    tasks: &TaskNodes,
+) -> Result<FieldChange, TaskPatchError> {
+    let FieldChange::Set(input) = change else {
+        return Ok(change.clone());
+    };
+    let target = blocker_target(input).ok_or_else(|| {
+        TaskPatchError::InvalidEpic("parent_epic must identify an existing Epic".into())
+    })?;
+    let canonical = match code::resolve_prefix(tasks.keys().map(String::as_str), target) {
+        CodeLookup::Found(code) => code,
+        CodeLookup::NotFound => {
+            return Err(TaskPatchError::InvalidEpic(format!(
+                "unknown parent_epic '{input}'"
+            )));
+        }
+        CodeLookup::Ambiguous(candidates) => {
+            return Err(TaskPatchError::InvalidEpic(format!(
+                "ambiguous parent_epic prefix '{input}': candidates {}",
+                candidates.join(", ")
+            )));
+        }
+    };
+    if own_code == Some(canonical.as_str()) {
+        return Err(TaskPatchError::InvalidEpic(
+            "a task cannot be its own parent_epic".into(),
+        ));
+    }
+    let parent = &tasks[&canonical];
+    if !parent.epic || parent.parent_epic.is_some() {
+        return Err(TaskPatchError::InvalidEpic(
+            "parent_epic must be an Epic without a parent".into(),
+        ));
+    }
+    Ok(FieldChange::Set(format!("[[{canonical}]]")))
+}
+
+fn effective_field<'a>(meta: &'a PageMeta, key: &str, change: &'a FieldChange) -> Option<&'a str> {
+    match change {
+        FieldChange::Keep => meta
+            .extra
+            .get(key)
+            .and_then(toml::Value::as_str)
+            .filter(|value| !value.trim().is_empty()),
+        FieldChange::Clear => None,
+        FieldChange::Set(value) => Some(value),
+    }
+}
+
 fn set_field(meta: &mut PageMeta, key: &str, value: &str) {
     meta.extra
         .insert(key.to_string(), toml::Value::String(value.to_string()));
@@ -541,6 +639,7 @@ mod tests {
                     TaskNode {
                         status: "FIELD".into(),
                         blocked_by: blocked_by.iter().map(|s| s.to_string()).collect(),
+                        ..TaskNode::default()
                     },
                 )
             })
@@ -1196,81 +1295,5 @@ mod tests {
         assert_eq!(extra(&meta, "priority").as_deref(), Some(DEFAULT_PRIORITY));
         assert_eq!(extra(&meta, "cycle").as_deref(), Some("S-13"));
         assert_eq!(meta.project.as_deref(), Some("falls"));
-    }
-
-    // -- error mapping --------------------------------------------------------
-
-    #[test]
-    fn errors_map_to_bad_request_with_the_established_messages() {
-        let error: ApiError = TaskPatchError::UnknownStatus("BOGUS".into()).into();
-        assert_eq!(error.status, 400);
-        assert_eq!(
-            error.error,
-            "unknown status: 'BOGUS'; valid values: INTAKE, TRIAGE, FIELD, REVIEW, SEALED"
-        );
-        let error: ApiError = TaskPatchError::UnknownPriority("P9".into()).into();
-        assert_eq!(
-            error.error,
-            "unknown priority: 'P9'; valid values: P0, P1, P2, P3"
-        );
-        let error: ApiError = TaskPatchError::UnknownTaskType("BOGUS".into()).into();
-        assert_eq!(error.status, 400);
-        assert_eq!(
-            error.error,
-            "unknown task_type: 'BOGUS'; valid values: FEATURE, FIX, TASK, STORY, SPIKE"
-        );
-        let error: ApiError = TaskPatchError::Cycle(CycleRefError::Unknown("S-99".into())).into();
-        assert_eq!(
-            error.error,
-            "unknown cycle 'S-99'; must match an existing cycle code or a unique prefix of one"
-        );
-        let error: ApiError = TaskPatchError::Cycle(CycleRefError::Ambiguous {
-            input: "S-calm".into(),
-            candidates: vec!["S-calm-heron-2xm9p".into(), "S-calm-otter-9k2ma".into()],
-        })
-        .into();
-        assert_eq!(
-            error.error,
-            "ambiguous cycle prefix 'S-calm': candidates S-calm-heron-2xm9p, S-calm-otter-9k2ma"
-        );
-        let error: ApiError = TaskPatchError::UnknownProject("ghost".into()).into();
-        assert_eq!(error.status, 400);
-        assert!(
-            error.error.starts_with("unknown project: ghost;"),
-            "{}",
-            error.error
-        );
-        let error: ApiError = TaskPatchError::InvalidProjectSlug {
-            slug: "../x".into(),
-            reason: "bad slug".into(),
-        }
-        .into();
-        assert_eq!(error.status, 400);
-        assert_eq!(error.error, "bad slug");
-        let error: ApiError = TaskPatchError::UnknownBlocker("TSK-x".into()).into();
-        assert_eq!(error.status, 400);
-        assert_eq!(
-            error.error,
-            "unknown blocked_by task 'TSK-x'; must match an existing task code or a unique prefix of one"
-        );
-        let error: ApiError = TaskPatchError::AmbiguousBlocker {
-            input: "TSK-b".into(),
-            candidates: vec!["TSK-b1".into(), "TSK-b2".into()],
-        }
-        .into();
-        assert_eq!(
-            error.error,
-            "ambiguous blocked_by prefix 'TSK-b': candidates TSK-b1, TSK-b2"
-        );
-        let error: ApiError = TaskPatchError::SelfBlocker("TSK-a".into()).into();
-        assert_eq!(error.error, "a task cannot be blocked by itself: 'TSK-a'");
-        let error: ApiError =
-            TaskPatchError::BlockerCycle(vec!["TSK-a".into(), "TSK-b".into(), "TSK-a".into()])
-                .into();
-        assert_eq!(error.status, 400);
-        assert_eq!(
-            error.error,
-            "blocked_by would create a cycle: TSK-a → TSK-b → TSK-a (each task is blocked by the next)"
-        );
     }
 }

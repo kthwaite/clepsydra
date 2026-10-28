@@ -208,9 +208,14 @@ async fn board_task_excerpt_is_null_for_encrypted_body_and_leaks_no_ciphertext()
         .pre_index_seed(|root| {
             fs::create_dir_all(root.join("tasks")).unwrap();
             fs::write(
+                root.join("tasks/TSK-epic.md"),
+                format!("+++\nid = \"{PLAIN_ID}\"\ntitle = \"Epic\"\ntype = \"TASK\"\ntask_type = \"EPIC\"\n+++\n"),
+            ).unwrap();
+            fs::write(
                 root.join("tasks/TSK-0402.md"),
                 format!(
                     "+++\nid = \"{PROTECTED_ID}\"\ntitle = \"Protected task\"\ntype = \"TASK\"\n\
+                     parent_epic = \"[[TSK-epic]]\"\nstatus = \"SEALED\"\n\
                      encryption = {{ format = \"age\", version = 1, key_id = \"{KEY_ID}\" }}\n+++\n\
                      {ARMOR}"
                 ),
@@ -229,6 +234,19 @@ async fn board_task_excerpt_is_null_for_encrypted_body_and_leaks_no_ciphertext()
 
     assert!(task.get("body_excerpt").is_some());
     assert!(task["body_excerpt"].is_null());
+    assert!(task["description"].is_null());
+    assert_eq!(task["parent_epic"], "TSK-epic");
+    let epic = board["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["id"] == PLAIN_ID)
+        .unwrap();
+    assert_eq!(
+        epic["child_progress"],
+        json!([1, 1]),
+        "public metadata remains visible"
+    );
     let serialized = serde_json::to_string(&board).unwrap();
     assert!(!serialized.contains("BEGIN AGE ENCRYPTED FILE"));
     assert!(!serialized.contains("YWdlLWVuY3J5cHRpb24"));

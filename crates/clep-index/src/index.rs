@@ -436,12 +436,13 @@ pub trait LinkablePropertiesProvider: Send {
 /// says. `attendees` is one: the server already refuses any value that is
 /// not a wikilink list (`vault::attendance`), so a config written before the
 /// key existed must not silently drop every attendee backlink. A Task's
-/// `blocked_by` is another: the board API writes it as a wikilink list of
-/// Blocker codes, so each Blocker collects a backlink and code changes are
+/// `blocked_by` and `parent_epic` are Task relations written as canonical
+/// wikilinks, so Blockers and Epics collect backlinks and code changes are
 /// repaired like any other link.
 pub const BUILTIN_RELATION_PROPERTIES: &[&str] = &[
     clep_vault::attendance::ATTENDEES_KEY,
     clep_vault::board_vocab::BLOCKED_BY_KEY,
+    clep_vault::board_vocab::PARENT_EPIC_KEY,
 ];
 
 /// `[vault].linkable_properties` plus the built-in relations, nothing else.

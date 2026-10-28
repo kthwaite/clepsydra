@@ -51,6 +51,9 @@ const task = (
     blocked_by: [],
     blocks: [],
     blocked: false,
+    parent_epic: null,
+    child_tasks: [],
+    child_progress: [0, 0],
     ...over,
   }) as BoardTask;
 
@@ -96,7 +99,11 @@ describe("MobileTasking", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     m.board = board();
-    useBoardStore.setState({ opFilter: "ALL", editTaskId: null });
+    useBoardStore.setState({
+      opFilter: "ALL",
+      editTaskId: null,
+      taskModal: null,
+    });
     m.creating = false;
   });
 

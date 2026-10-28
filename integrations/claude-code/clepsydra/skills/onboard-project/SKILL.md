@@ -47,7 +47,8 @@ tags). Body shape, in order:
 
 - `integration_branch` — a string. Ask the user which branch merges land on;
   offer the integration branch named in the repo's `CLAUDE.md` as the default.
-  The plugin moves a Task to Review when Claude merges into this branch.
+  The plugin moves an executable non-Epic Task to Review when Claude merges
+  into this branch; its Epic remains unchanged.
   Without it, merge automation is off.
 - `triage_index` — optional wikilink string such as
   `"[[<Name> Backlog]]"`. Ask; omit when the user has no backlog index.
@@ -62,10 +63,15 @@ values with `vault_get_properties`.
 
 **4. Backlog migration — only if the repo tracks work in files** (FIXME.md,
 ISSUES.md, TODO/BACKLOG-style documents). Find the *authoritative* tracker
-first (stale ones often point to a successor). One `vault_task_create` per
-open item (project = slug, tags include `ai-generated`; the board assigns
-TSK codes), an index NOTE named "<Name> Backlog" wikilinking the tasks, then
-demote the tracker files to short pointer stubs referencing the vault (their
+first (stale ones often point to a successor). Read `vault_board` to reuse
+existing Tasks. Create one executable Task per open delivery (project = slug,
+tags include `ai-generated`; the board assigns TSK codes). Preserve tracker
+groupings that describe multi-delivery outcomes using the vault skill's
+**Epics and executable children**: a TASK with `task_type: "EPIC"` plus normal
+child Tasks attached by `parent_epic`, never nested Epics or Blocker links.
+Preserve child estimates and Cycle assignments; the Epic gets neither.
+Create an index NOTE named "<Name> Backlog" wikilinking the Epics and Tasks,
+then demote tracker files to short pointer stubs referencing the vault (their
 history stays in git). No tracker files → open work goes in hub Threads, no
 tasks are created.
 

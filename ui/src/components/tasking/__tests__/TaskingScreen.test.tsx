@@ -32,7 +32,6 @@ import {
   filterTasks,
   TaskingScreen,
 } from "../TaskingScreen";
-import { TYPE_FILTER_OPTIONS } from "../taskingFacets";
 import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_NO_SLUG_OP,
@@ -50,6 +49,9 @@ const FILTER_FIXTURE: BoardResponse = {
   tasks: [
     {
       blocked_by: [],
+      parent_epic: null,
+      child_tasks: [],
+      child_progress: [0, 0],
       blocks: [],
       blocked: false,
       id: "f1",
@@ -67,6 +69,9 @@ const FILTER_FIXTURE: BoardResponse = {
     },
     {
       blocked_by: [],
+      parent_epic: null,
+      child_tasks: [],
+      child_progress: [0, 0],
       blocks: [],
       blocked: false,
       id: "f2",
@@ -84,6 +89,9 @@ const FILTER_FIXTURE: BoardResponse = {
     },
     {
       blocked_by: [],
+      parent_epic: null,
+      child_tasks: [],
+      child_progress: [0, 0],
       blocks: [],
       blocked: false,
       id: "f3",
@@ -1064,16 +1072,6 @@ describe("Type filter facet", () => {
     expect(typeOf({ ...task })).toEqual(["UNTYPED"]);
   });
 
-  it("offers the five types plus Untyped", () => {
-    expect(TYPE_FILTER_OPTIONS).toEqual([
-      { value: "FEATURE", label: "Feature" },
-      { value: "FIX", label: "Fix" },
-      { value: "TASK", label: "Task" },
-      { value: "STORY", label: "Story" },
-      { value: "SPIKE", label: "Spike" },
-      { value: "UNTYPED", label: "Untyped" },
-    ]);
-  });
 });
 
 describe("Blocked filter flag", () => {

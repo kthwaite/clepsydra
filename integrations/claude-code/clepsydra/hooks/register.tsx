@@ -33,7 +33,7 @@ import {
 } from './merge'
 import { basename, mainCheckoutOf, parseProjectMap, resolveProject } from './project'
 import { resolveVaultTool } from './tools'
-import { bindingKey, branchTaskCode, groupTasks, parseBoard, resolveTaskRef, shortCode, type BoardTask } from './tasks'
+import { bindingKey, branchTaskCode, groupTasks, isExecutableTask, parseBoard, resolveTaskRef, shortCode, type BoardTask } from './tasks'
 
 type $ = EngineInterface
 
@@ -289,6 +289,8 @@ async function refreshBoard($: $): Promise<BoardTask[] | null> {
       : resolveProject({ repoBase: repo.repoBase, mainBase: repo.mainBase, map: cfg.projectMap, projects: board.projects })
   const before = await read($, projectRef)
   await update($, boardRef, () => board.tasks)
+  const binding = await read($, bindingRef)
+  if (binding !== null && board.tasks.some(task => task.code === binding.code && !isExecutableTask(task))) await unbind($)
   await update($, hubsRef, () => board.hubs)
   hubRows = board.hubRows
   await update($, projectRef, () => project ?? null)
@@ -336,6 +338,7 @@ async function fetchBody($: $, t: BoardTask): Promise<void> {
 }
 
 async function bind($: $, t: BoardTask, source: ClepsydraBinding['source']): Promise<void> {
+  if (!isExecutableTask(t)) return
   await update($, bindingRef, () => ({ code: t.code, source }))
   const repo = await currentRepo($)
   if (source === 'explicit' && repo !== null) await $.store.set(bindingKey(repo.top, repo.branch), t.code)
@@ -356,7 +359,7 @@ async function restoreBinding($: $, tasks: readonly BoardTask[]): Promise<void> 
   const repo = await currentRepo($)
   if (repo === null) return
   const stored = await $.store.get(bindingKey(repo.top, repo.branch))
-  const explicit = typeof stored === 'string' ? tasks.find(t => t.code === stored) : undefined
+  const explicit = typeof stored === 'string' ? tasks.find(t => t.code === stored && isExecutableTask(t)) : undefined
   if (explicit !== undefined) return bind($, explicit, 'explicit')
   const fromBranch = branchTaskCode(repo.branch)
   if (fromBranch === undefined) return
@@ -365,6 +368,7 @@ async function restoreBinding($: $, tasks: readonly BoardTask[]): Promise<void> 
 }
 
 async function setField($: $, t: BoardTask, consent: string): Promise<string> {
+  if (!isExecutableTask(t)) return `${t.code} is an Epic; plan it with vault_task_update and start a child Task`
   if (t.status === 'FIELD') return `${t.code} already FIELD`
   const r = await callVault($, 'vault_task_update', { task: t.code, status: 'FIELD' }, consent)
   await refreshBoard($)
@@ -374,7 +378,7 @@ async function setField($: $, t: BoardTask, consent: string): Promise<string> {
 /** Board `start`: bind, move to FIELD unless there, put `work on …` in the composer. */
 async function startTask($: $, code: string): Promise<void> {
   const t = ((await boardTasks($)) ?? []).find(x => x.code === code)
-  if (t === undefined) return
+  if (t === undefined || !isExecutableTask(t)) return
   await bind($, t, 'explicit')
   const said = await setField($, t, `The user pressed "start" on ${t.code} in the clepsydra board pane.`)
   await $.prompt.fill({ text: `work on ${t.code}: ${t.title}` })
@@ -383,7 +387,7 @@ async function startTask($: $, code: string): Promise<void> {
 
 async function bindFromPane($: $, code: string): Promise<void> {
   const t = ((await boardTasks($)) ?? []).find(x => x.code === code)
-  if (t === undefined) return
+  if (t === undefined || !isExecutableTask(t)) return
   await bind($, t, 'explicit')
   $.ui.toast(`clepsydra: bound ${t.code}`)
 }

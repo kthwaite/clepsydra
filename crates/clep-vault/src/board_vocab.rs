@@ -7,3 +7,6 @@ pub const DEFAULT_PRIORITY: &str = "P2";
 /// their codes (`blocked_by = ["[[TSK-brave-finch-7q3zd]]"]`). A built-in
 /// relation property, so each entry is a backlink on the Blocker's page.
 pub const BLOCKED_BY_KEY: &str = "blocked_by";
+
+/// One parent Epic, stored as a canonical `[[TSK-code]]` relation.
+pub const PARENT_EPIC_KEY: &str = "parent_epic";

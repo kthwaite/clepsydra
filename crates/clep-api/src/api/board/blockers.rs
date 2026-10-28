@@ -1,10 +1,13 @@
-//! Blockers: the Task graph behind `blocked_by` (CONTEXT.md: Blocker,
-//! Blocked).
+//! Task relations: Blockers (`blocked_by`) and one-level Epic containment
+//! (`parent_epic`).
 //!
 //! A Task records the Tasks it waits on in its `blocked_by` frontmatter
 //! list, as wikilinks to their codes. Only the waiting Task stores the
 //! edge. `blocks` (the inverse) and `blocked` (any open Blocker, or `hold`)
 //! are derived here on every read and never persisted.
+//! A non-Epic Task may name one Epic parent. The parent's child codes and
+//! [SEALED, total] progress are derived from every Task before board scoping.
+//! Containment never blocks or automatically completes either Task.
 //!
 //! [`load_task_nodes`] reads the graph from the index in one query. The rest
 //! is pure: [`TaskNodes`] answers the derived questions and finds the cycle
@@ -14,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use rusqlite::params;
 
-use crate::vault::board_vocab::{BLOCKED_BY_KEY, DEFAULT_STATUS};
+use crate::vault::board_vocab::{BLOCKED_BY_KEY, DEFAULT_STATUS, PARENT_EPIC_KEY};
 use crate::vault::kind::Kind;
 
 use super::{extra_str, path_stem};
@@ -31,6 +34,8 @@ pub(crate) struct TaskNode {
     /// an existing Task is that Task's code as stored; any other entry is
     /// kept as written (a dangling Blocker).
     pub blocked_by: Vec<String>,
+    pub epic: bool,
+    pub parent_epic: Option<String>,
 }
 
 /// Every Task, keyed by its code.
@@ -72,31 +77,44 @@ pub(crate) fn blocked_by_targets(meta: &serde_json::Value) -> Vec<String> {
 pub(crate) fn task_nodes_from<'a>(
     tasks: impl IntoIterator<Item = (String, &'a serde_json::Value)>,
 ) -> TaskNodes {
-    let raw: Vec<(String, String, Vec<String>)> = tasks
+    let raw: Vec<(String, TaskNode)> = tasks
         .into_iter()
         .map(|(code, meta)| {
-            let status = extra_str(meta, "status").unwrap_or_else(|| DEFAULT_STATUS.to_string());
-            (code, status, blocked_by_targets(meta))
+            let node = TaskNode {
+                status: extra_str(meta, "status").unwrap_or_else(|| DEFAULT_STATUS.to_string()),
+                blocked_by: blocked_by_targets(meta),
+                epic: extra_str(meta, "task_type")
+                    .is_some_and(|value| value.trim().eq_ignore_ascii_case("EPIC")),
+                parent_epic: meta
+                    .get(PARENT_EPIC_KEY)
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(blocker_target)
+                    .map(str::to_string),
+            };
+            (code, node)
         })
         .collect();
     let by_folded: BTreeMap<String, String> = raw
         .iter()
-        .map(|(code, _, _)| (code.to_lowercase(), code.clone()))
+        .map(|(code, _)| (code.to_lowercase(), code.clone()))
         .collect();
+    let canonical = |target: String| {
+        by_folded
+            .get(&target.to_lowercase())
+            .cloned()
+            .unwrap_or(target)
+    };
     raw.into_iter()
-        .map(|(code, status, targets)| {
+        .map(|(code, mut node)| {
             let mut seen = BTreeSet::new();
-            let blocked_by = targets
+            node.blocked_by = node
+                .blocked_by
                 .into_iter()
-                .map(|target| {
-                    by_folded
-                        .get(&target.to_lowercase())
-                        .cloned()
-                        .unwrap_or(target)
-                })
+                .map(&canonical)
                 .filter(|target| seen.insert(target.clone()))
                 .collect();
-            (code, TaskNode { status, blocked_by })
+            node.parent_epic = node.parent_epic.map(canonical);
+            (code, node)
         })
         .collect()
 }
@@ -150,6 +168,28 @@ pub(crate) fn blocks_index(nodes: &TaskNodes) -> BTreeMap<String, Vec<String>> {
         }
     }
     blocks
+}
+
+/// Derive valid one-level containment without guessing broken manual references.
+pub(crate) fn children_index(nodes: &TaskNodes) -> BTreeMap<String, (Vec<String>, [u32; 2])> {
+    let mut children: BTreeMap<String, (Vec<String>, [u32; 2])> = BTreeMap::new();
+    for (code, node) in nodes {
+        if node.epic {
+            continue;
+        }
+        let Some(parent) = node.parent_epic.as_ref().filter(|parent| {
+            nodes
+                .get(*parent)
+                .is_some_and(|node| node.epic && node.parent_epic.is_none())
+        }) else {
+            continue;
+        };
+        let (codes, progress) = children.entry(parent.clone()).or_default();
+        codes.push(code.clone());
+        progress[0] += u32::from(node.status == DONE_STATUS);
+        progress[1] += 1;
+    }
+    children
 }
 
 /// The cycle that giving Task `code` the Blockers `proposed` would close,
@@ -214,6 +254,7 @@ mod tests {
                     TaskNode {
                         status: status.to_string(),
                         blocked_by: blocked_by.iter().map(|s| s.to_string()).collect(),
+                        ..TaskNode::default()
                     },
                 )
             })

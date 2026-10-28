@@ -45,6 +45,9 @@ const C01_TASKS = tasks.filter((t) => t.cycle === "C-01");
 /** A cycle with hold tasks and checks for stats testing */
 const T_HOLD: BoardTask = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: true,
   id: "th1",
@@ -64,6 +67,9 @@ const T_HOLD: BoardTask = {
 
 const T_SEALED: BoardTask = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: false,
   id: "ts1",
@@ -82,6 +88,9 @@ const T_SEALED: BoardTask = {
 
 const T_FIELD: BoardTask = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: false,
   id: "tf1",

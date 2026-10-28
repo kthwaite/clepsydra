@@ -9,6 +9,10 @@ export type BoardTask = {
   priority: string | null
   project: string | null
   path: string
+  taskType: string | null
+  parentEpic: string | null
+  childTasks: string[]
+  childProgress: [number, number]
   /** `[done, total]`. */
   checks: [number, number]
   updatedAt: string
@@ -39,6 +43,7 @@ function toTask(raw: unknown): BoardTask | undefined {
   const checks = Array.isArray(raw.checks) ? raw.checks : []
   const done = typeof checks[0] === 'number' ? checks[0] : 0
   const total = typeof checks[1] === 'number' ? checks[1] : 0
+  const progress = Array.isArray(raw.child_progress) ? raw.child_progress : []
   return {
     code,
     title,
@@ -46,6 +51,10 @@ function toTask(raw: unknown): BoardTask | undefined {
     priority: str(raw.priority) ?? null,
     project: str(raw.project) ?? null,
     path,
+    taskType: str(raw.task_type) ?? null,
+    parentEpic: str(raw.parent_epic) ?? null,
+    childTasks: Array.isArray(raw.child_tasks) ? raw.child_tasks.filter((code): code is string => typeof code === 'string') : [],
+    childProgress: [typeof progress[0] === 'number' ? progress[0] : 0, typeof progress[1] === 'number' ? progress[1] : 0],
     checks: [done, total],
     updatedAt: str(raw.updated_at) ?? '',
   }
@@ -68,6 +77,11 @@ export function parseBoard(json: unknown): Board | undefined {
   }
   return { tasks, projects, hubs, hubRows }
 }
+/** Epics are planning containers; execution and merge hooks operate on leaf Tasks. */
+export function isExecutableTask(task: BoardTask): boolean {
+  return task.taskType?.trim().toUpperCase() !== 'EPIC'
+}
+
 
 export const GROUP_ORDER = ['FIELD', 'REVIEW', 'TRIAGE', 'INTAKE'] as const
 
@@ -84,9 +98,9 @@ export function sortTasks(tasks: readonly BoardTask[]): BoardTask[] {
 
 export type TaskGroup = { status: string; tasks: BoardTask[] }
 
-/** The project's tasks in board order; empty groups dropped; SEALED only with `all`. */
+/** The project's executable tasks in board order; SEALED only with `all`. */
 export function groupTasks(tasks: readonly BoardTask[], project: string, all: boolean): TaskGroup[] {
-  const mine = tasks.filter(t => t.project === project)
+  const mine = tasks.filter(t => t.project === project && isExecutableTask(t))
   const order: string[] = all ? [...GROUP_ORDER, 'SEALED'] : [...GROUP_ORDER]
   return order
     .map(status => ({ status, tasks: sortTasks(mine.filter(t => t.status === status)) }))
@@ -108,6 +122,7 @@ export type TaskRef = { task: BoardTask } | { candidates: BoardTask[] }
 
 /** Exact code, else unique code prefix, else unique title substring (all case-insensitive). */
 export function resolveTaskRef(ref: string, tasks: readonly BoardTask[]): TaskRef {
+  tasks = tasks.filter(isExecutableTask)
   const q = ref.trim().toLowerCase()
   const exact = tasks.find(t => t.code.toLowerCase() === q)
   if (exact !== undefined) return { task: exact }

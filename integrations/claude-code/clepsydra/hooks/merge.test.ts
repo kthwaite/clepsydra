@@ -10,6 +10,10 @@ const task = (code: string, status: string): BoardTask => ({
   priority: null,
   project: 'clepsydra',
   path: `tasks/clepsydra/${code}.md`,
+  taskType: null,
+  parentEpic: null,
+  childTasks: [],
+  childProgress: [0, 0],
   checks: [0, 0],
   updatedAt: '',
 })
@@ -132,6 +136,14 @@ describe('mergeCode', () => {
 })
 
 describe('mergeTask', () => {
+  test('leaves the Epic untouched when its branch or stored binding is merged', () => {
+    const epic = { ...task('TSK-parent-plan-1', 'FIELD'), taskType: 'EPIC' }
+    const child = { ...task('TSK-child-work-2', 'FIELD'), parentEpic: epic.code }
+    const tasks = [epic, child]
+    expect(mergeTask({ mergedBranch: `feature/${epic.code}`, tasks })).toBeUndefined()
+    expect(mergeTask({ bound: epic.code, mergedBranch: 'feature/plain', tasks })).toBeUndefined()
+    expect(mergeTask({ mergedBranch: `feature/${child.code}`, tasks })).toEqual(child)
+  })
   const tasks = [task('TSK-a-b-1', 'FIELD'), task('TSK-c-d-2', 'FIELD'), task('TSK-e-f-3', 'REVIEW'), task('TSK-g-h-4', 'SEALED')]
 
   test('the merged branch beats the binding (R-H)', () => {

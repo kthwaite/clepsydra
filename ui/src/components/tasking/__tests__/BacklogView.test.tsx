@@ -110,11 +110,53 @@ const columnNames = (grid: HTMLElement) =>
 
 const ACTIVE: BoardCycle = BOARD_FIXTURE.cycles[0];
 
+it.each(["EPIC", " epic "])(
+  "groups %s children once, collapses them, and preserves children when the parent is filtered",
+  async (taskType) => {
+    const epic: BoardTask = {
+      ...BOARD_FIXTURE.tasks[0],
+      id: "epic",
+      code: "TSK-E",
+      title: "Outcome",
+      task_type: taskType,
+      cycle: null,
+      parent_epic: null,
+      child_tasks: ["TSK-C"],
+      child_progress: [1, 2],
+    };
+    const child: BoardTask = {
+      ...BOARD_FIXTURE.tasks[0],
+      id: "child",
+      code: "TSK-C",
+      title: "Independent child",
+      parent_epic: epic.code,
+      child_tasks: [],
+      child_progress: [0, 0],
+    };
+    const rendered = wrap(view([epic, child]));
+    expect(document.querySelectorAll('tr[data-row-id="child"]')).toHaveLength(
+      1,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Collapse Outcome" }),
+    );
+    expect(document.querySelector('tr[data-row-id="child"]')).toBeNull();
+    rendered.rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        {view([child])}
+      </QueryClientProvider>,
+    );
+    expect(rowOf("child")).toBeInTheDocument();
+  },
+);
 // Extra tasks used in BacklogView-specific fixtures
 
 /** P0 task with a due date */
 const T_P0_DUE: BoardTask = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: false,
   id: "bk-p0-due",
@@ -135,6 +177,9 @@ const T_P0_DUE: BoardTask = {
 /** P0 task without a due date (should sort after T_P0_DUE) */
 const T_P0_NODUE: BoardTask = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: false,
   id: "bk-p0-nodue",
@@ -155,6 +200,9 @@ const T_P0_NODUE: BoardTask = {
 /** P1 task with a hold */
 const T_P1_HOLD: BoardTask = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: true,
   id: "bk-p1-hold",
@@ -176,6 +224,9 @@ const T_P1_HOLD: BoardTask = {
 /** P2 task with checklist checks=[2,5] */
 const T_P2_CHECKS: BoardTask = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: false,
   id: "bk-p2-checks",
@@ -196,6 +247,9 @@ const T_P2_CHECKS: BoardTask = {
 /** P2 task with fully-done checklist checks=[3,3] */
 const T_P2_DONE: BoardTask = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: false,
   id: "bk-p2-done",
@@ -216,6 +270,9 @@ const T_P2_DONE: BoardTask = {
 // P2 task at INTAKE (earlier COL_ORDER index than FIELD) for within-group sort test
 const T_P2_INTAKE: BoardTask = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: false,
   id: "bk-p2-intake",

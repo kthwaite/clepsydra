@@ -72,6 +72,9 @@ const NEUTRAL_COL_LABEL: ColLabelFn = (id) => COL_LABEL[id] ?? id;
 // A task with all optional fields populated for richer render tests
 const FULL_TASK: BoardTask = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: false,
   id: "t-full",
@@ -99,6 +102,123 @@ const HELD_TASK: BoardTask = {
   code: "TSK-0043",
   hold: "BLOCKED — waiting on API",
 };
+
+it.each(["EPIC", " epic "])(
+  "shows %s progress, opens children, and prepares child creation",
+  (taskType) => {
+    const epic: BoardTask = {
+      ...FULL_TASK,
+      task_type: taskType,
+      cycle: null,
+      estimate: null,
+      parent_epic: null,
+      child_tasks: ["TSK-CHILD"],
+      child_progress: [0, 1],
+    };
+    const child: BoardTask = {
+      ...FULL_TASK,
+      id: "child",
+      code: "TSK-CHILD",
+      title: "Child outcome",
+      parent_epic: epic.code,
+      child_tasks: [],
+      child_progress: [0, 0],
+    };
+    wrap({ task: epic, boardTasks: [epic, child] });
+    expect(screen.getByText("0 / 1 children done")).toBeInTheDocument();
+    expect(screen.getByLabelText("Cycle")).toBeDisabled();
+    expect(screen.getByLabelText("Estimate")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Child outcome" }));
+    expect(useBoardStore.getState().editTaskId).toBe("child");
+    fireEvent.click(screen.getByRole("button", { name: "Create child" }));
+    expect(useBoardStore.getState().taskModal).toMatchObject({
+      parent_epic: epic.code,
+      project: "alpha",
+    });
+  },
+);
+
+it("requires explicit clearing before converting a scheduled task to Epic", async () => {
+  const stub = makeStub();
+  wrap({ fetchStub: stub });
+  await userEvent.click(screen.getByRole("radio", { name: "Epic" }));
+  expect(
+    stub.mock.calls.filter(([, options]) => options?.method === "PATCH"),
+  ).toHaveLength(0);
+  await userEvent.click(
+    screen.getByRole("button", {
+      name: "Clear incompatible fields and convert",
+    }),
+  );
+  await waitFor(() => {
+    const request = stub.mock.calls.find(
+      ([, options]) => options?.method === "PATCH",
+    );
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+      task_type: "EPIC",
+      cycle: null,
+      estimate: null,
+      parent_epic: null,
+    });
+  });
+});
+
+it("attaches and detaches existing tasks through the task PATCH endpoint", async () => {
+  const epic: BoardTask = {
+    ...FULL_TASK,
+    task_type: "EPIC",
+    cycle: null,
+    estimate: null,
+    parent_epic: null,
+    child_tasks: ["TSK-C"],
+    child_progress: [0, 1],
+  };
+  const child: BoardTask = {
+    ...FULL_TASK,
+    id: "child",
+    code: "TSK-C",
+    title: "Attached",
+    parent_epic: epic.code,
+    child_tasks: [],
+    child_progress: [0, 0],
+  };
+  const candidate: BoardTask = {
+    ...child,
+    id: "candidate",
+    code: "TSK-A",
+    title: "Available",
+    parent_epic: null,
+  };
+  const stub = makeStub();
+  wrap({ task: epic, boardTasks: [epic, child, candidate], fetchStub: stub });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Detach Attached" }),
+  );
+  await waitFor(() =>
+    expect(stub).toHaveBeenCalledWith(
+      expect.stringContaining("/child"),
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ parent_epic: null }),
+      }),
+    ),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: /Attach existing task/ }),
+  );
+  await userEvent.click(
+    screen.getByRole("option", { name: "TSK-A · Available" }),
+  );
+  await waitFor(() =>
+    expect(stub).toHaveBeenCalledWith(
+      expect.stringContaining("/candidate"),
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ parent_epic: epic.code }),
+      }),
+    ),
+  );
+});
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

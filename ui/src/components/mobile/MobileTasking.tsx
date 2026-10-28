@@ -13,10 +13,13 @@ import {
   DEFAULT_STATUS,
   fmtCycleWindow,
   isDone,
+  isEpic,
   priColor,
   taskStatusLabel,
 } from "#/components/tasking/board-constants";
+import { TypeChip } from "#/components/tasking/board-presentation";
 import { deriveProjectScopes } from "#/components/tasking/board-projects";
+import { NewTaskModal } from "#/components/tasking/NewTaskModal";
 import { TaskEditPanel } from "#/components/tasking/TaskEditPanel";
 import { filterTasks } from "#/components/tasking/TaskingScreen";
 import { Button } from "#/components/ui/button";
@@ -57,6 +60,13 @@ function TaskCard({ task, today }: { task: BoardTask; today: string }) {
       )}
     >
       <span className="text-[15.5px] leading-[1.4] text-ink">{task.title}</span>
+      {isEpic(task.task_type) ? (
+        <span className="text-sm text-mute">
+          Epic · {task.child_progress[0]} of {task.child_progress[1]} tasks done
+        </span>
+      ) : (
+        <TypeChip type={task.task_type} />
+      )}
       <span className="flex items-center gap-2 text-[12.5px] text-mute">
         <span
           aria-hidden
@@ -82,6 +92,8 @@ export function MobileTasking() {
   const setOpFilter = useBoardStore((s) => s.setOpFilter);
   const editTaskId = useBoardStore((s) => s.editTaskId);
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
+  const taskModal = useBoardStore((s) => s.taskModal);
+  const openTaskModal = useBoardStore((s) => s.openTaskModal);
   const selectedBoard = useBoard({
     includeRetired: true,
     enabled: editTaskId !== null,
@@ -120,7 +132,9 @@ export function MobileTasking() {
   }, [data, scopes, opFilter, setOpFilter]);
 
   const cycle = data?.cycles.find((c) => c.state === "ACTIVE");
-  const cycleTasks = cycle ? scoped.filter((t) => t.cycle === cycle.code) : [];
+  const cycleTasks = cycle
+    ? scoped.filter((t) => !isEpic(t.task_type) && t.cycle === cycle.code)
+    : [];
   const cycleDone = cycleTasks.filter((t) => isDone(t.status)).length;
 
   const submit = () => {
@@ -262,6 +276,16 @@ export function MobileTasking() {
             + New task
           </button>
         )}
+        <Button
+          onPress={() =>
+            openTaskModal({
+              project: scope?.slug ?? undefined,
+              status: selected,
+            })
+          }
+        >
+          New task with details
+        </Button>
       </div>
       {editTaskId && !editTask && (
         <div
@@ -319,6 +343,14 @@ export function MobileTasking() {
             }}
           />
         </div>
+      )}
+      {taskModal && (
+        <NewTaskModal
+          projects={scopes}
+          cycles={data?.cycles ?? []}
+          tasks={selectedBoard.data?.tasks ?? tasks}
+          colLabel={taskStatusLabel}
+        />
       )}
     </div>
   );

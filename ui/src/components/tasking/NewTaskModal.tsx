@@ -26,7 +26,7 @@
  */
 
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import type { BoardCycle } from "#/api/board";
+import type { BoardCycle, BoardTask } from "#/api/board";
 import { useCreateTask } from "#/api/board";
 import { Button } from "#/components/ui/button";
 import { Select, SelectItem } from "#/components/ui/select";
@@ -39,6 +39,7 @@ import {
 } from "./BoardModalFrame";
 import { type ColLabelFn, cycleStateLabel } from "./board-constants";
 import { type ProjectScope, scopeLabel } from "./board-projects";
+import { EpicPicker } from "./EpicPicker";
 import {
   DispositionRow,
   EdField,
@@ -72,6 +73,7 @@ interface NewTaskModalProps {
   /** Project scopes (operations ∪ task slugs) — see deriveProjectScopes. */
   projects: ProjectScope[];
   cycles: BoardCycle[];
+  tasks?: BoardTask[];
   /** Resolves a column id to its server-supplied display label. */
   colLabel: ColLabelFn;
 }
@@ -80,6 +82,7 @@ export function NewTaskModal({
   projects,
   cycles,
   colLabel,
+  tasks = [],
 }: NewTaskModalProps) {
   const taskModal = useBoardStore((s) => s.taskModal);
   const closeTaskModal = useBoardStore((s) => s.closeTaskModal);
@@ -95,12 +98,14 @@ export function NewTaskModal({
 
   const titleRef = useRef<HTMLInputElement>(null);
   const isOpen = taskModal !== null;
+  const [typeError, setTypeError] = useState<string | null>(null);
 
   // Reinitialise on open
   // biome-ignore lint/correctness/useExhaustiveDependencies: reinitialise only on open
   useEffect(() => {
     if (!isOpen) return;
     setDraft(newTaskDraft(taskModal));
+    setTypeError(null);
     // Focus title after state flush
     setTimeout(() => titleRef.current?.focus(), 0);
   }, [isOpen]);
@@ -218,6 +223,7 @@ export function NewTaskModal({
           <EdField label="Cycle">
             <Select
               aria-label="Cycle"
+              isDisabled={draft.taskType === "EPIC"}
               value={draft.cycle}
               onChange={(key) =>
                 setField("cycle", key === null ? BACKLOG_CYCLE : String(key))
@@ -261,10 +267,38 @@ export function NewTaskModal({
         <EdField label="Type">
           <TypeRow
             value={draft.taskType}
-            onChange={(v) => setField("taskType", v)}
+            onChange={(v) => {
+              if (
+                v === "EPIC" &&
+                (draft.cycle !== BACKLOG_CYCLE ||
+                  draft.estimate ||
+                  draft.parent_epic)
+              ) {
+                setTypeError(
+                  "Clear the Cycle, estimate and parent Epic before selecting Epic.",
+                );
+                return;
+              }
+              setTypeError(null);
+              setField("taskType", v);
+            }}
             testIdPrefix="new-task"
           />
         </EdField>
+        {typeError && (
+          <p role="alert" className="text-sm text-hot">
+            {typeError}
+          </p>
+        )}
+        {draft.taskType !== "EPIC" && (
+          <EdField label="Parent Epic">
+            <EpicPicker
+              tasks={tasks}
+              value={draft.parent_epic}
+              onChange={(code) => setField("parent_epic", code ?? "")}
+            />
+          </EdField>
+        )}
 
         {/* Assignee + estimate */}
         <div className="grid grid-cols-2 gap-3.5">
@@ -282,6 +316,7 @@ export function NewTaskModal({
             <input
               type="text"
               aria-label="Estimate"
+              disabled={draft.taskType === "EPIC"}
               className={INPUT_CLS}
               value={draft.estimate}
               onChange={(e) => setField("estimate", e.target.value)}

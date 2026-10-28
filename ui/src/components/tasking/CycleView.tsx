@@ -26,6 +26,7 @@ import {
   cycleStateLabel,
   fmtCycleWindow,
   isDone,
+  isEpic,
   PRI_ORDER,
   PriChip,
   StatePip,
@@ -135,8 +136,8 @@ export function CycleView({
   const items = useMemo(
     () =>
       cycle.code === "BACKLOG"
-        ? tasks.filter((t) => !t.cycle)
-        : tasks.filter((t) => t.cycle === cycle.code),
+        ? tasks.filter((t) => !isEpic(t.task_type) && !t.cycle)
+        : tasks.filter((t) => !isEpic(t.task_type) && t.cycle === cycle.code),
     [tasks, cycle.code],
   );
 
@@ -187,7 +188,7 @@ export function CycleView({
 
   // Unassigned tasks, counted over the same slice the view shows.
   const backlogCount = useMemo(
-    () => tasks.filter((t) => !t.cycle).length,
+    () => tasks.filter((t) => !isEpic(t.task_type) && !t.cycle).length,
     [tasks],
   );
 

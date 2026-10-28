@@ -10,6 +10,10 @@ const T: BoardTask = {
   priority: 'P1',
   project: 'clepsydra',
   path: 'tasks/clepsydra/TSK-brave-finch-7q3zd.md',
+  taskType: null,
+  parentEpic: null,
+  childTasks: [],
+  childProgress: [0, 0],
   checks: [3, 5],
   updatedAt: '2026-10-04T00:00:00Z',
 }

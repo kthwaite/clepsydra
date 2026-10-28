@@ -63,6 +63,9 @@ export const BOARD_FIXTURE: BoardResponse = {
   tasks: [
     {
       blocked_by: [],
+      parent_epic: null,
+      child_tasks: [],
+      child_progress: [0, 0],
       blocks: [],
       blocked: false,
       id: "t1",
@@ -80,6 +83,9 @@ export const BOARD_FIXTURE: BoardResponse = {
     },
     {
       blocked_by: [],
+      parent_epic: null,
+      child_tasks: [],
+      child_progress: [0, 0],
       blocks: [],
       blocked: true,
       id: "t2",
@@ -98,6 +104,9 @@ export const BOARD_FIXTURE: BoardResponse = {
     },
     {
       blocked_by: [],
+      parent_epic: null,
+      child_tasks: [],
+      child_progress: [0, 0],
       blocks: [],
       blocked: false,
       id: "t3",
@@ -115,6 +124,9 @@ export const BOARD_FIXTURE: BoardResponse = {
     },
     {
       blocked_by: [],
+      parent_epic: null,
+      child_tasks: [],
+      child_progress: [0, 0],
       blocks: [],
       blocked: false,
       id: "t4",
@@ -132,6 +144,9 @@ export const BOARD_FIXTURE: BoardResponse = {
     },
     {
       blocked_by: [],
+      parent_epic: null,
+      child_tasks: [],
+      child_progress: [0, 0],
       blocks: [],
       blocked: false,
       id: "t5",
@@ -202,6 +217,9 @@ export const CLOSED_CYCLE: BoardResponse["cycles"][number] = {
  */
 export const SEALED_IN_CLOSED_CYCLE_TASK: BoardResponse["tasks"][number] = {
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   blocked: false,
   id: "t-hist",

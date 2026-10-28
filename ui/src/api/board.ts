@@ -88,6 +88,7 @@ export function applyTaskPatch(
       ? { project: patch.project === "" ? null : patch.project }
       : {}),
     // Tri-state fields
+    task_type: triState(task.task_type, "task_type"),
     cycle: triState(task.cycle, "cycle"),
     assignee: triState(task.assignee, "assignee"),
     estimate: triState(task.estimate, "estimate"),
@@ -101,6 +102,9 @@ export function applyTaskPatch(
     blocked_by:
       "blocked_by" in patch ? (patch.blocked_by ?? []) : task.blocked_by,
   };
+  // Parent references require server resolution; child totals can include
+  // Tasks hidden by Project scope. Keep that hierarchy authoritative until
+  // the mutation response and board refetch, rather than guessing locally.
 
   const tasks = [...board.tasks];
   tasks[idx] = updated;
@@ -190,7 +194,7 @@ export function useCreateTask() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error("Failed to create task");
+      if (!res.ok) throw await responseError(res, "Failed to create task");
       return res.json() as Promise<BoardTask>;
     },
     onError: () => toast.error("Couldn’t create task"),

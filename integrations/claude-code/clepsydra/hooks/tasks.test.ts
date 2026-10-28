@@ -18,6 +18,10 @@ function task(code: string, over: Partial<BoardTask> = {}): BoardTask {
     priority: null,
     project: 'clepsydra',
     path: `tasks/clepsydra/${code}.md`,
+    taskType: null,
+    parentEpic: null,
+    childTasks: [],
+    childProgress: [0, 0],
     checks: [0, 0],
     updatedAt: '2026-10-01T00:00:00Z',
     ...over,
@@ -25,6 +29,17 @@ function task(code: string, over: Partial<BoardTask> = {}): BoardTask {
 }
 
 describe('parseBoard', () => {
+  test('preserves Epic hierarchy for planning without treating children as Epics', () => {
+    const b = parseBoard({
+      tasks: [
+        { ...task('TSK-parent'), task_type: 'EPIC', child_tasks: ['TSK-child'], child_progress: [0, 1] },
+        { ...task('TSK-child'), task_type: 'FIX', parent_epic: 'TSK-parent' },
+      ],
+    })
+    expect(b?.tasks[0]).toMatchObject({ taskType: 'EPIC', childTasks: ['TSK-child'], childProgress: [0, 1] })
+    expect(b?.tasks[1]).toMatchObject({ taskType: 'FIX', parentEpic: 'TSK-parent' })
+    expect(groupTasks(b?.tasks ?? [], 'clepsydra', false)[0]?.tasks.map(t => t.code)).toEqual(['TSK-child'])
+  })
   test('hubRows: operations with a project and a path (the server lists only non-retired pages)', () => {
     const b = parseBoard({
       tasks: [],
@@ -65,6 +80,10 @@ describe('parseBoard', () => {
         priority: 'P1',
         project: 'clepsydra',
         path: 'tasks/clepsydra/TSK-brave-finch-7q3zd.md',
+        taskType: null,
+        parentEpic: null,
+        childTasks: [],
+        childProgress: [0, 0],
         checks: [3, 5],
         updatedAt: '2026-10-02T00:00:00Z',
       },
@@ -77,6 +96,12 @@ describe('parseBoard', () => {
 })
 
 describe('groupTasks', () => {
+  test('excludes Epics even when listing completed executable tasks', () => {
+    const epics = ['EPIC', 'epic', ' EPIC '].map(taskType =>
+      task('TSK-parent', { taskType, status: 'SEALED' }),
+    )
+    expect(groupTasks(epics, 'clepsydra', true)).toEqual([])
+  })
   const tasks = [
     task('TSK-a-a-1', { status: 'INTAKE', priority: 'P2' }),
     task('TSK-b-b-1', { status: 'FIELD', priority: null, updatedAt: '2026-10-03T00:00:00Z' }),
@@ -110,6 +135,14 @@ describe('shortCode', () => {
 })
 
 describe('resolveTaskRef', () => {
+  test('resolves executable children, not an Epic by exact code, prefix, or title', () => {
+    const epic = task('TSK-parent', { taskType: 'EPIC', title: 'Parent plan' })
+    const child = task('TSK-child', { parentEpic: epic.code, title: 'Child delivery' })
+    for (const ref of ['TSK-parent', 'TSK-par', 'Parent plan']) {
+      expect(resolveTaskRef(ref, [epic, child])).toEqual({ candidates: [] })
+    }
+    expect(resolveTaskRef('child', [epic, child])).toEqual({ task: child })
+  })
   const tasks = [
     task('TSK-brave-finch-7q3zd', { title: 'Board pane' }),
     task('TSK-brave-fox-aaaaa', { title: 'Journal on exit' }),

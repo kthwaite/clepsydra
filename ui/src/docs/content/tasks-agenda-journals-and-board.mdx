@@ -31,6 +31,12 @@ views and mutations over those files, not separate stores.
 A **Task** is a page-backed unit of planned work tracked on the Task Board. A
 Task can belong to a Project and a Cycle.
 
+An **Epic** is a Task representing an outcome delivered through several
+**child Tasks**. Each child remains a page-backed Task with its own type,
+status, estimate, and Cycle. A Task has at most one parent Epic; Epics cannot
+be children. Projects provide the wider context, while an Epic captures a
+specific outcome within that work.
+
 A **Todo** is any Markdown checkbox item, whether it is open, done, or
 cancelled. Its status does not change what it is.
 
@@ -229,7 +235,7 @@ dates that do not exist. The default mode and span are left out of the URL.
 
 Open `/tasking` and choose **New task**. Set the Project, status, priority,
 Type, Cycle, dates, and optional Description and Checklist. Type defaults to
-**None**; pick Feature, Fix, Task, Story, or Spike to classify the Task. The Description becomes
+**None**; pick Feature, Fix, Task, Story, Spike, or Epic to classify the Task. The Description becomes
 the opening prose in the Task page, above the Checklist, and appears beneath
 the title on Board cards. Mark a Task **Blocked** and add a blocker reason when
 it cannot proceed, or link the Tasks it waits on as Blockers (see below).
@@ -323,12 +329,52 @@ other pages under it.
 Switching views does not change Task pages. Dragging a card or editing its
 panel updates the corresponding Task page metadata.
 
+### Break an outcome into an Epic
+
+Choose **New task**, set **Type → Epic**, and use the Description for the
+outcome and acceptance criteria. On mobile, **New task with details** opens
+the same creation form. Epics span Cycles rather than belonging to one, and
+do not carry an estimate; schedule and estimate their child Tasks instead.
+
+Open the Epic's editor to manage **Child tasks**:
+
+- **Create child** opens a new Task with its parent Epic and Project prefilled.
+  Its type, status, estimate, Cycle, and Project remain independently editable.
+- **Attach existing task** links an unparented Task without changing any of
+  those fields. A child's **Parent Epic** picker can also move it to another
+  Epic or clear the relationship.
+- **Detach** removes only the parent relationship; it does not delete the Task.
+- Choose a child's title to open it, or **Open parent Epic** to return.
+
+The editor, cards, and List show completed-child progress separately from
+Checklist progress. Progress includes children outside the current Project
+scope and completed-task filter. List groups visible children under their
+Epic, with **Collapse** / **Expand** controls; filtering out the parent does
+not hide matching children. Children remain independently actionable in
+Board and Cycles views.
+
+Completing every child does **not** complete the Epic. Review its outcome and
+explicitly mark it Done. Completing an Epic likewise leaves its children's
+statuses unchanged. Containment is not a Blocker relationship.
+
+Open-work counts, Cycle statistics, and completion history count executable
+Tasks, not Epic containers. Inventory counts can still include Epics. New
+history records preserve the Task's type at the time of each transition, so
+converting a completed Task into an Epic does not erase its delivered work.
+Older history without a type uses the page's current type.
+
+Converting an estimated, Cycle-assigned, or parented Task into an Epic asks
+you to explicitly clear those incompatible fields together. Detach all
+children before changing an Epic back to another type.
+
 ### Edit Task metadata in Folio
 
 A Task Folio has a **Task details** section beneath its title. It shares the
 Task Board's editors for status, priority, type, Project, Cycle, assignee,
 estimate, start and due dates, hold reason, Related page, **Blocked by**, and
-**Blocks**. The task code, derived blocked state, and Checklist progress are
+**Blocks**, plus **Parent Epic** or **Child tasks** as appropriate. **Create
+child** opens the Tasking creation form with the parent prefilled. The task
+code, derived blocked state, child progress, and Checklist progress are
 read-only. Edit the title, tags, body, and Checklist through the ordinary Folio
 controls rather than a second copy of those fields.
 
@@ -371,16 +417,26 @@ Cycle Markdown, or calling the API, use these persisted values:
 - Task `status`: Inbox (`INTAKE`), Ready (`TRIAGE`), In Progress (`FIELD`),
   Review (`REVIEW`), and Done (`SEALED`).
 - Task `priority`: Critical (`P0`), High (`P1`), Medium (`P2`), and Low (`P3`).
-- Task `task_type` (optional): `FEATURE`, `FIX`, `TASK`, `STORY`, or `SPIKE`.
+- Task `task_type` (optional): `FEATURE`, `FIX`, `TASK`, `STORY`, `SPIKE`, or `EPIC`.
   The API matches it case-insensitively, stores it in capitals, and rejects any
   other value. An absent `task_type` means the Task is untyped.
 - Cycle `state`: Planned (`PLANNED`), Active (`ACTIVE`), and Closed (`CLOSED`).
 - Backlog is represented in Markdown by an absent `cycle` value. APIs that
   accept a Cycle target use `BACKLOG` to clear the Cycle.
 - Over the API an empty or whitespace-only string on a clearable Task Field
-  (`cycle`, `assignee`, `estimate`, `task_type`, `due`, `start`, `hold`,
+  (`cycle`, `assignee`, `estimate`, `task_type`, `parent_epic`, `due`, `start`, `hold`,
   `link`) clears it, the same as `null`; on create (which has no `hold`) it
   means the field is not set.
+- Task `parent_epic` (optional): a single wikilink to an Epic's Task code,
+  for example `parent_epic = "[[TSK-brave-finch-7q3zd]]"`. The API accepts a
+  code, unique prefix, or `[[CODE]]` and stores the canonical wikilink. PATCH
+  omission keeps it; `null` or blank clears it. Only the child stores the
+  relationship. The board returns `parent_epic` as a code, derived
+  `child_tasks` as child codes, and `child_progress` as `[done, total]`.
+  A parent must be an existing Epic without a parent of its own. Self-parenting,
+  nested Epics, and Epic Cycle/estimate assignments are rejected. Manual
+  dangling references are preserved rather than guessed. Use the Task API
+  or MCP Task tools, not the generic custom-properties API, to change parents.
 - Task `blocked_by` (optional): the Task's Blockers, as a list of wikilinks
   to their codes, for example `blocked_by = ["[[TSK-brave-finch-7q3zd]]"]`.
   Only the waiting Task stores the list. Each entry is a backlink on the

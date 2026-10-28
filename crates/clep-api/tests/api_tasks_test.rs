@@ -435,6 +435,91 @@ async fn task_history_returns_fourteen_daily_seal_counts_for_the_requested_proje
 }
 
 #[tokio::test]
+async fn completion_history_counts_child_work_not_epic_completion() {
+    let today = chrono::Utc::now().date_naive();
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        for (code, suffix, task_type, parent) in [
+            ("TSK-epic", "001", "EPIC", ""),
+            (
+                "TSK-child",
+                "002",
+                "TASK",
+                "parent_epic = \"[[TSK-epic]]\"\n",
+            ),
+        ] {
+            std::fs::write(
+                root.join(format!("tasks/{code}.md")),
+                format!(
+                    "+++\nid = \"01951234-0000-7000-8000-ccc000000{suffix}\"\ntype = \"TASK\"\ntitle = \"{code}\"\ntask_type = \"{task_type}\"\nstatus = \"SEALED\"\n{parent}created_at = {today}T08:00:00Z\nupdated_at = {today}T12:00:00Z\n+++\n"
+                ),
+            ).unwrap();
+        }
+    });
+    let response = server.get("/api/vault/tasks/history?days=1").await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["days"][0]["count"], 1);
+}
+
+#[tokio::test]
+async fn completion_history_uses_event_time_task_type_after_conversion() {
+    let today = chrono::Utc::now().date_naive();
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        for (code, suffix, current_type, sealed_type) in [
+            ("TSK-former-task", "003", "EPIC", "TASK"),
+            ("TSK-former-epic", "004", "TASK", "EPIC"),
+        ] {
+            std::fs::write(
+                root.join(format!("tasks/{code}.md")),
+                format!(
+                    "+++\nid = \"01951234-0000-7000-8000-ccc000000{suffix}\"\ntype = \"TASK\"\ntitle = \"{code}\"\ntask_type = \"{current_type}\"\nstatus = \"SEALED\"\ncreated_at = {today}T08:00:00Z\nupdated_at = {today}T14:00:00Z\ntask_history = [{{ at = \"{today}T08:00:00Z\", status = \"FIELD\", task_type = \"{sealed_type}\" }}, {{ at = \"{today}T12:00:00Z\", status = \"SEALED\", task_type = \"{sealed_type}\" }}, {{ at = \"{today}T14:00:00Z\", status = \"SEALED\", task_type = \"{current_type}\" }}]\n+++\n"
+                ),
+            ).unwrap();
+        }
+    });
+    let response = server.get("/api/vault/tasks/history?days=1").await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["days"][0]["count"], 1);
+}
+
+#[tokio::test]
+async fn board_mutations_preserve_executable_completion_history_through_type_changes() {
+    let (server, _tmp) = setup_server();
+    for task_type in ["EPIC", "TASK"] {
+        let response = server
+            .post("/api/vault/board/tasks")
+            .json(&serde_json::json!({
+                "title": format!("History {task_type}"), "task_type": task_type
+            }))
+            .await;
+        response.assert_status(axum::http::StatusCode::CREATED);
+        let task: serde_json::Value = response.json();
+        let url = format!("/api/vault/board/tasks/{}", task["id"].as_str().unwrap());
+        server
+            .patch(&url)
+            .json(&serde_json::json!({"status": "SEALED"}))
+            .await
+            .assert_status_ok();
+        let next_type = if task_type == "EPIC" { "TASK" } else { "EPIC" };
+        server
+            .patch(&url)
+            .json(&serde_json::json!({"task_type": next_type}))
+            .await
+            .assert_status_ok();
+    }
+    let response = server.get("/api/vault/tasks/history?days=1").await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(
+        body["days"][0]["count"], 1,
+        "Task completion survives conversion; Epic completion never becomes executable work"
+    );
+}
+
+#[tokio::test]
 async fn task_history_survives_later_edits_and_reopening() {
     let today = chrono::Utc::now().date_naive();
     let sealed_on = today - chrono::Duration::days(1);

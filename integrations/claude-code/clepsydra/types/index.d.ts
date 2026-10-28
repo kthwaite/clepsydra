@@ -6,6 +6,10 @@ export type ClepsydraTask = {
   priority: string | null
   project: string | null
   path: string
+  taskType: string | null
+  parentEpic: string | null
+  childTasks: string[]
+  childProgress: [number, number]
   checks: [number, number]
   updatedAt: string
 }
@@ -22,7 +26,7 @@ export type ClepsydraRepo = {
   common: string
 }
 
-/** The active task: explicit (`/task`, a board press; persisted per repo+branch) or from the branch name. */
+/** The active non-Epic task: explicit (`/task`, a board press; persisted per repo+branch) or from the branch name. */
 export type ClepsydraBinding = { code: string; source: 'explicit' | 'branch' }
 
 /** The project hub page the session starts with. */

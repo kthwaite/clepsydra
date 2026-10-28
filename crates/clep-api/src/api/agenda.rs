@@ -350,10 +350,11 @@ pub async fn get_cycle_burndown(
                 unfiled,
                 &known_projects,
             );
-            if event.cycle.as_deref() == Some(cycle.as_str()) && in_scope {
+            if !event.is_epic() && event.cycle.as_deref() == Some(cycle.as_str()) && in_scope {
                 has_cycle_history = true;
             }
-            let next = event.cycle.as_deref() == Some(cycle.as_str())
+            let next = !event.is_epic()
+                && event.cycle.as_deref() == Some(cycle.as_str())
                 && event.status != "SEALED"
                 && in_scope;
             if date < start {
@@ -379,7 +380,8 @@ pub async fn get_cycle_burndown(
                 unfiled,
                 &known_projects,
             );
-            let next = event.cycle.as_deref() == Some(cycle.as_str())
+            let next = !event.is_epic()
+                && event.cycle.as_deref() == Some(cycle.as_str())
                 && event.status != "SEALED"
                 && in_scope;
             if next != included {

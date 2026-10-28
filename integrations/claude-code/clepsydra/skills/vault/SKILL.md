@@ -1,6 +1,6 @@
 ---
 name: vault
-description: Use when asked to add or capture something in the clepsydra vault, create or edit pages, set or clear custom frontmatter properties, search or read notes, tag or file pages, reorganise vault content, or send the current conversation to Clepsydra.
+description: Use when asked to add or capture something in the clepsydra vault, create or edit pages, plan Epics and child Tasks, set or clear custom frontmatter properties, search or read notes, tag or file pages, reorganise vault content, or send the current conversation to Clepsydra.
 ---
 
 # Working the clepsydra vault
@@ -62,8 +62,8 @@ files directly, which bypasses locking, link rewriting, and the index.
 | Erase a binned page for good | `vault_purge_page` — user-confirmed only |
 | See what a move would rewrite | `vault_preview_mutation` |
 | See the Task Board / look up codes | `vault_board` |
-| New Task | `vault_task_create` — not create |
-| Move a Task through the board / edit fields | `vault_task_update` |
+| New Task or Epic | `vault_task_create` — not create |
+| Move a Task, attach/detach an Epic child, or edit fields | `vault_task_update` |
 | New Cycle | `vault_cycle_create` |
 | Close or edit a Cycle | `vault_cycle_update` |
 | Find / read / orient | `vault_search`, `vault_get_page`, `vault_list_pages`, `vault_tree`, `vault_links`, `vault_tags` |
@@ -199,9 +199,41 @@ The `body` wire field is the Task Description. Checklist values become Todos.
 Move and edit with `vault_task_update`, addressing the Task by code (or any
 unique prefix of one), path, or id. Title/Project/status/priority/tags update
 when present (`clear_project: true` clears the Project). Cycle, assignee,
-estimate, due, blocker reason (`hold`), and Related Page (`link`) are
+estimate, task type (`task_type`), parent Epic (`parent_epic`), due, blocker reason (`hold`), and Related Page (`link`) are
 tri-state — absent keeps, `null` or `""` clears, and a value sets. A
 non-empty `hold` means Blocked; Cycle `"BACKLOG"` moves the Task to Backlog.
+
+**Epics and executable children.** An Epic is a `TASK` page with
+`task_type: "EPIC"`, not a new Kind. Use one for an outcome spanning several
+independently deliverable Tasks. Read the board first, reuse matching work,
+then create the Epic with its scope and acceptance criteria. Copy its returned
+TSK code into each child's `parent_epic`; retain the child's normal type
+(`FEATURE`, `FIX`, `TASK`, `STORY`, `SPIKE`, or untyped). Attach existing Tasks
+with `vault_task_update`, not duplicate pages.
+
+`parent_epic` accepts a full code, unique prefix, or `[[CODE]]`; the server
+stores one canonical `[[CODE]]` wikilink. On update, absent keeps it, `null`
+or blank detaches it. Each child has at most one parent; an Epic cannot itself
+have a parent, Cycle, or estimate. Converting a Task to Epic requires clearing
+those fields in the same update when set. An Epic with children cannot change
+to another type until the children are detached or reparented.
+
+Assign Cycles and estimates to children individually. Set each child's
+Project explicitly when creating it; attaching does not inherit or migrate
+Project, and cross-project children are allowed. `blocked_by` represents
+prerequisites only: containment does not block either side.
+
+`vault_board` always returns `parent_epic` (code or `null`), `child_tasks`
+(derived child codes), and `child_progress` (`[SEALED children, total]`).
+Progress includes children outside a project-filtered board. Read children
+before deciding the Epic is complete; only an explicit status update closes
+the parent, even when every child is Done. Preserve dangling references from
+manual edits until their target is known rather than guessing replacements.
+
+For execution, bind/start/resume a non-Epic child with `/task`; the plugin's
+picker and merge hooks leave Epics untouched. Plan and deliberately update
+Epics through MCP. Count and estimate non-Epic Tasks for workload and completion
+metrics, so the same delivery is not counted twice.
 
 Create Cycles with `vault_cycle_create` (omit `code` to have the server mint
 an `S-<adjective>-<noun>-<tail>` code; an explicit `code` must match that

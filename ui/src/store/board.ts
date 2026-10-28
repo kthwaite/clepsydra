@@ -30,7 +30,12 @@ interface BoardState {
   showCompleted: boolean;
   // Ephemeral
   editTaskId: string | null;
-  taskModal: { project?: string; status?: string; cycle?: string } | null;
+  taskModal: {
+    project?: string;
+    status?: string;
+    cycle?: string;
+    parent_epic?: string;
+  } | null;
   cycleModal:
     | { kind: "new" }
     | { kind: "open" | "seal"; cycleId: string }
@@ -51,6 +56,7 @@ interface BoardActions {
     project?: string;
     status?: string;
     cycle?: string;
+    parent_epic?: string;
   }) => void;
   closeTaskModal: () => void;
   openCycleModal: (

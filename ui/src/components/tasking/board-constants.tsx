@@ -81,7 +81,14 @@ export const PRI_LABEL: Record<string, string> = {
 // ── task type ────────────────────────────────────────────────────────────────
 
 /** The closed task type vocabulary, in picker order. */
-export const TYPE_ORDER = ["FEATURE", "FIX", "TASK", "STORY", "SPIKE"] as const;
+export const TYPE_ORDER = [
+  "FEATURE",
+  "FIX",
+  "TASK",
+  "STORY",
+  "SPIKE",
+  "EPIC",
+] as const;
 
 export const TYPE_LABEL: Record<string, string> = {
   FEATURE: "Feature",
@@ -89,7 +96,12 @@ export const TYPE_LABEL: Record<string, string> = {
   TASK: "Task",
   STORY: "Story",
   SPIKE: "Spike",
+  EPIC: "Epic",
 };
+
+/** Manual frontmatter has the same Epic semantics as API-authored tasks. */
+export const isEpic = (taskType: string | null | undefined): boolean =>
+  taskType?.trim().toUpperCase() === "EPIC";
 
 /** Type-filter sentinel for tasks with no `task_type`. */
 export const TYPE_NONE = "UNTYPED";

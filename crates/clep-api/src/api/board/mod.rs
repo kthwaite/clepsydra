@@ -50,7 +50,7 @@ const PRIORITIES: &[&str] = &["P0", "P1", DEFAULT_PRIORITY, "P3"];
 
 /// Valid task type tokens. Matched case-insensitively on write, stored
 /// uppercase.
-const TASK_TYPES: &[&str] = &["FEATURE", "FIX", "TASK", "STORY", "SPIKE"];
+const TASK_TYPES: &[&str] = &["FEATURE", "FIX", "TASK", "STORY", "SPIKE", "EPIC"];
 
 // ---------------------------------------------------------------------------
 // Tri-state deserialization helper
@@ -134,6 +134,13 @@ pub struct BoardTask {
     /// The `task_type` frontmatter value, passed through as written; `null`
     /// when the Task is untyped.
     pub task_type: Option<String>,
+    /// Parent Epic's canonical Task code; dangling manually authored references are retained.
+    #[schema(required = true)]
+    pub parent_epic: Option<String>,
+    /// Derived child Task codes, never stored on the Epic.
+    pub child_tasks: Vec<String>,
+    /// Derived [SEALED children, total children], before board scoping.
+    pub child_progress: [u32; 2],
     pub due: Option<String>,
     pub start: Option<String>,
     pub hold: Option<String>,
@@ -247,8 +254,10 @@ pub struct CreateTaskRequest {
     pub cycle: Option<String>,
     pub assignee: Option<String>,
     pub estimate: Option<String>,
-    /// One of FEATURE, FIX, TASK, STORY, SPIKE (case-insensitive).
+    /// One of FEATURE, FIX, TASK, STORY, SPIKE, EPIC (case-insensitive).
     pub task_type: Option<String>,
+    /// Parent Epic: Task code, unique code prefix, or `[[CODE]]` wikilink.
+    pub parent_epic: Option<String>,
     pub due: Option<String>,
     pub start: Option<String>,
     pub tags: Option<Vec<String>>,
@@ -291,9 +300,12 @@ pub struct PatchTaskRequest {
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub estimate: Option<Option<String>>,
     /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
-    /// A value must be FEATURE, FIX, TASK, STORY, or SPIKE (case-insensitive).
+    /// A value must be FEATURE, FIX, TASK, STORY, SPIKE, or EPIC (case-insensitive).
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub task_type: Option<Option<String>>,
+    /// Parent Epic: absent = keep, null or blank = clear; code, unique prefix, or wikilink = set.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub parent_epic: Option<Option<String>>,
     /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub due: Option<Option<String>>,

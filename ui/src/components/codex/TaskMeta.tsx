@@ -148,6 +148,17 @@ export function TaskMeta({
           colLabel={taskStatusLabel}
           readOnly={readOnly}
           sendPatch={sendPatch}
+          onCreateChild={(parent) => {
+            useBoardStore.getState().openTaskModal({
+              parent_epic: parent.code,
+              project: parent.project ?? undefined,
+            });
+            void openInTasking(parent).catch((error) =>
+              setNavigationError(
+                formatApiError(error, "Couldn’t open child creation."),
+              ),
+            );
+          }}
           onOpenTask={(target) => openTab("page", target.path, target.title)}
           onOpenPage={(target, label, passage) =>
             openTab("page", target, label, passage)

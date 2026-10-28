@@ -156,6 +156,49 @@ async fn cycle_burndown_uses_cycle_dates_and_sealed_task_timestamps() {
 }
 
 #[tokio::test]
+async fn cycle_burndown_excludes_legacy_epics_and_tracks_type_conversions() {
+    let today = Utc::now().date_naive();
+    let start = today - Duration::days(1);
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("cycles/C-01.md"),
+            format!("+++\nid = \"01951234-0000-7000-8000-aaa000000021\"\ntype = \"CYCLE\"\ntitle = \"Cycle\"\nstate = \"ACTIVE\"\nstart = \"{start}\"\nend = \"{today}\"\n+++\n"),
+        ).unwrap();
+        for (code, suffix, task_type, history) in [
+            ("TSK-epic", "021", "EPIC", String::new()),
+            ("TSK-child", "022", "TASK", String::new()),
+            (
+                "TSK-converted",
+                "023",
+                "EPIC",
+                format!(
+                    "task_history = [{{ at = \"{start}T09:00:00Z\", status = \"FIELD\", cycle = \"C-01\", task_type = \"TASK\" }}, {{ at = \"{today}T12:00:00Z\", status = \"FIELD\", cycle = \"C-01\", task_type = \"EPIC\" }}]\n"
+                ),
+            ),
+        ] {
+            std::fs::write(
+                root.join(format!("tasks/{code}.md")),
+                format!("+++\nid = \"01951234-0000-7000-8000-bbb000000{suffix}\"\ntype = \"TASK\"\ntitle = \"{code}\"\ntask_type = \"{task_type}\"\nstatus = \"FIELD\"\ncycle = \"C-01\"\nestimate = \"99d\"\ncreated_at = {start}T09:00:00Z\nupdated_at = {today}T12:00:00Z\n{history}+++\n"),
+            ).unwrap();
+        }
+    });
+    let response = server
+        .get("/api/vault/agenda/cycle-burndown?cycle=C-01")
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(
+        body["points"],
+        serde_json::json!([
+            { "date": start.to_string(), "remaining": 2 },
+            { "date": today.to_string(), "remaining": 1 }
+        ])
+    );
+}
+
+#[tokio::test]
 async fn cycle_burndown_uses_event_time_membership_and_status() {
     let today = Utc::now().date_naive();
     let start = today - Duration::days(3);

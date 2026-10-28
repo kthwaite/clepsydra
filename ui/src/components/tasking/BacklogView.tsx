@@ -17,9 +17,10 @@
  *   name + caption.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { BoardCycle, BoardTask } from "#/api/board";
 import { Tick, type TickVariant } from "#/components/codex/Tick";
+import { Button } from "#/components/ui/button";
 import { type DataColumn, DataTable } from "#/components/ui/data-table";
 import { useMediaQuery } from "#/hooks/useMediaQuery";
 import { cn } from "#/lib/cn";
@@ -30,6 +31,7 @@ import {
   type ColLabelFn,
   fmtCycleWindow,
   isDone,
+  isEpic,
   PriChip,
   StatePip,
 } from "./board-constants";
@@ -100,6 +102,16 @@ function taskColumns(colLabel: ColLabelFn): DataColumn<BoardTask>[] {
             <PriChip pri={t.priority} />
           </InlineEditPopover>
           <TypeChip type={t.task_type} />
+          {isEpic(t.task_type) && (
+            <span className="text-xs text-mute">
+              {t.child_progress[0]}/{t.child_progress[1]} children
+            </span>
+          )}
+          {t.parent_epic && (
+            <span className="text-xs text-mute" title="Parent Epic">
+              ↳ {t.parent_epic}
+            </span>
+          )}
           {t.blocked && (
             <span
               data-testid={`bk-hold-tag-${t.id}`}
@@ -309,9 +321,25 @@ export function BacklogView({
   const showDone = useBoardStore((s) => s.showCompleted);
   const columnVisibility = useColumnVisibility();
   const columns = useMemo(() => taskColumns(colLabel), [colLabel]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const { groups, remaining } = useMemo(() => {
+    const visible = tasks.filter((task) => showDone || !isDone(task.status));
+    const epics = visible.filter((task) => isEpic(task.task_type));
+    const byCode = new Map(
+      epics.map((epic) => [epic.code, { epic, children: [] as BoardTask[] }]),
+    );
+    const remaining: BoardTask[] = [];
+    for (const task of visible) {
+      if (isEpic(task.task_type)) continue;
+      const group = task.parent_epic ? byCode.get(task.parent_epic) : undefined;
+      if (group) group.children.push(task);
+      else remaining.push(task);
+    }
+    return { groups: [...byCode.values()], remaining };
+  }, [tasks, showDone]);
   const split = useMemo(
-    () => splitBacklog(tasks, activeCycle, { showDone }),
-    [tasks, activeCycle, showDone],
+    () => splitBacklog(remaining, activeCycle, { showDone }),
+    [remaining, activeCycle, showDone],
   );
 
   return (
@@ -323,6 +351,37 @@ export function BacklogView({
           className="h-full hover:bg-transparent focus:bg-transparent"
         />
       </div>
+      {groups.map(({ epic, children }) => (
+        <section
+          key={epic.id}
+          className="mt-4"
+          aria-label={`Epic ${epic.title}`}
+        >
+          <Button
+            size="sm"
+            aria-label={`${collapsed.has(epic.id) ? "Expand" : "Collapse"} ${epic.title}`}
+            aria-expanded={!collapsed.has(epic.id)}
+            onPress={() =>
+              setCollapsed((previous) => {
+                const next = new Set(previous);
+                if (next.has(epic.id)) next.delete(epic.id);
+                else next.add(epic.id);
+                return next;
+              })
+            }
+          >
+            {collapsed.has(epic.id) ? "Expand" : "Collapse"} · {epic.title} ·{" "}
+            {epic.child_progress[0]}/{epic.child_progress[1]} children done
+          </Button>
+          <TaskTable
+            ariaLabel={`Epic: ${epic.title}`}
+            tasks={collapsed.has(epic.id) ? [epic] : [epic, ...children]}
+            columns={columns}
+            columnVisibility={columnVisibility}
+            empty="No children"
+          />
+        </section>
+      ))}
 
       {activeCycle && split.cycle && (
         <section className="mt-[18px]">

@@ -31,6 +31,9 @@ pub struct TaskHistoryEvent {
     pub cycle: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    /// Event-time type; absent in histories written before Epic support.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<String>,
 }
 
 impl TaskHistoryEvent {
@@ -42,7 +45,16 @@ impl TaskHistoryEvent {
     }
 
     fn same_state(&self, other: &Self) -> bool {
-        self.status == other.status && self.cycle == other.cycle && self.project == other.project
+        self.status == other.status
+            && self.cycle == other.cycle
+            && self.project == other.project
+            && self.task_type == other.task_type
+    }
+
+    pub fn is_epic(&self) -> bool {
+        self.task_type
+            .as_deref()
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("EPIC"))
     }
 }
 
@@ -59,6 +71,7 @@ fn snapshot(meta: &PageMeta, at: DateTime<Utc>) -> TaskHistoryEvent {
         status: extra_string(meta, "status").unwrap_or_else(|| DEFAULT_STATUS.to_string()),
         cycle: extra_string(meta, "cycle"),
         project: meta.project.clone(),
+        task_type: Some(extra_string(meta, "task_type").unwrap_or_else(|| "TASK".into())),
     }
 }
 
@@ -91,11 +104,25 @@ fn normalize(mut events: Vec<TaskHistoryEvent>) -> Vec<TaskHistoryEvent> {
 }
 
 fn parsed_page_history(meta: &PageMeta) -> Vec<TaskHistoryEvent> {
-    meta.extra
+    let mut events = meta
+        .extra
         .get(TASK_HISTORY_KEY)
         .and_then(|value| value.clone().try_into::<Vec<TaskHistoryEvent>>().ok())
         .map(normalize)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let task_type = extra_string(meta, "task_type");
+    fill_legacy_task_types(&mut events, task_type.as_deref());
+    events
+}
+
+// Old snapshots cannot distinguish a historical conversion. Interpret their
+// missing type using the page's current type; all new snapshots pin it explicitly.
+fn fill_legacy_task_types(events: &mut [TaskHistoryEvent], task_type: Option<&str>) {
+    for event in events {
+        if event.task_type.is_none() {
+            event.task_type = Some(task_type.unwrap_or("TASK").to_string());
+        }
+    }
 }
 
 /// Return persisted history plus a synthetic final snapshot when a task was
@@ -147,6 +174,12 @@ pub fn effective_indexed_history(meta: &serde_json::Value) -> Vec<TaskHistoryEve
             .get("project")
             .and_then(serde_json::Value::as_str)
             .map(str::to_string),
+        task_type: Some(
+            meta.get("task_type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("TASK")
+                .to_string(),
+        ),
     });
 
     let mut events = meta
@@ -154,6 +187,10 @@ pub fn effective_indexed_history(meta: &serde_json::Value) -> Vec<TaskHistoryEve
         .and_then(|value| serde_json::from_value::<Vec<TaskHistoryEvent>>(value.clone()).ok())
         .map(normalize)
         .unwrap_or_default();
+    fill_legacy_task_types(
+        &mut events,
+        meta.get("task_type").and_then(serde_json::Value::as_str),
+    );
     let Some(current) = current else {
         return events;
     };
@@ -183,6 +220,12 @@ fn history_value(events: &[TaskHistoryEvent]) -> toml::Value {
                 if let Some(project) = &event.project {
                     table.insert("project".to_string(), toml::Value::String(project.clone()));
                 }
+                if let Some(task_type) = &event.task_type {
+                    table.insert(
+                        "task_type".to_string(),
+                        toml::Value::String(task_type.clone()),
+                    );
+                }
                 toml::Value::Table(table)
             })
             .collect(),
@@ -197,7 +240,7 @@ pub fn initialize_task_history(meta: &mut PageMeta) {
 }
 
 /// Heal legacy/external history from the old metadata and append the new state
-/// when status, cycle, or project changed.
+/// when status, cycle, project, or task type changed.
 pub(crate) fn record_task_transition(old: &PageMeta, new: &mut PageMeta, at: DateTime<Utc>) {
     let mut events = effective_page_history(old);
     let next = snapshot(new, at);

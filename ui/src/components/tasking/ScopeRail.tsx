@@ -11,7 +11,12 @@ import {
   SCOPE_RAIL_MIN,
   useBoardStore,
 } from "#/store/board";
-import { CycleStatePip, fmtCycleWindow, HealthDot } from "./board-constants";
+import {
+  CycleStatePip,
+  fmtCycleWindow,
+  HealthDot,
+  isEpic,
+} from "./board-constants";
 import { type ProjectScope, scopeLabel } from "./board-projects";
 
 // ── UNFILED detection ────────────────────────────────────────────────────────
@@ -319,7 +324,12 @@ export function ScopeRail({ projects, cycles, tasks }: ScopeRailProps) {
               displayCode={cycle.code}
               state={cycle.state}
               windowLabel={fmtCycleWindow(cycle.start, cycle.end)}
-              count={tasks.filter((task) => task.cycle === cycle.code).length}
+              count={
+                tasks.filter(
+                  (task) =>
+                    task.cycle === cycle.code && !isEpic(task.task_type),
+                ).length
+              }
               active={mode === "cycle" && cycleSel === cycle.code}
               onSelect={() => {
                 setCycleSel(cycle.code);

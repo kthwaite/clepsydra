@@ -1,4 +1,5 @@
 import { cn } from "#/lib/cn";
+import { isEpic } from "./board-constants";
 
 export interface ChecklistBarProps {
   percent: number;
@@ -40,7 +41,7 @@ export function TypeChip({ type }: { type?: string | null }) {
       className="inline-block flex-shrink-0 rounded-full bg-sink px-2 text-[12px] leading-5 tabular-nums"
       style={{ color: type === "FIX" ? "var(--hot)" : "var(--mute)" }}
     >
-      {type}
+      {isEpic(type) ? "EPIC" : type}
     </span>
   );
 }

@@ -19,6 +19,7 @@ import {
   HealthDot,
   healthColor,
   isDone,
+  isEpic,
   isInProgress,
   MODES,
 } from "./board-constants";
@@ -104,9 +105,13 @@ export function BoardHeader({
   }
 
   // Stats
-  const open = tasks.filter((t) => !isDone(t.status)).length;
-  const inField = tasks.filter((t) => isInProgress(t.status)).length;
-  const onHold = tasks.filter((t) => t.blocked).length;
+  const open = tasks.filter(
+    (t) => !isEpic(t.task_type) && !isDone(t.status),
+  ).length;
+  const inField = tasks.filter(
+    (t) => !isEpic(t.task_type) && isInProgress(t.status),
+  ).length;
+  const onHold = tasks.filter((t) => !isEpic(t.task_type) && t.blocked).length;
 
   const opHealthColor = healthColor(activeOp?.health ?? "");
   const dossier = activeOp?.dossier;
@@ -114,7 +119,9 @@ export function BoardHeader({
   // The running cycle, with progress as sealed of all its tasks.
   const activeCycle = findActiveCycle(cycles);
   const cycleTasks = activeCycle
-    ? scopedTasks.filter((t) => t.cycle === activeCycle.code)
+    ? scopedTasks.filter(
+        (t) => !isEpic(t.task_type) && t.cycle === activeCycle.code,
+      )
     : [];
 
   // Title the scope the rail selected, including No project and scopes

@@ -593,6 +593,7 @@ describe("NewTaskModal — submit payload", () => {
         tags: null,
         link: null,
         checklist: null,
+        parent_epic: null,
       });
     });
   });

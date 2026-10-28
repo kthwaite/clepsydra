@@ -8,6 +8,9 @@ const ACTIVE: BoardCycle = BOARD_FIXTURE.cycles[0];
 function task(id: string, patch: Partial<BoardTask> = {}): BoardTask {
   return {
     blocked_by: [],
+    parent_epic: null,
+    child_tasks: [],
+    child_progress: [0, 0],
     blocks: [],
     blocked: false,
     id,

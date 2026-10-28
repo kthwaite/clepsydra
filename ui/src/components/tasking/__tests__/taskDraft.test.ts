@@ -25,12 +25,26 @@ const TASK: BoardTask = {
   link: "[[Spec]]",
   blocked: false,
   blocked_by: [],
+  parent_epic: null,
+  child_tasks: [],
+  child_progress: [0, 0],
   blocks: [],
   body_excerpt: null,
   checks: [],
   updated_at: "2026-10-01T00:00:00Z",
 } as BoardTask;
 
+describe("Epic child creation", () => {
+  it("prefills the parent and project without fixing the child's project", () => {
+    const draft = newTaskDraft({ parent_epic: "TSK-EPIC", project: "garden" });
+    draft.title = "Ship the child";
+    draft.project = "another";
+    expect(toCreatePayload(draft)).toMatchObject({
+      parent_epic: "TSK-EPIC",
+      project: "another",
+    });
+  });
+});
 describe("blankToNull", () => {
   it("trims, and maps blank to null", () => {
     expect(blankToNull("  Kit ")).toBe("Kit");
@@ -121,6 +135,7 @@ describe("newTaskDraft", () => {
       title: "",
       body: "",
       project: "",
+      parent_epic: "",
       cycle: "BACKLOG",
       status: "INTAKE",
       priority: "P2",
@@ -158,6 +173,7 @@ describe("toCreatePayload", () => {
     expect(toCreatePayload({ ...newTaskDraft(), title: " New " })).toEqual({
       title: "New",
       project: null,
+      parent_epic: null,
       status: "INTAKE",
       priority: "P2",
       task_type: null,

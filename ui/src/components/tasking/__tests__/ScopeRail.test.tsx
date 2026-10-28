@@ -112,6 +112,22 @@ describe("ScopeRail", () => {
     expect(within(row).getByText("3")).toBeInTheDocument();
   });
 
+  it("excludes legacy Epic Cycle membership without hiding it from project inventory", () => {
+    const mixed = [
+      { ...tasks[0], id: "epic", task_type: "EPIC", cycle: "C-01" },
+      { ...tasks[0], id: "child", task_type: "TASK", cycle: "C-01" },
+    ];
+    wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={mixed} />);
+    expect(
+      within(screen.getByRole("button", { name: /C-01/ })).getByText("1"),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("button", { name: /All projects/ })).getByText(
+        "2",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("counts only tasks without a Cycle in Backlog", () => {
     const taskWithAnotherCycle = {
       ...tasks[0],

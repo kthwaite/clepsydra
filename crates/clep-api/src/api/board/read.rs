@@ -20,7 +20,7 @@ use crate::vault::kind::Kind;
 use crate::vault::path::VaultPath;
 use crate::vault::query::body_excerpt;
 
-use super::blockers::{blocks_index, is_blocked, load_task_nodes, task_nodes_from};
+use super::blockers::{blocks_index, children_index, is_blocked, load_task_nodes, task_nodes_from};
 use super::description::task_description;
 use super::{
     BoardColumn, BoardCycle, BoardOperation, BoardResponse, BoardTask, COLUMNS, extra_str,
@@ -414,6 +414,11 @@ pub(super) async fn build_board_task_dto(
                 .map(|node| node.blocked_by.clone())
                 .unwrap_or_default();
             let blocks = blocks_index(&nodes).remove(&code_str).unwrap_or_default();
+            let parent_epic = nodes
+                .get(&code_str)
+                .and_then(|node| node.parent_epic.clone());
+            let (child_tasks, child_progress) =
+                children_index(&nodes).remove(&code_str).unwrap_or_default();
 
             Ok::<_, rusqlite::Error>(BoardTask {
                 id,
@@ -429,6 +434,9 @@ pub(super) async fn build_board_task_dto(
                 assignee,
                 estimate,
                 task_type,
+                parent_epic,
+                child_tasks,
+                child_progress,
                 due,
                 start: task_start,
                 hold,
@@ -549,6 +557,7 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
             .map(|(row, meta)| (path_stem(&row.1).to_string(), meta)),
     );
     let mut blocks_by_code = blocks_index(&nodes);
+    let mut children_by_code = children_index(&nodes);
 
     let mut tasks: Vec<(BoardTask, Option<String>)> = Vec::new();
     for ((id_str, path, title, _, project, updated_at, tags_raw, body, created_at), meta) in
@@ -593,6 +602,8 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
             .map(|node| node.blocked_by.clone())
             .unwrap_or_default();
         let blocks = blocks_by_code.remove(&code).unwrap_or_default();
+        let parent_epic = nodes.get(&code).and_then(|node| node.parent_epic.clone());
+        let (child_tasks, child_progress) = children_by_code.remove(&code).unwrap_or_default();
 
         tasks.push((
             BoardTask {
@@ -609,6 +620,9 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
                 assignee,
                 estimate,
                 task_type,
+                parent_epic,
+                child_tasks,
+                child_progress,
                 due,
                 start: task_start,
                 hold,

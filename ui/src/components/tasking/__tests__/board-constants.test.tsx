@@ -152,6 +152,7 @@ describe("task type vocabulary", () => {
       ["TASK", "Task"],
       ["STORY", "Story"],
       ["SPIKE", "Spike"],
+      ["EPIC", "Epic"],
     ]);
     expect(TYPE_NONE).toBe("UNTYPED");
   });
@@ -164,7 +165,15 @@ describe("TypeRow", () => {
     const names = Array.from(group.querySelectorAll("label")).map((l) =>
       l.textContent?.trim(),
     );
-    expect(names).toEqual(["None", "Feature", "Fix", "Task", "Story", "Spike"]);
+    expect(names).toEqual([
+      "None",
+      "Feature",
+      "Fix",
+      "Task",
+      "Story",
+      "Spike",
+      "Epic",
+    ]);
     expect(screen.getByRole("radio", { name: "None" })).toBeChecked();
   });
 
