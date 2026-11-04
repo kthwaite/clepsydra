@@ -249,6 +249,21 @@ export function tryListContinuation(
         to: [...nextItemPath, 0],
       });
 
+      // Blocks after the split point follow the tail, so nothing that came
+      // after the caret ends up above it.
+      if (Path.equals(Path.parent(paragraphPath), itemPath)) {
+        const laterBlocks =
+          itemNode.children.length -
+          paragraphPath[paragraphPath.length - 1] -
+          1;
+        for (let i = 0; i < laterBlocks; i++) {
+          Transforms.moveNodes(editor, {
+            at: Path.next(paragraphPath),
+            to: [...nextItemPath, i + 1],
+          });
+        }
+      }
+
       // Move cursor to start of new item
       Transforms.select(editor, Editor.start(editor, nextItemPath));
     });
