@@ -9,6 +9,7 @@ import {
 } from "slate";
 import { HistoryEditor } from "slate-history";
 import { isListElement, isListItem } from "#/editor/plugins/listUtils";
+import { unwrapListItemToParagraph } from "#/editor/plugins/withOutliner";
 import type { ListItemElement } from "#/editor/types";
 
 /**
@@ -135,40 +136,9 @@ export function tryListContinuation(
       return true;
     }
 
-    // LC-04: Empty top-level item -> exit list, unwrap to paragraph
-    batchOp(() => {
-      Editor.withoutNormalizing(editor, () => {
-        // Remove the empty item from the list
-        Transforms.removeNodes(editor, { at: itemPath });
-
-        // Insert a paragraph after the list
-        const afterListPath = Path.next(parentListPath);
-        Transforms.insertNodes(
-          editor,
-          {
-            type: "paragraph",
-            children: [{ text: "" }],
-          } as SlateElement,
-          { at: afterListPath },
-        );
-
-        // Move cursor to the new paragraph
-        Transforms.select(editor, {
-          anchor: { path: [...afterListPath, 0], offset: 0 },
-          focus: { path: [...afterListPath, 0], offset: 0 },
-        });
-
-        // If the list is now empty, remove it
-        try {
-          const remaining = Node.get(editor, parentListPath);
-          if (isListElement(remaining) && remaining.children.length === 0) {
-            Transforms.removeNodes(editor, { at: parentListPath });
-          }
-        } catch {
-          // Already removed
-        }
-      });
-    });
+    // LC-04: Empty top-level item -> exit in place, as Backspace does: the list
+    // splits around the paragraph and the item's children are lifted, not lost.
+    batchOp(() => unwrapListItemToParagraph(editor, itemPath));
     return true;
   }
 

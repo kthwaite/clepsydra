@@ -105,7 +105,10 @@ function isItemNested(editor: Editor, itemPath: Path): boolean {
  * containing list, preserving its text content. Splits the list if the item
  * is in the middle, so items above and below remain in valid lists.
  */
-function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
+export function unwrapListItemToParagraph(
+  editor: Editor,
+  itemPath: Path,
+): void {
   const parentListPath = Path.parent(itemPath);
   const parentList = Node.get(editor, parentListPath);
   if (!isListElement(parentList)) return;
