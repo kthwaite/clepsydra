@@ -477,14 +477,27 @@ const isBlankParagraph = (node: Nodes | undefined): boolean =>
   node.children.every((c) => c.type === "text" && c.value === "");
 
 /**
- * CommonMark does not let an empty list item interrupt a paragraph, so a bare
- * marker on the line after the parent's text reads as more of that text. A blank
- * line ends the paragraph first. An item cannot start with a blank line followed
- * by content, so an empty parent, whose marker line has no text, gets none. An
- * empty task's marker line does hold text: the `[ ]` written by the task handler.
+ * List items are written tight, and these neighbours change meaning without a
+ * blank line between them:
+ * - An empty list item cannot interrupt a paragraph, so a bare marker reads as
+ *   more of the parent's text. An item cannot start with a blank line followed by
+ *   content, so an empty parent, whose marker line has no text, gets none. An
+ *   empty task's marker line does hold text: the `[ ]` the task handler writes.
+ * - A paragraph after a list or blockquote reads as its lazy continuation.
+ * - `---` after a paragraph makes that paragraph a heading.
  */
-const separateEmptyChildBullet: Join = (left, right, parent) => {
-  if (left.type !== "paragraph" || right.type !== "list") return undefined;
+const separateUnsafeNeighbours: Join = (left, right, parent) => {
+  if (parent.type !== "listItem") return undefined;
+  if (
+    (left.type === "list" || left.type === "blockquote") &&
+    right.type === "paragraph"
+  ) {
+    return 1;
+  }
+  if (left.type !== "paragraph") return undefined;
+  if (right.type === "thematicBreak") return 1;
+  if (right.type !== "list") return undefined;
+
   const firstItem = right.children[0];
   if (
     !firstItem ||
@@ -493,9 +506,8 @@ const separateEmptyChildBullet: Join = (left, right, parent) => {
   ) {
     return undefined;
   }
-  const parentHasMarkerText =
-    parent.type === "listItem" && typeof parent.checked === "boolean";
-  return !isBlankParagraph(left) || parentHasMarkerText ? 1 : undefined;
+  const hasMarkerText = typeof parent.checked === "boolean";
+  return !isBlankParagraph(left) || hasMarkerText ? 1 : undefined;
 };
 
 /**
@@ -512,7 +524,7 @@ export function slateToMdast(nodes: Descendant[]): string {
   const markdown = toMarkdown(root as Nodes, {
     bullet: "*",
     rule: "-",
-    join: [separateEmptyChildBullet],
+    join: [separateUnsafeNeighbours],
     extensions: [
       baseFenceToMarkdown(),
       searchFenceToMarkdown(),
