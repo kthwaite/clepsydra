@@ -116,6 +116,20 @@ describe("> then Enter", () => {
   });
 });
 
+describe("a blockquote that is the whole document", () => {
+  it("gives way to an empty paragraph holding the caret on Enter", async () => {
+    const editor = makeEditor([quote(paragraph(""))]);
+    Transforms.select(editor, Editor.start(editor, []));
+    Editor.insertBreak(editor);
+    await flush();
+    expect(editor.children).toEqual([paragraph("")]);
+    expect(editor.selection).toEqual({
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 0 },
+    });
+  });
+});
+
 describe("undoing the exit", () => {
   it("brings the quote back with a caret in it", async () => {
     const editor = makeEditor([paragraph("")]);
