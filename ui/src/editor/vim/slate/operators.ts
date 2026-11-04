@@ -274,6 +274,24 @@ export function charwiseSpan(
   return { start, end };
 }
 
+/** Whether an inline void sits on a line. It adds no columns to `line.text`. */
+function lineHasInlineVoid(editor: Editor, line: Line): boolean {
+  const block = Node.get(editor, line.blockPath) as Element;
+  let offset = 0;
+  for (const child of block.children) {
+    if (
+      Element.isElement(child) &&
+      Editor.isVoid(editor, child) &&
+      offset >= line.start &&
+      offset <= line.start + line.text.length
+    ) {
+      return true;
+    }
+    offset += Node.string(child).length;
+  }
+  return false;
+}
+
 /** Apply d/c/y to a charwise span. Returns the resulting state patch. */
 export function applyCharwise(
   editor: Editor,
@@ -299,11 +317,20 @@ export function applyCharwise(
     Editor.string(editor, range).length === 0 &&
     lines[start.li].text.length === 0
   ) {
-    // An empty line leading an item that holds more has no break of its own
-    // to give: the line stands for the item. Nothing is removed.
+    // No columns does not mean blank: a line may hold only a wikilink. And an
+    // empty line leading an item that holds more has no break of its own to
+    // give: the line stands for the item. Either way nothing is removed.
     const item = listItemOf(editor, lines[start.li].blockPath);
-    if (item && (Node.get(editor, item) as Element).children.length > 1) {
-      return op === "c" ? { mode: "insert" } : {};
+    if (
+      lineHasInlineVoid(editor, lines[start.li]) ||
+      (item && (Node.get(editor, item) as Element).children.length > 1)
+    ) {
+      if (op !== "c") return {};
+      Transforms.select(
+        editor,
+        pointOfPos(editor, lines, { li: start.li, off: 0 }),
+      );
+      return { mode: "insert" };
     }
     // Deleting just the line break from an empty line (dw on an empty
     // line): a zero-text cross-block range doesn't merge in Slate, so
