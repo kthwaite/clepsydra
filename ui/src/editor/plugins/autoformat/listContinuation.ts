@@ -12,16 +12,36 @@ import { isListElement, isListItem } from "#/editor/plugins/listUtils";
 import type { ListItemElement } from "#/editor/types";
 
 /**
- * Get the text content of the first paragraph child of a list-item.
- * Returns the trimmed text, or undefined if no paragraph child.
+ * Whether a block shows nothing: whitespace-only text and no inline void. An
+ * inline void such as a wikilink contributes no text, so `Node.string` alone
+ * would take it for empty.
  */
-function getFirstParagraphText(item: SlateElement): string | undefined {
-  for (const child of item.children) {
-    if (SlateElement.isElement(child) && child.type === "paragraph") {
-      return Node.string(child).trim();
-    }
+export function isBlankBlock(editor: Editor, block: SlateElement): boolean {
+  if (Node.string(block).trim() !== "") return false;
+  for (const [node] of Node.elements(block)) {
+    if (editor.isVoid(node)) return false;
   }
-  return undefined;
+  return true;
+}
+
+/**
+ * Whether Enter should treat the item as empty: the caret sits in the item's
+ * leading paragraph and that paragraph is blank. A later block's text, or a
+ * lead that is not a paragraph, means the item has content.
+ */
+function isEmptyItemAtCaret(
+  editor: Editor,
+  item: SlateElement,
+  itemPath: Path,
+  caretPath: Path,
+): boolean {
+  const lead = item.children[0];
+  return (
+    SlateElement.isElement(lead) &&
+    lead.type === "paragraph" &&
+    Path.isAncestor([...itemPath, 0], caretPath) &&
+    isBlankBlock(editor, lead)
+  );
 }
 
 /**
@@ -68,9 +88,12 @@ export function tryListContinuation(
     Path,
   ];
 
-  // Get first paragraph text to determine if "empty"
-  const firstText = getFirstParagraphText(itemNode);
-  const isEmpty = firstText === undefined || firstText === "";
+  const isEmpty = isEmptyItemAtCaret(
+    editor,
+    itemNode,
+    itemPath,
+    selection.anchor.path,
+  );
 
   // Find the parent list
   const parentListPath = Path.parent(itemPath);
