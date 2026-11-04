@@ -458,6 +458,14 @@ function convertListItem(
     ),
   };
 
+  // An empty item parses with no children, or led by its nested list when it has
+  // one, since Markdown cannot write an empty line above a list. The page loads
+  // this value without normalizing it, so restore the canonical lead here.
+  const lead = el.children[0];
+  if (!lead || isNestedList(lead)) {
+    el.children.unshift({ type: "paragraph", children: [{ text: "" }] });
+  }
+
   // Propagate checkbox state from GFM task list items
   if (node.checked === true) {
     el.checked = true;
