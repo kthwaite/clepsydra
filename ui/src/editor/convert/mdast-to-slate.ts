@@ -439,7 +439,10 @@ function convertListItem(
     firstChild.children[0].type === "text"
   ) {
     const emptyTask = /^\[([ xX])\]$/.exec(firstChild.children[0].value);
-    if (emptyTask) {
+    // A marker is written as a bare `[`. An escaped or encoded one is text.
+    const start = firstChild.children[0].position?.start.offset;
+    const isMarker = start === undefined || source[start] === "[";
+    if (emptyTask && isMarker) {
       return {
         type: "list-item",
         checked: emptyTask[1] !== " ",
