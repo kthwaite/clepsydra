@@ -51,4 +51,17 @@ describe("an empty task with children", () => {
     expect(slateToMarkdown(doc)).toBe("* [ ] text\n  * kid\n");
     expect(markdownToSlate(slateToMarkdown(doc))).toEqual(doc);
   });
+
+  it("keeps a code block after an empty task", () => {
+    const doc = [
+      list(
+        task(false, "", {
+          type: "code-block",
+          children: [{ text: "code" }],
+        } as Descendant),
+      ),
+    ];
+
+    expect(markdownToSlate(slateToMarkdown(doc))).toEqual(doc);
+  });
 });

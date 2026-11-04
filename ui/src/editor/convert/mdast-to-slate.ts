@@ -430,14 +430,13 @@ function convertListItem(
   // remark-gfm does not classify a terminal task marker with no following
   // content as a task; it leaves the marker as the paragraph's literal text.
   // Recover that conventional empty-task syntax at the conversion boundary,
-  // with or without nested lists after it.
+  // with or without blocks after it.
   const [firstChild, ...laterChildren] = node.children;
   if (
     node.checked == null &&
     firstChild?.type === "paragraph" &&
     firstChild.children.length === 1 &&
-    firstChild.children[0].type === "text" &&
-    laterChildren.every((child) => child.type === "list")
+    firstChild.children[0].type === "text"
   ) {
     const emptyTask = /^\[([ xX])\]$/.exec(firstChild.children[0].value);
     if (emptyTask) {
