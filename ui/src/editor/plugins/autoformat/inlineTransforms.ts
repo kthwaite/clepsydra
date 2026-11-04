@@ -219,8 +219,9 @@ function tryMarkTransform(
   HistoryEditor.withNewBatch(editor, () => {
     Editor.withoutNormalizing(editor, () => {
       // Delete the markdown syntax
-      Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
-      Transforms.delete(editor);
+      Transforms.delete(editor, {
+        at: { anchor: rangeStart, focus: rangeEnd },
+      });
 
       // Insert content with mark
       Transforms.insertNodes(editor, { text: content, [mark]: true });
@@ -255,8 +256,9 @@ function tryWikilinkTransform(
   const rangeEnd: Point = { path, offset: textBefore.length };
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
-      Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
-      Transforms.delete(editor);
+      Transforms.delete(editor, {
+        at: { anchor: rangeStart, focus: rangeEnd },
+      });
       Transforms.insertNodes(editor, makeWikilink({ target, alias }));
       const wikilinkPath = editor.selection?.anchor.path.slice(0, -1);
       if (wikilinkPath) selectTextAfterInline(editor, wikilinkPath);
@@ -382,11 +384,12 @@ function tryInlinePropertyTransform(
 
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
-      Transforms.select(editor, {
-        anchor: { path: start.path, offset: deleteStart - start.start },
-        focus: anchor,
+      Transforms.delete(editor, {
+        at: {
+          anchor: { path: start.path, offset: deleteStart - start.start },
+          focus: anchor,
+        },
       });
-      Transforms.delete(editor);
       Transforms.setNodes<PropertyBearingElement>(
         editor,
         { properties },
@@ -438,8 +441,9 @@ function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
 
     HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
       Editor.withoutNormalizing(editor, () => {
-        Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
-        Transforms.delete(editor);
+        Transforms.delete(editor, {
+          at: { anchor: rangeStart, focus: rangeEnd },
+        });
         Transforms.insertNodes(editor, makeFootnoteRef({ identifier }));
         const referencePath = editor.selection?.anchor.path.slice(0, -1);
         ensureFootnoteDef(editor, identifier);
@@ -495,8 +499,9 @@ function tryLinkTransform(editor: Editor, closerConsumed = false): boolean {
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
       // Delete the markdown link syntax
-      Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
-      Transforms.delete(editor);
+      Transforms.delete(editor, {
+        at: { anchor: rangeStart, focus: rangeEnd },
+      });
 
       // Insert link element. withSchema marks link elements as inline.
       const linkNode: CustomElement = {
