@@ -299,6 +299,12 @@ export function applyCharwise(
     Editor.string(editor, range).length === 0 &&
     lines[start.li].text.length === 0
   ) {
+    // An empty line leading an item that holds more has no break of its own
+    // to give: the line stands for the item. Nothing is removed.
+    const item = listItemOf(editor, lines[start.li].blockPath);
+    if (item && (Node.get(editor, item) as Element).children.length > 1) {
+      return op === "c" ? { mode: "insert" } : {};
+    }
     // Deleting just the line break from an empty line (dw on an empty
     // line): a zero-text cross-block range doesn't merge in Slate, so
     // remove the empty line instead.
