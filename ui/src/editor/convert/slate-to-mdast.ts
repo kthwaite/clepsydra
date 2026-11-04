@@ -10,7 +10,7 @@ import type {
 } from "mdast";
 import { gfmToMarkdown } from "mdast-util-gfm";
 import type {} from "mdast-util-gfm-strikethrough";
-import type { Options } from "mdast-util-to-markdown";
+import type { Join, Options } from "mdast-util-to-markdown";
 import { toMarkdown } from "mdast-util-to-markdown";
 import type { Descendant } from "slate";
 import { Text as SlateText } from "slate";
@@ -472,6 +472,44 @@ function withoutAtomicTrailingSentinel(nodes: Descendant[]): Descendant[] {
 
 // ---------------------------------------------------------------------------
 
+const isBlankParagraph = (node: Nodes | undefined): boolean =>
+  node?.type === "paragraph" &&
+  node.children.every((c) => c.type === "text" && c.value === "");
+
+/**
+ * List items are written tight, and these neighbours change meaning without a
+ * blank line between them:
+ * - An empty list item cannot interrupt a paragraph, so a bare marker reads as
+ *   more of the parent's text. An item cannot start with a blank line followed by
+ *   content, so an empty parent, whose marker line has no text, gets none. An
+ *   empty task's marker line does hold text: the `[ ]` the task handler writes.
+ * - A paragraph after a list or blockquote reads as its lazy continuation.
+ * - `---` after a paragraph makes that paragraph a heading.
+ */
+const separateUnsafeNeighbours: Join = (left, right, parent) => {
+  if (parent.type !== "listItem") return undefined;
+  if (
+    (left.type === "list" || left.type === "blockquote") &&
+    right.type === "paragraph"
+  ) {
+    return 1;
+  }
+  if (left.type !== "paragraph") return undefined;
+  if (right.type === "thematicBreak") return 1;
+  if (right.type !== "list") return undefined;
+
+  const firstItem = right.children[0];
+  if (
+    !firstItem ||
+    typeof firstItem.checked === "boolean" ||
+    (firstItem.children.length > 0 && !isBlankParagraph(firstItem.children[0]))
+  ) {
+    return undefined;
+  }
+  const hasMarkerText = typeof parent.checked === "boolean";
+  return !isBlankParagraph(left) || hasMarkerText ? 1 : undefined;
+};
+
 /**
  * Convert a Slate `Descendant[]` tree to a markdown string.
  */
@@ -486,6 +524,7 @@ export function slateToMdast(nodes: Descendant[]): string {
   const markdown = toMarkdown(root as Nodes, {
     bullet: "*",
     rule: "-",
+    join: [separateUnsafeNeighbours],
     extensions: [
       baseFenceToMarkdown(),
       searchFenceToMarkdown(),
