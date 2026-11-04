@@ -184,21 +184,22 @@ function isCodeBlock(editor: Editor, path: number[]): boolean {
   return Element.isElement(node) && node.type === "code-block";
 }
 
-/**
- * The item whose lead line is `blockPath`, when that line shows nothing: no text
- * but whitespace, no inline void. Enter on such an item leaves the list.
- */
-function emptyItemOf(editor: Editor, blockPath: Path): Path | null {
+/** The item whose lead line is `blockPath`, if any. */
+function itemLedBy(editor: Editor, blockPath: Path): Path | null {
   if (blockPath[blockPath.length - 1] !== 0 || blockPath.length < 2)
     return null;
   const itemPath = Path.parent(blockPath);
   const item = Node.get(editor, itemPath);
-  if (!Element.isElement(item) || item.type !== "list-item") return null;
+  return Element.isElement(item) && item.type === "list-item" ? itemPath : null;
+}
+
+/** A line showing nothing: no text but whitespace, no inline void. */
+function isBlankBlock(editor: Editor, blockPath: Path): boolean {
   const block = Node.get(editor, blockPath) as Element;
-  const blank =
+  return (
     Node.string(block).trim() === "" &&
-    !block.children.some((child) => Element.isElement(child));
-  return blank ? itemPath : null;
+    !block.children.some((child) => Element.isElement(child))
+  );
 }
 
 /**
@@ -230,11 +231,13 @@ function openLine(editor: Editor, below: boolean): void {
     return;
   }
 
-  const emptyItem = emptyItemOf(editor, line.blockPath);
-  if (emptyItem) {
-    // Enter here would leave the list; these commands only open a line.
-    const { checked } = Node.get(editor, emptyItem) as ListItemElement;
-    const at = below ? Path.next(emptyItem) : emptyItem;
+  // A new sibling, not Enter, wherever Enter would do something else. On a blank
+  // line Enter leaves the list. At the start of a line it splits the item, and
+  // the check and children stay with the empty half.
+  const item = itemLedBy(editor, line.blockPath);
+  if (item && (!below || isBlankBlock(editor, line.blockPath))) {
+    const { checked } = Node.get(editor, item) as ListItemElement;
+    const at = below ? Path.next(item) : item;
     const fresh: ListItemElement = {
       type: "list-item",
       children: [makeParagraph({})],

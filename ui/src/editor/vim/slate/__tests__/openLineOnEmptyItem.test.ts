@@ -2,7 +2,7 @@
  * `o` and `O` open a line. Enter on an empty bullet means "leave the list", so
  * they cannot go through it there: an empty item gets a new sibling instead.
  */
-import type { Descendant } from "slate";
+import type { Descendant, Editor } from "slate";
 import { describe, expect, it } from "vitest";
 import type { ListItemElement } from "#/editor/schema/types";
 import { li, makeEditor, snapshot, ul } from "./fixtures";
@@ -69,8 +69,62 @@ describe("O on an empty item", () => {
   });
 });
 
+describe("O on an item with text", () => {
+  const task = (text: string, checked: boolean) =>
+    ({
+      type: "list-item",
+      checked,
+      children: [{ type: "paragraph", children: [{ text }] }],
+    }) as ListItemElement;
+  const checks = (editor: Editor) =>
+    (editor.children[0] as { children: ListItemElement[] }).children.map(
+      (item) => item.checked,
+    );
+
+  it("leaves a checked task's check on its own line", () => {
+    const editor = makeEditor(ul(task("a|b", true)));
+    keys(editor, "O");
+    expect(snapshot(editor)).toEqual(["li:|", "li:ab"]);
+    expect(checks(editor)).toEqual([false, true]);
+  });
+
+  it("opens an unchecked task above an unchecked task", () => {
+    const editor = makeEditor(ul(task("a|b", false)));
+    keys(editor, "O");
+    expect(checks(editor)).toEqual([false, false]);
+  });
+
+  it("opens a plain item above a plain item", () => {
+    const editor = makeEditor(ul(li("a|b")));
+    keys(editor, "O");
+    expect(checks(editor)).toEqual([undefined, undefined]);
+  });
+
+  it("leaves a parent's text above its children", () => {
+    const editor = makeEditor(ul(li("a|b", ul(li("kid")))));
+    keys(editor, "O");
+    expect(snapshot(editor)).toEqual(["li:|", "li:ab", "li2:kid"]);
+  });
+
+  it("types on the new line", () => {
+    const editor = makeEditor(ul(task("a|b", true), task("z", false)));
+    keys(editor, "O");
+    editor.insertText("Q");
+    expect(snapshot(editor)).toEqual(["li:Q|", "li:ab", "li:z"]);
+    expect(checks(editor)).toEqual([false, true, false]);
+  });
+
+  it("undoes in one step", () => {
+    const editor = makeEditor(ul(task("a|b", true)));
+    const before = JSON.stringify(editor.children);
+    const state = keys(editor, "O");
+    keys(editor, "<Esc>u", state);
+    expect(JSON.stringify(editor.children)).toBe(before);
+  });
+});
+
 describe("o and O on an item with text", () => {
-  it("still go through list continuation", () => {
+  it("still open a line next to it", () => {
     const below = makeEditor(ul(li("it|em"), li("z")));
     keys(below, "o");
     expect(snapshot(below)).toEqual(["li:item", "li:|", "li:z"]);
