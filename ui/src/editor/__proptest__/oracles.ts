@@ -100,6 +100,29 @@ export function sameOutline(a: Flat[], expected: Flat[]): boolean {
   });
 }
 
+/** The item at `lead` leaves its list: lead becomes a paragraph, kids rise. */
+function lifted(ls: Line[], f: Flat[], lead: number, text?: string): Flat[] {
+  const end = itemEnd(ls, lead);
+  const d = ls[lead].depth;
+  const out = shift(f, lead, end, -1);
+  out[lead] = {
+    ...out[lead],
+    kind: "p",
+    checked: null,
+    ...(text === undefined ? {} : { text }),
+  };
+  for (let i = lead + 1; i < end; i++) {
+    if (ls[i].depth === d && out[i].kind === "paragraph") {
+      out[i] = { ...out[i], kind: "p" };
+    }
+    // A blockquote line directly in the item counts two levels inside it.
+    if (ls[i].depth === d + 1 && ls[i].listKey === null) {
+      out[i] = { ...out[i], depth: d - 1 };
+    }
+  }
+  return out;
+}
+
 function outdented(ls: Line[], f: Flat[], lead: number): Flat[] {
   const end = itemEnd(ls, lead);
   const out = shift(f, lead, end, -1);
@@ -165,9 +188,7 @@ export function expectedOutline(
         if (ls[lead].nested) return outdented(ls, f, lead);
         // Exit in place: the list splits around the new paragraph, as Backspace
         // does; nothing below it is lost or jumps above it.
-        const out = shift(f, lead, end, -1);
-        out[lead] = { ...out[lead], kind: "p", text: "", checked: null };
-        return out;
+        return lifted(ls, f, lead);
       }
       if (atEnd) {
         const fresh: Flat = {
@@ -193,15 +214,7 @@ export function expectedOutline(
       ) {
         return null;
       }
-      const end = itemEnd(ls, lead);
-      const out = shift(f, lead, end, -1);
-      out[lead] = { ...out[lead], kind: "p", checked: null };
-      for (let i = lead + 1; i < end; i++) {
-        if (ls[i].depth === ls[lead].depth && out[i].kind === "paragraph") {
-          out[i] = { ...out[i], kind: "p" };
-        }
-      }
-      return out;
+      return lifted(ls, f, lead);
     }
     default:
       return null;

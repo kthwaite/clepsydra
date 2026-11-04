@@ -226,6 +226,10 @@ export async function replay(
         );
       }
       if (back) {
+        const parsedShape = shapeViolations({ children: back, selection: null });
+        if (preStable && parsedShape.length) {
+          add(`parse-shape:${parsedShape[0]}:${op.k}`, `md=${json(md)}`, step);
+        }
         const md2 = slateToMarkdown(clone(back));
         const hasTopEmpty =
           json(comparable(editor.children)) !==
@@ -318,7 +322,7 @@ export async function continuation(
   }
   const ls = outline(a);
   const c = caretInfo(a, ls);
-  const b = makeEditor(reload(a.children));
+  const b = makeEditor(reload(a.children), { normalized: false });
   // Lines must correspond one to one, or logical caret positions would not.
   if (json(canonical(b.children)) !== json(canonical(a.children))) return null;
   if (c) {

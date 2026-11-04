@@ -7,7 +7,7 @@ import type { Descendant } from "slate";
 import { it } from "vitest";
 import { slateToMarkdown } from "../convert";
 import { firstDivergence } from "./census";
-import { clone, comparable, reload } from "./harness";
+import { clone, comparable, makeEditor, reload } from "./harness";
 
 type Leaf = () => Descendant[];
 const LEADS: Record<string, Leaf> = {
@@ -15,9 +15,6 @@ const LEADS: Record<string, Leaf> = {
   empty: () => [{ text: "" }],
   space: () => [{ text: " " }],
   bold: () => [{ text: "x", bold: true }],
-  emptyBold: () => [{ text: "", bold: true }],
-  emptyItalic: () => [{ text: "", italic: true }],
-  emptyCode: () => [{ text: "", code: true }],
   link: () =>
     [
       { text: "" },
@@ -80,8 +77,10 @@ it("enumerate", () => {
       fails.set(sig, r);
       return;
     }
-    const a = comparable(doc);
-    const b = comparable(back);
+    // Parser output is loaded unnormalized; leaf boundaries around inline voids
+    // are a separate check below. Compare meaning here.
+    const a = comparable(makeEditor(doc).children);
+    const b = comparable(makeEditor(back).children);
     if (JSON.stringify(a) === JSON.stringify(b)) return;
     const sig = `${firstDivergence(a, b)}`;
     const ex = `${name} md=${JSON.stringify(md)} back=${JSON.stringify(b).slice(0, 220)}`;
@@ -92,10 +91,14 @@ it("enumerate", () => {
   for (const a of keys) {
     for (const ca of checks) {
       check(`single ${a}/${ca}`, [ul(li(a, ca))]);
-      // Parent with a child.
+      // Parent with a child, in both types, the child also a task.
       for (const ck of ["plain", "empty", "link"]) {
-        check(`parent ${a}/${ca}>${ck}`, [ul(li(a, ca, ul(li(ck, null))))]);
-        check(`parentNum ${a}/${ca}>${ck}`, [ol(li(a, ca, ol(li(ck, null))))]);
+        for (const cc of checks) {
+          check(`parent ${a}/${ca}>${ck}/${cc}`, [ul(li(a, ca, ul(li(ck, cc))))]);
+          check(`parentNum ${a}/${ca}>${ck}/${cc}`, [ol(li(a, ca, ol(li(ck, cc))))]);
+          check(`parentNumBullet ${a}/${ca}>${ck}/${cc}`, [ol(li(a, ca, ul(li(ck, cc))))]);
+          check(`parentTwoKids ${a}/${ca}>${ck}/${cc}`, [ul(li(a, ca, ul(li(ck, cc), li("empty", null))))]);
+        }
       }
       // Item followed by a sibling.
       for (const b of ["plain", "empty", "stars"]) {

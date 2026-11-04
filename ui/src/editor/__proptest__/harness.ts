@@ -41,7 +41,14 @@ import "../types";
 // Editor (same chain as SlateEditor.tsx)
 // ---------------------------------------------------------------------------
 
-export function makeEditor(children: Descendant[]): Editor {
+/**
+ * The page hands `markdownToSlate` output straight to `<Slate initialValue>`;
+ * Slate does not normalize an initial value. `normalized: false` matches that.
+ */
+export function makeEditor(
+  children: Descendant[],
+  { normalized = true }: { normalized?: boolean } = {},
+): Editor {
   const editor = withMathClipboard(
     withMarkdownPaste(
       withReact(
@@ -58,7 +65,7 @@ export function makeEditor(children: Descendant[]): Editor {
     ),
   );
   editor.children = clone(children);
-  Editor.normalize(editor, { force: true });
+  if (normalized) Editor.normalize(editor, { force: true });
   return editor;
 }
 
@@ -597,7 +604,9 @@ function textBefore(
 }
 
 /** Canonical shape from ui/CLAUDE.md, plus selection validity. */
-export function shapeViolations(editor: Editor): string[] {
+export function shapeViolations(
+  editor: Pick<Editor, "children" | "selection">,
+): string[] {
   const out: string[] = [];
   const walk = (n: Descendant, p: Path) => {
     if (!SlateElement.isElement(n)) return;
@@ -627,11 +636,11 @@ export function shapeViolations(editor: Editor): string[] {
   const s = editor.selection;
   if (s) {
     for (const pt of [s.anchor, s.focus]) {
-      if (!Editor.hasPath(editor, pt.path)) {
+      if (!Editor.hasPath(editor as Editor, pt.path)) {
         out.push("selection-bad-path");
         continue;
       }
-      const leaf = Node.get(editor, pt.path);
+      const leaf = Node.get(editor as Editor, pt.path);
       if (!Text.isText(leaf)) out.push("selection-not-text");
       else if (pt.offset > leaf.text.length) out.push("selection-bad-offset");
     }
@@ -689,7 +698,6 @@ export function comparable(nodes: Descendant[]): unknown {
 
 export function reload(children: Descendant[]): Descendant[] {
   const md = slateToMarkdown(clone(children));
-  const parsed = markdownToSlate(md);
-  return makeEditor(parsed).children;
+  return markdownToSlate(md);
 }
 
