@@ -181,37 +181,45 @@ function wrapInList(
   mergeWithAdjacentList(editor, listPath, listType);
 }
 
-/** Merge the list at `listPath` into an immediately-preceding same-type list. */
+/** Merge the list at `listPath` with its same-type sibling lists on both sides. */
 function mergeWithAdjacentList(
   editor: Editor,
   listPath: Path,
   listType: ListType,
 ): void {
-  const index = listPath[listPath.length - 1];
-  if (index > 0) {
+  const sameType = (path: Path) => {
+    if (!Editor.hasPath(editor, path)) return false;
+    const node = Node.get(editor, path);
+    return SlateElement.isElement(node) && node.type === listType;
+  };
+
+  let merged = listPath;
+  if (listPath[listPath.length - 1] > 0) {
     const prevPath = Path.previous(listPath);
-    try {
-      const prevNode = Node.get(editor, prevPath);
-      if (SlateElement.isElement(prevNode) && prevNode.type === listType) {
-        const ourNode = Node.get(editor, listPath);
-        if (!SlateElement.isElement(ourNode)) return;
-        const count = ourNode.children.length;
-        // Always move the current first child: each move shrinks our list from
-        // the front, so source index 0 is the next item every iteration. This
-        // preserves original order (moving from the tail would reverse it).
-        for (let i = 0; i < count; i++) {
-          Transforms.moveNodes(editor, {
-            at: [...listPath, 0],
-            to: [...prevPath, prevNode.children.length],
-          });
-        }
-        Transforms.removeNodes(editor, { at: listPath });
-        return;
-      }
-    } catch {
-      // no previous sibling
+    if (sameType(prevPath)) {
+      appendListItems(editor, listPath, prevPath);
+      merged = prevPath;
     }
   }
+  const nextPath = Path.next(merged);
+  if (sameType(nextPath)) appendListItems(editor, nextPath, merged);
+}
+
+/** Move every item of the list at `from` to the end of `to`, removing `from`. */
+function appendListItems(editor: Editor, from: Path, to: Path): void {
+  const fromNode = Node.get(editor, from) as SlateElement;
+  const toNode = Node.get(editor, to) as SlateElement;
+  const count = fromNode.children.length;
+  const offset = toNode.children.length;
+  // Always move the current first child: each move shrinks the source from the
+  // front, so index 0 is the next item every iteration and order is preserved.
+  for (let i = 0; i < count; i++) {
+    Transforms.moveNodes(editor, {
+      at: [...from, 0],
+      to: [...to, offset + i],
+    });
+  }
+  Transforms.removeNodes(editor, { at: from });
 }
 
 function withBatch(editor: Editor, fn: () => void): void {
