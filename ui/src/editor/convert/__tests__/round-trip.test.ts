@@ -339,12 +339,14 @@ x
       {
         type: "paragraph",
         children: [
+          { text: "" },
           {
             type: "inline-math",
             tex: "a$b",
             delimiter: String.raw`\(`,
             children: [{ text: "" }],
           },
+          { text: "" },
         ],
       },
     ]);
