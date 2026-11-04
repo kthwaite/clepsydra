@@ -147,6 +147,51 @@ function groupSpan(lines: Line[], a: number, b: number): LineGroup[] {
   return groups;
 }
 
+/**
+ * A register node for only some lines of a block. A code block's text is all
+ * there is to it. Anything else keeps the marks and links on those lines.
+ */
+function partialBlock(
+  editor: Editor,
+  lines: Line[],
+  group: LineGroup,
+): Descendant {
+  const block = structuredClone(Node.get(editor, group.blockPath)) as Element;
+  if (block.type === "code-block") {
+    const text = lines
+      .slice(group.first, group.last + 1)
+      .map((l) => l.text)
+      .join("\n");
+    return { ...block, children: [{ text }] } as Descendant;
+  }
+  const start = lines[group.first].start;
+  const end = lines[group.last].start + lines[group.last].text.length;
+  const hasBreakAfter = end < Node.string(block).length;
+  // Run to just past the line's break, so a link ending the line is inside.
+  const from =
+    start === 0
+      ? Editor.start(editor, group.blockPath)
+      : pointAtBlockOffset(editor, group.blockPath, start);
+  const to = hasBreakAfter
+    ? pointAtBlockOffset(editor, group.blockPath, end + 1)
+    : Editor.end(editor, group.blockPath);
+  const inBlock = (point: Point) => ({
+    path: point.path.slice(group.blockPath.length),
+    offset: point.offset,
+  });
+  const children = structuredClone(
+    Node.fragment(block, { anchor: inBlock(from), focus: inBlock(to) }),
+  ) as Descendant[];
+  if (hasBreakAfter) {
+    let last = children[children.length - 1];
+    while (Element.isElement(last)) {
+      last = last.children[last.children.length - 1] as Descendant;
+    }
+    last.text = last.text.replace(/\n$/, "");
+  }
+  return { ...block, children } as Descendant;
+}
+
 /** Build a linewise register from lines [a..b]. */
 export function captureLinewise(
   editor: Editor,
@@ -157,28 +202,21 @@ export function captureLinewise(
   const fragment: Descendant[] = [];
   const captured: Path[] = [];
   for (const group of groupSpan(lines, a, b)) {
+    const unit = group.whole
+      ? registerUnitPath(editor, group.blockPath)
+      : group.blockPath;
+    // Groups run in document order, so a unit that subsumed later lines
+    // (an item with nested lists) is captured once, not per line.
+    if (
+      captured.some((c) => Path.equals(c, unit) || Path.isAncestor(c, unit))
+    ) {
+      continue;
+    }
     if (group.whole) {
-      const unit = registerUnitPath(editor, group.blockPath);
-      // Groups run in document order, so a unit that subsumed later lines
-      // (an item with nested lists) is captured once, not per line.
-      if (
-        captured.some((c) => Path.equals(c, unit) || Path.isAncestor(c, unit))
-      ) {
-        continue;
-      }
       captured.push(unit);
       fragment.push(structuredClone(Node.get(editor, unit)) as Descendant);
     } else {
-      // Partial code block: synthesize a code block from the covered lines.
-      const block = Node.get(editor, group.blockPath);
-      const text = lines
-        .slice(group.first, group.last + 1)
-        .map((l) => l.text)
-        .join("\n");
-      fragment.push({
-        ...(structuredClone(block) as Element),
-        children: [{ text }],
-      } as Descendant);
+      fragment.push(partialBlock(editor, lines, group));
     }
   }
   return { kind: "line", fragment: stripBlockIds(fragment) };
@@ -450,6 +488,19 @@ function isCodeBlock(editor: Editor, blockPath: Path): boolean {
   return Element.isElement(node) && node.type === "code-block";
 }
 
+/** One string per lowest block, so nested blocks stay on their own lines. */
+function plainLines(editor: Editor, node: Descendant): string[] {
+  if (
+    Element.isElement(node) &&
+    node.children.some((c) => Element.isElement(c) && Editor.isBlock(editor, c))
+  ) {
+    return (node.children as Descendant[]).flatMap((c) =>
+      plainLines(editor, c),
+    );
+  }
+  return [Node.string(node)];
+}
+
 /** Adapt register nodes to the paste context (list vs non-list). */
 function adaptNodes(fragment: Descendant[], intoList: boolean): Descendant[] {
   const nodes: Descendant[] = [];
@@ -476,7 +527,9 @@ export function pasteLinewise(
 
   if (isCodeBlock(editor, line.blockPath)) {
     // Paste as text lines inside the code block.
-    const once = register.fragment.map((node) => Node.string(node)).join("\n");
+    const once = register.fragment
+      .flatMap((node) => plainLines(editor, node))
+      .join("\n");
     const parts: string[] = [];
     for (let i = 0; i < n; i++) parts.push(once);
     const text = parts.join("\n");
