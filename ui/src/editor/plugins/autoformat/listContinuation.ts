@@ -9,6 +9,7 @@ import {
 } from "slate";
 import { HistoryEditor } from "slate-history";
 import { isListElement, isListItem } from "#/editor/plugins/listUtils";
+import { outdentListItem } from "#/editor/plugins/withOutliner";
 import type { ListItemElement } from "#/editor/types";
 
 /**
@@ -88,50 +89,7 @@ export function tryListContinuation(
   if (isEmpty) {
     if (isNested(editor, itemPath)) {
       // LC-03: Empty nested item -> outdent
-      batchOp(() => {
-        Editor.withoutNormalizing(editor, () => {
-          const itemIndex = itemPath[itemPath.length - 1];
-          const siblingCount = parentList.children.length;
-
-          // If there are siblings after this item, they become a sub-list of the outdented item
-          if (itemIndex < siblingCount - 1) {
-            const trailingItems: SlateElement[] = [];
-            for (let i = siblingCount - 1; i > itemIndex; i--) {
-              const trailPath = [...parentListPath, i];
-              trailingItems.unshift(
-                JSON.parse(JSON.stringify(Node.get(editor, trailPath))),
-              );
-              Transforms.removeNodes(editor, { at: trailPath });
-            }
-            const currentItem = Node.get(editor, itemPath);
-            if (SlateElement.isElement(currentItem)) {
-              Transforms.insertNodes(
-                editor,
-                {
-                  type: parentList.type,
-                  children: trailingItems,
-                } as SlateElement,
-                { at: [...itemPath, currentItem.children.length] },
-              );
-            }
-          }
-
-          // Move item after the grandparent list-item
-          const grandparentPath = Path.parent(parentListPath);
-          const destPath = Path.next(grandparentPath);
-          Transforms.moveNodes(editor, { at: itemPath, to: destPath });
-
-          // Clean up empty parent list
-          try {
-            const remaining = Node.get(editor, parentListPath);
-            if (isListElement(remaining) && remaining.children.length === 0) {
-              Transforms.removeNodes(editor, { at: parentListPath });
-            }
-          } catch {
-            // Already removed
-          }
-        });
-      });
+      batchOp(() => outdentListItem(editor));
       return true;
     }
 
