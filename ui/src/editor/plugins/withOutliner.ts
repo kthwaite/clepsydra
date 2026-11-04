@@ -8,7 +8,11 @@ import {
   Element as SlateElement,
   Transforms,
 } from "slate";
-import { isListElement, isListItem } from "#/editor/plugins/listUtils";
+import {
+  isListElement,
+  isListItem,
+  type ListType,
+} from "#/editor/plugins/listUtils";
 import type { ListItemElement } from "#/editor/types";
 
 /**
@@ -319,39 +323,11 @@ export function outdentListItem(editor: Editor): void {
   const grandparent = Node.get(editor, grandparentPath);
   if (!isListItem(grandparent)) return;
 
-  const itemIndex = itemPath[itemPath.length - 1];
-  const siblingCount = parentList.children.length;
-
   Editor.withoutNormalizing(editor, () => {
-    // If there are siblings after the current item in the nested list,
-    // they become a sub-list of the item being outdented.
-    if (itemIndex < siblingCount - 1) {
-      const listType = parentList.type;
-
-      // Clone trailing items and remove them from the nested list
-      const trailingItems: SlateElement[] = [];
-      for (let i = siblingCount - 1; i > itemIndex; i--) {
-        const trailPath = [...parentListPath, i];
-        trailingItems.unshift(
-          JSON.parse(JSON.stringify(Node.get(editor, trailPath))),
-        );
-        Transforms.removeNodes(editor, { at: trailPath });
-      }
-
-      // Insert them as a nested list inside the current item
-      const currentItem = Node.get(editor, itemPath);
-      if (!SlateElement.isElement(currentItem)) return;
-      const insertIdx = currentItem.children.length;
-
-      Transforms.insertNodes(
-        editor,
-        {
-          type: listType,
-          children: trailingItems,
-        } as SlateElement,
-        { at: [...itemPath, insertIdx] },
-      );
-    }
+    // Everything after the item within its parent follows it, so nothing that
+    // came after the item ends up above it.
+    adoptTrailingSiblings(editor, itemPath, parentListPath, parentList.type);
+    adoptLaterBlocks(editor, itemPath, parentListPath);
 
     // Move the current item out, after the grandparent
     const destPath = Path.next(grandparentPath);
@@ -367,6 +343,74 @@ export function outdentListItem(editor: Editor): void {
       // Parent list already removed by normalization
     }
   });
+}
+
+/**
+ * Move the item's later siblings into a sub-list of the item, joining its last
+ * nested list when the types match, so no two lists end up side by side.
+ */
+function adoptTrailingSiblings(
+  editor: Editor,
+  itemPath: Path,
+  parentListPath: Path,
+  listType: ListType,
+): void {
+  const parentList = Node.get(editor, parentListPath);
+  if (!isListElement(parentList)) return;
+  const firstTrailing = itemPath[itemPath.length - 1] + 1;
+  const count = parentList.children.length - firstTrailing;
+  if (count <= 0) return;
+
+  const item = Node.get(editor, itemPath);
+  if (!isListItem(item)) return;
+  const lastIndex = item.children.length - 1;
+  const last = item.children[lastIndex];
+
+  let targetPath: Path;
+  let targetIndex: number;
+  if (isListElement(last) && last.type === listType) {
+    targetPath = [...itemPath, lastIndex];
+    targetIndex = last.children.length;
+  } else {
+    targetPath = [...itemPath, item.children.length];
+    targetIndex = 0;
+    Transforms.insertNodes(
+      editor,
+      { type: listType, children: [] },
+      { at: targetPath },
+    );
+  }
+
+  const source = [...parentListPath, firstTrailing];
+  for (let i = 0; i < count; i++) {
+    Transforms.moveNodes(editor, {
+      at: source,
+      to: [...targetPath, targetIndex + i],
+    });
+  }
+}
+
+/** Move blocks after the item's parent list, within the parent item, into the item. */
+function adoptLaterBlocks(
+  editor: Editor,
+  itemPath: Path,
+  parentListPath: Path,
+): void {
+  const grandparent = Node.get(editor, Path.parent(parentListPath));
+  if (!isListItem(grandparent)) return;
+  const first = parentListPath[parentListPath.length - 1] + 1;
+  const count = grandparent.children.length - first;
+  if (count <= 0) return;
+
+  const item = Node.get(editor, itemPath);
+  if (!isListItem(item)) return;
+  const source = Path.next(parentListPath);
+  for (let i = 0; i < count; i++) {
+    Transforms.moveNodes(editor, {
+      at: source,
+      to: [...itemPath, item.children.length + i],
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
