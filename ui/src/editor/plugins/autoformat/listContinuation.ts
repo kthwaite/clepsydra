@@ -66,6 +66,36 @@ function isNested(editor: Editor, itemPath: Path): boolean {
 }
 
 /**
+ * Enter over a selection that starts in a list-item: delete the selection, then
+ * continue the list from the collapsed caret, as one undo step. A selection that
+ * starts outside a list stays with the default break.
+ */
+function replaceSelectionAndContinue(
+  editor: Editor,
+  selection: Range,
+  historyBatch: boolean,
+): boolean {
+  const inItem = Editor.above(editor, {
+    at: Range.start(selection),
+    match: (n) => isListItem(n),
+  });
+  if (!inItem) return false;
+
+  const replace = () => {
+    Transforms.delete(editor);
+    if (!tryListContinuation(editor, { historyBatch: false, keepItem: true })) {
+      Transforms.splitNodes(editor, { always: true });
+    }
+  };
+  if (historyBatch) {
+    HistoryEditor.withNewBatch(editor as HistoryEditor, replace);
+  } else {
+    replace();
+  }
+  return true;
+}
+
+/**
  * Handle Enter key inside a list-item. Returns true if handled, false otherwise.
  *
  * Cases:
@@ -76,10 +106,20 @@ function isNested(editor: Editor, itemPath: Path): boolean {
  */
 export function tryListContinuation(
   editor: Editor,
-  { historyBatch = true }: { historyBatch?: boolean } = {},
+  {
+    historyBatch = true,
+    keepItem = false,
+  }: {
+    historyBatch?: boolean;
+    /** The item was just emptied by the caller, so Enter must not exit it. */
+    keepItem?: boolean;
+  } = {},
 ): boolean {
   const { selection } = editor;
-  if (!selection || !Range.isCollapsed(selection)) return false;
+  if (!selection) return false;
+  if (Range.isExpanded(selection)) {
+    return replaceSelectionAndContinue(editor, selection, historyBatch);
+  }
 
   // Find the nearest list-item ancestor
   const itemEntry = Editor.above(editor, {
@@ -112,7 +152,7 @@ export function tryListContinuation(
     }
   };
 
-  if (isEmpty) {
+  if (isEmpty && !keepItem) {
     if (isNested(editor, itemPath)) {
       // LC-03: Empty nested item -> outdent
       batchOp(() => outdentListItem(editor));
