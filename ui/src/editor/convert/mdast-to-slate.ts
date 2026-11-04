@@ -9,6 +9,8 @@ import {
   parseConversationMarker,
 } from "#/editor/conversation/marker";
 import { inlinePropertyScanner } from "#/editor/properties";
+import { kindIsInline } from "#/editor/schema/descriptor";
+import { getDescriptor } from "#/editor/schema/registry";
 import type {
   BlockRefElement,
   CustomElement,
@@ -113,7 +115,39 @@ export function mdastToSlate(markdown: string): Descendant[] {
     return [{ type: "paragraph", children: [{ text: "" }] }];
   }
 
-  return result;
+  return result.map(withInlineBoundaries);
+}
+
+const isInlineElement = (node: Descendant): boolean => {
+  if (isTextNode(node)) return false;
+  const descriptor = getDescriptor((node as CustomElement).type);
+  return descriptor !== undefined && kindIsInline(descriptor.kind);
+};
+
+/**
+ * Slate needs a text leaf on both sides of every inline, or the caret has nowhere
+ * to go there: after a wikilink at a line's end it lands inside the void and typing
+ * is dropped. Normalization adds these, but an initial value is not normalized, so
+ * the page would load without them.
+ */
+function withInlineBoundaries(node: Descendant): Descendant {
+  if (isTextNode(node)) return node;
+  const element = node as CustomElement;
+  if (!element.children) return node;
+
+  const children: Descendant[] = [];
+  for (const child of element.children) {
+    const inline = isInlineElement(child);
+    const previous = children[children.length - 1];
+    if (inline && (!previous || !isTextNode(previous))) {
+      children.push({ text: "" });
+    }
+    children.push(withInlineBoundaries(child));
+  }
+  const last = children[children.length - 1];
+  if (last && isInlineElement(last)) children.push({ text: "" });
+
+  return { ...element, children } as Descendant;
 }
 
 /**
