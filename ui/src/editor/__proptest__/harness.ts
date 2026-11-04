@@ -622,7 +622,8 @@ export function shapeViolations(
       const first = n.children[0];
       if (!first || !SlateElement.isElement(first)) {
         out.push("item-text-child");
-      } else if (first.type !== "paragraph") {
+      } else if (isList(first)) {
+        // A non-list block may lead an item: see ui/CLAUDE.md.
         out.push(`item-first-child-${first.type}`);
       }
     }
