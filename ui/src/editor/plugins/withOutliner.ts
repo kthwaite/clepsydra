@@ -101,9 +101,10 @@ function isItemNested(editor: Editor, itemPath: Path): boolean {
 }
 
 /**
- * Convert a top-level list-item into a paragraph at the same depth as the
- * containing list, preserving its text content. Splits the list if the item
- * is in the middle, so items above and below remain in valid lists.
+ * Lift a top-level list-item out of its list at the same depth as the list.
+ * Its first paragraph becomes a plain paragraph; every other child follows it
+ * unchanged and in order, so Backspace never deletes content. The list splits
+ * if the item is in the middle, so items above and below remain in valid lists.
  */
 export function unwrapListItemToParagraph(
   editor: Editor,
@@ -116,32 +117,9 @@ export function unwrapListItemToParagraph(
   const itemIndex = itemPath[itemPath.length - 1];
   const siblingCount = parentList.children.length;
 
-  // Snapshot the inline children of the item's first paragraph (these become
-  // the new paragraph's children). Nested lists are lifted after the new
-  // paragraph so Backspace never silently deletes child items.
   const itemNode = Node.get(editor, itemPath);
-  if (!SlateElement.isElement(itemNode)) return;
-  let paragraphChildren: Descendant[] = [{ text: "" }];
-  let foundParagraph = false;
-  for (const child of itemNode.children) {
-    if (SlateElement.isElement(child) && child.type === "paragraph") {
-      paragraphChildren = JSON.parse(JSON.stringify(child.children));
-      foundParagraph = true;
-      break;
-    }
-  }
-  if (!foundParagraph) {
-    // Fall back to the item's own inline children, skipping nested lists.
-    const inline = itemNode.children.filter(
-      (c) => !(SlateElement.isElement(c) && isListElement(c)),
-    );
-    if (inline.length > 0) {
-      paragraphChildren = JSON.parse(JSON.stringify(inline));
-    }
-  }
-  const nestedLists = itemNode.children
-    .filter((child) => SlateElement.isElement(child) && isListElement(child))
-    .map((child) => JSON.parse(JSON.stringify(child)) as SlateElement);
+  if (!isListItem(itemNode)) return;
+  const lifted = liftedItemBlocks(editor, itemNode);
 
   Editor.withoutNormalizing(editor, () => {
     // Capture trailing siblings before mutation so we can rebuild a list below.
@@ -173,15 +151,9 @@ export function unwrapListItemToParagraph(
       insertAt = Path.next(parentListPath);
     }
 
-    Transforms.insertNodes(
-      editor,
-      { type: "paragraph", children: paragraphChildren },
-      { at: insertAt },
-    );
-
-    let nextInsertAt = Path.next(insertAt);
-    for (const nestedList of nestedLists) {
-      Transforms.insertNodes(editor, nestedList, { at: nextInsertAt });
+    let nextInsertAt = insertAt;
+    for (const block of lifted) {
+      Transforms.insertNodes(editor, block, { at: nextInsertAt });
       nextInsertAt = Path.next(nextInsertAt);
     }
 
@@ -193,9 +165,41 @@ export function unwrapListItemToParagraph(
       );
     }
 
-    // Place the cursor at the start of the new paragraph.
+    // Place the cursor at the start of the former lead.
     Transforms.select(editor, Editor.start(editor, insertAt));
   });
+}
+
+/**
+ * The blocks an item leaves behind when lifted out of its list. Its block id
+ * and properties live on the item, so they move to the lead paragraph, and a
+ * reference to the line keeps resolving.
+ */
+function liftedItemBlocks(editor: Editor, item: ListItemElement): Descendant[] {
+  const children: Descendant[] = JSON.parse(JSON.stringify(item.children));
+  const firstBlock = children.findIndex(
+    (c) => SlateElement.isElement(c) && Editor.isBlock(editor, c),
+  );
+  const strayInlines =
+    firstBlock === -1 ? children : children.slice(0, firstBlock);
+  const blocks = firstBlock === -1 ? [] : children.slice(firstBlock);
+  const metadata = {
+    ...(item.blockId ? { blockId: item.blockId } : {}),
+    ...(item.properties ? { properties: item.properties } : {}),
+  };
+
+  const [lead] = blocks;
+  if (
+    strayInlines.length > 0 ||
+    !SlateElement.isElement(lead) ||
+    isListElement(lead)
+  ) {
+    // Nothing leads the item but stray inlines or a nested list.
+    const inlines = strayInlines.length > 0 ? strayInlines : [{ text: "" }];
+    return [{ type: "paragraph", ...metadata, children: inlines }, ...blocks];
+  }
+  if (lead.type !== "paragraph" && lead.type !== "heading") return blocks;
+  return [{ ...lead, ...metadata }, ...blocks.slice(1)];
 }
 
 // ---------------------------------------------------------------------------
