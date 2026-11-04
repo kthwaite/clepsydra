@@ -100,6 +100,13 @@ function gfmToMarkdownWithEmptyTasks(): Options {
               return value;
             }
 
+            // remark gives an ordered list right after another the `)` marker,
+            // which the wrapped handler does not recognize as a list marker.
+            value = value.replace(
+              /^(\d+\) {1,3})/,
+              `$1[${node.checked ? "x" : " "}] `,
+            );
+
             const splitEmptyTask = value.match(
               /^((?:[*+-]|\d+\.))\r?\n\[([ xX])\][ \t]*$/,
             );
@@ -108,11 +115,11 @@ function gfmToMarkdownWithEmptyTasks(): Options {
             }
 
             value = value.replace(
-              /^(?:[*+-]|\d+\.)(?=\r?\n|$)/,
+              /^(?:[*+-]|\d+[.)])(?=\r?\n|$)/,
               (marker) => `${marker} [${node.checked ? "x" : " "}] `,
             );
             return value.replace(
-              /^((?:[*+-]|\d+\.)[ \t]+\[[ xX]\])(?=\r?\n|$)/,
+              /^((?:[*+-]|\d+[.)])[ \t]+\[[ xX]\])(?=\r?\n|$)/,
               "$1 ",
             );
           },
