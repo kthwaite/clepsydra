@@ -127,7 +127,6 @@ function convertChildren(
   context: ConversionContext,
   extractMetadata = true,
   recognizeJournalTime = false,
-  insideBlockquote = false,
 ): Descendant[] {
   const result: Descendant[] = [];
   for (const node of nodes) {
@@ -137,13 +136,23 @@ function convertChildren(
       context,
       extractMetadata,
       recognizeJournalTime,
-      insideBlockquote,
     );
     if (converted != null) {
       result.push(converted);
     }
   }
   return result;
+}
+
+/**
+ * The parser hands over math as raw source, so each continuation line starts
+ * with its container's indent or `>` markers, as wide as the column the math
+ * starts in. The serializer writes that prefix again, so it must not stay in tex.
+ */
+function withoutContainerPrefix(body: string, startColumn = 1): string {
+  if (startColumn <= 1) return body;
+  const prefix = new RegExp(`\\n[ \\t>]{0,${startColumn - 1}}`, "g");
+  return body.replace(prefix, "\n");
 }
 
 function conversationMarkerFromBlockquote(
@@ -194,7 +203,6 @@ function convertBlockNode(
   context: ConversionContext,
   extractMetadata = true,
   recognizeJournalTime = false,
-  insideBlockquote = false,
 ): Descendant | null {
   switch (node.type) {
     case "paragraph": {
@@ -257,7 +265,6 @@ function convertBlockNode(
           context,
           true,
           false,
-          true,
         );
         return {
           type: "conversation-turn",
@@ -284,7 +291,6 @@ function convertBlockNode(
           context,
           true,
           false,
-          true,
         ),
       };
     }
@@ -301,9 +307,10 @@ function convertBlockNode(
       const math = node as FolioMathMdast;
       return {
         type: "math-block",
-        tex: insideBlockquote
-          ? math.data.folioSourceBody.replace(/^> ?/gm, "")
-          : math.data.folioSourceBody,
+        tex: withoutContainerPrefix(
+          math.data.folioSourceBody,
+          math.position?.start.column,
+        ),
         delimiter: math.data.folioDelimiter,
         children: [{ text: "" }],
       } satisfies MathBlockElement;
