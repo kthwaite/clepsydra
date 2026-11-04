@@ -227,7 +227,10 @@ export async function replay(
       }
       if (back) {
         const md2 = slateToMarkdown(clone(back));
-        if (preStable && md2 !== md) {
+        const hasTopEmpty =
+          json(comparable(editor.children)) !==
+          json(canonical(editor.children));
+        if (preStable && !hasTopEmpty && md2 !== md) {
           add(`md-unstable:${op.k}`, `md=${json(md)} md2=${json(md2)}`, step);
         }
       }
@@ -316,7 +319,8 @@ export async function continuation(
   const ls = outline(a);
   const c = caretInfo(a, ls);
   const b = makeEditor(reload(a.children));
-  if (json(comparable(b.children)) !== json(comparable(a.children))) return null;
+  // Lines must correspond one to one, or logical caret positions would not.
+  if (json(canonical(b.children)) !== json(canonical(a.children))) return null;
   if (c) {
     const bl = outline(b)[c.lineIndex];
     if (bl) {

@@ -61,6 +61,13 @@ const caseArb = fc
     }),
   );
 
+/** `chain` shrinks poorly; a fixed profile lets shrinking remove structure. */
+const shrinkArb = fc.record({
+  spec: arbDoc({ voids: true, extras: true, tasks: true, empties: true }),
+  ops: arbOps(kinds, ["a", "b", " "], 12),
+  enabled: fc.constant([...kinds] as OpKind[]),
+});
+
 interface Row {
   sig: string;
   count: number;
@@ -142,7 +149,7 @@ it.runIf(process.env.SHRINK_SIGS)(
       const hits = (vs: Violation[]) =>
         vs.find((v) => v.sig.startsWith(target));
       const r = await fc.check(
-        fc.asyncProperty(caseArb, async (c) => {
+        fc.asyncProperty(shrinkArb, async (c) => {
           const doc = buildDoc(c.spec);
           if (target.startsWith("start-unstable")) {
             if (stable(doc)) return true;

@@ -112,7 +112,8 @@ describe("Backspace", () => {
     const e = fromMd("- first\n\n  ```\n  code\n  ```\n");
     caretOn(e, "first");
     Editor.deleteBackward(e, { unit: "character" });
-    expect(lineText(e)).toEqual(["first", "code"]);
+    // The schema appends a caret-escape paragraph after a terminal code block.
+    expect(lineText(e).filter(Boolean)).toEqual(["first", "code"]);
   });
 
   it("C3c: at the start of an item keeps its block id", () => {
