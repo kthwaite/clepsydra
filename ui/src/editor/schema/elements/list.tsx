@@ -368,6 +368,16 @@ export const listItemDescriptor: ElementDescriptor<ListItemElement> = {
       Transforms.insertNodes(editor, makeParagraph({}), { at: [...path, 0] });
       return true;
     }
+    // A nested list cannot lead an item: the item would have no line of its own
+    // for a marker or a caret. Merging an item's text away can leave this shape.
+    const [lead] = node.children;
+    if (
+      SlateElement.isElement(lead) &&
+      (lead.type === "bulleted-list" || lead.type === "numbered-list")
+    ) {
+      Transforms.insertNodes(editor, makeParagraph({}), { at: [...path, 0] });
+      return true;
+    }
     // Claim the node to suppress Slate's default block-flattening of mixed
     // (text + nested list) content — preserves the outliner's nesting.
     return true;
