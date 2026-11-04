@@ -458,10 +458,11 @@ function convertListItem(
     ),
   };
 
-  // Markdown has no way to write an empty line above a nested list, so `-` then
-  // an indented list parses to a list-led item. Restore the canonical lead.
+  // An empty item parses with no children, or led by its nested list when it has
+  // one, since Markdown cannot write an empty line above a list. The page loads
+  // this value without normalizing it, so restore the canonical lead here.
   const lead = el.children[0];
-  if (lead && isNestedList(lead)) {
+  if (!lead || isNestedList(lead)) {
     el.children.unshift({ type: "paragraph", children: [{ text: "" }] });
   }
 

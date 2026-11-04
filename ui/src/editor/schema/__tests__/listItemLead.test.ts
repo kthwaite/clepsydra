@@ -21,6 +21,32 @@ function makeEditor(children: Descendant[]) {
 }
 
 describe("a bullet always has its own line", () => {
+  // The page loads the parser's output as is: Slate does not normalize an
+  // initial value, so these assert on what `markdownToSlate` itself returns.
+  it("a saved empty bullet loads with a line the caret can reach", () => {
+    const loaded = markdownToSlate("* a\n*\n* b\n");
+
+    expect(loaded).toEqual([list(item("a"), item(""), item("b"))]);
+
+    const editor = makeEditor(loaded);
+    expect(Editor.start(editor, [0, 1]).path).toEqual([0, 1, 0, 0]);
+  });
+
+  it("a saved empty numbered item loads with a line", () => {
+    expect(markdownToSlate("1. a\n2.\n")).toEqual([
+      {
+        type: "numbered-list",
+        children: [item("a"), item("")],
+      },
+    ]);
+  });
+
+  it("a saved empty child bullet loads with a line", () => {
+    expect(markdownToSlate("* a\n\n  *\n")).toEqual([
+      list(item("a", list(item("")))),
+    ]);
+  });
+
   it("reloading an empty parent keeps a paragraph above its children", () => {
     const saved = slateToMarkdown([list(item("", list(item("kid"))))]);
 
