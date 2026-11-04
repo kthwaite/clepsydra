@@ -9,7 +9,12 @@ import {
   pointAtBlockOffset,
   pointOfPos,
 } from "./lines";
-import { applyCharwise, cursorPos, selectPos } from "./operators";
+import {
+  applyCharwise,
+  cursorPos,
+  deleteAcrossBlocks,
+  selectPos,
+} from "./operators";
 import type { VimState } from "./types";
 
 /** `x`: delete `count` graphemes, clamped to the line end. Writes the register. */
@@ -165,10 +170,7 @@ export function joinLines(editor: Editor, count: number): Partial<VimState> {
     // An empty current line has nothing before the break, which Slate would
     // read as a range hanging over into the next line and shrink away.
     if (end) {
-      Transforms.delete(editor, {
-        at: { anchor: start, focus: end },
-        hanging: true,
-      });
+      deleteAcrossBlocks(editor, { anchor: start, focus: end }, true);
     }
     selectPos(editor, "normal", { li: from.li, off: cur.text.length });
   }

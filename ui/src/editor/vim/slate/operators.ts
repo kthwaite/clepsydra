@@ -1,4 +1,4 @@
-import type { Descendant } from "slate";
+import type { Descendant, PathRef, Point } from "slate";
 import { Editor, Element, Node, Path, Range, Transforms } from "slate";
 import type { Operator } from "../core/ast";
 import { nextBoundary } from "./graphemes";
@@ -235,6 +235,87 @@ export function deleteLineSpan(
   selectPos(editor, "normal", { li, off: firstNonBlank(after[li]) });
 }
 
+const isListNode = (node: Node) =>
+  Element.isElement(node) &&
+  (node.type === "bulleted-list" || node.type === "numbered-list");
+
+/**
+ * Tidy one wrapper a cross-block delete took the lead from. Slate removes a
+ * wrapper only if its block had one leaf, and leaves a nested list leading the
+ * item. Either would come back as an empty bullet: the children move to the
+ * start block's item, in reading order, and a wrapper left empty goes.
+ */
+function settleWrapper(
+  editor: Editor,
+  ref: PathRef,
+  startBlockPath: Path,
+): void {
+  const path = ref.current;
+  if (!path) return;
+  const target = Path.parent(startBlockPath);
+  const owner = target.length > 0 ? Node.get(editor, target) : null;
+  const wrapper = Node.get(editor, path) as Element;
+  if (
+    owner &&
+    isListItem(owner) &&
+    isListItem(wrapper) &&
+    wrapper.children.length > 0 &&
+    isListNode(wrapper.children[0])
+  ) {
+    let index = Path.isAncestor(target, path)
+      ? path[target.length]
+      : owner.children.length;
+    for (let left = wrapper.children.length; left > 0; left--) {
+      Transforms.moveNodes(editor, {
+        at: [...(ref.current as Path), 0],
+        to: [...target, index++],
+      });
+    }
+  }
+  const settled = ref.current as Path;
+  if ((Node.get(editor, settled) as Element).children.length === 0) {
+    Transforms.removeNodes(editor, { at: settled });
+  }
+}
+
+/** Delete a range that may cross blocks, leaving no empty bullet behind. */
+export function deleteAcrossBlocks(
+  editor: Editor,
+  at: Range,
+  hanging = false,
+): void {
+  const [start, end] = Range.edges(at);
+  const blockAt = (point: Point) =>
+    Editor.above(editor, {
+      at: point,
+      match: (n) => Element.isElement(n) && Editor.isBlock(editor, n),
+      mode: "lowest",
+    })?.[1];
+  const startBlock = blockAt(start);
+  const endBlock = blockAt(end);
+  if (!startBlock || !endBlock || Path.equals(startBlock, endBlock)) {
+    Transforms.delete(editor, { at, hanging });
+    return;
+  }
+  // Every wrapper of the end block that the start block is not also inside,
+  // innermost first: a fully covered item in between loses its lead too.
+  const wrappers: PathRef[] = [];
+  for (
+    let path = Path.parent(endBlock);
+    path.length > 0 && !Path.isAncestor(path, startBlock);
+    path = Path.parent(path)
+  ) {
+    wrappers.push(Editor.pathRef(editor, path));
+  }
+  Editor.withoutNormalizing(editor, () => {
+    Transforms.delete(editor, { at, hanging });
+    for (const ref of wrappers) {
+      settleWrapper(editor, ref, startBlock);
+      ref.unref();
+    }
+  });
+}
+
 /** Clear lines [a..b] into a single empty line and enter insert (vim cc). */
 export function changeLineSpan(
   editor: Editor,
@@ -254,7 +335,7 @@ export function changeLineSpan(
   // A collapsed `at` would delete one char forward: the next line's break.
   if (Range.isExpanded(at)) {
     // `hanging`: a span ending on an empty line still takes that line.
-    Transforms.delete(editor, { at, hanging: true });
+    deleteAcrossBlocks(editor, at, true);
   }
   selectPos(editor, "insert", { li: a, off: 0 });
 }
@@ -351,7 +432,7 @@ export function applyCharwise(
     deleteLineSpan(editor, lines, start.li, start.li);
     return op === "c" ? { register, mode: "insert" } : { register };
   }
-  Transforms.delete(editor, { at: range, hanging });
+  deleteAcrossBlocks(editor, range, hanging);
   selectPos(editor, op === "c" ? "insert" : "normal", start, "after");
   return op === "c" ? { register, mode: "insert" } : { register };
 }
