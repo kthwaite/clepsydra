@@ -80,4 +80,17 @@ describe("an empty child bullet directly under its parent's text", () => {
       "*\n  *\n",
     );
   });
+
+  it("works when the parent is an empty task", () => {
+    const doc = [
+      bullets({
+        type: "list-item",
+        checked: false,
+        children: [paragraph(""), bullets(item(""))],
+      } as Descendant),
+    ];
+
+    expect(slateToMarkdown(doc)).toBe("* [ ] \n\n  *\n");
+    expect(roundTrip(doc)).toEqual(doc);
+  });
 });
