@@ -1,6 +1,5 @@
 import {
   Editor,
-  Node,
   Path,
   Range,
   Element as SlateElement,
@@ -16,7 +15,7 @@ import {
   tryThematicBreak,
 } from "./blockTransforms";
 import { tryInlineTransform } from "./inlineTransforms";
-import { tryListContinuation } from "./listContinuation";
+import { isBlankBlock, tryListContinuation } from "./listContinuation";
 import {
   isInMathCandidate,
   tryDisplayMathNewline,
@@ -256,16 +255,15 @@ function tryBlockquoteContinuation(editor: Editor): boolean {
   });
   if (!bqEntry) return false;
 
-  const paraEntry = Editor.above(editor, {
+  const paraEntry = Editor.above<SlateElement>(editor, {
     match: (n) =>
       SlateElement.isElement(n) && (n as CustomElement).type === "paragraph",
   });
   if (!paraEntry) return false;
 
   const [paragraph] = paraEntry;
-  const text = Node.string(paragraph);
 
-  if (text.trim() === "") {
+  if (isBlankBlock(editor, paragraph)) {
     const [, bqPath] = bqEntry;
     HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
       Editor.withoutNormalizing(editor, () => {
