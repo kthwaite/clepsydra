@@ -138,6 +138,10 @@ function safeColorValue(value: string | undefined): string | undefined {
   return trimmed;
 }
 function textToMdast(leaf: CustomText): PhrasingContent | PhrasingContent[] {
+  // An empty leaf keeps its marks while the caret holds them for typing. Written
+  // out they are bare delimiters: `****` even reads as a thematic break.
+  if (leaf.text === "") return { type: "text", value: "" };
+
   // Inline code takes absolute precedence — markdown cannot nest marks inside code spans
   if (leaf.code) {
     const node: InlineCode = { type: "inlineCode", value: leaf.text };
