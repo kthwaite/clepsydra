@@ -10,7 +10,7 @@ import type {
 } from "mdast";
 import { gfmToMarkdown } from "mdast-util-gfm";
 import type {} from "mdast-util-gfm-strikethrough";
-import type { Options } from "mdast-util-to-markdown";
+import type { Join, Options } from "mdast-util-to-markdown";
 import { toMarkdown } from "mdast-util-to-markdown";
 import type { Descendant } from "slate";
 import { Text as SlateText } from "slate";
@@ -496,6 +496,32 @@ function withoutAtomicTrailingSentinel(nodes: Descendant[]): Descendant[] {
 
 // ---------------------------------------------------------------------------
 
+const isBlankParagraph = (node: Nodes | undefined): boolean =>
+  node?.type === "paragraph" &&
+  node.children.every((c) => c.type === "text" && c.value === "");
+
+/**
+ * CommonMark does not let an empty list item interrupt a paragraph, so a bare
+ * marker on the line after the parent's text reads as more of that text. A blank
+ * line ends the paragraph first. An item cannot start with a blank line followed
+ * by content, so an empty parent, whose marker line has no text, gets none. An
+ * empty task's marker line does hold text: the `[ ]` written by the task handler.
+ */
+const separateEmptyChildBullet: Join = (left, right, parent) => {
+  if (left.type !== "paragraph" || right.type !== "list") return undefined;
+  const firstItem = right.children[0];
+  if (
+    !firstItem ||
+    typeof firstItem.checked === "boolean" ||
+    (firstItem.children.length > 0 && !isBlankParagraph(firstItem.children[0]))
+  ) {
+    return undefined;
+  }
+  const parentHasMarkerText =
+    parent.type === "listItem" && typeof parent.checked === "boolean";
+  return !isBlankParagraph(left) || parentHasMarkerText ? 1 : undefined;
+};
+
 /**
  * Convert a Slate `Descendant[]` tree to a markdown string.
  */
@@ -510,6 +536,7 @@ export function slateToMdast(nodes: Descendant[]): string {
   const markdown = toMarkdown(root as Nodes, {
     bullet: "*",
     rule: "-",
+    join: [separateEmptyChildBullet],
     extensions: [
       baseFenceToMarkdown(),
       searchFenceToMarkdown(),
