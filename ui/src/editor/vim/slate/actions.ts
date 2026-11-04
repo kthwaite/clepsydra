@@ -1,10 +1,11 @@
-import { Editor, Element, Node, Transforms } from "slate";
+import { Editor, Element, Node, Point, Transforms } from "slate";
 import type { HistoryEditor } from "slate-history";
 import type { InsertWhere } from "../core/ast";
 import { advanceGraphemes, nextBoundary, prevBoundary } from "./graphemes";
 import {
   firstNonBlank,
   getLines,
+  type Line,
   pointAtBlockOffset,
   pointOfPos,
 } from "./lines";
@@ -24,6 +25,23 @@ export function deleteChar(editor: Editor, count: number): Partial<VimState> {
   });
 }
 
+/** Replace the chars of one grapheme, leaving any wikilink beside it alone. */
+function replaceGrapheme(
+  editor: Editor,
+  lines: Line[],
+  li: number,
+  off: number,
+  text: string,
+): void {
+  const end = nextBoundary(lines[li].text, off);
+  Transforms.insertText(editor, text, {
+    at: {
+      anchor: pointOfPos(editor, lines, { li, off }, "after"),
+      focus: pointOfPos(editor, lines, { li, off: end }, "before"),
+    },
+  });
+}
+
 /** `r`: replace `count` graphemes; aborts (like vim) when the line is too short. */
 export function replaceChar(
   editor: Editor,
@@ -33,17 +51,18 @@ export function replaceChar(
   const lines = getLines(editor);
   const from = cursorPos(editor, lines);
   const line = lines[from.li];
+  const starts: number[] = [];
   let end = from.off;
   for (let i = 0; i < count; i++) {
     if (end >= line.text.length) return {};
+    starts.push(end);
     end = nextBoundary(line.text, end);
   }
-  Transforms.insertText(editor, char.repeat(count), {
-    at: {
-      anchor: pointOfPos(editor, lines, from),
-      focus: pointOfPos(editor, lines, { li: from.li, off: end }),
-    },
-  });
+  // One at a time so a link or mark between graphemes survives. Right to left
+  // keeps the earlier columns valid.
+  for (const off of starts.reverse()) {
+    replaceGrapheme(editor, lines, from.li, off, char);
+  }
   // The replacement chars are single code units; land on the last one.
   selectPos(editor, "normal", { li: from.li, off: from.off + count - 1 });
   return {};
@@ -56,19 +75,22 @@ export function toggleCase(editor: Editor, count: number): Partial<VimState> {
   const line = lines[from.li];
   if (line.text.length === 0) return {};
   const end = advanceGraphemes(line.text, from.off, count);
-  const swapped = [...line.text.slice(from.off, end)]
-    .map((ch) => {
-      const lower = ch.toLowerCase();
-      const upper = ch.toUpperCase();
-      return ch === lower ? upper : lower;
-    })
-    .join("");
-  Transforms.insertText(editor, swapped, {
-    at: {
-      anchor: pointOfPos(editor, lines, from),
-      focus: pointOfPos(editor, lines, { li: from.li, off: end }),
-    },
-  });
+  const starts: number[] = [];
+  for (let off = from.off; off < end; off = nextBoundary(line.text, off)) {
+    starts.push(off);
+  }
+  // One at a time, right to left, as in replaceChar.
+  for (const off of starts.reverse()) {
+    const grapheme = line.text.slice(off, nextBoundary(line.text, off));
+    const swapped = [...grapheme]
+      .map((ch) => {
+        const lower = ch.toLowerCase();
+        const upper = ch.toUpperCase();
+        return ch === lower ? upper : lower;
+      })
+      .join("");
+    replaceGrapheme(editor, lines, from.li, off, swapped);
+  }
   selectPos(editor, "normal", { li: from.li, off: end });
   return {};
 }
@@ -82,26 +104,65 @@ export function joinLines(editor: Editor, count: number): Partial<VimState> {
     if (from.li >= lines.length - 1) break;
     const cur = lines[from.li];
     const next = lines[from.li + 1];
-    const lead = next.text.match(/\S/)?.index ?? next.text.length;
-    Transforms.delete(editor, {
-      at: {
-        anchor: pointOfPos(editor, lines, {
-          li: from.li,
-          off: cur.text.length,
-        }),
-        focus: pointOfPos(editor, lines, { li: from.li + 1, off: lead }),
-      },
-    });
-    const needSpace =
-      cur.text.length > 0 &&
-      !cur.text.endsWith(" ") &&
-      next.text.trim().length > 0;
-    if (needSpace) {
-      const now = getLines(editor);
-      Transforms.insertText(editor, " ", {
-        at: pointOfPos(editor, now, { li: from.li, off: cur.text.length }),
-      });
-    }
+    // Spaces after a leading link are text, not indent.
+    const leadingLink = !Point.equals(
+      pointOfPos(editor, lines, { li: from.li + 1, off: 0 }, "before"),
+      pointOfPos(editor, lines, { li: from.li + 1, off: 0 }, "after"),
+    );
+    const lead = leadingLink
+      ? 0
+      : (next.text.match(/\S/)?.index ?? next.text.length);
+    // Cut only the break and the indent: a wikilink ending the current line or
+    // starting the next sits outside this range.
+    const anchor = pointOfPos(
+      editor,
+      lines,
+      { li: from.li, off: cur.text.length },
+      "after",
+    );
+    const focus = pointOfPos(
+      editor,
+      lines,
+      { li: from.li + 1, off: lead },
+      "before",
+    );
+    // A link counts as content, though it adds no columns.
+    const curHasContent =
+      cur.text.length > 0 ||
+      !Point.equals(
+        anchor,
+        pointOfPos(editor, lines, { li: from.li, off: 0 }, "before"),
+      );
+    const nextHasContent =
+      next.text.trim().length > 0 ||
+      !Point.equals(
+        focus,
+        pointOfPos(
+          editor,
+          lines,
+          { li: from.li + 1, off: next.text.length },
+          "after",
+        ),
+      );
+    const endsInSpace =
+      cur.text.endsWith(" ") &&
+      Point.equals(
+        anchor,
+        pointOfPos(
+          editor,
+          lines,
+          { li: from.li, off: cur.text.length },
+          "before",
+        ),
+      );
+    const space = curHasContent && !endsInSpace && nextHasContent;
+    // The space goes in first: the join point has no column of its own when a
+    // link sits on either side of it.
+    const focusRef = Editor.pointRef(editor, focus);
+    if (space) Transforms.insertText(editor, " ", { at: anchor });
+    const start = { ...anchor, offset: anchor.offset + (space ? 1 : 0) };
+    const end = focusRef.unref();
+    if (end) Transforms.delete(editor, { at: { anchor: start, focus: end } });
     selectPos(editor, "normal", { li: from.li, off: cur.text.length });
   }
   return {};
@@ -175,7 +236,13 @@ export function enterInsert(
         : where === "first-nonblank"
           ? firstNonBlank(line)
           : line.text.length;
-  selectPos(editor, "insert", { li: from.li, off });
+  // Typing goes right before the caret's char, except `a`: right after it.
+  selectPos(
+    editor,
+    "insert",
+    { li: from.li, off },
+    where === "after" ? "before" : "after",
+  );
   return { mode: "insert" };
 }
 

@@ -3,6 +3,7 @@ import { Editor, Element, Node, Path, Transforms } from "slate";
 import type { Operator } from "../core/ast";
 import { nextBoundary } from "./graphemes";
 import {
+  type ColumnBias,
   clampCol,
   firstNonBlank,
   getLines,
@@ -22,11 +23,12 @@ export function selectPos(
   editor: Editor,
   mode: "normal" | "insert",
   pos: LinePos,
+  bias: ColumnBias = "before",
 ): void {
   const lines = getLines(editor);
   const li = Math.max(0, Math.min(pos.li, lines.length - 1));
   const off = clampCol(lines[li], pos.off, mode);
-  Transforms.select(editor, pointOfPos(editor, lines, { li, off }));
+  Transforms.select(editor, pointOfPos(editor, lines, { li, off }, bias));
 }
 
 /** Current cursor head as a (line, column) position. */
@@ -240,11 +242,14 @@ export function changeLineSpan(
   a: number,
   b: number,
 ): void {
-  const anchor = pointOfPos(editor, lines, { li: a, off: 0 });
-  const focus = pointOfPos(editor, lines, {
-    li: b,
-    off: lines[b].text.length,
-  });
+  // Whole lines: a wikilink at either edge goes with them.
+  const anchor = pointOfPos(editor, lines, { li: a, off: 0 }, "before");
+  const focus = pointOfPos(
+    editor,
+    lines,
+    { li: b, off: lines[b].text.length },
+    "after",
+  );
   Transforms.delete(editor, { at: { anchor, focus } });
   selectPos(editor, "insert", { li: a, off: 0 });
 }
@@ -303,9 +308,10 @@ export function applyCharwise(
   if (comparePos(start, end) >= 0) {
     return op === "c" ? { mode: "insert" } : {};
   }
+  // Hug the span's first and last chars, so a wikilink at either edge stays.
   const range: Range = {
-    anchor: pointOfPos(editor, lines, start),
-    focus: pointOfPos(editor, lines, end),
+    anchor: pointOfPos(editor, lines, start, "after"),
+    focus: pointOfPos(editor, lines, end, "before"),
   };
   const register = captureCharwise(editor, range);
   if (op === "y") {
@@ -328,7 +334,7 @@ export function applyCharwise(
       if (op !== "c") return {};
       Transforms.select(
         editor,
-        pointOfPos(editor, lines, { li: start.li, off: 0 }),
+        pointOfPos(editor, lines, { li: start.li, off: 0 }, "after"),
       );
       return { mode: "insert" };
     }
@@ -339,7 +345,7 @@ export function applyCharwise(
     return op === "c" ? { register, mode: "insert" } : { register };
   }
   Transforms.delete(editor, { at: range });
-  selectPos(editor, op === "c" ? "insert" : "normal", start);
+  selectPos(editor, op === "c" ? "insert" : "normal", start, "after");
   return op === "c" ? { register, mode: "insert" } : { register };
 }
 
@@ -435,7 +441,9 @@ export function pasteCharwise(
     after && line.text.length > 0
       ? { li: from.li, off: nextBoundary(line.text, from.off) }
       : from;
-  Transforms.select(editor, pointOfPos(editor, lines, at));
+  // `p` lands right after the caret's char, `P` right before it.
+  const bias = after && line.text.length > 0 ? "before" : "after";
+  Transforms.select(editor, pointOfPos(editor, lines, at, bias));
   const n = Math.min(count, MAX_PASTE_COUNT);
   for (let i = 0; i < n; i++) {
     Transforms.insertFragment(editor, structuredClone(register.fragment));
