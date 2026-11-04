@@ -173,6 +173,10 @@ export function tryListContinuation(
 
   const [, paragraphPath] = paragraphEntry;
 
+  // A paragraph inside a block in the item, such as a blockquote, is not one of
+  // the item's own lines: Enter there belongs to that block.
+  if (!Path.equals(Path.parent(paragraphPath), itemPath)) return false;
+
   // Get the text node and offset
   const point = selection.anchor;
   const textNode = Node.get(editor, point.path);
@@ -241,6 +245,17 @@ export function tryListContinuation(
         at: Path.next(paragraphPath),
         to: [...nextItemPath, 0],
       });
+
+      // Blocks after the split point follow the tail, so nothing that came
+      // after the caret ends up above it.
+      const laterBlocks =
+        itemNode.children.length - paragraphPath[paragraphPath.length - 1] - 1;
+      for (let i = 0; i < laterBlocks; i++) {
+        Transforms.moveNodes(editor, {
+          at: Path.next(paragraphPath),
+          to: [...nextItemPath, i + 1],
+        });
+      }
 
       // Move cursor to start of new item
       Transforms.select(editor, Editor.start(editor, nextItemPath));
