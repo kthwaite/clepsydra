@@ -71,4 +71,18 @@ describe("Enter inside the text of a bullet that has children", () => {
       list(item("lead", paragraph("a")), item("b", list(item("kid")))),
     ]);
   });
+
+  it("inside a blockquote in the item, leaves Enter to the blockquote", () => {
+    const quote = {
+      type: "blockquote",
+      children: [paragraph("quote")],
+    } as Descendant;
+    const editor = makeEditor([list(item("lead", quote, list(item("kid"))))]);
+    const before = JSON.stringify(editor.children);
+    Transforms.select(editor, { path: [0, 0, 1, 0, 0], offset: 2 });
+
+    expect(tryListContinuation(editor)).toBe(false);
+
+    expect(JSON.stringify(editor.children)).toBe(before);
+  });
 });
