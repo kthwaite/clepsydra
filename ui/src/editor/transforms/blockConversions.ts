@@ -8,7 +8,7 @@ import {
   Transforms,
 } from "slate";
 import { HistoryEditor } from "slate-history";
-import { isListElement, type ListType } from "#/editor/plugins/listUtils";
+import { isListItem, type ListType } from "#/editor/plugins/listUtils";
 import { makeBlockquote } from "#/editor/schema/elements/blockquote";
 import {
   makeBulletedList,
@@ -101,17 +101,6 @@ export function applySelectionList(editor: Editor, listType: ListType): void {
   if (!editor.selection || Range.isCollapsed(editor.selection)) return;
 
   withBatch(editor, () => {
-    // Split existing list containers at the selection, leaving other items alone.
-    Transforms.unwrapNodes(editor, {
-      match: isListElement,
-      split: true,
-    });
-    Transforms.unwrapNodes(editor, {
-      match: (node) =>
-        SlateElement.isElement(node) && node.type === "list-item",
-      split: true,
-    });
-
     const isTextBlock = (node: Node) =>
       SlateElement.isElement(node) &&
       (node.type === "paragraph" || node.type === "heading");
@@ -119,6 +108,8 @@ export function applySelectionList(editor: Editor, listType: ListType): void {
 
     // Work backwards so splitting a later line never invalidates earlier paths.
     for (const [block, path] of blocks.reverse()) {
+      // A soft line inside a list item is part of that item.
+      if (isListItem(Node.get(editor, Path.parent(path)))) continue;
       for (const [leaf, leafPath] of Array.from(Node.texts(block)).reverse()) {
         for (let offset = leaf.text.lastIndexOf("\n"); offset >= 0; ) {
           const point = { path: [...path, ...leafPath], offset };
@@ -149,14 +140,45 @@ export function applySelectionList(editor: Editor, listType: ListType): void {
       for (const ref of paths) {
         const path = ref.current;
         if (!path) continue;
-        Transforms.setNodes(editor, { type: "paragraph" }, { at: path });
-        Transforms.unsetNodes(editor, "level", { at: path });
-        wrapInList(editor, path, listType);
+        if ((Node.get(editor, path) as SlateElement).type === "heading") {
+          Transforms.setNodes(editor, { type: "paragraph" }, { at: path });
+          Transforms.unsetNodes(editor, "level", { at: path });
+        }
+        // A line that is already an item keeps the item, and everything on it.
+        const item = itemLedBy(editor, path);
+        if (item) setItemListType(editor, item, listType);
+        else wrapInList(editor, path, listType);
       }
     } finally {
       for (const ref of paths) ref.unref();
     }
   });
+}
+
+/** The list item whose own line is the paragraph at `at`, if there is one. */
+function itemLedBy(editor: Editor, at: Path): Path | null {
+  if (at.length < 2 || at[at.length - 1] !== 0) return null;
+  const parentPath = Path.parent(at);
+  const parent = Node.get(editor, parentPath);
+  return SlateElement.isElement(parent) && parent.type === "list-item"
+    ? parentPath
+    : null;
+}
+
+/** Put one item in a list of `listType`, splitting its list around it if needed. */
+function setItemListType(editor: Editor, item: Path, listType: ListType): void {
+  const list = Node.get(editor, Path.parent(item));
+  if (SlateElement.isElement(list) && list.type === listType) return;
+  const ref = Editor.pathRef(editor, item);
+  Transforms.liftNodes(editor, { at: item });
+  const lifted = ref.unref();
+  if (!lifted) return;
+  Transforms.wrapNodes(
+    editor,
+    listType === "bulleted-list" ? makeBulletedList({}) : makeNumberedList({}),
+    { at: lifted },
+  );
+  mergeWithAdjacentList(editor, lifted, listType);
 }
 
 function wrapInList(
