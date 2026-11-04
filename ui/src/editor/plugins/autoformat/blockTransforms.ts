@@ -226,6 +226,13 @@ export function tryThematicBreak(editor: Editor): boolean {
   const [block, blockPath] = blockEntry;
   if (block.type !== "paragraph") return false;
 
+  // A list item leads with a paragraph, and a void break there would hold no
+  // text. The dashes stay literal instead.
+  const parent = Node.get(editor, Path.parent(blockPath));
+  if (SlateElement.isElement(parent) && parent.type === "list-item") {
+    return false;
+  }
+
   const text = getBlockTriggerText(editor, blockEntry, {
     requireLineEnd: true,
   });
