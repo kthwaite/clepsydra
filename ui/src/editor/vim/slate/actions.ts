@@ -1,5 +1,7 @@
-import { Editor, Element, Node, Point, Transforms } from "slate";
+import { Editor, Element, Node, Path, Point, Transforms } from "slate";
 import type { HistoryEditor } from "slate-history";
+import { makeParagraph } from "#/editor/schema/elements/paragraph";
+import type { ListItemElement } from "#/editor/schema/types";
 import type { InsertWhere } from "../core/ast";
 import { advanceGraphemes, nextBoundary, prevBoundary } from "./graphemes";
 import {
@@ -183,6 +185,23 @@ function isCodeBlock(editor: Editor, path: number[]): boolean {
 }
 
 /**
+ * The item whose lead line is `blockPath`, when that line shows nothing: no text
+ * but whitespace, no inline void. Enter on such an item leaves the list.
+ */
+function emptyItemOf(editor: Editor, blockPath: Path): Path | null {
+  if (blockPath[blockPath.length - 1] !== 0 || blockPath.length < 2)
+    return null;
+  const itemPath = Path.parent(blockPath);
+  const item = Node.get(editor, itemPath);
+  if (!Element.isElement(item) || item.type !== "list-item") return null;
+  const block = Node.get(editor, blockPath) as Element;
+  const blank =
+    Node.string(block).trim() === "" &&
+    !block.children.some((child) => Element.isElement(child));
+  return blank ? itemPath : null;
+}
+
+/**
  * `o`/`O`: open a line. Normal blocks go through `editor.insertBreak()` so
  * the host's break behavior (list continuation) applies; code blocks insert
  * a newline within the block instead of splitting it.
@@ -208,6 +227,21 @@ function openLine(editor: Editor, below: boolean): void {
       });
       selectPos(editor, "insert", { li: from.li, off: 0 });
     }
+    return;
+  }
+
+  const emptyItem = emptyItemOf(editor, line.blockPath);
+  if (emptyItem) {
+    // Enter here would leave the list; these commands only open a line.
+    const { checked } = Node.get(editor, emptyItem) as ListItemElement;
+    const at = below ? Path.next(emptyItem) : emptyItem;
+    const fresh: ListItemElement = {
+      type: "list-item",
+      children: [makeParagraph({})],
+      ...(checked === undefined || checked === null ? {} : { checked: false }),
+    };
+    Transforms.insertNodes(editor, fresh, { at });
+    Transforms.select(editor, Editor.start(editor, at));
     return;
   }
 
