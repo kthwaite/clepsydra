@@ -32,6 +32,26 @@ import { searchFenceToMarkdown } from "./searchEmbedMarkdown";
 // toMarkdown extension for wikilinks
 // ---------------------------------------------------------------------------
 
+/**
+ * An escaped `[` that starts a line opens display math on reload, and an
+ * unclosed one takes every following block in its container with it. Text must
+ * stay text, so write that bracket as an entity. Everywhere else `\\[` is safe.
+ */
+function literalBracketToMarkdown(): Options {
+  return {
+    handlers: {
+      text(node, _parent, state, info) {
+        const atLineStart = info.before === "\n";
+        return state
+          .safe(node.value, info)
+          .replace(/(^|\n[ \t]*)\\\[/g, (match, lead: string) =>
+            lead === "" && !atLineStart ? match : `${lead}&#x5B;`,
+          );
+      },
+    } as Options["handlers"],
+  };
+}
+
 function wikiLinkToMarkdownExtension(): Options {
   return {
     handlers: {
@@ -561,6 +581,7 @@ export function slateToMdast(nodes: Descendant[]): string {
       folioMathToMarkdown(),
       gfmToMarkdownWithEmptyTasks(),
       wikiLinkToMarkdownExtension(),
+      literalBracketToMarkdown(),
       singleTildeStrikethroughExtension(),
     ],
   });
