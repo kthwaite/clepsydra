@@ -458,6 +458,13 @@ function convertListItem(
     ),
   };
 
+  // Markdown has no way to write an empty line above a nested list, so `-` then
+  // an indented list parses to a list-led item. Restore the canonical lead.
+  const lead = el.children[0];
+  if (lead && isNestedList(lead)) {
+    el.children.unshift({ type: "paragraph", children: [{ text: "" }] });
+  }
+
   // Propagate checkbox state from GFM task list items
   if (node.checked === true) {
     el.checked = true;
