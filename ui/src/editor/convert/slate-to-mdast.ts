@@ -110,11 +110,12 @@ function gfmToMarkdownWithEmptyTasks(): Options {
             // With children after the empty paragraph, the checkbox lands on
             // the first child's line instead. Put it back on the marker's line.
             const splitEmptyParent = value.match(
-              /^((?:[*+-]|\d+\.))\r?\n\[([ xX])\] ((?: +)[^\r\n][\s\S]*)$/,
+              /^((?:[*+-]|\d+\.))\r?\n\[([ xX])\] (\r?\n)?( +[^\r\n][\s\S]*)$/,
             );
             if (splitEmptyParent) {
-              const [, marker, box, children] = splitEmptyParent;
-              return `${marker} [${box}] \n${children}`;
+              const [, marker, box, blankLine = "", children] =
+                splitEmptyParent;
+              return `${marker} [${box}] \n${blankLine}${children}`;
             }
 
             value = value.replace(
