@@ -340,7 +340,7 @@ function run(
         return { ...done, ...patch };
       }
       const span = visualCharSpan(lines, state.visualAnchor, state.visualHead);
-      const patch = applyCharwise(editor, lines, command.op, span);
+      const patch = applyCharwise(editor, lines, command.op, span, true);
       return { ...done, ...patch };
     }
     case "visual-object": {

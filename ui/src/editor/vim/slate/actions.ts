@@ -162,7 +162,14 @@ export function joinLines(editor: Editor, count: number): Partial<VimState> {
     if (space) Transforms.insertText(editor, " ", { at: anchor });
     const start = { ...anchor, offset: anchor.offset + (space ? 1 : 0) };
     const end = focusRef.unref();
-    if (end) Transforms.delete(editor, { at: { anchor: start, focus: end } });
+    // An empty current line has nothing before the break, which Slate would
+    // read as a range hanging over into the next line and shrink away.
+    if (end) {
+      Transforms.delete(editor, {
+        at: { anchor: start, focus: end },
+        hanging: true,
+      });
+    }
     selectPos(editor, "normal", { li: from.li, off: cur.text.length });
   }
   return {};

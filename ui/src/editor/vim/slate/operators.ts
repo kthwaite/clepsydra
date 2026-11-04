@@ -1,5 +1,5 @@
-import type { Descendant, Range } from "slate";
-import { Editor, Element, Node, Path, Transforms } from "slate";
+import type { Descendant } from "slate";
+import { Editor, Element, Node, Path, Range, Transforms } from "slate";
 import type { Operator } from "../core/ast";
 import { nextBoundary } from "./graphemes";
 import {
@@ -250,7 +250,12 @@ export function changeLineSpan(
     { li: b, off: lines[b].text.length },
     "after",
   );
-  Transforms.delete(editor, { at: { anchor, focus } });
+  const at = { anchor, focus };
+  // A collapsed `at` would delete one char forward: the next line's break.
+  if (Range.isExpanded(at)) {
+    // `hanging`: a span ending on an empty line still takes that line.
+    Transforms.delete(editor, { at, hanging: true });
+  }
   selectPos(editor, "insert", { li: a, off: 0 });
 }
 
@@ -303,6 +308,8 @@ export function applyCharwise(
   lines: Line[],
   op: Operator,
   span: CharwiseSpan,
+  /** The span is exact, as in visual mode: never let Slate shrink it. */
+  hanging = false,
 ): Partial<VimState> {
   const { start, end } = span;
   if (comparePos(start, end) >= 0) {
@@ -344,7 +351,7 @@ export function applyCharwise(
     deleteLineSpan(editor, lines, start.li, start.li);
     return op === "c" ? { register, mode: "insert" } : { register };
   }
-  Transforms.delete(editor, { at: range });
+  Transforms.delete(editor, { at: range, hanging });
   selectPos(editor, op === "c" ? "insert" : "normal", start, "after");
   return op === "c" ? { register, mode: "insert" } : { register };
 }
