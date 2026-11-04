@@ -98,6 +98,7 @@ describe("conversation markdown/Slate conversion", () => {
               url: "https://example.com",
               children: [{ text: "link" }],
             },
+            { text: "" },
           ],
         },
       ],

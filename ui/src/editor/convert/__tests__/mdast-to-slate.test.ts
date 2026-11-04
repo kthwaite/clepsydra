@@ -376,11 +376,13 @@ describe("markdownToSlate", () => {
         {
           type: "paragraph",
           children: [
+            { text: "" },
             {
               type: "link",
               url: "https://example.com",
               children: [{ text: "click here" }],
             },
+            { text: "" },
           ],
         },
       ]);
@@ -392,11 +394,13 @@ describe("markdownToSlate", () => {
         {
           type: "paragraph",
           children: [
+            { text: "" },
             {
               type: "link",
               url: "https://example.com",
               children: [{ text: "bold link", bold: true }],
             },
+            { text: "" },
           ],
         },
       ]);
@@ -411,6 +415,7 @@ describe("markdownToSlate", () => {
         {
           type: "paragraph",
           children: [
+            { text: "" },
             {
               type: "link",
               url: "https://example.com",
@@ -426,6 +431,7 @@ describe("markdownToSlate", () => {
                 },
               ],
             },
+            { text: "" },
           ],
         },
       ]);
@@ -440,6 +446,7 @@ describe("markdownToSlate", () => {
         {
           type: "paragraph",
           children: [
+            { text: "" },
             {
               type: "link",
               url: "notes/source.md",
@@ -450,6 +457,7 @@ describe("markdownToSlate", () => {
                 },
               ],
             },
+            { text: "" },
           ],
         },
       ]);
@@ -538,11 +546,13 @@ describe("markdownToSlate", () => {
         {
           type: "paragraph",
           children: [
+            { text: "" },
             {
               type: "wikilink",
               target: "Some Page",
               children: [{ text: "" }],
             },
+            { text: "" },
           ],
         },
       ]);
@@ -932,6 +942,7 @@ describe("tables", () => {
       { text: "bold", bold: true },
       { text: " and " },
       { type: "wikilink", target: "Page", children: [{ text: "" }] },
+      { text: "" },
     ]);
   });
 
