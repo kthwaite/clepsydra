@@ -146,6 +146,17 @@ function convertChildren(
   return result;
 }
 
+/**
+ * A container with no content parses with no children, and the page loads this
+ * value without normalizing it. Give it a line the caret can reach.
+ */
+function withEmptyLine(
+  children: Descendant[],
+  emptyLine: Descendant = { type: "paragraph", children: [{ text: "" }] },
+): Descendant[] {
+  return children.length > 0 ? children : [emptyLine];
+}
+
 function conversationMarkerFromBlockquote(
   node: Extract<RootContent, { type: "blockquote" }>,
 ): { marker: ConversationMarker; body: RootContent[] } | null {
@@ -278,13 +289,15 @@ function convertBlockNode(
       }
       return {
         type: "blockquote",
-        children: convertChildren(
-          node.children as RootContent[],
-          source,
-          context,
-          true,
-          false,
-          true,
+        children: withEmptyLine(
+          convertChildren(
+            node.children as RootContent[],
+            source,
+            context,
+            true,
+            false,
+            true,
+          ),
         ),
       };
     }
@@ -353,10 +366,9 @@ function convertBlockNode(
       return {
         type: "footnote-def",
         identifier: (node as { identifier: string }).identifier,
-        children: convertChildren(
-          node.children as RootContent[],
-          source,
-          context,
+        children: withEmptyLine(
+          convertChildren(node.children as RootContent[], source, context),
+          { text: "" },
         ),
       };
 
