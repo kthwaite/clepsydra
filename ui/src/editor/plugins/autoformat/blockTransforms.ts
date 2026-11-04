@@ -17,7 +17,7 @@ const HEADING_RE = /^(#{1,6})$/;
 const NUMBERED_LIST_RE = /^(\d+)\.$/;
 const BULLETED_LIST_RE = /^[-*]$/;
 const BLOCKQUOTE_RE = /^>$/;
-const TASK_RE = /^\[([ xX]?)\]$/;
+export const TASK_RE = /^\[([ xX]?)\]$/;
 const CODE_FENCE_RE = /^```(\w*)$/;
 
 // ---------------------------------------------------------------------------
