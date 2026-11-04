@@ -312,7 +312,7 @@ function convertListItem(
   const li: ListItem = {
     type: "listItem",
     spread: false,
-    children: convertBlockChildren(node.children),
+    children: dropEmptyLeadParagraphs(convertBlockChildren(node.children)),
   };
 
   // Propagate checkbox state for GFM task list items
@@ -325,6 +325,31 @@ function convertListItem(
   appendBlockMetadataToListItem(li, node);
 
   return li;
+}
+
+/**
+ * CommonMark lets an item start with at most one blank line, so a bare marker,
+ * a blank line, and text ends the item: the text leaves the list and swallows
+ * the bullets after it. An empty lead before a paragraph has no valid Markdown
+ * form, so it is dropped and the text leads the item.
+ */
+function dropEmptyLeadParagraphs(children: BlockContent[]): BlockContent[] {
+  let first = 0;
+  while (
+    children[first]?.type === "paragraph" &&
+    isEmptyParagraph(children[first]) &&
+    children[first + 1]?.type === "paragraph"
+  ) {
+    first++;
+  }
+  return children.slice(first);
+}
+
+function isEmptyParagraph(block: BlockContent): boolean {
+  return (
+    block.type === "paragraph" &&
+    block.children.every((c) => c.type === "text" && c.value === "")
+  );
 }
 
 // ---------------------------------------------------------------------------
