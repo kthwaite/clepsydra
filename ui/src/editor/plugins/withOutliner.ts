@@ -8,6 +8,7 @@ import {
   Element as SlateElement,
   Transforms,
 } from "slate";
+import { insertListFragment } from "#/editor/plugins/listFragment";
 import { isListElement, isListItem } from "#/editor/plugins/listUtils";
 import type { ListItemElement } from "#/editor/types";
 
@@ -16,7 +17,17 @@ import type { ListItemElement } from "#/editor/types";
  * outdenting/unwrapping on Backspace or Slate's ordinary text deletion.
  */
 export function withOutliner(editor: Editor): Editor {
-  const { deleteBackward, deleteForward } = editor;
+  const { deleteBackward, deleteForward, insertFragment } = editor;
+
+  editor.insertFragment = (fragment, options) => {
+    if (options?.at) {
+      insertFragment(fragment, options);
+      return;
+    }
+    insertListFragment(editor, fragment as Descendant[], (prepared) => {
+      insertFragment(prepared, options);
+    });
+  };
 
   editor.deleteBackward = (unit) => {
     if (joinAdjacentLists(editor, "backward")) return;
