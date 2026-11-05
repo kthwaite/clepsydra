@@ -13,6 +13,7 @@ import { makeFootnoteRef } from "#/editor/schema/elements/footnoteRef";
 import { makeWikilink } from "#/editor/schema/elements/wikilink";
 import { ensureFootnoteDef } from "#/editor/transforms/footnotes";
 import type { CustomElement } from "#/editor/types";
+import { TASK_RE } from "./blockTransforms";
 
 type MarkType = "bold" | "italic" | "strikethrough" | "code";
 
@@ -398,6 +399,23 @@ function tryInlinePropertyTransform(
   return true;
 }
 
+/**
+ * `[ ]` or `[x]` opening a paragraph may be a task marker, which needs the next
+ * Space to see the brackets directly before the caret. A link typed there still
+ * converts when its `)` arrives.
+ */
+function isTaskMarkerAtBlockStart(
+  editor: Editor,
+  path: Path,
+  openBracketIdx: number,
+  label: string,
+): boolean {
+  if (openBracketIdx !== 0 || path[path.length - 1] !== 0) return false;
+  if (!TASK_RE.test(`[${label}]`)) return false;
+  const block = Node.get(editor, Path.parent(path));
+  return SlateElement.isElement(block) && block.type === "paragraph";
+}
+
 function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
   const info = getTextBefore(editor);
   if (!info) return false;
@@ -422,6 +440,9 @@ function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
 
   const label = textBefore.slice(openBracketIdx + 1, contentEnd);
   if (label.length === 0) return false;
+  if (isTaskMarkerAtBlockStart(editor, path, openBracketIdx, label)) {
+    return false;
+  }
 
   if (label.startsWith("^")) {
     const identifier = label.slice(1);
