@@ -1,5 +1,6 @@
 import {
   Editor,
+  Node,
   Path,
   type Point,
   Range,
@@ -352,6 +353,17 @@ function replaceInline(
   });
 }
 
+/** GFM writes a checkbox above a paragraph, so a task keeps its lead paragraph. */
+function leadsTask(editor: Editor, blockPath: Path): boolean {
+  if (blockPath[blockPath.length - 1] !== 0) return false;
+  const parent = Node.get(editor, Path.parent(blockPath));
+  return (
+    SlateElement.isElement(parent) &&
+    parent.type === "list-item" &&
+    parent.checked != null
+  );
+}
+
 function replaceDisplay(
   editor: Editor,
   blockPath: Path,
@@ -359,16 +371,22 @@ function replaceDisplay(
 ): void {
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
-      Transforms.removeNodes(editor, { at: blockPath });
+      const keepLead = leadsTask(editor, blockPath);
+      if (keepLead) {
+        Transforms.delete(editor, { at: Editor.range(editor, blockPath) });
+      } else {
+        Transforms.removeNodes(editor, { at: blockPath });
+      }
+      const mathPath = keepLead ? Path.next(blockPath) : blockPath;
       Transforms.insertNodes(
         editor,
         makeMathBlock({
           tex: match.tex,
           delimiter: match.delimiter as "$$" | "\\[",
         }),
-        { at: blockPath },
+        { at: mathPath },
       );
-      const followingPath = Path.next(blockPath);
+      const followingPath = Path.next(mathPath);
       Transforms.insertNodes(
         editor,
         { type: "paragraph", children: [{ text: "" }] },
