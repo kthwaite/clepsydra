@@ -17,7 +17,7 @@ import {
 } from "#/editor/schema/elements/list";
 import { makeParagraph } from "#/editor/schema/elements/paragraph";
 import { insertJournalTimeHeading } from "#/editor/transforms/journalTime";
-import type { CodeBlockElement } from "#/editor/types";
+import type { CodeBlockElement, ListItemElement } from "#/editor/types";
 
 export type BlockConversion =
   | { type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6 }
@@ -60,14 +60,21 @@ export function applyBlockConversion(
         );
         break;
       case "bulleted-list":
-        wrapInList(editor, at, "bulleted-list");
+      case "numbered-list": {
+        const item = itemLedBy(editor, at);
+        if (item) setItemListType(editor, item, conversion.type);
+        else wrapInList(editor, at, conversion.type);
         break;
-      case "numbered-list":
-        wrapInList(editor, at, "numbered-list");
+      }
+      case "task": {
+        const checked = conversion.checked ?? false;
+        const item = itemLedBy(editor, at);
+        if (!item) wrapInList(editor, at, "bulleted-list", checked);
+        else if ((Node.get(editor, item) as ListItemElement).checked == null) {
+          Transforms.setNodes(editor, { checked }, { at: item });
+        }
         break;
-      case "task":
-        wrapInList(editor, at, "bulleted-list", conversion.checked ?? false);
-        break;
+      }
       case "blockquote":
         Transforms.wrapNodes(editor, makeBlockquote({}), { at });
         break;
@@ -157,6 +164,32 @@ export function applySelectionList(editor: Editor, listType: ListType): void {
       for (const ref of paths) ref.unref();
     }
   });
+}
+
+/** The list item whose own line is the paragraph at `at`, if there is one. */
+function itemLedBy(editor: Editor, at: Path): Path | null {
+  if (at.length < 2 || at[at.length - 1] !== 0) return null;
+  const parentPath = Path.parent(at);
+  const parent = Node.get(editor, parentPath);
+  return SlateElement.isElement(parent) && parent.type === "list-item"
+    ? parentPath
+    : null;
+}
+
+/** Put one item in a list of `listType`, splitting its list around it if needed. */
+function setItemListType(editor: Editor, item: Path, listType: ListType): void {
+  const list = Node.get(editor, Path.parent(item));
+  if (SlateElement.isElement(list) && list.type === listType) return;
+  const ref = Editor.pathRef(editor, item);
+  Transforms.liftNodes(editor, { at: item });
+  const lifted = ref.unref();
+  if (!lifted) return;
+  Transforms.wrapNodes(
+    editor,
+    listType === "bulleted-list" ? makeBulletedList({}) : makeNumberedList({}),
+    { at: lifted },
+  );
+  mergeWithAdjacentList(editor, lifted, listType);
 }
 
 function wrapInList(
