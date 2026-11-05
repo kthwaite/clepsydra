@@ -370,10 +370,15 @@ export const listItemDescriptor: ElementDescriptor<ListItemElement> = {
     }
     // A nested list cannot lead an item: the item would have no line of its own
     // for a marker or a caret. Merging an item's text away can leave this shape.
+    // Any other block may lead, except in a task: GFM writes the checkbox above a
+    // paragraph, so without one the check is gone on save.
     const [lead] = node.children;
+    const isTask = node.checked !== undefined && node.checked !== null;
     if (
       SlateElement.isElement(lead) &&
-      (lead.type === "bulleted-list" || lead.type === "numbered-list")
+      (lead.type === "bulleted-list" ||
+        lead.type === "numbered-list" ||
+        (isTask && lead.type !== "paragraph"))
     ) {
       Transforms.insertNodes(editor, makeParagraph({}), { at: [...path, 0] });
       return true;

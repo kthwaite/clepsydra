@@ -96,3 +96,45 @@ describe("a bullet always has its own line", () => {
     expect(reloaded).toEqual(editor.children);
   });
 });
+
+describe("a task always leads with a paragraph", () => {
+  const code = (text: string) =>
+    ({ type: "code-block", children: [{ text }] }) as Descendant;
+  const task = (...children: Descendant[]) =>
+    ({ type: "list-item", checked: true, children }) as Descendant;
+
+  it("Delete on an emptied task's lead keeps a line for the checkbox", () => {
+    const editor = makeEditor([list(task(paragraph(""), code("c")))]);
+    Transforms.select(editor, Editor.start(editor, [0, 0, 0]));
+
+    editor.deleteForward("character");
+
+    expect(editor.children).toEqual([list(task(paragraph(""), code("c")))]);
+  });
+
+  it("a transform replacing a task's lead with a block leaves it a line", () => {
+    const editor = makeEditor([list(task(paragraph("")))]);
+
+    Editor.withoutNormalizing(editor, () => {
+      Transforms.removeNodes(editor, { at: [0, 0, 0] });
+      Transforms.insertNodes(editor, code("c"), { at: [0, 0, 0] });
+    });
+
+    expect(editor.children).toEqual([list(task(paragraph(""), code("c")))]);
+  });
+
+  it("a plain item may still lead with a block", () => {
+    const editor = makeEditor([
+      list({ type: "list-item", children: [paragraph("")] } as Descendant),
+    ]);
+
+    Editor.withoutNormalizing(editor, () => {
+      Transforms.removeNodes(editor, { at: [0, 0, 0] });
+      Transforms.insertNodes(editor, code("c"), { at: [0, 0, 0] });
+    });
+
+    expect(editor.children).toEqual([
+      list({ type: "list-item", children: [code("c")] } as Descendant),
+    ]);
+  });
+});
