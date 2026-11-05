@@ -10,7 +10,7 @@ import type {
 } from "mdast";
 import { gfmToMarkdown } from "mdast-util-gfm";
 import type {} from "mdast-util-gfm-strikethrough";
-import type { Options } from "mdast-util-to-markdown";
+import type { Join, Options } from "mdast-util-to-markdown";
 import { toMarkdown } from "mdast-util-to-markdown";
 import type { Descendant } from "slate";
 import { Text as SlateText } from "slate";
@@ -31,6 +31,26 @@ import { searchFenceToMarkdown } from "./searchEmbedMarkdown";
 // ---------------------------------------------------------------------------
 // toMarkdown extension for wikilinks
 // ---------------------------------------------------------------------------
+
+/**
+ * An escaped `[` that starts a line opens display math on reload, and an
+ * unclosed one takes every following block in its container with it. Text must
+ * stay text, so write that bracket as an entity. Everywhere else `\\[` is safe.
+ */
+function literalBracketToMarkdown(): Options {
+  return {
+    handlers: {
+      text(node, _parent, state, info) {
+        const atLineStart = info.before === "\n";
+        return state
+          .safe(node.value, info)
+          .replace(/(^|\n[ \t]*)\\\[/g, (match, lead: string) =>
+            lead === "" && !atLineStart ? match : `${lead}&#x5B;`,
+          );
+      },
+    } as Options["handlers"],
+  };
+}
 
 function wikiLinkToMarkdownExtension(): Options {
   return {
@@ -100,6 +120,13 @@ function gfmToMarkdownWithEmptyTasks(): Options {
               return value;
             }
 
+            // remark gives an ordered list right after another the `)` marker,
+            // which the wrapped handler does not recognize as a list marker.
+            value = value.replace(
+              /^(\d+\) {1,3})/,
+              `$1[${node.checked ? "x" : " "}] `,
+            );
+
             const splitEmptyTask = value.match(
               /^((?:[*+-]|\d+\.))\r?\n\[([ xX])\][ \t]*$/,
             );
@@ -107,12 +134,23 @@ function gfmToMarkdownWithEmptyTasks(): Options {
               return `${splitEmptyTask[1]} [${splitEmptyTask[2]}] `;
             }
 
+            // With children after the empty paragraph, the checkbox lands on
+            // the first child's line instead. Put it back on the marker's line.
+            const splitEmptyParent = value.match(
+              /^((?:[*+-]|\d+\.))\r?\n\[([ xX])\] (\r?\n)?( +[^\r\n][\s\S]*)$/,
+            );
+            if (splitEmptyParent) {
+              const [, marker, box, blankLine = "", children] =
+                splitEmptyParent;
+              return `${marker} [${box}] \n${blankLine}${children}`;
+            }
+
             value = value.replace(
-              /^(?:[*+-]|\d+\.)(?=\r?\n|$)/,
+              /^(?:[*+-]|\d+[.)])(?=\r?\n|$)/,
               (marker) => `${marker} [${node.checked ? "x" : " "}] `,
             );
             return value.replace(
-              /^((?:[*+-]|\d+\.)[ \t]+\[[ xX]\])(?=\r?\n|$)/,
+              /^((?:[*+-]|\d+[.)])[ \t]+\[[ xX]\])(?=\r?\n|$)/,
               "$1 ",
             );
           },
@@ -138,6 +176,10 @@ function safeColorValue(value: string | undefined): string | undefined {
   return trimmed;
 }
 function textToMdast(leaf: CustomText): PhrasingContent | PhrasingContent[] {
+  // An empty leaf keeps its marks while the caret holds them for typing. Written
+  // out they are bare delimiters: `****` even reads as a thematic break.
+  if (leaf.text === "") return { type: "text", value: "" };
+
   // Inline code takes absolute precedence — markdown cannot nest marks inside code spans
   if (leaf.code) {
     const node: InlineCode = { type: "inlineCode", value: leaf.text };
@@ -312,7 +354,7 @@ function convertListItem(
   const li: ListItem = {
     type: "listItem",
     spread: false,
-    children: convertBlockChildren(node.children),
+    children: dropEmptyLeadParagraphs(convertBlockChildren(node.children)),
   };
 
   // Propagate checkbox state for GFM task list items
@@ -325,6 +367,31 @@ function convertListItem(
   appendBlockMetadataToListItem(li, node);
 
   return li;
+}
+
+/**
+ * CommonMark lets an item start with at most one blank line, so a bare marker,
+ * a blank line, and text ends the item: the text leaves the list and swallows
+ * the bullets after it. An empty lead before a paragraph has no valid Markdown
+ * form, so it is dropped and the text leads the item.
+ */
+function dropEmptyLeadParagraphs(children: BlockContent[]): BlockContent[] {
+  let first = 0;
+  while (
+    children[first]?.type === "paragraph" &&
+    isEmptyParagraph(children[first]) &&
+    children[first + 1]?.type === "paragraph"
+  ) {
+    first++;
+  }
+  return children.slice(first);
+}
+
+function isEmptyParagraph(block: BlockContent): boolean {
+  return (
+    block.type === "paragraph" &&
+    block.children.every((c) => c.type === "text" && c.value === "")
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +419,20 @@ function buildMetadataSuffix(element: {
 }
 
 /**
+ * The loader finds a block id by the space before it, and parsing strips a plain
+ * space at the start of a line. A block with no text has to encode that space.
+ */
+function metadataSuffixValue(
+  suffix: string,
+  phrasing: PhrasingContent[],
+): string {
+  const noText = phrasing.every((n) => n.type === "text" && n.value === "");
+  return noText && suffix.startsWith(" ^")
+    ? `&#x20;${suffix.slice(1)}`
+    : suffix;
+}
+
+/**
  * Append properties/blockId suffix as an inline HTML node to a PhrasingContent[].
  * Using HTML type prevents toMarkdown from escaping brackets in [key:: value].
  */
@@ -362,7 +443,10 @@ function appendBlockMetadataSuffix(
   const suffix = buildMetadataSuffix(element);
   if (!suffix) return;
   // Append as inline HTML to bypass bracket escaping
-  children.push({ type: "html", value: suffix } as unknown as PhrasingContent);
+  children.push({
+    type: "html",
+    value: metadataSuffixValue(suffix, children),
+  } as unknown as PhrasingContent);
 }
 
 /**
@@ -378,9 +462,16 @@ function appendBlockMetadataToListItem(
   // Find the first paragraph in the list item and append as inline HTML
   for (const child of li.children) {
     if (child.type === "paragraph") {
+      // On a line with no text, the suffix's space would follow the marker and
+      // push the item's content a column right of its children's indent.
+      const noText = child.children.every(
+        (c) => c.type === "text" && c.value === "",
+      );
       child.children.push({
         type: "html",
-        value: suffix,
+        value: noText
+          ? metadataSuffixValue(suffix, child.children).trimStart()
+          : suffix,
       } as unknown as PhrasingContent);
       return;
     }
@@ -389,7 +480,10 @@ function appendBlockMetadataToListItem(
   li.children.push({
     type: "paragraph",
     children: [
-      { type: "html", value: suffix.trimStart() } as unknown as PhrasingContent,
+      {
+        type: "html",
+        value: metadataSuffixValue(suffix, []).trimStart(),
+      } as unknown as PhrasingContent,
     ],
   });
 }
@@ -461,6 +555,44 @@ function withoutAtomicTrailingSentinel(nodes: Descendant[]): Descendant[] {
 
 // ---------------------------------------------------------------------------
 
+const isBlankParagraph = (node: Nodes | undefined): boolean =>
+  node?.type === "paragraph" &&
+  node.children.every((c) => c.type === "text" && c.value === "");
+
+/**
+ * List items are written tight, and these neighbours change meaning without a
+ * blank line between them:
+ * - An empty list item cannot interrupt a paragraph, so a bare marker reads as
+ *   more of the parent's text. An item cannot start with a blank line followed by
+ *   content, so an empty parent, whose marker line has no text, gets none. An
+ *   empty task's marker line does hold text: the `[ ]` the task handler writes.
+ * - A paragraph after a list or blockquote reads as its lazy continuation.
+ * - `---` after a paragraph makes that paragraph a heading.
+ */
+const separateUnsafeNeighbours: Join = (left, right, parent) => {
+  if (parent.type !== "listItem") return undefined;
+  if (
+    (left.type === "list" || left.type === "blockquote") &&
+    right.type === "paragraph"
+  ) {
+    return 1;
+  }
+  if (left.type !== "paragraph") return undefined;
+  if (right.type === "thematicBreak") return 1;
+  if (right.type !== "list") return undefined;
+
+  const firstItem = right.children[0];
+  if (
+    !firstItem ||
+    typeof firstItem.checked === "boolean" ||
+    (firstItem.children.length > 0 && !isBlankParagraph(firstItem.children[0]))
+  ) {
+    return undefined;
+  }
+  const hasMarkerText = typeof parent.checked === "boolean";
+  return !isBlankParagraph(left) || hasMarkerText ? 1 : undefined;
+};
+
 /**
  * Convert a Slate `Descendant[]` tree to a markdown string.
  */
@@ -475,6 +607,7 @@ export function slateToMdast(nodes: Descendant[]): string {
   const markdown = toMarkdown(root as Nodes, {
     bullet: "*",
     rule: "-",
+    join: [separateUnsafeNeighbours],
     extensions: [
       baseFenceToMarkdown(),
       searchFenceToMarkdown(),
@@ -482,6 +615,7 @@ export function slateToMdast(nodes: Descendant[]): string {
       folioMathToMarkdown(),
       gfmToMarkdownWithEmptyTasks(),
       wikiLinkToMarkdownExtension(),
+      literalBracketToMarkdown(),
       singleTildeStrikethroughExtension(),
     ],
   });

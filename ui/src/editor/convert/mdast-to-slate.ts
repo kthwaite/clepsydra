@@ -9,6 +9,8 @@ import {
   parseConversationMarker,
 } from "#/editor/conversation/marker";
 import { inlinePropertyScanner } from "#/editor/properties";
+import { kindIsInline } from "#/editor/schema/descriptor";
+import { getDescriptor } from "#/editor/schema/registry";
 import type {
   BlockRefElement,
   CustomElement,
@@ -18,6 +20,7 @@ import type {
   LinkElement,
   ListItemElement,
   MathBlockElement,
+  ParagraphElement,
   TableAlign,
   TableCellElement,
   TableElement,
@@ -113,7 +116,39 @@ export function mdastToSlate(markdown: string): Descendant[] {
     return [{ type: "paragraph", children: [{ text: "" }] }];
   }
 
-  return result;
+  return result.map(withInlineBoundaries);
+}
+
+const isInlineElement = (node: Descendant): boolean => {
+  if (isTextNode(node)) return false;
+  const descriptor = getDescriptor((node as CustomElement).type);
+  return descriptor !== undefined && kindIsInline(descriptor.kind);
+};
+
+/**
+ * Slate needs a text leaf on both sides of every inline, or the caret has nowhere
+ * to go there: after a wikilink at a line's end it lands inside the void and typing
+ * is dropped. Normalization adds these, but an initial value is not normalized, so
+ * the page would load without them.
+ */
+function withInlineBoundaries(node: Descendant): Descendant {
+  if (isTextNode(node)) return node;
+  const element = node as CustomElement;
+  if (!element.children) return node;
+
+  const children: Descendant[] = [];
+  for (const child of element.children) {
+    const inline = isInlineElement(child);
+    const previous = children[children.length - 1];
+    if (inline && (!previous || !isTextNode(previous))) {
+      children.push({ text: "" });
+    }
+    children.push(withInlineBoundaries(child));
+  }
+  const last = children[children.length - 1];
+  if (last && isInlineElement(last)) children.push({ text: "" });
+
+  return { ...element, children } as Descendant;
 }
 
 /**
@@ -127,7 +162,6 @@ function convertChildren(
   context: ConversionContext,
   extractMetadata = true,
   recognizeJournalTime = false,
-  insideBlockquote = false,
 ): Descendant[] {
   const result: Descendant[] = [];
   for (const node of nodes) {
@@ -137,13 +171,34 @@ function convertChildren(
       context,
       extractMetadata,
       recognizeJournalTime,
-      insideBlockquote,
     );
     if (converted != null) {
       result.push(converted);
     }
   }
   return result;
+}
+
+/**
+ * A container with no content parses with no children, and the page loads this
+ * value without normalizing it. Give it a line the caret can reach.
+ */
+function withEmptyLine(
+  children: Descendant[],
+  emptyLine: Descendant = { type: "paragraph", children: [{ text: "" }] },
+): Descendant[] {
+  return children.length > 0 ? children : [emptyLine];
+}
+
+/**
+ * The parser hands over math as raw source, so each continuation line starts
+ * with its container's indent or `>` markers, as wide as the column the math
+ * starts in. The serializer writes that prefix again, so it must not stay in tex.
+ */
+function withoutContainerPrefix(body: string, startColumn = 1): string {
+  if (startColumn <= 1) return body;
+  const prefix = new RegExp(`\\n[ \\t>]{0,${startColumn - 1}}`, "g");
+  return body.replace(prefix, "\n");
 }
 
 function conversationMarkerFromBlockquote(
@@ -194,7 +249,6 @@ function convertBlockNode(
   context: ConversionContext,
   extractMetadata = true,
   recognizeJournalTime = false,
-  insideBlockquote = false,
 ): Descendant | null {
   switch (node.type) {
     case "paragraph": {
@@ -257,7 +311,6 @@ function convertBlockNode(
           context,
           true,
           false,
-          true,
         );
         return {
           type: "conversation-turn",
@@ -278,13 +331,14 @@ function convertBlockNode(
       }
       return {
         type: "blockquote",
-        children: convertChildren(
-          node.children as RootContent[],
-          source,
-          context,
-          true,
-          false,
-          true,
+        children: withEmptyLine(
+          convertChildren(
+            node.children as RootContent[],
+            source,
+            context,
+            true,
+            false,
+          ),
         ),
       };
     }
@@ -301,9 +355,10 @@ function convertBlockNode(
       const math = node as FolioMathMdast;
       return {
         type: "math-block",
-        tex: insideBlockquote
-          ? math.data.folioSourceBody.replace(/^> ?/gm, "")
-          : math.data.folioSourceBody,
+        tex: withoutContainerPrefix(
+          math.data.folioSourceBody,
+          math.position?.start.column,
+        ),
         delimiter: math.data.folioDelimiter,
         children: [{ text: "" }],
       } satisfies MathBlockElement;
@@ -353,10 +408,9 @@ function convertBlockNode(
       return {
         type: "footnote-def",
         identifier: (node as { identifier: string }).identifier,
-        children: convertChildren(
-          node.children as RootContent[],
-          source,
-          context,
+        children: withEmptyLine(
+          convertChildren(node.children as RootContent[], source, context),
+          { text: "" },
         ),
       };
 
@@ -429,20 +483,27 @@ function convertListItem(
 ): ListItemElement {
   // remark-gfm does not classify a terminal task marker with no following
   // content as a task; it leaves the marker as the paragraph's literal text.
-  // Recover that conventional empty-task syntax at the conversion boundary.
-  const onlyChild = node.children.length === 1 ? node.children[0] : undefined;
+  // Recover that conventional empty-task syntax at the conversion boundary,
+  // with or without blocks after it.
+  const [firstChild, ...laterChildren] = node.children;
   if (
     node.checked == null &&
-    onlyChild?.type === "paragraph" &&
-    onlyChild.children.length === 1 &&
-    onlyChild.children[0].type === "text"
+    firstChild?.type === "paragraph" &&
+    firstChild.children.length === 1 &&
+    firstChild.children[0].type === "text"
   ) {
-    const emptyTask = /^\[([ xX])\]$/.exec(onlyChild.children[0].value);
-    if (emptyTask) {
+    const emptyTask = /^\[([ xX])\]$/.exec(firstChild.children[0].value);
+    // A marker is written as a bare `[`. An escaped or encoded one is text.
+    const start = firstChild.children[0].position?.start.offset;
+    const isMarker = start === undefined || source[start] === "[";
+    if (emptyTask && isMarker) {
       return {
         type: "list-item",
         checked: emptyTask[1] !== " ",
-        children: [{ type: "paragraph", children: [{ text: "" }] }],
+        children: [
+          { type: "paragraph", children: [{ text: "" }] },
+          ...convertChildren(laterChildren, source, context, false),
+        ],
       };
     }
   }
@@ -457,6 +518,14 @@ function convertListItem(
       false,
     ),
   };
+
+  // An empty item parses with no children, or led by its nested list when it has
+  // one, since Markdown cannot write an empty line above a list. The page loads
+  // this value without normalizing it, so restore the canonical lead here.
+  const lead = el.children[0];
+  if (!lead || isNestedList(lead)) {
+    el.children.unshift({ type: "paragraph", children: [{ text: "" }] });
+  }
 
   // Propagate checkbox state from GFM task list items
   if (node.checked === true) {
@@ -827,6 +896,10 @@ function isTextNode(node: Descendant): node is CustomText {
   return "text" in node;
 }
 
+function isParagraph(node: Descendant): node is ParagraphElement {
+  return !isTextNode(node) && (node as CustomElement).type === "paragraph";
+}
+
 function isNestedList(node: Descendant): boolean {
   return (
     !isTextNode(node) && NESTED_LIST_TYPES.has((node as CustomElement).type)
@@ -950,21 +1023,35 @@ function extractBlockMetadata<T extends Descendant>(element: T): T {
     el.properties = properties;
   }
 
+  // The serializer writes an item's metadata onto its first paragraph, whatever
+  // blocks follow it, so look there before the end of the item.
+  const paragraphs =
+    el.type === "list-item" ? searchChildren.filter(isParagraph) : [];
+
   // 2. Extract block ID from the last text node (within search scope)
-  const lastText = findLastTextNode(searchChildren);
-  if (lastText) {
-    const blockIdMatch = BLOCK_ID_RE.exec(lastText.text);
-    if (blockIdMatch) {
+  const idCandidates = [
+    paragraphs[0] && findLastTextNode(paragraphs[0].children),
+    findLastTextNode(searchChildren),
+  ];
+  for (const text of idCandidates) {
+    const blockIdMatch = text && BLOCK_ID_RE.exec(text.text);
+    if (text && blockIdMatch) {
       el.blockId = blockIdMatch[1];
-      lastText.text = lastText.text.slice(
-        0,
-        lastText.text.length - blockIdMatch[0].length,
-      );
+      text.text = text.text.slice(0, text.text.length - blockIdMatch[0].length);
+      break;
     }
   }
 
   // 3. Clean up trailing whitespace left by property/blockId removal
-  if (el.blockId || el.properties) trimMetadataWhitespace(searchChildren);
+  if (el.blockId || el.properties) {
+    if (paragraphs.length > 0) {
+      for (const paragraph of paragraphs) {
+        trimMetadataWhitespace(paragraph.children);
+      }
+    } else {
+      trimMetadataWhitespace(searchChildren);
+    }
+  }
 
   return element;
 }

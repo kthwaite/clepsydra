@@ -8,7 +8,12 @@ import {
   Element as SlateElement,
   Transforms,
 } from "slate";
-import { isListElement, isListItem } from "#/editor/plugins/listUtils";
+import { insertListFragment } from "#/editor/plugins/listFragment";
+import {
+  isListElement,
+  isListItem,
+  type ListType,
+} from "#/editor/plugins/listUtils";
 import type { ListItemElement } from "#/editor/types";
 
 /**
@@ -16,7 +21,17 @@ import type { ListItemElement } from "#/editor/types";
  * outdenting/unwrapping on Backspace or Slate's ordinary text deletion.
  */
 export function withOutliner(editor: Editor): Editor {
-  const { deleteBackward, deleteForward } = editor;
+  const { deleteBackward, deleteForward, insertFragment } = editor;
+
+  editor.insertFragment = (fragment, options) => {
+    if (options?.at) {
+      insertFragment(fragment, options);
+      return;
+    }
+    insertListFragment(editor, fragment as Descendant[], (prepared) => {
+      insertFragment(prepared, options);
+    });
+  };
 
   editor.deleteBackward = (unit) => {
     if (joinAdjacentLists(editor, "backward")) return;
@@ -101,11 +116,15 @@ function isItemNested(editor: Editor, itemPath: Path): boolean {
 }
 
 /**
- * Convert a top-level list-item into a paragraph at the same depth as the
- * containing list, preserving its text content. Splits the list if the item
- * is in the middle, so items above and below remain in valid lists.
+ * Lift a top-level list-item out of its list at the same depth as the list.
+ * Its first paragraph becomes a plain paragraph; every other child follows it
+ * unchanged and in order, so Backspace never deletes content. The list splits
+ * if the item is in the middle, so items above and below remain in valid lists.
  */
-function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
+export function unwrapListItemToParagraph(
+  editor: Editor,
+  itemPath: Path,
+): void {
   const parentListPath = Path.parent(itemPath);
   const parentList = Node.get(editor, parentListPath);
   if (!isListElement(parentList)) return;
@@ -113,32 +132,9 @@ function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
   const itemIndex = itemPath[itemPath.length - 1];
   const siblingCount = parentList.children.length;
 
-  // Snapshot the inline children of the item's first paragraph (these become
-  // the new paragraph's children). Nested lists are lifted after the new
-  // paragraph so Backspace never silently deletes child items.
   const itemNode = Node.get(editor, itemPath);
-  if (!SlateElement.isElement(itemNode)) return;
-  let paragraphChildren: Descendant[] = [{ text: "" }];
-  let foundParagraph = false;
-  for (const child of itemNode.children) {
-    if (SlateElement.isElement(child) && child.type === "paragraph") {
-      paragraphChildren = JSON.parse(JSON.stringify(child.children));
-      foundParagraph = true;
-      break;
-    }
-  }
-  if (!foundParagraph) {
-    // Fall back to the item's own inline children, skipping nested lists.
-    const inline = itemNode.children.filter(
-      (c) => !(SlateElement.isElement(c) && isListElement(c)),
-    );
-    if (inline.length > 0) {
-      paragraphChildren = JSON.parse(JSON.stringify(inline));
-    }
-  }
-  const nestedLists = itemNode.children
-    .filter((child) => SlateElement.isElement(child) && isListElement(child))
-    .map((child) => JSON.parse(JSON.stringify(child)) as SlateElement);
+  if (!isListItem(itemNode)) return;
+  const lifted = liftedItemBlocks(editor, itemNode);
 
   Editor.withoutNormalizing(editor, () => {
     // Capture trailing siblings before mutation so we can rebuild a list below.
@@ -170,15 +166,9 @@ function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
       insertAt = Path.next(parentListPath);
     }
 
-    Transforms.insertNodes(
-      editor,
-      { type: "paragraph", children: paragraphChildren },
-      { at: insertAt },
-    );
-
-    let nextInsertAt = Path.next(insertAt);
-    for (const nestedList of nestedLists) {
-      Transforms.insertNodes(editor, nestedList, { at: nextInsertAt });
+    let nextInsertAt = insertAt;
+    for (const block of lifted) {
+      Transforms.insertNodes(editor, block, { at: nextInsertAt });
       nextInsertAt = Path.next(nextInsertAt);
     }
 
@@ -190,9 +180,41 @@ function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
       );
     }
 
-    // Place the cursor at the start of the new paragraph.
+    // Place the cursor at the start of the former lead.
     Transforms.select(editor, Editor.start(editor, insertAt));
   });
+}
+
+/**
+ * The blocks an item leaves behind when lifted out of its list. Its block id
+ * and properties live on the item, so they move to the lead paragraph, and a
+ * reference to the line keeps resolving.
+ */
+function liftedItemBlocks(editor: Editor, item: ListItemElement): Descendant[] {
+  const children: Descendant[] = JSON.parse(JSON.stringify(item.children));
+  const firstBlock = children.findIndex(
+    (c) => SlateElement.isElement(c) && Editor.isBlock(editor, c),
+  );
+  const strayInlines =
+    firstBlock === -1 ? children : children.slice(0, firstBlock);
+  const blocks = firstBlock === -1 ? [] : children.slice(firstBlock);
+  const metadata = {
+    ...(item.blockId ? { blockId: item.blockId } : {}),
+    ...(item.properties ? { properties: item.properties } : {}),
+  };
+
+  const [lead] = blocks;
+  if (
+    strayInlines.length > 0 ||
+    !SlateElement.isElement(lead) ||
+    isListElement(lead)
+  ) {
+    // Nothing leads the item but stray inlines or a nested list.
+    const inlines = strayInlines.length > 0 ? strayInlines : [{ text: "" }];
+    return [{ type: "paragraph", ...metadata, children: inlines }, ...blocks];
+  }
+  if (lead.type !== "paragraph" && lead.type !== "heading") return blocks;
+  return [{ ...lead, ...metadata }, ...blocks.slice(1)];
 }
 
 // ---------------------------------------------------------------------------
@@ -312,39 +334,11 @@ export function outdentListItem(editor: Editor): void {
   const grandparent = Node.get(editor, grandparentPath);
   if (!isListItem(grandparent)) return;
 
-  const itemIndex = itemPath[itemPath.length - 1];
-  const siblingCount = parentList.children.length;
-
   Editor.withoutNormalizing(editor, () => {
-    // If there are siblings after the current item in the nested list,
-    // they become a sub-list of the item being outdented.
-    if (itemIndex < siblingCount - 1) {
-      const listType = parentList.type;
-
-      // Clone trailing items and remove them from the nested list
-      const trailingItems: SlateElement[] = [];
-      for (let i = siblingCount - 1; i > itemIndex; i--) {
-        const trailPath = [...parentListPath, i];
-        trailingItems.unshift(
-          JSON.parse(JSON.stringify(Node.get(editor, trailPath))),
-        );
-        Transforms.removeNodes(editor, { at: trailPath });
-      }
-
-      // Insert them as a nested list inside the current item
-      const currentItem = Node.get(editor, itemPath);
-      if (!SlateElement.isElement(currentItem)) return;
-      const insertIdx = currentItem.children.length;
-
-      Transforms.insertNodes(
-        editor,
-        {
-          type: listType,
-          children: trailingItems,
-        } as SlateElement,
-        { at: [...itemPath, insertIdx] },
-      );
-    }
+    // Everything after the item within its parent follows it, so nothing that
+    // came after the item ends up above it.
+    adoptTrailingSiblings(editor, itemPath, parentListPath, parentList.type);
+    adoptLaterBlocks(editor, itemPath, parentListPath);
 
     // Move the current item out, after the grandparent
     const destPath = Path.next(grandparentPath);
@@ -360,6 +354,74 @@ export function outdentListItem(editor: Editor): void {
       // Parent list already removed by normalization
     }
   });
+}
+
+/**
+ * Move the item's later siblings into a sub-list of the item, joining its last
+ * nested list when the types match, so no two lists end up side by side.
+ */
+function adoptTrailingSiblings(
+  editor: Editor,
+  itemPath: Path,
+  parentListPath: Path,
+  listType: ListType,
+): void {
+  const parentList = Node.get(editor, parentListPath);
+  if (!isListElement(parentList)) return;
+  const firstTrailing = itemPath[itemPath.length - 1] + 1;
+  const count = parentList.children.length - firstTrailing;
+  if (count <= 0) return;
+
+  const item = Node.get(editor, itemPath);
+  if (!isListItem(item)) return;
+  const lastIndex = item.children.length - 1;
+  const last = item.children[lastIndex];
+
+  let targetPath: Path;
+  let targetIndex: number;
+  if (isListElement(last) && last.type === listType) {
+    targetPath = [...itemPath, lastIndex];
+    targetIndex = last.children.length;
+  } else {
+    targetPath = [...itemPath, item.children.length];
+    targetIndex = 0;
+    Transforms.insertNodes(
+      editor,
+      { type: listType, children: [] },
+      { at: targetPath },
+    );
+  }
+
+  const source = [...parentListPath, firstTrailing];
+  for (let i = 0; i < count; i++) {
+    Transforms.moveNodes(editor, {
+      at: source,
+      to: [...targetPath, targetIndex + i],
+    });
+  }
+}
+
+/** Move blocks after the item's parent list, within the parent item, into the item. */
+function adoptLaterBlocks(
+  editor: Editor,
+  itemPath: Path,
+  parentListPath: Path,
+): void {
+  const grandparent = Node.get(editor, Path.parent(parentListPath));
+  if (!isListItem(grandparent)) return;
+  const first = parentListPath[parentListPath.length - 1] + 1;
+  const count = grandparent.children.length - first;
+  if (count <= 0) return;
+
+  const item = Node.get(editor, itemPath);
+  if (!isListItem(item)) return;
+  const source = Path.next(parentListPath);
+  for (let i = 0; i < count; i++) {
+    Transforms.moveNodes(editor, {
+      at: source,
+      to: [...itemPath, item.children.length + i],
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

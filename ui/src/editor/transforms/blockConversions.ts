@@ -8,7 +8,7 @@ import {
   Transforms,
 } from "slate";
 import { HistoryEditor } from "slate-history";
-import { isListElement, type ListType } from "#/editor/plugins/listUtils";
+import { isListItem, type ListType } from "#/editor/plugins/listUtils";
 import { makeBlockquote } from "#/editor/schema/elements/blockquote";
 import {
   makeBulletedList,
@@ -17,7 +17,7 @@ import {
 } from "#/editor/schema/elements/list";
 import { makeParagraph } from "#/editor/schema/elements/paragraph";
 import { insertJournalTimeHeading } from "#/editor/transforms/journalTime";
-import type { CodeBlockElement } from "#/editor/types";
+import type { CodeBlockElement, ListItemElement } from "#/editor/types";
 
 export type BlockConversion =
   | { type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6 }
@@ -44,12 +44,16 @@ export interface ApplyBlockConversionOptions {
  */
 export function applyBlockConversion(
   editor: Editor,
-  { at, deleteRange, conversion }: ApplyBlockConversionOptions,
+  { at: lineAt, deleteRange, conversion }: ApplyBlockConversionOptions,
 ): void {
   withBatch(editor, () => {
     if (deleteRange) {
       Transforms.delete(editor, { at: deleteRange });
     }
+
+    const at = BLOCK_CONVERSIONS.has(conversion.type)
+      ? lineAfterTaskLead(editor, lineAt)
+      : lineAt;
 
     switch (conversion.type) {
       case "heading":
@@ -60,14 +64,21 @@ export function applyBlockConversion(
         );
         break;
       case "bulleted-list":
-        wrapInList(editor, at, "bulleted-list");
+      case "numbered-list": {
+        const item = itemLedBy(editor, at);
+        if (item) setItemListType(editor, item, conversion.type);
+        else wrapInList(editor, at, conversion.type);
         break;
-      case "numbered-list":
-        wrapInList(editor, at, "numbered-list");
+      }
+      case "task": {
+        const checked = conversion.checked ?? false;
+        const item = itemLedBy(editor, at);
+        if (!item) wrapInList(editor, at, "bulleted-list", checked);
+        else if ((Node.get(editor, item) as ListItemElement).checked == null) {
+          Transforms.setNodes(editor, { checked }, { at: item });
+        }
         break;
-      case "task":
-        wrapInList(editor, at, "bulleted-list", conversion.checked ?? false);
-        break;
+      }
       case "blockquote":
         Transforms.wrapNodes(editor, makeBlockquote({}), { at });
         break;
@@ -101,17 +112,6 @@ export function applySelectionList(editor: Editor, listType: ListType): void {
   if (!editor.selection || Range.isCollapsed(editor.selection)) return;
 
   withBatch(editor, () => {
-    // Split existing list containers at the selection, leaving other items alone.
-    Transforms.unwrapNodes(editor, {
-      match: isListElement,
-      split: true,
-    });
-    Transforms.unwrapNodes(editor, {
-      match: (node) =>
-        SlateElement.isElement(node) && node.type === "list-item",
-      split: true,
-    });
-
     const isTextBlock = (node: Node) =>
       SlateElement.isElement(node) &&
       (node.type === "paragraph" || node.type === "heading");
@@ -119,6 +119,8 @@ export function applySelectionList(editor: Editor, listType: ListType): void {
 
     // Work backwards so splitting a later line never invalidates earlier paths.
     for (const [block, path] of blocks.reverse()) {
+      // A soft line inside a list item is part of that item.
+      if (isListItem(Node.get(editor, Path.parent(path)))) continue;
       for (const [leaf, leafPath] of Array.from(Node.texts(block)).reverse()) {
         for (let offset = leaf.text.lastIndexOf("\n"); offset >= 0; ) {
           const point = { path: [...path, ...leafPath], offset };
@@ -149,14 +151,68 @@ export function applySelectionList(editor: Editor, listType: ListType): void {
       for (const ref of paths) {
         const path = ref.current;
         if (!path) continue;
-        Transforms.setNodes(editor, { type: "paragraph" }, { at: path });
-        Transforms.unsetNodes(editor, "level", { at: path });
-        wrapInList(editor, path, listType);
+        if ((Node.get(editor, path) as SlateElement).type === "heading") {
+          Transforms.setNodes(editor, { type: "paragraph" }, { at: path });
+          Transforms.unsetNodes(editor, "level", { at: path });
+        }
+        // A line that is already an item keeps the item, and everything on it.
+        const item = itemLedBy(editor, path);
+        if (item) setItemListType(editor, item, listType);
+        else wrapInList(editor, path, listType);
       }
     } finally {
       for (const ref of paths) ref.unref();
     }
   });
+}
+
+const BLOCK_CONVERSIONS: ReadonlySet<BlockConversion["type"]> = new Set([
+  "heading",
+  "blockquote",
+  "code-block",
+  "thematic-break",
+]);
+
+/**
+ * GFM writes a checkbox only above a paragraph, and the item's metadata is
+ * written onto that paragraph. So a block conversion on a task's own line goes on
+ * a new line after it, and the task keeps its line. Otherwise returns `at`.
+ */
+function lineAfterTaskLead(editor: Editor, at: Path): Path {
+  const item = itemLedBy(editor, at);
+  if (!item || (Node.get(editor, item) as ListItemElement).checked == null) {
+    return at;
+  }
+  const next = Path.next(at);
+  Transforms.insertNodes(editor, makeParagraph({}), { at: next });
+  Transforms.select(editor, Editor.start(editor, next));
+  return next;
+}
+
+/** The list item whose own line is the paragraph at `at`, if there is one. */
+function itemLedBy(editor: Editor, at: Path): Path | null {
+  if (at.length < 2 || at[at.length - 1] !== 0) return null;
+  const parentPath = Path.parent(at);
+  const parent = Node.get(editor, parentPath);
+  return SlateElement.isElement(parent) && parent.type === "list-item"
+    ? parentPath
+    : null;
+}
+
+/** Put one item in a list of `listType`, splitting its list around it if needed. */
+function setItemListType(editor: Editor, item: Path, listType: ListType): void {
+  const list = Node.get(editor, Path.parent(item));
+  if (SlateElement.isElement(list) && list.type === listType) return;
+  const ref = Editor.pathRef(editor, item);
+  Transforms.liftNodes(editor, { at: item });
+  const lifted = ref.unref();
+  if (!lifted) return;
+  Transforms.wrapNodes(
+    editor,
+    listType === "bulleted-list" ? makeBulletedList({}) : makeNumberedList({}),
+    { at: lifted },
+  );
+  mergeWithAdjacentList(editor, lifted, listType);
 }
 
 function wrapInList(
@@ -181,37 +237,45 @@ function wrapInList(
   mergeWithAdjacentList(editor, listPath, listType);
 }
 
-/** Merge the list at `listPath` into an immediately-preceding same-type list. */
+/** Merge the list at `listPath` with its same-type sibling lists on both sides. */
 function mergeWithAdjacentList(
   editor: Editor,
   listPath: Path,
   listType: ListType,
 ): void {
-  const index = listPath[listPath.length - 1];
-  if (index > 0) {
+  const sameType = (path: Path) => {
+    if (!Editor.hasPath(editor, path)) return false;
+    const node = Node.get(editor, path);
+    return SlateElement.isElement(node) && node.type === listType;
+  };
+
+  let merged = listPath;
+  if (listPath[listPath.length - 1] > 0) {
     const prevPath = Path.previous(listPath);
-    try {
-      const prevNode = Node.get(editor, prevPath);
-      if (SlateElement.isElement(prevNode) && prevNode.type === listType) {
-        const ourNode = Node.get(editor, listPath);
-        if (!SlateElement.isElement(ourNode)) return;
-        const count = ourNode.children.length;
-        // Always move the current first child: each move shrinks our list from
-        // the front, so source index 0 is the next item every iteration. This
-        // preserves original order (moving from the tail would reverse it).
-        for (let i = 0; i < count; i++) {
-          Transforms.moveNodes(editor, {
-            at: [...listPath, 0],
-            to: [...prevPath, prevNode.children.length],
-          });
-        }
-        Transforms.removeNodes(editor, { at: listPath });
-        return;
-      }
-    } catch {
-      // no previous sibling
+    if (sameType(prevPath)) {
+      appendListItems(editor, listPath, prevPath);
+      merged = prevPath;
     }
   }
+  const nextPath = Path.next(merged);
+  if (sameType(nextPath)) appendListItems(editor, nextPath, merged);
+}
+
+/** Move every item of the list at `from` to the end of `to`, removing `from`. */
+function appendListItems(editor: Editor, from: Path, to: Path): void {
+  const fromNode = Node.get(editor, from) as SlateElement;
+  const toNode = Node.get(editor, to) as SlateElement;
+  const count = fromNode.children.length;
+  const offset = toNode.children.length;
+  // Always move the current first child: each move shrinks the source from the
+  // front, so index 0 is the next item every iteration and order is preserved.
+  for (let i = 0; i < count; i++) {
+    Transforms.moveNodes(editor, {
+      at: [...from, 0],
+      to: [...to, offset + i],
+    });
+  }
+  Transforms.removeNodes(editor, { at: from });
 }
 
 function withBatch(editor: Editor, fn: () => void): void {

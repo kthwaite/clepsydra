@@ -3,6 +3,7 @@ import {
   Node,
   Path,
   type Point,
+  Range,
   Element as SlateElement,
   Text,
   Transforms,
@@ -13,6 +14,7 @@ import { makeFootnoteRef } from "#/editor/schema/elements/footnoteRef";
 import { makeWikilink } from "#/editor/schema/elements/wikilink";
 import { ensureFootnoteDef } from "#/editor/transforms/footnotes";
 import type { CustomElement } from "#/editor/types";
+import { TASK_RE } from "./blockTransforms";
 
 type MarkType = "bold" | "italic" | "strikethrough" | "code";
 
@@ -219,8 +221,9 @@ function tryMarkTransform(
   HistoryEditor.withNewBatch(editor, () => {
     Editor.withoutNormalizing(editor, () => {
       // Delete the markdown syntax
-      Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
-      Transforms.delete(editor);
+      Transforms.delete(editor, {
+        at: { anchor: rangeStart, focus: rangeEnd },
+      });
 
       // Insert content with mark
       Transforms.insertNodes(editor, { text: content, [mark]: true });
@@ -255,8 +258,9 @@ function tryWikilinkTransform(
   const rangeEnd: Point = { path, offset: textBefore.length };
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
-      Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
-      Transforms.delete(editor);
+      Transforms.delete(editor, {
+        at: { anchor: rangeStart, focus: rangeEnd },
+      });
       Transforms.insertNodes(editor, makeWikilink({ target, alias }));
       const wikilinkPath = editor.selection?.anchor.path.slice(0, -1);
       if (wikilinkPath) selectTextAfterInline(editor, wikilinkPath);
@@ -382,11 +386,12 @@ function tryInlinePropertyTransform(
 
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
-      Transforms.select(editor, {
-        anchor: { path: start.path, offset: deleteStart - start.start },
-        focus: anchor,
+      Transforms.delete(editor, {
+        at: {
+          anchor: { path: start.path, offset: deleteStart - start.start },
+          focus: anchor,
+        },
       });
-      Transforms.delete(editor);
       Transforms.setNodes<PropertyBearingElement>(
         editor,
         { properties },
@@ -396,6 +401,23 @@ function tryInlinePropertyTransform(
   });
 
   return true;
+}
+
+/**
+ * `[ ]` or `[x]` opening a paragraph may be a task marker, which needs the next
+ * Space to see the brackets directly before the caret. A link typed there still
+ * converts when its `)` arrives.
+ */
+function isTaskMarkerAtBlockStart(
+  editor: Editor,
+  path: Path,
+  openBracketIdx: number,
+  label: string,
+): boolean {
+  if (openBracketIdx !== 0 || path[path.length - 1] !== 0) return false;
+  if (!TASK_RE.test(`[${label}]`)) return false;
+  const block = Node.get(editor, Path.parent(path));
+  return SlateElement.isElement(block) && block.type === "paragraph";
 }
 
 function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
@@ -422,6 +444,9 @@ function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
 
   const label = textBefore.slice(openBracketIdx + 1, contentEnd);
   if (label.length === 0) return false;
+  if (isTaskMarkerAtBlockStart(editor, path, openBracketIdx, label)) {
+    return false;
+  }
 
   if (label.startsWith("^")) {
     const identifier = label.slice(1);
@@ -438,8 +463,9 @@ function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
 
     HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
       Editor.withoutNormalizing(editor, () => {
-        Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
-        Transforms.delete(editor);
+        Transforms.delete(editor, {
+          at: { anchor: rangeStart, focus: rangeEnd },
+        });
         Transforms.insertNodes(editor, makeFootnoteRef({ identifier }));
         const referencePath = editor.selection?.anchor.path.slice(0, -1);
         ensureFootnoteDef(editor, identifier);
@@ -458,6 +484,23 @@ function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
     });
   });
   return true;
+}
+
+/**
+ * The `]` already scaffolded `]()` with the caret inside, so the `(` a typist
+ * presses next is there. Inserting it would make the URL start with a paren.
+ */
+export function trySkipScaffoldParen(editor: Editor): boolean {
+  if (isInCodeContext(editor)) return false;
+  const { selection } = editor;
+  if (!selection || !Range.isCollapsed(selection)) return false;
+  const { anchor } = selection;
+  const [node] = Editor.node(editor, anchor.path);
+  if (!Text.isText(node)) return false;
+  return (
+    node.text[anchor.offset] === ")" &&
+    node.text.slice(0, anchor.offset).endsWith("](")
+  );
 }
 
 function tryLinkTransform(editor: Editor, closerConsumed = false): boolean {
@@ -495,8 +538,9 @@ function tryLinkTransform(editor: Editor, closerConsumed = false): boolean {
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
       // Delete the markdown link syntax
-      Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
-      Transforms.delete(editor);
+      Transforms.delete(editor, {
+        at: { anchor: rangeStart, focus: rangeEnd },
+      });
 
       // Insert link element. withSchema marks link elements as inline.
       const linkNode: CustomElement = {

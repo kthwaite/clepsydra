@@ -1,4 +1,5 @@
 import { type Editor, Transforms } from "slate";
+import { HistoryEditor } from "slate-history";
 import type { Command, Motion, Operator } from "../core/ast";
 import {
   deleteChar,
@@ -137,7 +138,18 @@ export function executeCommand(
   state: VimState,
   command: Command,
 ): Partial<VimState> {
-  const patch = run(editor, state, command);
+  // One command, one undo step. Left to itself, history merges an edit into the
+  // previous batch when a selection change precedes it in the same tick, or when
+  // it deletes text right next to the previous delete. Undo and redo walk the
+  // stack, so they must not add to it.
+  let patch: Partial<VimState> = {};
+  if (command.t === "undo" || command.t === "redo") {
+    patch = run(editor, state, command);
+  } else {
+    HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+      patch = run(editor, state, command);
+    });
+  }
   // Any command that doesn't explicitly manage the goal column clears it.
   return { goalColumn: null, ...patch };
 }
@@ -328,7 +340,7 @@ function run(
         return { ...done, ...patch };
       }
       const span = visualCharSpan(lines, state.visualAnchor, state.visualHead);
-      const patch = applyCharwise(editor, lines, command.op, span);
+      const patch = applyCharwise(editor, lines, command.op, span, true);
       return { ...done, ...patch };
     }
     case "visual-object": {

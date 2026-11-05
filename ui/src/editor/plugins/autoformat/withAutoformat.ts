@@ -1,6 +1,5 @@
 import {
   Editor,
-  Node,
   Path,
   Range,
   Element as SlateElement,
@@ -9,14 +8,14 @@ import {
 } from "slate";
 import { HistoryEditor } from "slate-history";
 import type { CustomElement } from "#/editor/types";
-import { tryAutoPair, tryOvertype } from "./autoPair";
+import { dropAutoPairedCloser, tryAutoPair, tryOvertype } from "./autoPair";
 import {
   tryBlockTransform,
   tryCodeFence,
   tryThematicBreak,
 } from "./blockTransforms";
-import { tryInlineTransform } from "./inlineTransforms";
-import { tryListContinuation } from "./listContinuation";
+import { tryInlineTransform, trySkipScaffoldParen } from "./inlineTransforms";
+import { isBlankBlock, tryListContinuation } from "./listContinuation";
 import {
   isInMathCandidate,
   tryDisplayMathNewline,
@@ -77,6 +76,8 @@ export function withAutoformat(editor: Editor): Editor {
       insertText(ch);
       return;
     }
+    if (ch === " ") dropAutoPairedCloser(editor);
+    if (ch === "(" && trySkipScaffoldParen(editor)) return;
     // Step 2: thematic break
     if (ch === "-" && tryThematicBreak(editor)) return;
     // Step 3: prefixed link on Space
@@ -256,32 +257,21 @@ function tryBlockquoteContinuation(editor: Editor): boolean {
   });
   if (!bqEntry) return false;
 
-  const paraEntry = Editor.above(editor, {
+  const paraEntry = Editor.above<SlateElement>(editor, {
     match: (n) =>
       SlateElement.isElement(n) && (n as CustomElement).type === "paragraph",
   });
   if (!paraEntry) return false;
 
   const [paragraph] = paraEntry;
-  const text = Node.string(paragraph);
 
-  if (text.trim() === "") {
+  if (isBlankBlock(editor, paragraph)) {
     const [, bqPath] = bqEntry;
     HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
       Editor.withoutNormalizing(editor, () => {
         const [, paraPath] = paraEntry;
-        Transforms.removeNodes(editor, { at: paraPath });
-        try {
-          const bq = Editor.node(editor, bqPath)[0];
-          if (
-            SlateElement.isElement(bq) &&
-            (bq as SlateElement).children.length === 0
-          ) {
-            Transforms.removeNodes(editor, { at: bqPath });
-          }
-        } catch {
-          /* already removed */
-        }
+        // Insert first: the path is right while the quote is still there, and the
+        // document always holds text, so undo can give the caret back.
         const afterPath = Path.next(bqPath);
         Transforms.insertNodes(
           editor,
@@ -295,6 +285,14 @@ function tryBlockquoteContinuation(editor: Editor): boolean {
           anchor: { path: [...afterPath, 0], offset: 0 },
           focus: { path: [...afterPath, 0], offset: 0 },
         });
+        Transforms.removeNodes(editor, { at: paraPath });
+        const bq = Editor.node(editor, bqPath)[0];
+        if (
+          SlateElement.isElement(bq) &&
+          (bq as SlateElement).children.length === 0
+        ) {
+          Transforms.removeNodes(editor, { at: bqPath });
+        }
       });
     });
     return true;

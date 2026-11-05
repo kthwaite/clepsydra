@@ -24,7 +24,7 @@ Loaded when working under `ui/`. Root-level rules (verification gates, feature w
 Slate.js editor with a registry-driven schema. Plugin chain: `withReact(withHistory(withAutoformat(withOutliner(withSchema(createEditor())))))`.
 
 - Element types live one-per-file under `schema/elements/`; each descriptor owns kind/create/render/normalize/toMdast. `getDescriptor` + `REGISTRY` in `schema/registry.ts`; cross-node rules in `schema/documentRules.ts`. Adding a type = 1 elements file + 1 union line in `schema/types.ts` + 1 registry entry (+ 1 `mdast-to-slate` branch if it deserializes).
-- Canonical list shape is `list-item > paragraph > text`; the list-item descriptor's normalize always claims the node, so all transforms must produce that shape.
+- Canonical list shape is `list-item > paragraph > text`; the list-item descriptor's normalize always claims the node, so all transforms must produce that shape. A nested list never leads an item. A non-list block may: display math typed into a bullet, and parsed forms such as `- # h`. A task needs a paragraph lead, because GFM writes the checkbox above a paragraph.
 - Markdown round-trip via mdast (`convert/`), autoformat + outliner + paste handling in `plugins/`, optional vim mode in `vim/`.
 
 ## Design Aesthetic

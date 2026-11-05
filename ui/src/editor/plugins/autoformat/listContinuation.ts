@@ -9,19 +9,43 @@ import {
 } from "slate";
 import { HistoryEditor } from "slate-history";
 import { isListElement, isListItem } from "#/editor/plugins/listUtils";
+import {
+  outdentListItem,
+  unwrapListItemToParagraph,
+} from "#/editor/plugins/withOutliner";
 import type { ListItemElement } from "#/editor/types";
 
 /**
- * Get the text content of the first paragraph child of a list-item.
- * Returns the trimmed text, or undefined if no paragraph child.
+ * Whether a block shows nothing: whitespace-only text and no inline void. An
+ * inline void such as a wikilink contributes no text, so `Node.string` alone
+ * would take it for empty.
  */
-function getFirstParagraphText(item: SlateElement): string | undefined {
-  for (const child of item.children) {
-    if (SlateElement.isElement(child) && child.type === "paragraph") {
-      return Node.string(child).trim();
-    }
+export function isBlankBlock(editor: Editor, block: SlateElement): boolean {
+  if (Node.string(block).trim() !== "") return false;
+  for (const [node] of Node.elements(block)) {
+    if (editor.isVoid(node)) return false;
   }
-  return undefined;
+  return true;
+}
+
+/**
+ * Whether Enter should treat the item as empty: the caret sits in the item's
+ * leading paragraph and that paragraph is blank. A later block's text, or a
+ * lead that is not a paragraph, means the item has content.
+ */
+function isEmptyItemAtCaret(
+  editor: Editor,
+  item: SlateElement,
+  itemPath: Path,
+  caretPath: Path,
+): boolean {
+  const lead = item.children[0];
+  return (
+    SlateElement.isElement(lead) &&
+    lead.type === "paragraph" &&
+    Path.isAncestor([...itemPath, 0], caretPath) &&
+    isBlankBlock(editor, lead)
+  );
 }
 
 /**
@@ -42,6 +66,36 @@ function isNested(editor: Editor, itemPath: Path): boolean {
 }
 
 /**
+ * Enter over a selection that starts in a list-item: delete the selection, then
+ * continue the list from the collapsed caret, as one undo step. A selection that
+ * starts outside a list stays with the default break.
+ */
+function replaceSelectionAndContinue(
+  editor: Editor,
+  selection: Range,
+  historyBatch: boolean,
+): boolean {
+  const inItem = Editor.above(editor, {
+    at: Range.start(selection),
+    match: (n) => isListItem(n),
+  });
+  if (!inItem) return false;
+
+  const replace = () => {
+    Transforms.delete(editor);
+    if (!tryListContinuation(editor, { historyBatch: false, keepItem: true })) {
+      Transforms.splitNodes(editor, { always: true });
+    }
+  };
+  if (historyBatch) {
+    HistoryEditor.withNewBatch(editor as HistoryEditor, replace);
+  } else {
+    replace();
+  }
+  return true;
+}
+
+/**
  * Handle Enter key inside a list-item. Returns true if handled, false otherwise.
  *
  * Cases:
@@ -52,10 +106,20 @@ function isNested(editor: Editor, itemPath: Path): boolean {
  */
 export function tryListContinuation(
   editor: Editor,
-  { historyBatch = true }: { historyBatch?: boolean } = {},
+  {
+    historyBatch = true,
+    keepItem = false,
+  }: {
+    historyBatch?: boolean;
+    /** The item was just emptied by the caller, so Enter must not exit it. */
+    keepItem?: boolean;
+  } = {},
 ): boolean {
   const { selection } = editor;
-  if (!selection || !Range.isCollapsed(selection)) return false;
+  if (!selection) return false;
+  if (Range.isExpanded(selection)) {
+    return replaceSelectionAndContinue(editor, selection, historyBatch);
+  }
 
   // Find the nearest list-item ancestor
   const itemEntry = Editor.above(editor, {
@@ -68,9 +132,12 @@ export function tryListContinuation(
     Path,
   ];
 
-  // Get first paragraph text to determine if "empty"
-  const firstText = getFirstParagraphText(itemNode);
-  const isEmpty = firstText === undefined || firstText === "";
+  const isEmpty = isEmptyItemAtCaret(
+    editor,
+    itemNode,
+    itemPath,
+    selection.anchor.path,
+  );
 
   // Find the parent list
   const parentListPath = Path.parent(itemPath);
@@ -85,90 +152,16 @@ export function tryListContinuation(
     }
   };
 
-  if (isEmpty) {
+  if (isEmpty && !keepItem) {
     if (isNested(editor, itemPath)) {
       // LC-03: Empty nested item -> outdent
-      batchOp(() => {
-        Editor.withoutNormalizing(editor, () => {
-          const itemIndex = itemPath[itemPath.length - 1];
-          const siblingCount = parentList.children.length;
-
-          // If there are siblings after this item, they become a sub-list of the outdented item
-          if (itemIndex < siblingCount - 1) {
-            const trailingItems: SlateElement[] = [];
-            for (let i = siblingCount - 1; i > itemIndex; i--) {
-              const trailPath = [...parentListPath, i];
-              trailingItems.unshift(
-                JSON.parse(JSON.stringify(Node.get(editor, trailPath))),
-              );
-              Transforms.removeNodes(editor, { at: trailPath });
-            }
-            const currentItem = Node.get(editor, itemPath);
-            if (SlateElement.isElement(currentItem)) {
-              Transforms.insertNodes(
-                editor,
-                {
-                  type: parentList.type,
-                  children: trailingItems,
-                } as SlateElement,
-                { at: [...itemPath, currentItem.children.length] },
-              );
-            }
-          }
-
-          // Move item after the grandparent list-item
-          const grandparentPath = Path.parent(parentListPath);
-          const destPath = Path.next(grandparentPath);
-          Transforms.moveNodes(editor, { at: itemPath, to: destPath });
-
-          // Clean up empty parent list
-          try {
-            const remaining = Node.get(editor, parentListPath);
-            if (isListElement(remaining) && remaining.children.length === 0) {
-              Transforms.removeNodes(editor, { at: parentListPath });
-            }
-          } catch {
-            // Already removed
-          }
-        });
-      });
+      batchOp(() => outdentListItem(editor));
       return true;
     }
 
-    // LC-04: Empty top-level item -> exit list, unwrap to paragraph
-    batchOp(() => {
-      Editor.withoutNormalizing(editor, () => {
-        // Remove the empty item from the list
-        Transforms.removeNodes(editor, { at: itemPath });
-
-        // Insert a paragraph after the list
-        const afterListPath = Path.next(parentListPath);
-        Transforms.insertNodes(
-          editor,
-          {
-            type: "paragraph",
-            children: [{ text: "" }],
-          } as SlateElement,
-          { at: afterListPath },
-        );
-
-        // Move cursor to the new paragraph
-        Transforms.select(editor, {
-          anchor: { path: [...afterListPath, 0], offset: 0 },
-          focus: { path: [...afterListPath, 0], offset: 0 },
-        });
-
-        // If the list is now empty, remove it
-        try {
-          const remaining = Node.get(editor, parentListPath);
-          if (isListElement(remaining) && remaining.children.length === 0) {
-            Transforms.removeNodes(editor, { at: parentListPath });
-          }
-        } catch {
-          // Already removed
-        }
-      });
-    });
+    // LC-04: Empty top-level item -> exit in place, as Backspace does: the list
+    // splits around the paragraph and the item's children are lifted, not lost.
+    batchOp(() => unwrapListItemToParagraph(editor, itemPath));
     return true;
   }
 
@@ -179,6 +172,10 @@ export function tryListContinuation(
   if (!paragraphEntry) return false;
 
   const [, paragraphPath] = paragraphEntry;
+
+  // A paragraph inside a block in the item, such as a blockquote, is not one of
+  // the item's own lines: Enter there belongs to that block.
+  if (!Path.equals(Path.parent(paragraphPath), itemPath)) return false;
 
   // Get the text node and offset
   const point = selection.anchor;
@@ -248,6 +245,17 @@ export function tryListContinuation(
         at: Path.next(paragraphPath),
         to: [...nextItemPath, 0],
       });
+
+      // Blocks after the split point follow the tail, so nothing that came
+      // after the caret ends up above it.
+      const laterBlocks =
+        itemNode.children.length - paragraphPath[paragraphPath.length - 1] - 1;
+      for (let i = 0; i < laterBlocks; i++) {
+        Transforms.moveNodes(editor, {
+          at: Path.next(paragraphPath),
+          to: [...nextItemPath, i + 1],
+        });
+      }
 
       // Move cursor to start of new item
       Transforms.select(editor, Editor.start(editor, nextItemPath));

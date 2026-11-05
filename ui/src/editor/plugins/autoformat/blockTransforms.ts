@@ -17,7 +17,7 @@ const HEADING_RE = /^(#{1,6})$/;
 const NUMBERED_LIST_RE = /^(\d+)\.$/;
 const BULLETED_LIST_RE = /^[-*]$/;
 const BLOCKQUOTE_RE = /^>$/;
-const TASK_RE = /^\[([ xX]?)\]$/;
+export const TASK_RE = /^\[([ xX]?)\]$/;
 const CODE_FENCE_RE = /^```(\w*)$/;
 
 // ---------------------------------------------------------------------------
@@ -225,6 +225,13 @@ export function tryThematicBreak(editor: Editor): boolean {
 
   const [block, blockPath] = blockEntry;
   if (block.type !== "paragraph") return false;
+
+  // A list item leads with a paragraph, and a void break there would hold no
+  // text. The dashes stay literal instead.
+  const parent = Node.get(editor, Path.parent(blockPath));
+  if (SlateElement.isElement(parent) && parent.type === "list-item") {
+    return false;
+  }
 
   const text = getBlockTriggerText(editor, blockEntry, {
     requireLineEnd: true,
