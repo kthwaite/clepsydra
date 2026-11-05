@@ -70,40 +70,50 @@ export function posOfPoint(
 }
 
 /**
+ * Which side of a leaf boundary a column resolves to. Inline voids have no
+ * width in column space and marks split leaves, so one column can name several
+ * points. `before` is the leftmost, right after the preceding char. `after` is
+ * the rightmost, right before the following char.
+ */
+export type ColumnBias = "before" | "after";
+
+/**
  * Map a raw character offset within a block's text (newlines included) to a
- * Slate point, walking the block's text leaves (handles mark-split leaves
- * and skips zero-width inline voids).
+ * Slate point, walking the block's text leaves.
  */
 export function pointAtBlockOffset(
   editor: Editor,
   blockPath: Path,
   target: number,
+  bias: ColumnBias = "before",
 ): Point {
   const [blockNode] = Editor.node(editor, blockPath);
   let cum = 0;
-  let last: Point = Editor.start(editor, blockPath);
+  let found: Point | null = null;
   for (const [textNode, textPath] of Node.texts(blockNode)) {
-    const abs = blockPath.concat(textPath);
     const len = textNode.text.length;
-    if (target <= cum + len && len > 0) {
-      return { path: abs, offset: target - cum };
-    }
-    if (len > 0 || target === cum) {
-      last = { path: abs, offset: len };
+    if (target >= cum && target <= cum + len) {
+      found = { path: blockPath.concat(textPath), offset: target - cum };
+      if (bias === "before") return found;
     }
     cum += len;
   }
-  return last;
+  return found ?? Editor.end(editor, blockPath);
 }
 
 /**
  * Map vim (line, column) coordinates to a Slate point. `off` is clamped to
  * the line length.
  */
-export function pointOfPos(editor: Editor, lines: Line[], pos: LinePos): Point {
+export function pointOfPos(
+  editor: Editor,
+  lines: Line[],
+  pos: LinePos,
+  bias: ColumnBias = "before",
+): Point {
   const line = lines[Math.max(0, Math.min(pos.li, lines.length - 1))];
   const target = line.start + Math.max(0, Math.min(pos.off, line.text.length));
-  return pointAtBlockOffset(editor, line.blockPath, target);
+  return pointAtBlockOffset(editor, line.blockPath, target, bias);
 }
 
 /**

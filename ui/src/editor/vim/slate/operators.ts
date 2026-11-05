@@ -1,8 +1,9 @@
-import type { Descendant, Range } from "slate";
-import { Editor, Element, Node, Path, Transforms } from "slate";
+import type { Descendant, PathRef, Point } from "slate";
+import { Editor, Element, Node, Path, Range, Transforms } from "slate";
 import type { Operator } from "../core/ast";
 import { nextBoundary } from "./graphemes";
 import {
+  type ColumnBias,
   clampCol,
   firstNonBlank,
   getLines,
@@ -22,11 +23,12 @@ export function selectPos(
   editor: Editor,
   mode: "normal" | "insert",
   pos: LinePos,
+  bias: ColumnBias = "before",
 ): void {
   const lines = getLines(editor);
   const li = Math.max(0, Math.min(pos.li, lines.length - 1));
   const off = clampCol(lines[li], pos.off, mode);
-  Transforms.select(editor, pointOfPos(editor, lines, { li, off }));
+  Transforms.select(editor, pointOfPos(editor, lines, { li, off }, bias));
 }
 
 /** Current cursor head as a (line, column) position. */
@@ -145,6 +147,51 @@ function groupSpan(lines: Line[], a: number, b: number): LineGroup[] {
   return groups;
 }
 
+/**
+ * A register node for only some lines of a block. A code block's text is all
+ * there is to it. Anything else keeps the marks and links on those lines.
+ */
+function partialBlock(
+  editor: Editor,
+  lines: Line[],
+  group: LineGroup,
+): Descendant {
+  const block = structuredClone(Node.get(editor, group.blockPath)) as Element;
+  if (block.type === "code-block") {
+    const text = lines
+      .slice(group.first, group.last + 1)
+      .map((l) => l.text)
+      .join("\n");
+    return { ...block, children: [{ text }] } as Descendant;
+  }
+  const start = lines[group.first].start;
+  const end = lines[group.last].start + lines[group.last].text.length;
+  const hasBreakAfter = end < Node.string(block).length;
+  // Run to just past the line's break, so a link ending the line is inside.
+  const from =
+    start === 0
+      ? Editor.start(editor, group.blockPath)
+      : pointAtBlockOffset(editor, group.blockPath, start);
+  const to = hasBreakAfter
+    ? pointAtBlockOffset(editor, group.blockPath, end + 1)
+    : Editor.end(editor, group.blockPath);
+  const inBlock = (point: Point) => ({
+    path: point.path.slice(group.blockPath.length),
+    offset: point.offset,
+  });
+  const children = structuredClone(
+    Node.fragment(block, { anchor: inBlock(from), focus: inBlock(to) }),
+  ) as Descendant[];
+  if (hasBreakAfter) {
+    let last = children[children.length - 1];
+    while (Element.isElement(last)) {
+      last = last.children[last.children.length - 1] as Descendant;
+    }
+    last.text = last.text.replace(/\n$/, "");
+  }
+  return { ...block, children } as Descendant;
+}
+
 /** Build a linewise register from lines [a..b]. */
 export function captureLinewise(
   editor: Editor,
@@ -155,28 +202,21 @@ export function captureLinewise(
   const fragment: Descendant[] = [];
   const captured: Path[] = [];
   for (const group of groupSpan(lines, a, b)) {
+    const unit = group.whole
+      ? registerUnitPath(editor, group.blockPath)
+      : group.blockPath;
+    // Groups run in document order, so a unit that subsumed later lines
+    // (an item with nested lists) is captured once, not per line.
+    if (
+      captured.some((c) => Path.equals(c, unit) || Path.isAncestor(c, unit))
+    ) {
+      continue;
+    }
     if (group.whole) {
-      const unit = registerUnitPath(editor, group.blockPath);
-      // Groups run in document order, so a unit that subsumed later lines
-      // (an item with nested lists) is captured once, not per line.
-      if (
-        captured.some((c) => Path.equals(c, unit) || Path.isAncestor(c, unit))
-      ) {
-        continue;
-      }
       captured.push(unit);
       fragment.push(structuredClone(Node.get(editor, unit)) as Descendant);
     } else {
-      // Partial code block: synthesize a code block from the covered lines.
-      const block = Node.get(editor, group.blockPath);
-      const text = lines
-        .slice(group.first, group.last + 1)
-        .map((l) => l.text)
-        .join("\n");
-      fragment.push({
-        ...(structuredClone(block) as Element),
-        children: [{ text }],
-      } as Descendant);
+      fragment.push(partialBlock(editor, lines, group));
     }
   }
   return { kind: "line", fragment: stripBlockIds(fragment) };
@@ -233,6 +273,87 @@ export function deleteLineSpan(
   selectPos(editor, "normal", { li, off: firstNonBlank(after[li]) });
 }
 
+const isListNode = (node: Node) =>
+  Element.isElement(node) &&
+  (node.type === "bulleted-list" || node.type === "numbered-list");
+
+/**
+ * Tidy one wrapper a cross-block delete took the lead from. Slate removes a
+ * wrapper only if its block had one leaf, and leaves a nested list leading the
+ * item. Either would come back as an empty bullet: the children move to the
+ * start block's item, in reading order, and a wrapper left empty goes.
+ */
+function settleWrapper(
+  editor: Editor,
+  ref: PathRef,
+  startBlockPath: Path,
+): void {
+  const path = ref.current;
+  if (!path) return;
+  const target = Path.parent(startBlockPath);
+  const owner = target.length > 0 ? Node.get(editor, target) : null;
+  const wrapper = Node.get(editor, path) as Element;
+  if (
+    owner &&
+    isListItem(owner) &&
+    isListItem(wrapper) &&
+    wrapper.children.length > 0 &&
+    isListNode(wrapper.children[0])
+  ) {
+    let index = Path.isAncestor(target, path)
+      ? path[target.length]
+      : owner.children.length;
+    for (let left = wrapper.children.length; left > 0; left--) {
+      Transforms.moveNodes(editor, {
+        at: [...(ref.current as Path), 0],
+        to: [...target, index++],
+      });
+    }
+  }
+  const settled = ref.current as Path;
+  if ((Node.get(editor, settled) as Element).children.length === 0) {
+    Transforms.removeNodes(editor, { at: settled });
+  }
+}
+
+/** Delete a range that may cross blocks, leaving no empty bullet behind. */
+export function deleteAcrossBlocks(
+  editor: Editor,
+  at: Range,
+  hanging = false,
+): void {
+  const [start, end] = Range.edges(at);
+  const blockAt = (point: Point) =>
+    Editor.above(editor, {
+      at: point,
+      match: (n) => Element.isElement(n) && Editor.isBlock(editor, n),
+      mode: "lowest",
+    })?.[1];
+  const startBlock = blockAt(start);
+  const endBlock = blockAt(end);
+  if (!startBlock || !endBlock || Path.equals(startBlock, endBlock)) {
+    Transforms.delete(editor, { at, hanging });
+    return;
+  }
+  // Every wrapper of the end block that the start block is not also inside,
+  // innermost first: a fully covered item in between loses its lead too.
+  const wrappers: PathRef[] = [];
+  for (
+    let path = Path.parent(endBlock);
+    path.length > 0 && !Path.isAncestor(path, startBlock);
+    path = Path.parent(path)
+  ) {
+    wrappers.push(Editor.pathRef(editor, path));
+  }
+  Editor.withoutNormalizing(editor, () => {
+    Transforms.delete(editor, { at, hanging });
+    for (const ref of wrappers) {
+      settleWrapper(editor, ref, startBlock);
+      ref.unref();
+    }
+  });
+}
+
 /** Clear lines [a..b] into a single empty line and enter insert (vim cc). */
 export function changeLineSpan(
   editor: Editor,
@@ -240,12 +361,20 @@ export function changeLineSpan(
   a: number,
   b: number,
 ): void {
-  const anchor = pointOfPos(editor, lines, { li: a, off: 0 });
-  const focus = pointOfPos(editor, lines, {
-    li: b,
-    off: lines[b].text.length,
-  });
-  Transforms.delete(editor, { at: { anchor, focus } });
+  // Whole lines: a wikilink at either edge goes with them.
+  const anchor = pointOfPos(editor, lines, { li: a, off: 0 }, "before");
+  const focus = pointOfPos(
+    editor,
+    lines,
+    { li: b, off: lines[b].text.length },
+    "after",
+  );
+  const at = { anchor, focus };
+  // A collapsed `at` would delete one char forward: the next line's break.
+  if (Range.isExpanded(at)) {
+    // `hanging`: a span ending on an empty line still takes that line.
+    deleteAcrossBlocks(editor, at, true);
+  }
   selectPos(editor, "insert", { li: a, off: 0 });
 }
 
@@ -274,20 +403,41 @@ export function charwiseSpan(
   return { start, end };
 }
 
+/** Whether an inline void sits on a line. It adds no columns to `line.text`. */
+function lineHasInlineVoid(editor: Editor, line: Line): boolean {
+  const block = Node.get(editor, line.blockPath) as Element;
+  let offset = 0;
+  for (const child of block.children) {
+    if (
+      Element.isElement(child) &&
+      Editor.isVoid(editor, child) &&
+      offset >= line.start &&
+      offset <= line.start + line.text.length
+    ) {
+      return true;
+    }
+    offset += Node.string(child).length;
+  }
+  return false;
+}
+
 /** Apply d/c/y to a charwise span. Returns the resulting state patch. */
 export function applyCharwise(
   editor: Editor,
   lines: Line[],
   op: Operator,
   span: CharwiseSpan,
+  /** The span is exact, as in visual mode: never let Slate shrink it. */
+  hanging = false,
 ): Partial<VimState> {
   const { start, end } = span;
   if (comparePos(start, end) >= 0) {
     return op === "c" ? { mode: "insert" } : {};
   }
+  // Hug the span's first and last chars, so a wikilink at either edge stays.
   const range: Range = {
-    anchor: pointOfPos(editor, lines, start),
-    focus: pointOfPos(editor, lines, end),
+    anchor: pointOfPos(editor, lines, start, "after"),
+    focus: pointOfPos(editor, lines, end, "before"),
   };
   const register = captureCharwise(editor, range);
   if (op === "y") {
@@ -299,14 +449,29 @@ export function applyCharwise(
     Editor.string(editor, range).length === 0 &&
     lines[start.li].text.length === 0
   ) {
+    // No columns does not mean blank: a line may hold only a wikilink. And an
+    // empty line leading an item that holds more has no break of its own to
+    // give: the line stands for the item. Either way nothing is removed.
+    const item = listItemOf(editor, lines[start.li].blockPath);
+    if (
+      lineHasInlineVoid(editor, lines[start.li]) ||
+      (item && (Node.get(editor, item) as Element).children.length > 1)
+    ) {
+      if (op !== "c") return {};
+      Transforms.select(
+        editor,
+        pointOfPos(editor, lines, { li: start.li, off: 0 }, "after"),
+      );
+      return { mode: "insert" };
+    }
     // Deleting just the line break from an empty line (dw on an empty
     // line): a zero-text cross-block range doesn't merge in Slate, so
     // remove the empty line instead.
     deleteLineSpan(editor, lines, start.li, start.li);
     return op === "c" ? { register, mode: "insert" } : { register };
   }
-  Transforms.delete(editor, { at: range });
-  selectPos(editor, op === "c" ? "insert" : "normal", start);
+  deleteAcrossBlocks(editor, range, hanging);
+  selectPos(editor, op === "c" ? "insert" : "normal", start, "after");
   return op === "c" ? { register, mode: "insert" } : { register };
 }
 
@@ -321,6 +486,19 @@ const MAX_PASTE_COUNT = 1000;
 function isCodeBlock(editor: Editor, blockPath: Path): boolean {
   const node = Node.get(editor, blockPath);
   return Element.isElement(node) && node.type === "code-block";
+}
+
+/** One string per lowest block, so nested blocks stay on their own lines. */
+function plainLines(editor: Editor, node: Descendant): string[] {
+  if (
+    Element.isElement(node) &&
+    node.children.some((c) => Element.isElement(c) && Editor.isBlock(editor, c))
+  ) {
+    return (node.children as Descendant[]).flatMap((c) =>
+      plainLines(editor, c),
+    );
+  }
+  return [Node.string(node)];
 }
 
 /** Adapt register nodes to the paste context (list vs non-list). */
@@ -349,7 +527,9 @@ export function pasteLinewise(
 
   if (isCodeBlock(editor, line.blockPath)) {
     // Paste as text lines inside the code block.
-    const once = register.fragment.map((node) => Node.string(node)).join("\n");
+    const once = register.fragment
+      .flatMap((node) => plainLines(editor, node))
+      .join("\n");
     const parts: string[] = [];
     for (let i = 0; i < n; i++) parts.push(once);
     const text = parts.join("\n");
@@ -402,7 +582,9 @@ export function pasteCharwise(
     after && line.text.length > 0
       ? { li: from.li, off: nextBoundary(line.text, from.off) }
       : from;
-  Transforms.select(editor, pointOfPos(editor, lines, at));
+  // `p` lands right after the caret's char, `P` right before it.
+  const bias = after && line.text.length > 0 ? "before" : "after";
+  Transforms.select(editor, pointOfPos(editor, lines, at, bias));
   const n = Math.min(count, MAX_PASTE_COUNT);
   for (let i = 0; i < n; i++) {
     Transforms.insertFragment(editor, structuredClone(register.fragment));
