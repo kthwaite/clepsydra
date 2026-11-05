@@ -1,5 +1,6 @@
 import {
   Editor,
+  Point,
   Range,
   Element as SlateElement,
   Text,
@@ -10,6 +11,9 @@ import type { CustomElement } from "#/editor/types";
 
 const OVERTYPE_CHARS = new Set(["*", "_", "~", "`", "]", ")"]);
 const AUTO_PAIR_CHARS = new Set(["*", "_", "~"]);
+
+/** Where the latest collapsed auto-pair left the caret, between the pair. */
+const AUTO_PAIRED_CARET = new WeakMap<Editor, Point>();
 
 export function tryOvertype(editor: Editor, ch: string): boolean {
   if (!OVERTYPE_CHARS.has(ch)) return false;
@@ -62,6 +66,9 @@ export function tryAutoPair(editor: Editor, ch: string): boolean {
         reverse: true,
       });
     });
+    if (editor.selection) {
+      AUTO_PAIRED_CARET.set(editor, editor.selection.anchor);
+    }
     return true;
   }
 
@@ -77,4 +84,29 @@ export function tryAutoPair(editor: Editor, ch: string): boolean {
     });
   });
   return true;
+}
+
+/**
+ * A Space straight after an auto-paired `*` or `_` means it opens nothing, since
+ * emphasis needs text after its opener. It is a bullet marker or a literal, so
+ * the closer the pairing inserted has to go.
+ */
+export function dropAutoPairedCloser(editor: Editor): void {
+  const caret = AUTO_PAIRED_CARET.get(editor);
+  AUTO_PAIRED_CARET.delete(editor);
+  const { selection } = editor;
+  if (
+    !caret ||
+    !selection ||
+    !Range.isCollapsed(selection) ||
+    !Point.equals(selection.anchor, caret)
+  ) {
+    return;
+  }
+  const [node] = Editor.node(editor, caret.path);
+  if (!Text.isText(node)) return;
+  const opener = node.text[caret.offset - 1];
+  if (!AUTO_PAIR_CHARS.has(opener) || node.text[caret.offset] !== opener)
+    return;
+  Transforms.delete(editor, { at: caret, distance: 1, unit: "character" });
 }

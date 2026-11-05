@@ -8,7 +8,7 @@ import {
 } from "slate";
 import { HistoryEditor } from "slate-history";
 import type { CustomElement } from "#/editor/types";
-import { tryAutoPair, tryOvertype } from "./autoPair";
+import { dropAutoPairedCloser, tryAutoPair, tryOvertype } from "./autoPair";
 import {
   tryBlockTransform,
   tryCodeFence,
@@ -76,6 +76,7 @@ export function withAutoformat(editor: Editor): Editor {
       insertText(ch);
       return;
     }
+    if (ch === " ") dropAutoPairedCloser(editor);
     // Step 2: thematic break
     if (ch === "-" && tryThematicBreak(editor)) return;
     // Step 3: prefixed link on Space
