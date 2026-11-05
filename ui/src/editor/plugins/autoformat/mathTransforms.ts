@@ -336,8 +336,9 @@ function replaceInline(
 
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
-      Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
-      Transforms.delete(editor);
+      Transforms.delete(editor, {
+        at: { anchor: rangeStart, focus: rangeEnd },
+      });
       Transforms.insertNodes(
         editor,
         makeInlineMath({

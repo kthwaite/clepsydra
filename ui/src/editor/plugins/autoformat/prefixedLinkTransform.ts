@@ -79,11 +79,12 @@ function replaceCandidate(
 
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
-      Transforms.select(editor, {
-        anchor: { path: candidate.path, offset: candidate.start },
-        focus: { path: candidate.path, offset: candidate.end },
+      Transforms.delete(editor, {
+        at: {
+          anchor: { path: candidate.path, offset: candidate.start },
+          focus: { path: candidate.path, offset: candidate.end },
+        },
       });
-      Transforms.delete(editor);
       Transforms.insertNodes(editor, {
         type: "link",
         url: expanded.url,
