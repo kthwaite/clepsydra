@@ -20,6 +20,7 @@ import type {
   LinkElement,
   ListItemElement,
   MathBlockElement,
+  ParagraphElement,
   TableAlign,
   TableCellElement,
   TableElement,
@@ -895,6 +896,10 @@ function isTextNode(node: Descendant): node is CustomText {
   return "text" in node;
 }
 
+function isParagraph(node: Descendant): node is ParagraphElement {
+  return !isTextNode(node) && (node as CustomElement).type === "paragraph";
+}
+
 function isNestedList(node: Descendant): boolean {
   return (
     !isTextNode(node) && NESTED_LIST_TYPES.has((node as CustomElement).type)
@@ -1018,21 +1023,35 @@ function extractBlockMetadata<T extends Descendant>(element: T): T {
     el.properties = properties;
   }
 
+  // The serializer writes an item's metadata onto its first paragraph, whatever
+  // blocks follow it, so look there before the end of the item.
+  const paragraphs =
+    el.type === "list-item" ? searchChildren.filter(isParagraph) : [];
+
   // 2. Extract block ID from the last text node (within search scope)
-  const lastText = findLastTextNode(searchChildren);
-  if (lastText) {
-    const blockIdMatch = BLOCK_ID_RE.exec(lastText.text);
-    if (blockIdMatch) {
+  const idCandidates = [
+    paragraphs[0] && findLastTextNode(paragraphs[0].children),
+    findLastTextNode(searchChildren),
+  ];
+  for (const text of idCandidates) {
+    const blockIdMatch = text && BLOCK_ID_RE.exec(text.text);
+    if (text && blockIdMatch) {
       el.blockId = blockIdMatch[1];
-      lastText.text = lastText.text.slice(
-        0,
-        lastText.text.length - blockIdMatch[0].length,
-      );
+      text.text = text.text.slice(0, text.text.length - blockIdMatch[0].length);
+      break;
     }
   }
 
   // 3. Clean up trailing whitespace left by property/blockId removal
-  if (el.blockId || el.properties) trimMetadataWhitespace(searchChildren);
+  if (el.blockId || el.properties) {
+    if (paragraphs.length > 0) {
+      for (const paragraph of paragraphs) {
+        trimMetadataWhitespace(paragraph.children);
+      }
+    } else {
+      trimMetadataWhitespace(searchChildren);
+    }
+  }
 
   return element;
 }

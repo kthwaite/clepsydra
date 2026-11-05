@@ -419,6 +419,20 @@ function buildMetadataSuffix(element: {
 }
 
 /**
+ * The loader finds a block id by the space before it, and parsing strips a plain
+ * space at the start of a line. A block with no text has to encode that space.
+ */
+function metadataSuffixValue(
+  suffix: string,
+  phrasing: PhrasingContent[],
+): string {
+  const noText = phrasing.every((n) => n.type === "text" && n.value === "");
+  return noText && suffix.startsWith(" ^")
+    ? `&#x20;${suffix.slice(1)}`
+    : suffix;
+}
+
+/**
  * Append properties/blockId suffix as an inline HTML node to a PhrasingContent[].
  * Using HTML type prevents toMarkdown from escaping brackets in [key:: value].
  */
@@ -429,7 +443,10 @@ function appendBlockMetadataSuffix(
   const suffix = buildMetadataSuffix(element);
   if (!suffix) return;
   // Append as inline HTML to bypass bracket escaping
-  children.push({ type: "html", value: suffix } as unknown as PhrasingContent);
+  children.push({
+    type: "html",
+    value: metadataSuffixValue(suffix, children),
+  } as unknown as PhrasingContent);
 }
 
 /**
@@ -447,7 +464,7 @@ function appendBlockMetadataToListItem(
     if (child.type === "paragraph") {
       child.children.push({
         type: "html",
-        value: suffix,
+        value: metadataSuffixValue(suffix, child.children),
       } as unknown as PhrasingContent);
       return;
     }
@@ -456,7 +473,10 @@ function appendBlockMetadataToListItem(
   li.children.push({
     type: "paragraph",
     children: [
-      { type: "html", value: suffix.trimStart() } as unknown as PhrasingContent,
+      {
+        type: "html",
+        value: metadataSuffixValue(suffix, []).trimStart(),
+      } as unknown as PhrasingContent,
     ],
   });
 }
