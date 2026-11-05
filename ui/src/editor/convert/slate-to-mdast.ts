@@ -462,9 +462,16 @@ function appendBlockMetadataToListItem(
   // Find the first paragraph in the list item and append as inline HTML
   for (const child of li.children) {
     if (child.type === "paragraph") {
+      // On a line with no text, the suffix's space would follow the marker and
+      // push the item's content a column right of its children's indent.
+      const noText = child.children.every(
+        (c) => c.type === "text" && c.value === "",
+      );
       child.children.push({
         type: "html",
-        value: metadataSuffixValue(suffix, child.children),
+        value: noText
+          ? metadataSuffixValue(suffix, child.children).trimStart()
+          : suffix,
       } as unknown as PhrasingContent);
       return;
     }
