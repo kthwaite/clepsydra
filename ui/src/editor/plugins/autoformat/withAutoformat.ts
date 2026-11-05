@@ -270,18 +270,8 @@ function tryBlockquoteContinuation(editor: Editor): boolean {
     HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
       Editor.withoutNormalizing(editor, () => {
         const [, paraPath] = paraEntry;
-        Transforms.removeNodes(editor, { at: paraPath });
-        try {
-          const bq = Editor.node(editor, bqPath)[0];
-          if (
-            SlateElement.isElement(bq) &&
-            (bq as SlateElement).children.length === 0
-          ) {
-            Transforms.removeNodes(editor, { at: bqPath });
-          }
-        } catch {
-          /* already removed */
-        }
+        // Insert first: the path is right while the quote is still there, and the
+        // document always holds text, so undo can give the caret back.
         const afterPath = Path.next(bqPath);
         Transforms.insertNodes(
           editor,
@@ -295,6 +285,14 @@ function tryBlockquoteContinuation(editor: Editor): boolean {
           anchor: { path: [...afterPath, 0], offset: 0 },
           focus: { path: [...afterPath, 0], offset: 0 },
         });
+        Transforms.removeNodes(editor, { at: paraPath });
+        const bq = Editor.node(editor, bqPath)[0];
+        if (
+          SlateElement.isElement(bq) &&
+          (bq as SlateElement).children.length === 0
+        ) {
+          Transforms.removeNodes(editor, { at: bqPath });
+        }
       });
     });
     return true;
