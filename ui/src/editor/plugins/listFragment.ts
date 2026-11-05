@@ -71,8 +71,8 @@ export function insertListFragment(
       Editor.isStart(editor, point, linePath) &&
       Editor.isEnd(editor, point, linePath);
 
-    // One plain item merges inline, unless it would fill an empty item.
-    if (isOnePlainItem(blocks) && !(isLead && hostEmpty)) {
+    // One block's text merges inline, unless it would fill an empty item.
+    if (isOneBlockOfText(editor, blocks) && !(isLead && hostEmpty)) {
       fallback(blocks);
       return;
     }
@@ -135,14 +135,25 @@ function unwrapLeadlessItem(item: Item): SlateElement[] {
   return inner;
 }
 
-function isOnePlainItem(blocks: Descendant[]): boolean {
+/**
+ * Whether the fragment is the text of one block, whatever wrappers it kept. A copy
+ * from inside an item keeps its ancestors, so part of a code block's text arrives
+ * as list > item > code-block. All of that block's text looks the same: the
+ * fragment records no offsets, so both paste as text on a line with text, as a
+ * top-level code block does.
+ */
+function isOneBlockOfText(editor: Editor, blocks: Descendant[]): boolean {
   if (blocks.length !== 1) return false;
-  const [list] = blocks;
-  if (!isListElement(list) || list.children.length !== 1) return false;
-  const [item] = list.children;
-  return (
-    isListItem(item) && item.children.length === 1 && isLine(item.children[0])
-  );
+  let node = blocks[0];
+  while (SlateElement.isElement(node) && !editor.isVoid(node)) {
+    const { children } = node;
+    if (children.some((c) => Text.isText(c) || editor.isInline(c as never))) {
+      return true;
+    }
+    if (children.length !== 1) return false;
+    node = children[0];
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
