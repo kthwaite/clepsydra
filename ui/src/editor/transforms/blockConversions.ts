@@ -44,12 +44,16 @@ export interface ApplyBlockConversionOptions {
  */
 export function applyBlockConversion(
   editor: Editor,
-  { at, deleteRange, conversion }: ApplyBlockConversionOptions,
+  { at: lineAt, deleteRange, conversion }: ApplyBlockConversionOptions,
 ): void {
   withBatch(editor, () => {
     if (deleteRange) {
       Transforms.delete(editor, { at: deleteRange });
     }
+
+    const at = BLOCK_CONVERSIONS.has(conversion.type)
+      ? lineAfterTaskLead(editor, lineAt)
+      : lineAt;
 
     switch (conversion.type) {
       case "heading":
@@ -164,6 +168,29 @@ export function applySelectionList(editor: Editor, listType: ListType): void {
       for (const ref of paths) ref.unref();
     }
   });
+}
+
+const BLOCK_CONVERSIONS: ReadonlySet<BlockConversion["type"]> = new Set([
+  "heading",
+  "blockquote",
+  "code-block",
+  "thematic-break",
+]);
+
+/**
+ * GFM writes a checkbox only above a paragraph, and the item's metadata is
+ * written onto that paragraph. So a block conversion on a task's own line goes on
+ * a new line after it, and the task keeps its line. Otherwise returns `at`.
+ */
+function lineAfterTaskLead(editor: Editor, at: Path): Path {
+  const item = itemLedBy(editor, at);
+  if (!item || (Node.get(editor, item) as ListItemElement).checked == null) {
+    return at;
+  }
+  const next = Path.next(at);
+  Transforms.insertNodes(editor, makeParagraph({}), { at: next });
+  Transforms.select(editor, Editor.start(editor, next));
+  return next;
 }
 
 /** The list item whose own line is the paragraph at `at`, if there is one. */
