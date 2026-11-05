@@ -175,6 +175,8 @@ registry element is expected to have at least one story.
 - **`list-item` canonical shape** is `list-item > paragraph > text`. Its
   `normalize` always returns `true` to suppress Slate's default block-flattening,
   so any transform that produces list items must emit that exact nesting.
+  A nested list never leads an item. A non-list block may: display math typed
+  into a bullet, and parsed forms such as `- # h`. A task needs a paragraph lead.
 - **Task list layout**: keep the checkbox row inline-level (`inline-flex` with
   full width and top alignment). System WebKit can initially paint an outside
   list marker over the checkbox when the first child is a block-level flex row;
