@@ -14,7 +14,7 @@ import {
   tryCodeFence,
   tryThematicBreak,
 } from "./blockTransforms";
-import { tryInlineTransform } from "./inlineTransforms";
+import { tryInlineTransform, trySkipScaffoldParen } from "./inlineTransforms";
 import { isBlankBlock, tryListContinuation } from "./listContinuation";
 import {
   isInMathCandidate,
@@ -77,6 +77,7 @@ export function withAutoformat(editor: Editor): Editor {
       return;
     }
     if (ch === " ") dropAutoPairedCloser(editor);
+    if (ch === "(" && trySkipScaffoldParen(editor)) return;
     // Step 2: thematic break
     if (ch === "-" && tryThematicBreak(editor)) return;
     // Step 3: prefixed link on Space

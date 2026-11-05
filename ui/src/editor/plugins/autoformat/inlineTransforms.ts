@@ -3,6 +3,7 @@ import {
   Node,
   Path,
   type Point,
+  Range,
   Element as SlateElement,
   Text,
   Transforms,
@@ -483,6 +484,23 @@ function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
     });
   });
   return true;
+}
+
+/**
+ * The `]` already scaffolded `]()` with the caret inside, so the `(` a typist
+ * presses next is there. Inserting it would make the URL start with a paren.
+ */
+export function trySkipScaffoldParen(editor: Editor): boolean {
+  if (isInCodeContext(editor)) return false;
+  const { selection } = editor;
+  if (!selection || !Range.isCollapsed(selection)) return false;
+  const { anchor } = selection;
+  const [node] = Editor.node(editor, anchor.path);
+  if (!Text.isText(node)) return false;
+  return (
+    node.text[anchor.offset] === ")" &&
+    node.text.slice(0, anchor.offset).endsWith("](")
+  );
 }
 
 function tryLinkTransform(editor: Editor, closerConsumed = false): boolean {
