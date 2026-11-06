@@ -10,13 +10,14 @@ chrono = { workspace = true }
 clep-vault = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 owo-colors = { workspace = true }
-rusqlite = { workspace = true }
+rusqlite = { workspace = true, features = ["functions"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
+unicode-normalization = { workspace = true }
 uuid = { workspace = true }
 walkdir = { workspace = true }
 

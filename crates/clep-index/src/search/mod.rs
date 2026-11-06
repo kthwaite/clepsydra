@@ -3,6 +3,7 @@ use thiserror::Error;
 
 use crate::index::SearchResult;
 
+mod fuzzy;
 pub(super) mod query;
 mod sql;
 
@@ -14,6 +15,10 @@ pub(super) enum SearchExecutionError {
     Query(#[from] SearchQueryError),
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
+}
+
+pub(super) fn configure_connection(connection: &Connection) -> rusqlite::Result<()> {
+    fuzzy::register(connection)
 }
 
 pub(super) fn search(

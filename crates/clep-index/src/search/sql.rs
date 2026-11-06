@@ -176,6 +176,17 @@ impl<'a> Compiler<'a> {
                         let parameter = self.bind(Value::Text(value.clone()));
                         format!("(COALESCE(p.project = ?{parameter}, 0))")
                     }
+                    SearchField::Title => {
+                        let fts = fts_expression(self.input, value, TextMode::Prefix, *span)?;
+                        let parameter = self.bind(Value::Text(fts));
+                        let fuzzy_parameter = self.bind(Value::Text(value.clone()));
+                        format!(
+                            "(EXISTS (SELECT 1 FROM pages_fts AS searched_pages \
+                             WHERE searched_pages.page_id = p.id \
+                             AND searched_pages.title MATCH ?{parameter}) \
+                             OR clep_fuzzy_title(?{fuzzy_parameter}, p.title))"
+                        )
+                    }
                     SearchField::Tag => {
                         let parameter = self.bind(Value::Text(value.clone()));
                         format!(

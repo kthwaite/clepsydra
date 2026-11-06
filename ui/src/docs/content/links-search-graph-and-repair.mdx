@@ -114,6 +114,8 @@ project:"My Project"
 "local backup"
 kind:meeting tag:"1:1"
 kind:meeting tag:1:1
+title:clepsdyra
+title:"clepsdyra hand"
 attendees:>1
 attendees:0 kind:meeting
 ```
@@ -125,6 +127,14 @@ fields are:
 - `kind` recognizes values case-insensitively and normalizes them to the
   canonical Kind token.
 - `tag` matches an exact, case-sensitive stored or computed tag.
+- `title` matches only the stored title, retaining full-text word-prefix and
+  stemming matches and adding case- and accent-insensitive typo tolerance.
+  Query words of 4–7 characters allow one insertion, deletion, substitution,
+  or adjacent transposition; words of 8 or more allow two. Shorter words
+  retain prefix matching without typo tolerance. Typo distance compares whole
+  words, not arbitrary substrings. Every word in a quoted title value must
+  match, in any order: `title:"clepsdyra hand"` finds **Clepsydra Handbook**.
+  Quotes group the field value; they do not make it an exact phrase.
 - `project` matches the exact, case-sensitive stored project value.
 - `attendees` compares how many people a page's `attendees` property names.
   The value is a whole number, optionally preceded by `=`, `>`, `>=`, `<`, or
@@ -133,10 +143,10 @@ fields are:
   naming anyone. Anything else (`attendees:many`, `attendees:-1`) is an
   `invalid_field_value` error.
 
-Field names must be lowercase. Fields do not use prefix or hierarchical
-matching. Separate expressions with whitespace for AND, use `|` for OR, prefix
-an expression with `-` for NOT, and use parentheses to group expressions.
-Precedence is NOT, then AND, then OR.
+Field names must be lowercase. `kind`, `tag`, and `project` do not use prefix
+or hierarchical matching. Separate expressions with whitespace for AND, use
+`|` for OR, prefix an expression with `-` for NOT, and use parentheses to group
+expressions. Precedence is NOT, then AND, then OR.
 
 Double quotes delimit phrases and field values that contain whitespace or
 operator characters. Within quotes, write `\"` for a literal double quote and

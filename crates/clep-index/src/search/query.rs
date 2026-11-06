@@ -23,6 +23,7 @@ pub(super) enum TextMode {
 pub(super) enum SearchField {
     Kind,
     Tag,
+    Title,
     Project,
     /// How many `attendees` a page names. The value is normalized to
     /// `<comparison><count>` (`=1`, `>=3`, …); see [`parse_count_comparison`].
@@ -709,6 +710,7 @@ impl Parser<'_> {
     ) -> Result<SearchExpr, SearchQueryError> {
         let field = match name.as_str() {
             "kind" => SearchField::Kind,
+            "title" => SearchField::Title,
             "tag" => SearchField::Tag,
             "project" => SearchField::Project,
             "attendees" => SearchField::Attendees,
@@ -777,7 +779,7 @@ impl Parser<'_> {
             SearchField::Attendees => parse_count_comparison(&value)
                 .map(|(comparison, count)| format!("{}{count}", comparison.as_str()))
                 .ok_or_else(|| self.invalid_count(value_span))?,
-            SearchField::Tag | SearchField::Project => value,
+            SearchField::Title | SearchField::Tag | SearchField::Project => value,
         };
 
         Ok(SearchExpr::Field {

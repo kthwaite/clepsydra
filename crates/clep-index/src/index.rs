@@ -526,6 +526,8 @@ impl VaultIndex {
         // 4. Migration: ensure links.target_id has ON DELETE SET NULL
         migrate_links_fk(conn)?;
 
+        search::configure_connection(conn)?;
+
         Ok(())
     }
 
@@ -3354,6 +3356,63 @@ mod tests {
         );
         assert_paths(index.search("clep stray", 20).unwrap(), &["notes/stray.md"]);
         assert_paths(index.search("Éla", 20).unwrap(), &["notes/unicode.md"]);
+    }
+
+    #[test]
+    fn search_title_tolerates_typos_without_searching_bodies() {
+        let index = search_index();
+
+        assert_paths(
+            index.search("title:clpsydra", 20).unwrap(),
+            &["notes/clepsydra.md", "notes/stray.md"],
+        );
+        assert_paths(
+            index.search("title:clep", 20).unwrap(),
+            &["notes/clepsydra.md", "notes/stray.md"],
+        );
+        assert_paths(
+            index.search(r#"title:"HANDBOOK clepsdyra""#, 20).unwrap(),
+            &["notes/clepsydra.md"],
+        );
+        assert_paths(
+            index.search("title:tastign", 20).unwrap(),
+            &["recipes/beer.md"],
+        );
+        assert!(index.search("title:fermentaton", 20).unwrap().is_empty());
+        assert!(index.search("clpsydra", 20).unwrap().is_empty());
+        assert_paths(
+            index
+                .search("(title:clpsydra | title:bakcup) -tag:ideas", 20)
+                .unwrap(),
+            &["notes/clepsydra.md", "notes/backup.md"],
+        );
+        let limited = index.search("title:clpsydra", 1).unwrap();
+        assert_eq!(paths(&limited), ["notes/stray.md"]);
+        assert!(limited[0].snippet.is_empty());
+    }
+
+    #[test]
+    fn search_title_bounds_typos_and_normalizes_unicode() {
+        let index = search_index();
+
+        for query in ["title:bakup", "title:backkup", "title:backxp"] {
+            assert_paths(index.search(query, 20).unwrap(), &["notes/backup.md"]);
+        }
+        assert_paths(
+            index.search("title:clepsidrx", 20).unwrap(),
+            &["notes/clepsydra.md", "notes/stray.md"],
+        );
+        for query in ["title:zlepsidrx", "title:ber", "title:psydra"] {
+            assert!(index.search(query, 20).unwrap().is_empty(), "{query}");
+        }
+        for query in ["title:ÉLXN", "title:E\u{301}LXN", "title:elxn"] {
+            assert_paths(index.search(query, 20).unwrap(), &["notes/unicode.md"]);
+        }
+        assert_paths(
+            index.search(r#"title:"clepsdyra hand""#, 20).unwrap(),
+            &["notes/clepsydra.md"],
+        );
+        assert_paths(index.search("tag:ideas -title:clpsydra", 20).unwrap(), &[]);
     }
 
     #[test]
