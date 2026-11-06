@@ -177,39 +177,31 @@ async fn a_page_under_a_legacy_one_on_one_folder_infers_meeting() {
 }
 
 #[tokio::test]
-async fn meeting_pages_open_with_a_scaffold_body() {
+async fn meeting_creation_preserves_blank_and_authored_bodies() {
     let (server, _tmp) = setup_server();
 
-    // The legacy token is a spelling of MEETING, so it gets the scaffold too.
-    for (path, kind) in [
-        ("meetings/scaffold.md", "MEETING"),
-        ("meetings/legacy.md", "ONE_ON_ONE"),
+    for (name, kind, body) in [
+        ("omitted", "MEETING", None),
+        ("empty", "MEETING", Some("")),
+        ("whitespace", "MEETING", Some(" \n")),
+        ("authored", "MEETING", Some("just this\n")),
+        ("legacy", "ONE_ON_ONE", None),
     ] {
-        let (status, created) = create(
-            &server,
-            path,
-            serde_json::json!({ "title": "Scaffold", "kind": kind }),
-        )
-        .await;
+        let mut request = serde_json::json!({ "title": name, "kind": kind });
+        if let Some(body) = body {
+            request["body"] = serde_json::json!(body);
+        }
+        let (status, created) = create(&server, &format!("meetings/{name}.md"), request).await;
         assert_eq!(status, StatusCode::CREATED);
         assert_eq!(created["kind"], "MEETING");
-        let body = created["body"].as_str().unwrap();
-        assert!(body.contains("## Agenda"), "no scaffold for {kind}: {body}");
-        assert!(body.contains("## Notes"), "no scaffold for {kind}: {body}");
-        assert!(
-            body.contains("## Actions"),
-            "no scaffold for {kind}: {body}"
-        );
-    }
+        assert_eq!(created["body"], body.unwrap_or_default(), "{name}");
 
-    // A supplied body is never overwritten.
-    let (_, created) = create(
-        &server,
-        "meetings/authored.md",
-        serde_json::json!({ "title": "Authored", "kind": "MEETING", "body": "just this\n" }),
-    )
-    .await;
-    assert_eq!(created["body"], "just this\n");
+        let path = created["path"].as_str().unwrap();
+        let response = server.get(&format!("/api/vault/pages/{path}")).await;
+        response.assert_status_ok();
+        let saved: serde_json::Value = response.json();
+        assert_eq!(saved["body"], body.unwrap_or_default(), "{name}");
+    }
 }
 
 #[tokio::test]

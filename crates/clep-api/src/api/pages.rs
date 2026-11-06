@@ -661,11 +661,6 @@ pub async fn get_page(
 /// because the codec needs all three sections present to read a recipe.
 const RECIPE_SCAFFOLD: &str = "## Ingredients\n\n## Steps\n\n## Notes\n";
 
-/// Body written for a MEETING created without one. Unlike the recipe
-/// scaffold nothing parses these headings; they are here because a meeting
-/// note that opens empty is a meeting note nobody takes minutes in.
-const MEETING_SCAFFOLD: &str = "## Agenda\n\n## Notes\n\n## Actions\n";
-
 fn page_id_not_found(uuid: &str) -> ApiError {
     ApiError::not_found(format!("page not found with id: {uuid}"))
 }
@@ -791,14 +786,9 @@ pub async fn create_page(
     }
 
     let page_body = body.body.unwrap_or_default();
-    // Scaffolds follow the *declared* kind, as the recipe scaffold always has:
-    // a caller who names the kind is asking for the shape that goes with it.
-    let page_body = if page_body.trim().is_empty() {
-        match meta.kind {
-            Some(Kind::Recipe) => RECIPE_SCAFFOLD.to_string(),
-            Some(Kind::Meeting) => MEETING_SCAFFOLD.to_string(),
-            _ => page_body,
-        }
+    // Only an explicitly declared recipe needs section headings for its codec.
+    let page_body = if meta.kind == Some(Kind::Recipe) && page_body.trim().is_empty() {
+        RECIPE_SCAFFOLD.to_string()
     } else {
         page_body
     };
