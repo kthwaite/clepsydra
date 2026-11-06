@@ -21,6 +21,9 @@ services and remove all temporary data.
 
 The [CI workflow](.github/workflows/ci.yml) checks frontend types, lint, tests,
 and build, plus Rust formatting, Clippy, and tests on Linux and macOS.
+It runs only on pushes to `prod`, including merges; pushes to `dev` and
+pull requests do not trigger CI. Run the full checks locally before merging
+branches into `dev`.
 To reproduce the core gates locally from the repository root:
 
 ```sh
