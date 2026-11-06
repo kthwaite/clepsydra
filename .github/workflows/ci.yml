@@ -2,8 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [prod, dev]
-  pull_request:
+    # Validate production merges; development branches are verified locally.
+    branches: [prod]
 
 # A newer push to the same branch makes the in-flight run redundant.
 concurrency:
