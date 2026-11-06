@@ -127,6 +127,14 @@ export function KindSelect({
             <Input
               ref={inputRef}
               placeholder={placeholder}
+              onFocus={(event) => {
+                if (
+                  value !== null &&
+                  event.currentTarget.value === kindDisplayLabel(value)
+                ) {
+                  event.currentTarget.select();
+                }
+              }}
               onKeyDownCapture={(event) => {
                 if (
                   event.nativeEvent.isComposing ||
