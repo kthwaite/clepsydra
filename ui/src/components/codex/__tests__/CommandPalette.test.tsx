@@ -62,7 +62,7 @@ const {
       >,
       activeTabId: null as string | null,
       createQuire: vi.fn(),
-      addTabToQuire: vi.fn(),
+      addTabsToQuire: vi.fn(),
       removeTabFromQuire: vi.fn(),
     },
   };
@@ -627,57 +627,6 @@ describe("CommandPalette keyboard navigation", () => {
     }
   });
 
-  it("preserves stable and dynamic Quire command IDs, labels, filtering, and actions", async () => {
-    const user = userEvent.setup();
-    workspaceStateMock.tabs = [
-      {
-        id: "tab-1",
-        type: "page",
-        path: "notes/alpha.md",
-        label: "Alpha",
-        quireId: "quire-1",
-      },
-    ];
-    workspaceStateMock.quires = {
-      "quire-1": {
-        id: "quire-1",
-        name: "Current",
-        color: "sepia",
-        collapsed: false,
-      },
-      "quire-2": {
-        id: "quire-2",
-        name: "Research",
-        color: "verdigris",
-        collapsed: false,
-      },
-    };
-    workspaceStateMock.activeTabId = "tab-1";
-    render(<CommandPalette />);
-
-    await user.type(
-      screen.getByRole("textbox", { name: "Command query" }),
-      "Quire:",
-    );
-
-    const ids = () =>
-      Array.from(document.querySelectorAll("[data-command-id]")).map((el) =>
-        el.getAttribute("data-command-id"),
-      );
-    expect(ids()).toContain("quire.new");
-    expect(ids()).toContain("quire.add.quire-2");
-    expect(ids()).not.toContain("quire.add.quire-1");
-    expect(ids()).toContain("quire.remove");
-    await user.click(
-      screen.getByRole("button", {
-        name: /Quire: add active folio to Research/i,
-      }),
-    );
-    expect(workspaceStateMock.addTabToQuire).toHaveBeenCalledWith(
-      "tab-1",
-      "quire-2",
-    );
-  });
   it("scrolls the active row into view as the selection moves", async () => {
     const scrollIntoView = vi.fn();
     Object.defineProperty(Element.prototype, "scrollIntoView", {

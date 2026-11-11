@@ -17,6 +17,7 @@ import {
 } from "#/components/ui/menu";
 import { TextField } from "#/components/ui/text-field";
 import { QUIRE_COLORS, quireColorVar } from "#/store/quires";
+import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
 export type MenuTarget =
@@ -50,6 +51,10 @@ export function SheafContextMenu({
   const quire = target.kind === "quire" ? quires[target.quireId] : undefined;
 
   const handleRootAction = (key: React.Key) => {
+    if (key === "show-all-tabs") {
+      useUiStore.getState().setTabGridOpen(true);
+      return;
+    }
     const state = useWorkspaceStore.getState();
 
     if (target.kind === "tab") {
@@ -113,7 +118,7 @@ export function SheafContextMenu({
     );
     if (!currentTab || !state.quires[key]) return;
 
-    state.addTabToQuire(target.tabId, key);
+    state.addTabsToQuire([target.tabId], key);
   };
 
   const handleColorAction = (key: React.Key) => {
@@ -140,7 +145,7 @@ export function SheafContextMenu({
     const state = useWorkspaceStore.getState();
     if (namingAction.kind === "create") {
       if (state.tabs.some((candidate) => candidate.id === namingAction.tabId)) {
-        state.createQuire(namingAction.tabId, name);
+        state.createQuire([namingAction.tabId], name);
       }
     } else if (state.quires[namingAction.quireId]) {
       state.renameQuire(namingAction.quireId, name);
@@ -163,6 +168,8 @@ export function SheafContextMenu({
           aria-label="sheaf context menu"
           onAction={handleRootAction}
         >
+          <MenuItem id="show-all-tabs">Show all tabs</MenuItem>
+          <MenuSeparator />
           <MenuItem id="close">Close</MenuItem>
           <MenuItem id="close-others">Close others</MenuItem>
           <MenuItem id="close-all">Close all</MenuItem>
@@ -199,6 +206,8 @@ export function SheafContextMenu({
           aria-label="sheaf context menu"
           onAction={handleRootAction}
         >
+          <MenuItem id="show-all-tabs">Show all tabs</MenuItem>
+          <MenuSeparator />
           <MenuItem id="rename">Rename…</MenuItem>
           <SubmenuTrigger>
             <MenuItem id="color">Colour</MenuItem>

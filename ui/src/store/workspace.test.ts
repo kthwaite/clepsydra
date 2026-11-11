@@ -757,6 +757,102 @@ describe("workspace Folio history lifecycle", () => {
     expect(readFolioHistoryRestorationRequest("alpha", "alpha.md")).toBeNull();
   });
 
+  it("cancels a bulk close without removing any tabs or their Folio state", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("alpha"), pageTab("beta"), pageTab("other")],
+      activeTabId: "alpha",
+    });
+    request("alpha");
+    seedRecord("alpha");
+    seedRecord("beta");
+    const before = useWorkspaceStore.getState();
+    let guardCalls = 0;
+    const unregister = registerWorkspaceTransitionGuard(() => {
+      guardCalls += 1;
+      return true;
+    });
+
+    try {
+      useWorkspaceStore.getState().closeTabs(["beta", "alpha", "beta"]);
+    } finally {
+      unregister();
+    }
+
+    expect(guardCalls).toBe(1);
+    expect(useWorkspaceStore.getState()).toBe(before);
+    expect(readFolioRestoration("alpha", "alpha.md")).not.toBeNull();
+    expect(readFolioRestoration("beta", "beta.md")).not.toBeNull();
+    expect(
+      readFolioHistoryRestorationRequest("alpha", "alpha.md"),
+    ).not.toBeNull();
+    expect(
+      readFolioHistoryLocation("visit-beta", "beta", "beta.md"),
+    ).not.toBeNull();
+  });
+
+  it("re-evaluates surviving IDs after approval and closes them in one mutation", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("alpha", "q1"), pageTab("beta", "q1"), pageTab("other")],
+      activeTabId: "alpha",
+      quires: {
+        q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
+      },
+      openHistory: [{ path: "alpha.md", openedAt: 1 }],
+    });
+    request("alpha");
+    for (const id of ["alpha", "beta", "other"]) seedRecord(id);
+    let proceed: (() => void) | undefined;
+    let guardCalls = 0;
+    const unregister = registerWorkspaceTransitionGuard((approve) => {
+      guardCalls += 1;
+      proceed = approve;
+      return true;
+    });
+
+    try {
+      useWorkspaceStore.getState().closeTabs(["beta", "alpha", "missing"]);
+      expect(useWorkspaceStore.getState().tabs).toHaveLength(3);
+      useWorkspaceStore.getState().closeTab("beta");
+      useWorkspaceStore.setState((state) => ({
+        tabs: [...state.tabs, pageTab("new")],
+      }));
+      const mutations: string[][] = [];
+      const unsubscribe = useWorkspaceStore.subscribe((state) => {
+        mutations.push(state.tabs.map((tab) => tab.id));
+      });
+      try {
+        assert.isDefined(proceed);
+        proceed();
+      } finally {
+        unsubscribe();
+      }
+      expect(mutations).toEqual([["other", "new"]]);
+    } finally {
+      unregister();
+    }
+
+    expect(guardCalls).toBe(1);
+    const state = useWorkspaceStore.getState();
+    expect(state.activeTabId).toBe("other");
+    expect(state.quires).toEqual({});
+    expect(state.openHistory).toEqual([{ path: "alpha.md", openedAt: 1 }]);
+    for (const id of ["alpha", "beta"]) {
+      expect(readFolioRestoration(id, `${id}.md`)).toBeNull();
+      expect(
+        readFolioHistoryLocation(`visit-${id}`, id, `${id}.md`),
+      ).toBeNull();
+    }
+    expect(readFolioHistoryRestorationRequest("alpha", "alpha.md")).toBeNull();
+    expect(readFolioRestoration("other", "other.md")).not.toBeNull();
+    expect(
+      readFolioHistoryLocation("visit-other", "other", "other.md"),
+    ).not.toBeNull();
+  });
+
   it("clears pending, latest, and visit state when a tab path changes", () => {
     clearFolioHistoryState();
     resetStore();
@@ -947,14 +1043,71 @@ describe("workspace Folio history lifecycle", () => {
 });
 
 describe("quire actions", () => {
+  it("creates one quire from live pages in workspace order across source quires", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        pageTab("a", "q1"),
+        pageTab("keep", "q1"),
+        { id: "graph", type: "graph", label: "Graph" },
+        pageTab("b", "q2"),
+        pageTab("c", "q2"),
+        pageTab("tail"),
+      ],
+      activeTabId: "c",
+      quires: {
+        q1: { id: "q1", name: "First", color: "sepia", collapsed: true },
+        q2: { id: "q2", name: "Second", color: "slate", collapsed: false },
+      },
+    });
+
+    useWorkspaceStore
+      .getState()
+      .createQuire(["c", "graph", "missing", "a", "b", "a"], " Research ");
+
+    const state = useWorkspaceStore.getState();
+    const created = Object.values(state.quires).find(
+      (quire) => quire.name === "Research",
+    );
+    assert.isDefined(created);
+    expect(created.collapsed).toBe(false);
+    expect(state.tabs.map((tab) => tab.id)).toEqual([
+      "a",
+      "b",
+      "c",
+      "keep",
+      "graph",
+      "tail",
+    ]);
+    expect(
+      state.tabs.filter((tab) => tab.quireId === created.id).map((tab) => tab.id),
+    ).toEqual(["a", "b", "c"]);
+    expect(state.tabs.find((tab) => tab.id === "graph")?.quireId).toBeUndefined();
+    expect(state.quires.q1).toMatchObject({ collapsed: true });
+    expect(state.quires.q2).toBeUndefined();
+    expect(state.activeTabId).toBe("c");
+  });
+
+  it("does not create a quire for an empty, graph-only, or stale selection", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("page"), { id: "graph", type: "graph", label: "Graph" }],
+      activeTabId: "page",
+    });
+    const before = useWorkspaceStore.getState();
+    useWorkspaceStore.getState().createQuire([], "Empty");
+    useWorkspaceStore.getState().createQuire(["graph", "missing"], "Invalid");
+    expect(useWorkspaceStore.getState()).toBe(before);
+  });
+
   it("createQuire assigns membership and rotates colors", () => {
     resetStore();
     useWorkspaceStore.setState({
       tabs: [pageTab("t1"), pageTab("t2")],
       activeTabId: "t1",
     });
-    useWorkspaceStore.getState().createQuire("t1", "thesis");
-    useWorkspaceStore.getState().createQuire("t2", "garden");
+    useWorkspaceStore.getState().createQuire(["t1"], "thesis");
+    useWorkspaceStore.getState().createQuire(["t2"], "garden");
 
     const { tabs, quires } = useWorkspaceStore.getState();
     const list = Object.values(quires);
@@ -965,14 +1118,116 @@ describe("quire actions", () => {
     );
   });
 
-  it("addTabToQuire gathers the tab into the quire run", () => {
+  it("moves selected pages after existing members in workspace order and prunes empty sources", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        pageTab("a", "source"),
+        pageTab("keep", "source"),
+        pageTab("existing-a", "target"),
+        pageTab("existing-b", "target"),
+        { id: "graph", type: "graph", label: "Graph" },
+        pageTab("b", "emptied"),
+        pageTab("c", "emptied"),
+        pageTab("tail"),
+      ],
+      activeTabId: "c",
+      quires: {
+        source: {
+          id: "source",
+          name: "Source",
+          color: "sepia",
+          collapsed: true,
+        },
+        target: {
+          id: "target",
+          name: "Target",
+          color: "slate",
+          collapsed: true,
+        },
+        emptied: {
+          id: "emptied",
+          name: "Emptied",
+          color: "madder",
+          collapsed: false,
+        },
+      },
+    });
+
+    useWorkspaceStore
+      .getState()
+      .addTabsToQuire(
+        ["c", "existing-b", "graph", "missing", "b", "a", "a"],
+        "target",
+      );
+
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).toEqual([
+      "keep",
+      "existing-a",
+      "existing-b",
+      "a",
+      "b",
+      "c",
+      "graph",
+      "tail",
+    ]);
+    expect(
+      state.tabs.filter((tab) => tab.quireId === "target").map((tab) => tab.id),
+    ).toEqual(["existing-a", "existing-b", "a", "b", "c"]);
+    expect(state.tabs.find((tab) => tab.id === "graph")?.quireId).toBeUndefined();
+    expect(state.quires.emptied).toBeUndefined();
+    expect(state.quires.source.collapsed).toBe(true);
+    expect(state.quires.target.collapsed).toBe(false);
+    expect(state.activeTabId).toBe("c");
+  });
+
+  it("ignores invalid group targets and selections without live page tabs", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        pageTab("member", "q1"),
+        pageTab("page"),
+        { id: "graph", type: "graph", label: "Graph" },
+      ],
+      activeTabId: "page",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: true } },
+    });
+    const before = useWorkspaceStore.getState();
+    useWorkspaceStore.getState().addTabsToQuire(["page"], "missing");
+    useWorkspaceStore.getState().addTabsToQuire(["graph", "missing"], "q1");
+    useWorkspaceStore.getState().addTabsToQuire([], "q1");
+    expect(useWorkspaceStore.getState()).toBe(before);
+
+    useWorkspaceStore.getState().addTabsToQuire(["member", "member"], "q1");
+    expect(useWorkspaceStore.getState()).toBe(before);
+  });
+
+  it("keeps a collapsed target closed when moving only inactive pages", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("member", "q1"), pageTab("move"), pageTab("active")],
+      activeTabId: "active",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: true } },
+    });
+
+    useWorkspaceStore.getState().addTabsToQuire(["move"], "q1");
+
+    expect(useWorkspaceStore.getState().quires.q1.collapsed).toBe(true);
+    expect(useWorkspaceStore.getState().activeTabId).toBe("active");
+    expect(
+      useWorkspaceStore.getState().tabs.find((tab) => tab.id === "move")?.quireId,
+    ).toBe("q1");
+  });
+
+  it("addTabsToQuire gathers the tab into the quire run", () => {
     resetStore();
     useWorkspaceStore.setState({
       tabs: [pageTab("t1", "q1"), pageTab("t2"), pageTab("t3", "q1")],
       activeTabId: "t1",
       quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
     });
-    useWorkspaceStore.getState().addTabToQuire("t2", "q1");
+    useWorkspaceStore.getState().addTabsToQuire(["t2"], "q1");
     expect(useWorkspaceStore.getState().tabs.map((t) => t.id)).toEqual([
       "t1",
       "t3",
@@ -980,14 +1235,14 @@ describe("quire actions", () => {
     ]);
   });
 
-  it("addTabToQuire is a no-op when the tab is already a member", () => {
+  it("addTabsToQuire is a no-op when the tab is already a member", () => {
     resetStore();
     useWorkspaceStore.setState({
       tabs: [pageTab("t1", "q1"), pageTab("t2", "q1"), pageTab("t3")],
       activeTabId: "t1",
       quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
     });
-    useWorkspaceStore.getState().addTabToQuire("t1", "q1");
+    useWorkspaceStore.getState().addTabsToQuire(["t1"], "q1");
     expect(useWorkspaceStore.getState().tabs.map((t) => t.id)).toEqual([
       "t1",
       "t2",
@@ -995,14 +1250,14 @@ describe("quire actions", () => {
     ]);
   });
 
-  it("addTabToQuire expands a collapsed quire when adding the active tab", () => {
+  it("addTabsToQuire expands a collapsed quire when adding the active tab", () => {
     resetStore();
     useWorkspaceStore.setState({
       tabs: [pageTab("t1", "q1"), pageTab("t2")],
       activeTabId: "t2",
       quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: true } },
     });
-    useWorkspaceStore.getState().addTabToQuire("t2", "q1");
+    useWorkspaceStore.getState().addTabsToQuire(["t2"], "q1");
     expect(useWorkspaceStore.getState().quires.q1.collapsed).toBe(false);
   });
 
@@ -1243,6 +1498,83 @@ describe("openTab quire integration", () => {
 });
 
 describe("visibility-aware closing", () => {
+  it("bulk close anchors fallback at the active tab after removing earlier tabs", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        pageTab("early"),
+        pageTab("left"),
+        pageTab("active"),
+        pageTab("hidden", "q1"),
+        pageTab("right"),
+        pageTab("far"),
+      ],
+      activeTabId: "active",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: true } },
+    });
+
+    useWorkspaceStore.getState().closeTabs(["active", "early", "missing"]);
+
+    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      "left",
+      "hidden",
+      "right",
+      "far",
+    ]);
+    expect(useWorkspaceStore.getState().activeTabId).toBe("right");
+  });
+
+  it("bulk close falls back left, then to no active tab when only hidden tabs remain", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        pageTab("left"),
+        pageTab("active"),
+        pageTab("hidden", "q1"),
+        { id: "graph", type: "graph", label: "Graph" },
+      ],
+      activeTabId: "active",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: true } },
+    });
+
+    useWorkspaceStore.getState().closeTabs(["active", "graph"]);
+    expect(useWorkspaceStore.getState().activeTabId).toBe("left");
+    useWorkspaceStore.getState().closeTabs(["left"]);
+    expect(useWorkspaceStore.getState().activeTabId).toBeNull();
+    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      "hidden",
+    ]);
+    useWorkspaceStore.getState().closeTabs(["hidden", "hidden"]);
+    expect(useWorkspaceStore.getState().tabs).toEqual([]);
+    expect(useWorkspaceStore.getState().quires).toEqual({});
+  });
+
+  it("bulk close leaves an unselected active tab intact and ignores stale IDs", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("active"), pageTab("other")],
+      activeTabId: "active",
+    });
+    let guardCalls = 0;
+    const unregister = registerWorkspaceTransitionGuard(() => {
+      guardCalls += 1;
+      return true;
+    });
+    try {
+      const before = useWorkspaceStore.getState();
+      useWorkspaceStore.getState().closeTabs(["missing"]);
+      expect(useWorkspaceStore.getState()).toBe(before);
+      useWorkspaceStore.getState().closeTabs(["other", "other", "missing"]);
+    } finally {
+      unregister();
+    }
+    expect(guardCalls).toBe(0);
+    expect(useWorkspaceStore.getState().activeTabId).toBe("active");
+    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      "active",
+    ]);
+  });
+
   it("closeTab skips hidden neighbors when re-homing activation", () => {
     resetStore();
     useWorkspaceStore.setState({

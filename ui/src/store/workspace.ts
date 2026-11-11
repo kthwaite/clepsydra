@@ -162,6 +162,7 @@ interface WorkspaceActions {
   ) => void;
   addTab: (tab: TabDescriptor) => void;
   closeTab: (tabId: string) => void;
+  closeTabs: (tabIds: readonly string[]) => void;
   closeOtherTabs: (tabId: string) => void;
   closeAllTabs: () => void;
   closeArchivedPageTabs: (pageId: string, path: string) => void;
@@ -182,8 +183,8 @@ interface WorkspaceActions {
   setTabPageId: (tabId: string, pageId: string) => void;
   updateTabPath: (tabId: string, path: string, label?: string) => void;
   setNavigationMode: (mode: NavigationMode) => void;
-  createQuire: (tabId: string, name: string) => void;
-  addTabToQuire: (tabId: string, quireId: string) => void;
+  createQuire: (tabIds: readonly string[], name: string) => void;
+  addTabsToQuire: (tabIds: readonly string[], quireId: string) => void;
   removeTabFromQuire: (tabId: string) => void;
   renameQuire: (quireId: string, name: string) => void;
   recolorQuire: (quireId: string, color: QuireColor) => void;
@@ -397,30 +398,40 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       closeTab(tabId) {
+        get().closeTabs([tabId]);
+      },
+
+      closeTabs(tabIds) {
         const state = get();
-        const idx = state.tabs.findIndex((t) => t.id === tabId);
-        if (idx === -1) return;
-        if (workspaceTransitionDepth === 0 && state.activeTabId === tabId) {
-          runWorkspaceTransition(() => get().closeTab(tabId));
+        const selectedIds = new Set(tabIds);
+        if (!state.tabs.some((tab) => selectedIds.has(tab.id))) return;
+        if (
+          workspaceTransitionDepth === 0 &&
+          state.activeTabId !== null &&
+          selectedIds.has(state.activeTabId)
+        ) {
+          runWorkspaceTransition(() => get().closeTabs([...selectedIds]));
           return;
         }
 
-        clearFolioRestoration(tabId);
-        clearFolioHistoryForTab(tabId);
-
-        const nextTabs = state.tabs.filter((t) => t.id !== tabId);
-        let nextActive = state.activeTabId;
-
-        if (state.activeTabId === tabId) {
-          nextActive =
-            nextTabs.length === 0
-              ? null
-              : nearestVisibleTabId(
-                  nextTabs,
-                  state.quires,
-                  Math.min(idx, nextTabs.length - 1),
-                );
+        const activeIndex = state.tabs.findIndex(
+          (tab) => tab.id === state.activeTabId,
+        );
+        const nextTabs: TabDescriptor[] = [];
+        let fallbackIndex = 0;
+        for (const [index, tab] of state.tabs.entries()) {
+          if (selectedIds.has(tab.id)) {
+            clearFolioRestoration(tab.id);
+            clearFolioHistoryForTab(tab.id);
+          } else {
+            nextTabs.push(tab);
+            if (index < activeIndex) fallbackIndex += 1;
+          }
         }
+        const nextActive =
+          state.activeTabId !== null && selectedIds.has(state.activeTabId)
+            ? nearestVisibleTabId(nextTabs, state.quires, fallbackIndex)
+            : state.activeTabId;
 
         set(
           normalized(nextTabs, state.quires, {
@@ -692,10 +703,16 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         set({ navigationMode: mode });
       },
 
-      createQuire(tabId, name) {
+      createQuire(tabIds, name) {
+        const selectedIds = new Set(tabIds);
         set((state) => {
-          const tab = state.tabs.find((t) => t.id === tabId);
-          if (tab?.type !== "page") return state;
+          if (
+            !state.tabs.some(
+              (tab) => tab.type === "page" && selectedIds.has(tab.id),
+            )
+          ) {
+            return state;
+          }
           const quire: Quire = {
             id: crypto.randomUUID(),
             name: name.trim() || "QUIRE",
@@ -703,36 +720,47 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             collapsed: false,
           };
           return normalized(
-            state.tabs.map((t) =>
-              t.id === tabId ? { ...t, quireId: quire.id } : t,
+            state.tabs.map((tab) =>
+              tab.type === "page" && selectedIds.has(tab.id)
+                ? { ...tab, quireId: quire.id }
+                : tab,
             ),
             { ...state.quires, [quire.id]: quire },
           );
         });
       },
 
-      addTabToQuire(tabId, quireId) {
+      addTabsToQuire(tabIds, quireId) {
+        const selectedIds = new Set(tabIds);
         set((state) => {
           const quire = state.quires[quireId];
-          const tab = state.tabs.find((t) => t.id === tabId);
-          if (!quire || !tab || tab.type !== "page") return state;
-          if (tab.quireId === quireId) return state; // already a member; no-op
-          // Invariant: the active tab is never hidden — expand on demand.
-          const expand = quire.collapsed && tabId === state.activeTabId;
-          // Move the tab to after the last existing member of the quire so
-          // normalizeQuires places it at the end of the run, not the middle.
-          const withoutTab = state.tabs.filter((t) => t.id !== tabId);
-          const lastMemberIdx = withoutTab.reduce(
-            (acc, t, i) => (t.quireId === quireId ? i : acc),
+          if (!quire) return state;
+          const incoming = state.tabs.filter(
+            (tab) =>
+              tab.type === "page" &&
+              selectedIds.has(tab.id) &&
+              tab.quireId !== quireId,
+          );
+          if (incoming.length === 0) return state;
+          // Existing members keep their order; newcomers follow in workspace
+          // order, regardless of checkbox selection order.
+          const incomingIds = new Set(incoming.map((tab) => tab.id));
+          const remaining = state.tabs.filter((tab) => !incomingIds.has(tab.id));
+          const lastMemberIdx = remaining.reduce(
+            (acc, tab, index) => (tab.quireId === quireId ? index : acc),
             -1,
           );
           const insertAt =
-            lastMemberIdx === -1 ? withoutTab.length : lastMemberIdx + 1;
+            lastMemberIdx === -1 ? remaining.length : lastMemberIdx + 1;
           const reordered = [
-            ...withoutTab.slice(0, insertAt),
-            { ...tab, quireId },
-            ...withoutTab.slice(insertAt),
+            ...remaining.slice(0, insertAt),
+            ...incoming.map((tab) => ({ ...tab, quireId })),
+            ...remaining.slice(insertAt),
           ];
+          const expand =
+            quire.collapsed &&
+            state.activeTabId !== null &&
+            incomingIds.has(state.activeTabId);
           return normalized(
             reordered,
             expand

@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
 import { ContentsMenu } from "#/components/codex/ContentsMenu";
@@ -22,6 +22,12 @@ import { useUiStore } from "#/store/ui";
 import { useViewHistory } from "#/store/viewHistory";
 import { useWorkspaceStore } from "#/store/workspace";
 
+const TabGrid = lazy(() =>
+  import("#/components/codex/TabGrid").then((module) => ({
+    default: module.TabGrid,
+  })),
+);
+
 function ActiveDot() {
   return (
     <span
@@ -40,6 +46,8 @@ export function DesktopCodexFrame({
   const navigate = useNavigate();
   const openSettings = useUiStore((s) => s.openSettings);
   const contentsOpen = useUiStore((s) => s.isContentsOpen);
+  const tabGridOpen = useUiStore((s) => s.isTabGridOpen);
+  const setTabGridOpen = useUiStore((s) => s.setTabGridOpen);
   const activeTabId = useWorkspaceStore((s) => s.activeTabId);
   const openTab = useOpenTab();
   const activateTab = useActivateTabWithFolioHistory();
@@ -130,6 +138,11 @@ export function DesktopCodexFrame({
           activeTabVisible={view === "folio"}
           className="order-1"
         />
+      )}
+      {tabGridOpen && (
+        <Suspense fallback={null}>
+          <TabGrid onClose={() => setTabGridOpen(false)} />
+        </Suspense>
       )}
 
       {bottomSlot

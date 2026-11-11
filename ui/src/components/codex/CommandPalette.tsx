@@ -319,10 +319,10 @@ function CommandPaletteContent() {
         const store = useWorkspaceStore.getState();
         switch (command.action) {
           case "create-quire":
-            store.createQuire(activeTab.id, deriveQuireName(activeTab.label));
+            store.createQuire([activeTab.id], deriveQuireName(activeTab.label));
             return;
           case "add-to-quire":
-            store.addTabToQuire(activeTab.id, command.quireId);
+            store.addTabsToQuire([activeTab.id], command.quireId);
             return;
           case "remove-from-quire":
             store.removeTabFromQuire(activeTab.id);
