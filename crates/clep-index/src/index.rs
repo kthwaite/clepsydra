@@ -2508,6 +2508,18 @@ fn upsert_indexed_page(
     let project = pf.meta.project.clone();
     let word_count = (!pf.encrypted).then(|| pf.body.split_whitespace().count() as i64);
 
+    // A rename or replacement can leave this path owned by another ID.
+    // Match index_page: derived rows cascade, but FTS needs explicit cleanup.
+    tx.execute(
+        "DELETE FROM pages_fts WHERE page_id IN
+         (SELECT id FROM pages WHERE path = ?1 AND id != ?2)",
+        params![pf.vault_path.as_str(), page_id],
+    )?;
+    tx.execute(
+        "DELETE FROM pages WHERE path = ?1 AND id != ?2",
+        params![pf.vault_path.as_str(), page_id],
+    )?;
+
     // Upsert into pages table
     tx.execute(
         "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project, encrypted, word_count)
@@ -2933,6 +2945,104 @@ mod prop_link_tests {
     fn no_linkable_props_yields_nothing() {
         let meta = PageMeta::new();
         assert!(extract_prop_links(&meta, &[]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod build_path_replacement_tests {
+    use super::*;
+
+    const ORIGINAL_ID: &str = "0190f8a0-0000-7000-8000-000000000001";
+    const REPLACEMENT_ID: &str = "0190f8a0-0000-7000-8000-000000000002";
+
+    fn write_page(root: &Path, path: &str, id: &str, body: &str) {
+        fs::write(root.join(path), format!("---\nid: {id}\n---\n{body}")).unwrap();
+    }
+
+    fn assert_index(index: &VaultIndex, expected: &[(&str, &str, &str)]) {
+        let mut expected: Vec<(String, String, String)> = expected
+            .iter()
+            .map(|&(id, path, body)| (id.into(), path.into(), body.into()))
+            .collect();
+        expected.sort();
+
+        // Inspect FTS independently so stale identities cannot hide behind a join.
+        for sql in [
+            "SELECT p.id, p.path, b.body FROM pages p
+             JOIN page_bodies b ON b.page_id = p.id ORDER BY p.id",
+            "SELECT page_id, path, body FROM pages_fts ORDER BY page_id",
+        ] {
+            let rows = index
+                .connection()
+                .prepare(sql)
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<Result<Vec<(String, String, String)>, _>>()
+                .unwrap();
+            assert_eq!(rows, expected, "{sql}");
+        }
+    }
+
+    #[test]
+    fn conflict_copy_renamed_over_original() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_page(tmp.path(), "note.md", ORIGINAL_ID, "Original body\n");
+        write_page(
+            tmp.path(),
+            "note.conflict-laptop.md",
+            REPLACEMENT_ID,
+            "Conflict body\n",
+        );
+        let vault = Vault::open(tmp.path()).unwrap();
+        let mut index = VaultIndex::open_in_memory().unwrap();
+        index.build(&vault).unwrap();
+
+        fs::rename(
+            tmp.path().join("note.conflict-laptop.md"),
+            tmp.path().join("note.md"),
+        )
+        .unwrap();
+        index.build(&vault).unwrap();
+
+        assert_index(&index, &[(REPLACEMENT_ID, "note.md", "Conflict body\n")]);
+    }
+
+    #[test]
+    fn file_replaced_with_new_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_page(tmp.path(), "note.md", ORIGINAL_ID, "Original body\n");
+        let vault = Vault::open(tmp.path()).unwrap();
+        let mut index = VaultIndex::open_in_memory().unwrap();
+        index.build(&vault).unwrap();
+
+        write_page(tmp.path(), "note.md", REPLACEMENT_ID, "Replacement body\n");
+        index.build(&vault).unwrap();
+
+        assert_index(&index, &[(REPLACEMENT_ID, "note.md", "Replacement body\n")]);
+    }
+
+    #[test]
+    fn two_pages_swapping_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_page(tmp.path(), "first.md", ORIGINAL_ID, "First body\n");
+        write_page(tmp.path(), "second.md", REPLACEMENT_ID, "Second body\n");
+        let vault = Vault::open(tmp.path()).unwrap();
+        let mut index = VaultIndex::open_in_memory().unwrap();
+        index.build(&vault).unwrap();
+
+        fs::rename(tmp.path().join("first.md"), tmp.path().join("swap.tmp")).unwrap();
+        fs::rename(tmp.path().join("second.md"), tmp.path().join("first.md")).unwrap();
+        fs::rename(tmp.path().join("swap.tmp"), tmp.path().join("second.md")).unwrap();
+        index.build(&vault).unwrap();
+
+        assert_index(
+            &index,
+            &[
+                (ORIGINAL_ID, "second.md", "First body\n"),
+                (REPLACEMENT_ID, "first.md", "Second body\n"),
+            ],
+        );
     }
 }
 

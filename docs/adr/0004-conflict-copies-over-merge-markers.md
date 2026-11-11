@@ -18,3 +18,7 @@ manual reconciliation later, surfaced by a doctor rule and the UI conflicts list
   lines as conflicted: it indexes read-only, never repairs, and emits a diagnostic —
   protection for hand-run `git pull`.
 - Resolution is ordinary editing: merge by hand, delete the copy.
+- A Conflict Copy can also replace the original by being renamed over it. Both
+  single-page indexing and full-vault rebuilds evict a different ID occupying the
+  destination path, including its search and derived rows, before indexing the
+  replacement. The same rule handles files replaced with new IDs and pages swapping paths.
