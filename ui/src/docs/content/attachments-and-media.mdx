@@ -1,12 +1,13 @@
 export const meta = {
   slug: "attachments-and-media",
   title: "Attachments and Media",
-  description: "Upload, insert, audit, and delete vault attachments."
+  description: "Associate files with pages, browse image galleries, and manage vault attachments."
 }
 
 Attachments are vault-wide files stored beneath the configured attachment
-folder, `_attachments` by default. Folios contain Markdown references to those
-files; deleting or moving a reference does not move the attachment bytes.
+folder, `_attachments` by default. Folios can associate files through frontmatter
+and reference them in Markdown. Removing a reference does not remove the
+association or move the attachment bytes.
 
 ## Prerequisites
 
@@ -27,6 +28,39 @@ byte size. Choose the filename to open the served file in a new browser tab.
 The server reports a MIME type inferred from the attachment path and otherwise
 uses `application/octet-stream`.
 
+### Page attachments and the image gallery
+
+Files associated with a Folio appear in an **Attachments** section below its
+body unless the body already links to or embeds them. An empty section is hidden.
+Images have thumbnails; other files have **Open** and **Download** links.
+
+Choose an inline image or a footer thumbnail to open the shared lightbox. Use
+the previous/next buttons or **Left/Right arrows** to navigate, and **Escape**
+to close. The viewer shows the filename and position. Zoom and pan reset when
+switching images; closing restores focus to the image that opened it.
+
+The gallery lists referenced images in document order, then remaining associated
+images in attachment order. Each file appears once, and navigation wraps around.
+Reference detection recognizes Markdown links, images, and reference-style links,
+including attachment URLs and vault-relative paths. Code examples are ignored.
+
+Uploads, **Insert**, and **Attach to page** record the association in the note:
+
+```toml
+attachments = ["diagram.png", "research/report.pdf"]
+```
+
+These are paths relative to the configured attachment folder, not URLs. Existing
+vault files are not assigned to a page by filename: choose **Show all attachments**
+and **Attach to page** to associate one without inserting anything into the body.
+The manager's page view includes both associated and referenced files.
+
+Adding an inline reference hides the matching footer entry. Removing that
+reference reveals the entry again if the file is still associated. To remove an
+association without deleting the file, edit the note's frontmatter externally.
+The page update API also accepts an `attachments` array: omitted preserves the
+current associations; `[]` clears them.
+
 ### Drop files into a Folio
 
 Drag one or more local files onto the editable Folio body. A caret marks the
@@ -39,10 +73,11 @@ desktop details sidebar. No separate **Upload** or **Insert** click is needed.
 You can continue editing while uploads run; the drop position follows those
 edits rather than the current cursor. Leaving the page, replacing its editor,
 or making it read-only cancels pending insertion and stops subsequent uploads.
-A request already sent to the server may still store its file. If you delete
-the insertion position, the editor reports that the uploaded files are available
-in the attachment manager; choose **Show all attachments** to find unreferenced
-files and insert them elsewhere.
+A request already sent to the server may still store its file. Successful uploads
+associate files with the current page while that upload session remains active.
+If you delete the insertion position, associated files remain available in the
+footer. Files uploaded after leaving the page may remain unassociated; find them
+through **Show all attachments** and choose **Attach to page** or **Insert**.
 
 Protected Folios require a separate plaintext-storage acknowledgment before
 each file uploads. Cancelling stops the remaining batch; earlier successful
@@ -57,12 +92,12 @@ keyboard-accessible alternative.
 ### Upload a file
 
 1. Choose **Upload** and select one file.
-2. On a normal Folio, Clepsydra stores the file but does not insert a reference
-   automatically. Find the new inventory entry and choose **Insert** when you
-   want the reference in the current body.
+2. On a normal Folio, Clepsydra stores and associates the file without inserting
+   a body reference. It appears in the footer automatically. Choose **Insert**
+   when you want it inline instead.
 3. On a protected Folio, review the per-upload plaintext disclosure. Cancelling
    stores no file and inserts no reference. Acknowledging uploads the file and,
-   after success, inserts its Markdown reference into the Folio.
+   after success, associates it and inserts its Markdown reference into the Folio.
 
 Uploads use the selected filename as the attachment path. The server creates
 missing attachment subfolders, installs the upload without replacing an
@@ -71,10 +106,11 @@ existing file, and requires the multipart field
 
 ### Insert or copy a reference
 
-Choose **Insert** on an existing entry to insert at the current Folio selection.
-On a protected Folio, each insertion of an already stored attachment opens a
-separate plaintext disclosure; an acknowledgment from an earlier upload or
-insertion is never reused.
+Choose **Insert** on an existing entry to associate it with the page and insert
+at the current Folio selection. **Attach to page** associates it without insertion.
+On a protected Folio, each insertion or association of an already stored attachment
+opens a separate plaintext disclosure; an acknowledgment from an earlier action
+is never reused.
 
 Clepsydra generates an image reference for `avif`, `bmp`, `gif`, `jpg`, `jpeg`,
 `png`, `svg`, and `webp` paths:
@@ -95,9 +131,10 @@ editing the Folio.
 ### Delete an attachment
 
 Choose the trash control, then **Confirm delete _filename_**. Deletion removes
-the stored file only. It does not scan or rewrite Folios, so every existing
-Markdown or HTML reference to that path remains in place and may become broken.
-Cancel before confirmation to leave the file untouched.
+the stored file only. It does not scan or rewrite Folios: existing associations
+and Markdown or HTML references remain in place. Missing files disappear from
+the footer, but body references may become broken. Cancel before confirmation
+to leave the file untouched.
 
 ### Audit stale references on protected Folios
 
@@ -131,8 +168,8 @@ text nor its extracted reference inventory to the server for this audit.
   every stale reference yourself.
 
 For protected Folios, the plaintext acknowledgment has a narrow boundary. It
-covers each new upload and each frontend insertion of an already stored
-reference. Existing references remain available to the best-effort audit while
+covers each new upload and each frontend insertion or association of an already
+stored file. Existing references remain available to the best-effort audit while
 the protected Folio is unlocked; they are not retroactively acknowledged or
 removed. The server enforces the upload field, but reference confirmation is a
 Clepsydra-frontend safeguard. A custom client can insert a reference without
@@ -144,9 +181,10 @@ authorization, or proof that ciphertext contains no attachment references.
 
 Attachment bytes are always plaintext. Filenames, attachment paths, reported
 MIME types, and sizes are also plaintext and can disclose the subject or
-content. In a protected Folio, only the Markdown reference becomes part of the
-encrypted body; the referenced file remains plaintext beneath the attachment
-folder and is served by its plaintext URL.
+content. Page associations in `attachments` frontmatter are also plaintext,
+including on protected Folios. Only references inside the encrypted body are
+encrypted; the files remain plaintext beneath the attachment folder and are
+served by their plaintext URLs.
 
 Use non-revealing filenames, remove sensitive metadata from files before
 uploading, and protect access to the vault and HTTP session. Body encryption is

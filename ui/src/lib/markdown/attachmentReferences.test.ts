@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { attachmentReferences } from "./attachmentReferences";
+import {
+  attachmentReferences,
+  createAttachmentResolver,
+} from "./attachmentReferences";
 
 describe("attachmentReferences", () => {
   it("returns unique vault attachment references in source order", () => {
@@ -126,5 +129,34 @@ describe("attachmentReferences", () => {
         ].join("\n"),
       ),
     ).toEqual([{ path: "café.pdf", label: "First", image: false }]);
+  });
+
+  it("resolves relative and API destinations against the real attachment inventory", () => {
+    const resolvePath = createAttachmentResolver("notes/current.md", [
+      { path: "café.png", vault_path: "media/café.png" },
+      { path: "paper.pdf", vault_path: "media/paper.pdf" },
+    ]);
+    expect(
+      attachmentReferences(
+        [
+          "![First](../media/cafe%CC%81.png)",
+          "![Again](/api/vault/attachments/caf%C3%A9.png#preview)",
+          "[Paper][paper]",
+          "[Missing](/api/vault/attachments/missing.png)",
+          "[Wrong folder](../attachments/paper.pdf)",
+          "`![Example](../media/example.png)`",
+          "",
+          "[paper]: ../media/paper.pdf?download=1",
+        ].join("\n"),
+        resolvePath,
+      ),
+    ).toEqual([
+      { path: "café.png", label: "First", image: true },
+      { path: "paper.pdf", label: "Paper", image: false },
+    ]);
+    expect(
+      resolvePath("https://other.test/api/vault/attachments/café.png"),
+    ).toBeNull();
+    expect(resolvePath("../media/%broken.png")).toBeNull();
   });
 });

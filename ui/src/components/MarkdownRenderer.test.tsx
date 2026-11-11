@@ -189,6 +189,26 @@ describe("MarkdownRenderer", () => {
     await user.click(screen.getByRole("link", { name: "Source" }));
     expect(openTabMock).toHaveBeenCalledWith("page", "notes/source.md");
   });
+  it("opens full-size images without a page provider and keeps compact images hidden", async () => {
+    const user = userEvent.setup();
+    const content = "![Bottle](https://images.example.test/bottle.svg)";
+    const view = render(<MarkdownRenderer restricted content={content} />);
+    const trigger = screen.getByRole("button", { name: "Open image: Bottle" });
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    expect(
+      await screen.findByRole("dialog", { name: "Image viewer" }),
+    ).toBeVisible();
+    expect(screen.getByText("bottle.svg")).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(trigger).toHaveFocus());
+    view.rerender(<MarkdownRenderer restricted compact content={content} />);
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Open image: Bottle" }),
+    ).toBeNull();
+  });
   it("renders a mermaid fence as a toggleable diagram", async () => {
     const user = userEvent.setup();
     const { container } = render(

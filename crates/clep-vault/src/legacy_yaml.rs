@@ -27,6 +27,8 @@ struct YamlPageMeta {
     tags: Vec<String>,
     #[serde(default)]
     aliases: Vec<String>,
+    #[serde(default)]
+    attachments: Vec<String>,
     #[serde(default, rename = "type")]
     kind: Option<Kind>,
     #[serde(default)]
@@ -51,6 +53,8 @@ struct LooseYamlPageMeta {
     tags: Vec<String>,
     #[serde(default)]
     aliases: Vec<String>,
+    #[serde(default)]
+    attachments: Vec<String>,
     #[serde(default, rename = "type")]
     kind: Option<Kind>,
     #[serde(default)]
@@ -117,6 +121,7 @@ pub fn parse_frontmatter(content: &str) -> Result<(PageMeta, String), Frontmatte
         title: strict.title,
         tags: strict.tags,
         aliases: strict.aliases,
+        attachments: strict.attachments,
         kind: strict.kind,
         project: strict.project,
         created_at: strict.created_at,
@@ -145,6 +150,7 @@ pub fn parse_or_repair_frontmatter(content: &str) -> (PageMeta, String, bool, Op
                 title: loose.title,
                 tags: loose.tags,
                 aliases: loose.aliases,
+                attachments: loose.attachments,
                 kind: loose.kind,
                 project: loose.project,
                 created_at: loose.created_at,

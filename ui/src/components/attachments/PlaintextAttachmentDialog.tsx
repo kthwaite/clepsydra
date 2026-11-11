@@ -4,7 +4,8 @@ import { Dialog } from "#/components/ui/dialog";
 
 export type PendingAttachmentAction =
   | { kind: "upload"; file: File }
-  | { kind: "insert"; attachment: AttachmentInfo; markdown: string };
+  | { kind: "insert"; attachment: AttachmentInfo; markdown: string }
+  | { kind: "attach"; attachment: AttachmentInfo };
 
 export interface PlaintextAttachmentDialogProps {
   action: PendingAttachmentAction | null;
@@ -28,10 +29,13 @@ export function PlaintextAttachmentDialog({
   onAcknowledge,
 }: PlaintextAttachmentDialogProps) {
   const upload = action?.kind === "upload" ? action.file : null;
-  const attachment = action?.kind === "insert" ? action.attachment : null;
+  const attachment =
+    action && action.kind !== "upload" ? action.attachment : null;
   const title = upload
     ? "Store plaintext attachment?"
-    : "Insert plaintext attachment reference?";
+    : action?.kind === "attach"
+      ? "Attach plaintext file to page?"
+      : "Insert plaintext attachment reference?";
 
   return (
     <Dialog
@@ -55,7 +59,11 @@ export function PlaintextAttachmentDialog({
               if (action) onAcknowledge(action);
             }}
           >
-            {upload ? "I understand, upload" : "I understand, insert"}
+            {upload
+              ? "I understand, upload"
+              : action?.kind === "attach"
+                ? "I understand, attach"
+                : "I understand, insert"}
           </Button>
         </>
       }
@@ -83,11 +91,19 @@ export function PlaintextAttachmentDialog({
               Only the Markdown reference becomes part of the protected note
               body. The existing attachment remains plaintext at its vault path.
             </p>
+          ) : action.kind === "attach" ? (
+            <p className="text-mute">
+              The existing file remains plaintext at its vault path.
+            </p>
           ) : (
             <p className="text-mute">
               Uploading stores this file outside the protected note body.
             </p>
           )}
+          <p className="text-mute">
+            The page association is stored in plaintext frontmatter, even when
+            the note body is encrypted.
+          </p>
           {error ? (
             <p role="alert" className="text-[13px] text-hot">
               {error}

@@ -131,6 +131,8 @@ pub struct PageMetaResponse {
     pub tags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aliases: Option<Vec<String>>,
+    /// Explicitly associated files, relative to the configured attachment folder.
+    pub attachments: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -219,6 +221,8 @@ pub struct UpdatePageRequest {
     pub title: Option<String>,
     pub tags: Option<Vec<String>>,
     pub aliases: Option<Vec<String>>,
+    /// Replace associated attachment-folder-relative file paths. Omit to preserve; [] clears.
+    pub attachments: Option<Vec<String>>,
     pub body: Option<String>,
     /// Declare or clear body write-protection. Sending `false` for a page whose
     /// kind protects bodies by default is how a reader unlocks it; the change is

@@ -61,6 +61,7 @@ export interface EnsuredPage {
     title?: string | null;
     tags?: string[] | null;
     aliases?: string[] | null;
+    attachments?: string[];
   };
 }
 
@@ -104,6 +105,8 @@ export interface PageEditorState {
   setTags: (t: string[]) => void;
   aliases: string[];
   setAliases: (a: string[]) => void;
+  attachments: string[];
+  attachAttachment: (path: string) => void;
   saveStatus: SaveStatus;
   saveError: string | null;
   onSlateChange: (value: Descendant[], editor: Editor) => void;
@@ -179,6 +182,12 @@ export function usePageEditor(
   const [title, setTitleState] = useState("");
   const [tags, setTagsState] = useState<string[]>([]);
   const [aliases, setAliasesState] = useState<string[]>([]);
+  const [attachments, setAttachmentsState] = useState<string[]>([]);
+  const attachmentLifecycle = useMemo(() => ({ path }), [path]);
+  const attachmentLifecycleRef = useRef(attachmentLifecycle);
+  useEffect(() => {
+    attachmentLifecycleRef.current = attachmentLifecycle;
+  }, [attachmentLifecycle]);
 
   // Use refs for metadata so doSave captures latest values without
   // recreating its closure on every keystroke (avoids cascade of
@@ -186,6 +195,7 @@ export function usePageEditor(
   const titleRef = useRef(title);
   const tagsRef = useRef(tags);
   const aliasesRef = useRef(aliases);
+  const attachmentsRef = useRef(attachments);
   useEffect(() => {
     titleRef.current = title;
   }, [title]);
@@ -200,6 +210,7 @@ export function usePageEditor(
     title: "",
     tags: [] as string[],
     aliases: [] as string[],
+    attachments: [] as string[],
     body: "",
   });
 
@@ -275,10 +286,18 @@ export function usePageEditor(
     titleRef.current = "";
     tagsRef.current = [];
     aliasesRef.current = [];
+    attachmentsRef.current = [];
     setTitleState("");
     setTagsState([]);
     setAliasesState([]);
-    savedRef.current = { title: "", tags: [], aliases: [], body: "" };
+    setAttachmentsState([]);
+    savedRef.current = {
+      title: "",
+      tags: [],
+      aliases: [],
+      attachments: [],
+      body: "",
+    };
     editorValueRef.current = [];
     bodyOverrideRef.current = null;
     revisionRef.current = "";
@@ -329,17 +348,27 @@ export function usePageEditor(
     const t = page.meta.title ?? "";
     const tg = page.meta.tags ?? [];
     const al = page.meta.aliases ?? [];
+    const at = page.meta.attachments ?? [];
+    attachmentsRef.current = at;
     setTitleState(t);
     setTagsState(tg);
     setAliasesState(al);
+    setAttachmentsState(at);
+    savedRef.current = {
+      ...savedRef.current,
+      title: t,
+      tags: tg,
+      aliases: al,
+      attachments: at,
+    };
+    revisionRef.current = page.revision;
     if (plainBody === null) return;
     const shouldResetEditor =
       editorValueRef.current.length === 0 ||
       savedRef.current.body !== plainBody;
     const nextValue = initialValue;
     bodyOverrideRef.current = null;
-    savedRef.current = { title: t, tags: tg, aliases: al, body: plainBody };
-    revisionRef.current = page.revision;
+    savedRef.current = { ...savedRef.current, body: plainBody };
     editorValueRef.current = nextValue;
     if (shouldResetEditor) {
       setEditorRevision((revision) => revision + 1);
@@ -400,6 +429,7 @@ export function usePageEditor(
       const currentTitle = titleRef.current;
       const currentTags = tagsRef.current;
       const currentAliases = aliasesRef.current;
+      let currentAttachments = attachmentsRef.current;
       // Only serialize the Slate tree when the user actually edited body content.
       // This prevents metadata-only edits from losing unsupported markdown nodes.
       const body = bodyDirty
@@ -412,8 +442,17 @@ export function usePageEditor(
       const aliasesChanged =
         JSON.stringify(currentAliases) !==
         JSON.stringify(savedRef.current.aliases);
+      let attachmentsChanged =
+        JSON.stringify(currentAttachments) !==
+        JSON.stringify(savedRef.current.attachments);
 
-      if (!bodyChanged && !titleChanged && !tagsChanged && !aliasesChanged) {
+      if (
+        !bodyChanged &&
+        !titleChanged &&
+        !tagsChanged &&
+        !aliasesChanged &&
+        !attachmentsChanged
+      ) {
         savedBodyGenRef.current = saveBodyGen;
         savedMetaGenRef.current = saveMetaGen;
         if (
@@ -435,6 +474,13 @@ export function usePageEditor(
           const serverTitle = result.page.meta.title ?? "";
           const serverTags = result.page.meta.tags ?? [];
           const serverAliases = result.page.meta.aliases ?? [];
+          const serverAttachments = result.page.meta.attachments ?? [];
+          currentAttachments = [
+            ...new Set([...serverAttachments, ...currentAttachments]),
+          ];
+          attachmentsChanged =
+            JSON.stringify(currentAttachments) !==
+            JSON.stringify(serverAttachments);
 
           if (!result.created && result.page.body.trim() !== "") {
             // The page was created and written elsewhere between load and
@@ -460,6 +506,7 @@ export function usePageEditor(
               title: serverTitle,
               tags: serverTags,
               aliases: serverAliases,
+              attachments: serverAttachments,
               body: result.page.body,
             };
             // Adopt template metadata the user did not touch while drafting;
@@ -476,6 +523,11 @@ export function usePageEditor(
               aliasesRef.current = serverAliases;
               setAliasesState(serverAliases);
             }
+            const nextAttachments = [
+              ...new Set([...serverAttachments, ...attachmentsRef.current]),
+            ];
+            attachmentsRef.current = nextAttachments;
+            setAttachmentsState(nextAttachments);
             isDraftRef.current = false;
             setEnsured(true);
           }
@@ -500,6 +552,7 @@ export function usePageEditor(
             ...(titleChanged ? { title: currentTitle || null } : {}),
             ...(tagsChanged ? { tags: currentTags } : {}),
             ...(aliasesChanged ? { aliases: currentAliases } : {}),
+            ...(attachmentsChanged ? { attachments: currentAttachments } : {}),
             ...(requestBody !== undefined ? { body: requestBody } : {}),
           },
         });
@@ -513,6 +566,7 @@ export function usePageEditor(
           title: response.meta.title ?? "",
           tags: response.meta.tags ?? [],
           aliases: response.meta.aliases ?? [],
+          attachments: response.meta.attachments ?? [],
           body: encrypted
             ? bodyChanged
               ? body
@@ -687,6 +741,7 @@ export function usePageEditor(
       const nextTitle = latest.meta.title ?? "";
       const nextTags = latest.meta.tags ?? [];
       const nextAliases = latest.meta.aliases ?? [];
+      const nextAttachments = latest.meta.attachments ?? [];
       let latestBody = latest.body;
       if (latest.encrypted) {
         const identity = encryptionActions?.getIdentity();
@@ -704,14 +759,17 @@ export function usePageEditor(
       titleRef.current = nextTitle;
       tagsRef.current = nextTags;
       aliasesRef.current = nextAliases;
+      attachmentsRef.current = nextAttachments;
       setTitleState(nextTitle);
       setTagsState(nextTags);
       setAliasesState(nextAliases);
+      setAttachmentsState(nextAttachments);
       editorValueRef.current = nextValue;
       savedRef.current = {
         title: nextTitle,
         tags: nextTags,
         aliases: nextAliases,
+        attachments: nextAttachments,
         body: latestBody,
       };
       savedBodyGenRef.current = bodyEditGenRef.current;
@@ -802,6 +860,26 @@ export function usePageEditor(
       scheduleSave();
     },
     [scheduleSave],
+  );
+
+  const attachAttachment = useCallback(
+    (attachmentPath: string) => {
+      // Uploads can finish after navigation, including a return to the same
+      // path. Only the callback belonging to this page lifecycle may append.
+      if (
+        attachmentLifecycleRef.current !== attachmentLifecycle ||
+        generatedChangeRef.current
+      )
+        return;
+      const normalized = attachmentPath.normalize("NFC");
+      if (attachmentsRef.current.includes(normalized)) return;
+      const nextAttachments = [...attachmentsRef.current, normalized];
+      attachmentsRef.current = nextAttachments;
+      setAttachmentsState(nextAttachments);
+      metaEditGenRef.current += 1;
+      scheduleSave();
+    },
+    [attachmentLifecycle, scheduleSave],
   );
 
   const setBodyMarkdown = useCallback(
@@ -898,6 +976,8 @@ export function usePageEditor(
     setTags,
     aliases,
     setAliases,
+    attachments,
+    attachAttachment,
     saveStatus,
     saveError,
     revisionConflict,

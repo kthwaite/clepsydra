@@ -172,13 +172,14 @@ fn hint_for(ty: Option<&PropertyType>) -> Option<ValueHint> {
 
 /// Frontmatter keys owned by the system serializer; patching them as
 /// properties would corrupt page identity or bypass typed update paths.
-const RESERVED_KEYS: [&str; 11] = [
+const RESERVED_KEYS: [&str; 12] = [
     "id",
     "title",
     "type",
     "project",
     "tags",
     "aliases",
+    "attachments",
     "created_at",
     "updated_at",
     "encryption",

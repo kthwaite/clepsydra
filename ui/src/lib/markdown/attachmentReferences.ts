@@ -11,6 +11,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { attachmentUrl } from "#/api/attachments";
+import { resolveVaultRelativeResource } from "#/lib/resourceUrl";
 
 export interface AttachmentReference {
   path: string;
@@ -40,13 +41,39 @@ function attachmentPathFromUrl(url: string): string | null {
   return path ? canonicalAttachmentPath(path) : null;
 }
 
+/**
+ * Resolve only files present in the inventory. Its vault paths carry the
+ * configured attachment folder; neither filenames nor folder names are guessed.
+ */
+export function createAttachmentResolver(
+  pagePath: string,
+  inventory: readonly { path: string; vault_path: string }[],
+): (url: string) => string | null {
+  const paths = new Set<string>();
+  const vaultPaths = new Map<string, string>();
+  for (const attachment of inventory) {
+    const path = canonicalAttachmentPath(attachment.path);
+    paths.add(path);
+    vaultPaths.set(canonicalAttachmentPath(attachment.vault_path), path);
+  }
+  return (url) => {
+    const apiPath = attachmentPathFromUrl(url);
+    if (apiPath) return paths.has(apiPath) ? apiPath : null;
+    const relative = resolveVaultRelativeResource(url, pagePath);
+    return relative
+      ? (vaultPaths.get(canonicalAttachmentPath(relative.path)) ?? null)
+      : null;
+  };
+}
+
 type ReferenceNode = Link | Image | LinkReference | ImageReference;
 
 function referenceFromNode(
   node: ReferenceNode,
   url: string,
+  resolvePath: (url: string) => string | null,
 ): AttachmentReference | null {
-  const path = attachmentPathFromUrl(url);
+  const path = resolvePath(url);
   if (!path) return null;
 
   return {
@@ -56,7 +83,10 @@ function referenceFromNode(
   };
 }
 
-export function attachmentReferences(markdown: string): AttachmentReference[] {
+export function attachmentReferences(
+  markdown: string,
+  resolvePath: (url: string) => string | null = attachmentPathFromUrl,
+): AttachmentReference[] {
   const tree = parser.parse(markdown) as Root;
   const definitions = new Map<string, string>();
   const references: AttachmentReference[] = [];
@@ -83,7 +113,11 @@ export function attachmentReferences(markdown: string): AttachmentReference[] {
     }
 
     if (url) {
-      const reference = referenceFromNode(node as ReferenceNode, url);
+      const reference = referenceFromNode(
+        node as ReferenceNode,
+        url,
+        resolvePath,
+      );
       if (reference && !seenPaths.has(reference.path)) {
         seenPaths.add(reference.path);
         references.push(reference);

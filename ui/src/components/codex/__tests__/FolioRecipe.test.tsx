@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Descendant } from "slate";
+import { createEditor, type Descendant, type Editor } from "slate";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import "./FolioProperties.mock";
 import { markdownToSlate, slateToMarkdown } from "#/editor/convert";
@@ -118,7 +118,7 @@ vi.mock("#/editor/SlateEditor", () => ({
     readOnly = false,
   }: {
     initialValue: Descendant[];
-    onChange: (value: Descendant[], editor: never) => void;
+    onChange: (value: Descendant[], editor: Editor) => void;
     onSaveNow: () => Promise<void>;
     readOnly?: boolean;
   }) => (
@@ -128,7 +128,7 @@ vi.mock("#/editor/SlateEditor", () => ({
         readOnly={readOnly}
         defaultValue={slateToMarkdown(initialValue)}
         onChange={(event) =>
-          onChange(markdownToSlate(event.currentTarget.value), {} as never)
+          onChange(markdownToSlate(event.currentTarget.value), createEditor())
         }
       />
       <button type="button" onClick={() => void onSaveNow()}>

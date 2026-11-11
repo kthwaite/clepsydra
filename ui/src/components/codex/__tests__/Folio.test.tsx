@@ -37,6 +37,7 @@ import type {
   UnlinkedMentionEntry,
 } from "#/api/types";
 import { BOARD_FIXTURE } from "#/components/tasking/__tests__/fixtures";
+import { markdownToSlate } from "#/editor/convert";
 import type { CustomEditor } from "#/editor/types";
 import { useBoardStore } from "#/store/board";
 
@@ -265,7 +266,7 @@ vi.mock("#/editor/SlateEditor", () => ({
     onUnmountSnapshot,
   }: {
     initialValue: Descendant[];
-    onChange: (value: Descendant[]) => void;
+    onChange: (value: Descendant[], editor: Editor) => void;
     editorRef?: { current: CustomEditor | null };
     onUnmountSnapshot?: (editor: CustomEditor) => void;
   }) => {
@@ -305,12 +306,15 @@ vi.mock("#/editor/SlateEditor", () => ({
           firstChild && Text.isText(firstChild) ? firstChild.text : ""
         }
         onChange={(event) =>
-          onChange([
-            {
-              type: "paragraph",
-              children: [{ text: event.currentTarget.value }],
-            },
-          ])
+          onChange(
+            [
+              {
+                type: "paragraph",
+                children: [{ text: event.currentTarget.value }],
+              },
+            ],
+            editor,
+          )
         }
       />
     );
@@ -452,6 +456,8 @@ function editableEditor() {
     setTags: vi.fn(),
     aliases: [],
     setAliases: vi.fn(),
+    attachments: [],
+    attachAttachment: vi.fn(),
     saveNow: vi.fn().mockResolvedValue(undefined),
     saveStatus: "saved" as const,
     saveError: null,
@@ -1771,11 +1777,14 @@ describe("Folio attachment protection plumbing", () => {
 
   it("hands decrypted Markdown to the protected attachment audit without mutating", async () => {
     const user = userEvent.setup();
+    const body =
+      "[Missing paper](/api/vault/attachments/private/missing%20paper.pdf)";
     usePageEditorMock.mockReturnValue({
       ...editableEditor(),
       encrypted: true,
-      bodyMarkdown:
-        "[Missing paper](/api/vault/attachments/private/missing%20paper.pdf)",
+      bodyMarkdown: body,
+      initialValue: markdownToSlate(body),
+      editorValue: markdownToSlate(body),
     });
 
     render(<Folio tabId="t1" path="notes/alpha.md" />);

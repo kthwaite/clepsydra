@@ -484,3 +484,156 @@ async fn bulk_assign_rejects_project_on_journal_pages() {
         "a rejected bulk assignment must not publish the note's project destination"
     );
 }
+
+#[tokio::test]
+async fn attachments_round_trip_preserve_unrelated_metadata_and_clear_explicitly() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            std::fs::write(
+                root.join("legacy.md"),
+                "---\nid: 01951234-0000-7000-8000-000000000501\n\
+                 attachments: [old.pdf]\ncustom: keep me\n---\nlegacy body\n",
+            )
+            .unwrap();
+            std::fs::write(
+                root.join("modern.md"),
+                "+++\nid = \"01951234-0000-7000-8000-000000000502\"\n\
+                 attachments = [\"old.pdf\"]\ncustom = \"keep me\"\n+++\nmodern body\n",
+            )
+            .unwrap();
+        })
+        .build();
+
+    for path in ["legacy.md", "modern.md"] {
+        let endpoint = format!("/api/vault/pages/{path}");
+        let original: serde_json::Value = fixture.server.get(&endpoint).await.json();
+        assert_eq!(
+            original["meta"]["attachments"],
+            serde_json::json!(["old.pdf"])
+        );
+
+        let update = fixture
+            .server
+            .put(&endpoint)
+            .json(&serde_json::json!({
+                "expected_revision": original["revision"],
+                "attachments": ["photos/cafe\u{301}.png", "report.pdf", "photos/café.png"]
+            }))
+            .await;
+        update.assert_status_ok();
+        let attached: serde_json::Value = update.json();
+        let expected = serde_json::json!(["photos/café.png", "report.pdf"]);
+        assert_eq!(attached["meta"]["attachments"], expected);
+        assert_eq!(attached["body"], original["body"]);
+        assert_eq!(attached["meta"]["custom"], "keep me");
+
+        let updated = fixture
+            .server
+            .put(&endpoint)
+            .json(&serde_json::json!({
+                "expected_revision": attached["revision"],
+                "title": "Renamed",
+                "body": "edited body\n"
+            }))
+            .await;
+        updated.assert_status_ok();
+        let read: serde_json::Value = fixture.server.get(&endpoint).await.json();
+        assert_eq!(read["meta"]["attachments"], expected);
+        assert_eq!(read["meta"]["custom"], "keep me");
+        assert_eq!(read["body"], "edited body\n");
+
+        let cleared = fixture
+            .server
+            .put(&endpoint)
+            .json(&serde_json::json!({
+                "expected_revision": read["revision"],
+                "attachments": []
+            }))
+            .await;
+        cleared.assert_status_ok();
+        let read: serde_json::Value = fixture.server.get(&endpoint).await.json();
+        assert_eq!(read["meta"]["attachments"], serde_json::json!([]));
+        assert_eq!(read["body"], "edited body\n");
+        assert_eq!(read["meta"]["custom"], "keep me");
+    }
+}
+
+#[tokio::test]
+async fn attachment_associations_default_empty_and_reject_non_file_paths_without_writing() {
+    let fixture = ApiFixture::builder().build();
+    create_page(&fixture.server, "note.md", &[], None).await;
+    let original: serde_json::Value = fixture.server.get("/api/vault/pages/note.md").await.json();
+    assert_eq!(original["meta"]["attachments"], serde_json::json!([]));
+
+    for invalid in [
+        "",
+        "../escape.png",
+        "/absolute.png",
+        "folder/../../escape.pdf",
+        "folder\\image.png",
+        "https://example.com/image.png",
+        "data:image/png;base64,AAAA",
+        "C:/image.png",
+        "folder/",
+        "bad\0name.png",
+    ] {
+        fixture
+            .server
+            .put("/api/vault/pages/note.md")
+            .json(&serde_json::json!({
+                "expected_revision": original["revision"],
+                "attachments": ["valid.pdf", invalid]
+            }))
+            .await
+            .assert_status_bad_request();
+        let unchanged: serde_json::Value =
+            fixture.server.get("/api/vault/pages/note.md").await.json();
+        assert_eq!(unchanged["revision"], original["revision"]);
+        assert_eq!(unchanged["meta"]["attachments"], serde_json::json!([]));
+    }
+}
+
+#[tokio::test]
+async fn attachments_are_plaintext_metadata_on_readonly_and_encrypted_pages() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            std::fs::write(
+                root.join("readonly.md"),
+                "+++\nid = \"01951234-0000-7000-8000-000000000503\"\n\
+                 readonly = true\n+++\nprotected body\n",
+            )
+            .unwrap();
+            std::fs::write(
+                root.join("encrypted.md"),
+                format!(
+                    "+++\nid = \"01951234-0000-7000-8000-000000000504\"\n\
+                     encryption = {{ format = \"age\", version = 1, key_id = \"01951234-0000-7000-8000-000000000505\" }}\n+++\n{}",
+                    clep_test_support::PRIVATE_NOTE_AGE
+                ),
+            )
+            .unwrap();
+        })
+        .build();
+
+    for path in ["readonly.md", "encrypted.md"] {
+        let endpoint = format!("/api/vault/pages/{path}");
+        let original: serde_json::Value = fixture.server.get(&endpoint).await.json();
+        let response = fixture
+            .server
+            .put(&endpoint)
+            .json(&serde_json::json!({
+                "expected_revision": original["revision"],
+                "attachments": ["visible-name.pdf"]
+            }))
+            .await;
+        response.assert_status_ok();
+        let read: serde_json::Value = fixture.server.get(&endpoint).await.json();
+        assert_eq!(
+            read["meta"]["attachments"],
+            serde_json::json!(["visible-name.pdf"])
+        );
+        assert_eq!(read["body"], original["body"]);
+        assert_eq!(read["encrypted"], original["encrypted"]);
+        assert_eq!(read["readonly"], original["readonly"]);
+    }
+}

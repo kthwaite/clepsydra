@@ -30,6 +30,9 @@ tags:
   - pkm
 aliases:
   - my-page
+attachments:
+  - figure.png
+  - papers/source.pdf
 created_at: "2025-06-01T12:00:00Z"
 updated_at: "2025-06-02T08:30:00Z"
 custom_field: 42
@@ -44,6 +47,8 @@ Body
     assert_eq!(meta.title.as_deref(), Some("My Page"));
     assert_eq!(meta.tags, vec!["rust", "pkm"]);
     assert_eq!(meta.aliases, vec!["my-page"]);
+    assert_eq!(meta.attachments, ["figure.png", "papers/source.pdf"]);
+    assert!(!meta.extra.contains_key("attachments"));
     assert!(meta.created_at.is_some());
     assert!(meta.updated_at.is_some());
     assert_eq!(
@@ -63,6 +68,7 @@ fn deserialize_minimal_frontmatter() {
     assert_eq!(meta.title, None);
     assert!(meta.tags.is_empty());
     assert!(meta.aliases.is_empty());
+    assert!(meta.attachments.is_empty());
     assert_eq!(meta.created_at, None);
     assert_eq!(meta.updated_at, None);
     assert!(meta.extra.is_empty());
@@ -181,6 +187,7 @@ fn round_trip_preserves_fields() {
         title: Some("Round Trip".into()),
         tags: vec!["alpha".into(), "beta".into()],
         aliases: vec!["rt".into()],
+        attachments: vec!["figure.png".into(), "papers/source.pdf".into()],
         created_at: Some(now),
         updated_at: Some(now),
         encryption: None,
@@ -197,6 +204,7 @@ fn round_trip_preserves_fields() {
     assert_eq!(deserialized.title, meta.title);
     assert_eq!(deserialized.tags, meta.tags);
     assert_eq!(deserialized.aliases, meta.aliases);
+    assert_eq!(deserialized.attachments, meta.attachments);
     assert_eq!(deserialized.created_at, meta.created_at);
     assert_eq!(deserialized.updated_at, meta.updated_at);
 }
@@ -209,6 +217,7 @@ fn skip_serializing_empty_fields() {
         title: None,
         tags: Vec::new(),
         aliases: Vec::new(),
+        attachments: Vec::new(),
         created_at: None,
         updated_at: None,
         encryption: None,
@@ -222,6 +231,7 @@ fn skip_serializing_empty_fields() {
     assert!(!rendered.contains("title"));
     assert!(!rendered.contains("tags"));
     assert!(!rendered.contains("aliases"));
+    assert!(!rendered.contains("attachments"));
     assert!(!rendered.contains("created_at"));
     assert!(!rendered.contains("updated_at"));
     // id must still be present
@@ -262,6 +272,7 @@ fn write_page_content_round_trip() {
         title: Some("Test".into()),
         tags: vec!["tag1".into()],
         aliases: Vec::new(),
+        attachments: Vec::new(),
         created_at: None,
         updated_at: None,
         encryption: None,
@@ -375,6 +386,7 @@ fn page_to_file_writes_correctly() {
         title: Some("Output".into()),
         tags: Vec::new(),
         aliases: Vec::new(),
+        attachments: Vec::new(),
         created_at: None,
         updated_at: None,
         encryption: None,

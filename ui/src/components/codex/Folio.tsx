@@ -16,6 +16,7 @@ import {
   useState,
 } from "react";
 import { type Descendant, Element as SlateElement } from "slate";
+import type { AttachmentInfo } from "#/api/attachments";
 import {
   useBacklinks,
   useOutlinks,
@@ -26,6 +27,10 @@ import {
 import { useJournalEditorOptions } from "#/api/journal";
 import { type ArchivedPage, useAssignPage } from "#/api/pages";
 import type { PageMeta } from "#/api/types";
+import {
+  PageAttachmentGallery,
+  PageAttachmentSection,
+} from "#/components/attachments/PageAttachmentGallery";
 import { useAttachmentDropUpload } from "#/components/attachments/useAttachmentDropUpload";
 import { FolioCalendarSection } from "#/components/calendar/FolioCalendarSection";
 import { AiConversationControls } from "#/components/codex/AiConversationControls";
@@ -233,6 +238,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [organizationOpen, setOrganizationOpen] = useState(false);
   const folioEditorRef = useRef<CustomEditor | null>(null);
+  const [, refreshAttachmentDocument] = useState(0);
   const {
     conversationMode,
     setConversationMode,
@@ -421,6 +427,10 @@ export function Folio({ tabId, path }: FolioProps) {
 
   const currentEditorValue = editor.editorValue ?? editor.initialValue;
   const visibleEditorValue = locked ? EMPTY_EDITOR_VALUE : currentEditorValue;
+  const attachmentMarkdown = useMemo(
+    () => slateToMarkdown(visibleEditorValue),
+    [visibleEditorValue],
+  );
   const wordCount = useMemo(
     () => countWordsFromSlate(visibleEditorValue),
     [visibleEditorValue],
@@ -571,7 +581,12 @@ export function Folio({ tabId, path }: FolioProps) {
   ) : null;
 
   const document = (
-    <>
+    <PageAttachmentGallery
+      key={path}
+      pagePath={path}
+      markdown={attachmentMarkdown}
+      attachedPaths={editor.attachments}
+    >
       {folioReadOnly ? (
         <ReadOnlyPageHeader
           path={path}
@@ -730,13 +745,27 @@ export function Folio({ tabId, path }: FolioProps) {
                     key={`${path}:${editor.editorRevision}`}
                     initialValue={currentEditorValue}
                     protectedPage={encrypted}
-                    onUploaded={() => {
+                    onUploaded={(attachment) => {
+                      editor.attachAttachment(attachment.path);
                       setAttachmentsOpen(true);
                       useFolioRails
                         .getState()
                         .setCollapsed(FOLIO_LEFT_RAIL, false);
                     }}
-                    onChange={editor.onSlateChange}
+                    onChange={(value, slateEditor) => {
+                      editor.onSlateChange(value, slateEditor);
+                      // Text edits cannot change attachment destinations.
+                      if (
+                        slateEditor.operations.some(
+                          (op) =>
+                            op.type !== "set_selection" &&
+                            op.type !== "insert_text" &&
+                            op.type !== "remove_text",
+                        )
+                      ) {
+                        refreshAttachmentDocument((revision) => revision + 1);
+                      }
+                    }}
                     onSaveNow={editor.saveNow}
                     insertionRequest={attachmentInsertion}
                     onInsertionHandled={finishAttachmentInsertion}
@@ -753,7 +782,8 @@ export function Folio({ tabId, path }: FolioProps) {
           </WikilinkResolutionProvider>
         </article>
       )}
-    </>
+      {surface !== "raw-markdown" ? <PageAttachmentSection /> : null}
+    </PageAttachmentGallery>
   );
 
   const details = (
@@ -892,8 +922,12 @@ export function Folio({ tabId, path }: FolioProps) {
               >
                 <div className="mt-2">
                   <AttachmentManager
+                    key={path}
                     protectedPage={encrypted}
-                    pageMarkdown={editor.bodyMarkdown}
+                    pagePath={path}
+                    pageMarkdown={attachmentMarkdown}
+                    attachedPaths={editor.attachments}
+                    onAttachAttachment={editor.attachAttachment}
                     onInsertMarkdown={requestAttachmentInsertion}
                   />
                 </div>
@@ -1176,7 +1210,7 @@ function FolioSlateEditor({
   ...props
 }: SlateEditorProps & {
   protectedPage: boolean;
-  onUploaded: () => void;
+  onUploaded: (attachment: AttachmentInfo) => void;
 }) {
   const { uploadFiles, feedback } = useAttachmentDropUpload({
     protectedPage,

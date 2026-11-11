@@ -180,6 +180,32 @@ describe("usePageEditor encrypted loads", () => {
     useUpdatePageMock.mockReturnValue({ mutateAsync: vi.fn() });
   });
 
+  it("saves plaintext attachment metadata while locked without touching ciphertext", async () => {
+    const page = makePage();
+    const mutateAsync = vi.fn().mockResolvedValue({
+      ...page,
+      revision: "rev-b",
+      meta: { ...page.meta, attachments: ["visible-name.pdf"] },
+    });
+    useUpdatePageMock.mockReturnValue({ mutateAsync });
+    const { result } = renderHook(() => usePageEditor("notes/protected-a.md"));
+
+    await act(async () => {
+      result.current.attachAttachment("visible-name.pdf");
+      await result.current.saveNow();
+    });
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      params: { path: { path: "notes/protected-a.md" } },
+      body: { expected_revision: "rev-a", attachments: ["visible-name.pdf"] },
+    });
+    expect(result.current.attachments).toEqual(["visible-name.pdf"]);
+    expect(result.current.encryptionState).toEqual({ status: "locked" });
+    expect(decryptMarkdownMock).not.toHaveBeenCalled();
+    expect(encryptMarkdownMock).not.toHaveBeenCalled();
+    expect(markdownToSlateMock).not.toHaveBeenCalled();
+  });
+
   it("returns a locked state without parsing ciphertext", () => {
     const { result } = renderHook(() => usePageEditor("notes/protected-a.md"));
 

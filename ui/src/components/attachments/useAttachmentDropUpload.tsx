@@ -11,7 +11,7 @@ import { PlaintextAttachmentDialog } from "#/components/attachments/PlaintextAtt
 interface AttachmentDropUploadOptions {
   protectedPage: boolean;
   disabled?: boolean;
-  onUploaded: () => void;
+  onUploaded: (attachment: AttachmentInfo) => void;
 }
 
 interface Approval {
@@ -125,7 +125,7 @@ export function useAttachmentDropUpload({
           }
           if (!mounted.current || batch.cancelled) break;
           markdown.push(attachmentMarkdown(attachment));
-          options.current.onUploaded();
+          options.current.onUploaded(attachment);
         }
       } finally {
         activeBatch.current = null;

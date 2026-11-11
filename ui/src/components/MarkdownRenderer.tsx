@@ -7,6 +7,7 @@ import Markdown, {
 import remarkGfm from "remark-gfm";
 import type { PluggableList } from "unified";
 import { externalPreviewUrl } from "#/api/externalPreviews";
+import { AttachmentImage } from "#/components/attachments/AttachmentImage";
 import { BlockTransclusion } from "#/components/blocks/BlockTransclusion";
 import { CLink } from "#/components/codex/CLink";
 import { ExternalPreviewLink } from "#/components/codex/ExternalPreviewLink";
@@ -198,6 +199,7 @@ function MarkdownBody({
           return transformMarkdownUrl(url, key, node);
         }}
         components={{
+          img: ({ node: _node, ...props }) => <AttachmentImage {...props} />,
           span: ({ children, node, ...props }) => {
             const tex = node?.properties["data-tex"];
             const delimiter = node?.properties["data-delimiter"];

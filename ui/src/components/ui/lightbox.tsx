@@ -5,7 +5,14 @@ import {
   zoom,
   zoomIdentity,
 } from "d3-zoom";
-import { RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  RotateCcw,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Modal,
@@ -22,6 +29,15 @@ export interface LightboxProps {
   /** Accessible name of the dialog, e.g. "Diagram". */
   label: string;
   children: ReactNode;
+  /** Identity of the displayed content; changing it resets pan and zoom. */
+  contentKey?: string;
+  caption?: string;
+  navigation?: {
+    index: number;
+    count: number;
+    previous: () => void;
+    next: () => void;
+  };
 }
 
 /**
@@ -34,8 +50,18 @@ export function Lightbox({
   onOpenChange,
   label,
   children,
+  contentKey,
+  caption,
+  navigation,
 }: LightboxProps) {
-  const [transform, setTransform] = useState<ZoomTransform>(zoomIdentity);
+  const [view, setView] = useState<{
+    key: string | undefined;
+    transform: ZoomTransform;
+  }>({
+    key: contentKey,
+    transform: zoomIdentity,
+  });
+  const transform = view.key === contentKey ? view.transform : zoomIdentity;
   const stageRef = useRef<HTMLDivElement | null>(null);
   const behaviorRef = useRef<ZoomBehavior<HTMLDivElement, unknown> | null>(
     null,
@@ -47,18 +73,42 @@ export function Lightbox({
 
     const behavior = zoom<HTMLDivElement, unknown>()
       .scaleExtent([0.25, 8])
-      .on("zoom", (event) => setTransform(event.transform));
+      .on("zoom", (event) =>
+        setView({ key: contentKey, transform: event.transform }),
+      );
     behaviorRef.current = behavior;
     select(stage).call(behavior);
+    behavior.transform(select(stage), zoomIdentity);
 
     return () => {
       select(stage).on(".zoom", null);
       behaviorRef.current = null;
       // Drop the view on the way out, not on the way back in: resetting when
       // the stage reopens would paint the old transform for one frame first.
-      setTransform(zoomIdentity);
+      setView({ key: contentKey, transform: zoomIdentity });
     };
-  }, [isOpen]);
+  }, [isOpen, contentKey]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onOpenChange(false);
+      } else if (navigation && event.key === "ArrowLeft") {
+        navigation.previous();
+      } else if (navigation && event.key === "ArrowRight") {
+        navigation.next();
+      } else {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    // Tooltips consume Escape on document capture. The open viewer owns these
+    // keys first, even with a tooltip focused; Tab still reaches the focus trap.
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [isOpen, onOpenChange, navigation]);
 
   /** Runs `apply` against the live stage, if the behavior is mounted. */
   const drive = (
@@ -80,100 +130,117 @@ export function Lightbox({
       className="fixed inset-0 z-50 bg-ground/95"
     >
       <Modal className="h-dvh w-screen">
-        <RACDialog
-          aria-label={label}
-          className="relative h-full w-full outline-none"
+        <div
+          role="document"
+          className="h-full w-full"
+          onKeyDown={(event) => {
+            // Tab must reach React Aria's document-level focus containment.
+            // Other portal events must never reach Slate or the workspace.
+            if (event.key !== "Tab") event.stopPropagation();
+          }}
         >
-          {/* The lightbox can be rendered from inside Slate's `Editable`, and
-              React portals still bubble synthetic events up the React tree.
-              This shield keeps keys pressed on the controls from reaching the
-              page below. Tab is let through so React Aria's document-level
-              focus containment can still see it and keep focus inside the
-              dialog — React's stopPropagation() would otherwise stop the
-              native event too. It does not shield keys pressed before focus
-              ever reaches a control (RAC focuses the dialog element itself on
-              open, and this wrapper is that element's child), but the global
-              shortcut dispatcher and slate-react's own editable-target check
-              cover that gap. */}
-          <div
-            role="document"
-            className="contents"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                onOpenChange(false);
-                event.preventDefault();
-              }
-              if (event.key !== "Tab") event.stopPropagation();
-            }}
+          <RACDialog
+            aria-label={label}
+            className="relative h-full w-full outline-none"
           >
-            <div
-              ref={stageRef}
-              data-testid="lightbox-stage"
-              className="absolute inset-0 cursor-grab touch-none overflow-hidden active:cursor-grabbing"
-            >
+            <div className="contents">
               <div
-                data-testid="lightbox-content"
-                className="absolute inset-0 flex items-center justify-center p-8 pt-20"
-                style={{
-                  transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
-                  transformOrigin: "0 0",
-                }}
+                ref={stageRef}
+                data-testid="lightbox-stage"
+                className="absolute inset-0 cursor-grab touch-none overflow-hidden active:cursor-grabbing"
               >
-                {children}
+                <div
+                  data-testid="lightbox-content"
+                  className="absolute inset-0 flex items-center justify-center p-8 pt-20"
+                  style={{
+                    transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
+                    transformOrigin: "0 0",
+                  }}
+                >
+                  {children}
+                </div>
+              </div>
+              {caption ? (
+                <div className="pointer-events-none absolute top-4 right-48 left-4 z-10 text-[13.5px] text-ink">
+                  <p className="truncate">{caption}</p>
+                  {navigation ? (
+                    <p aria-live="polite" className="text-mute">
+                      {navigation.index + 1} of {navigation.count}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              {navigation && navigation.count > 1 ? (
+                <div className="absolute inset-x-4 bottom-4 z-10 flex justify-between">
+                  <TooltipIconButton
+                    aria-label="Previous image"
+                    className={CONTROL_CLASS}
+                    onPress={navigation.previous}
+                  >
+                    <ChevronLeft size={18} />
+                  </TooltipIconButton>
+                  <TooltipIconButton
+                    aria-label="Next image"
+                    className={CONTROL_CLASS}
+                    onPress={navigation.next}
+                  >
+                    <ChevronRight size={18} />
+                  </TooltipIconButton>
+                </div>
+              ) : null}
+              <div className="absolute top-3 right-3 z-10 flex flex-col items-end gap-1">
+                <div className="flex items-center gap-1">
+                  <TooltipIconButton
+                    aria-label="Zoom in"
+                    className={CONTROL_CLASS}
+                    onPress={() =>
+                      drive((behavior, stage) =>
+                        behavior.scaleBy(select(stage), 1.25),
+                      )
+                    }
+                  >
+                    <ZoomIn size={14} />
+                  </TooltipIconButton>
+                  <TooltipIconButton
+                    aria-label="Zoom out"
+                    className={CONTROL_CLASS}
+                    onPress={() =>
+                      drive((behavior, stage) =>
+                        behavior.scaleBy(select(stage), 0.8),
+                      )
+                    }
+                  >
+                    <ZoomOut size={14} />
+                  </TooltipIconButton>
+                  <TooltipIconButton
+                    aria-label="Reset view"
+                    className={CONTROL_CLASS}
+                    onPress={() =>
+                      drive((behavior, stage) =>
+                        behavior.transform(select(stage), zoomIdentity),
+                      )
+                    }
+                  >
+                    <RotateCcw size={14} />
+                  </TooltipIconButton>
+                  <TooltipIconButton
+                    aria-label="Close"
+                    className={CONTROL_CLASS}
+                    onPress={() => onOpenChange(false)}
+                  >
+                    <X size={14} />
+                  </TooltipIconButton>
+                </div>
+                <p
+                  aria-live="polite"
+                  className="pointer-events-none text-[12.5px] text-mute"
+                >
+                  {`${Math.round(transform.k * 100)}%`}
+                </p>
               </div>
             </div>
-            <div className="absolute top-3 right-3 z-10 flex flex-col items-end gap-1">
-              <div className="flex items-center gap-1">
-                <TooltipIconButton
-                  aria-label="Zoom in"
-                  className={CONTROL_CLASS}
-                  onPress={() =>
-                    drive((behavior, stage) =>
-                      behavior.scaleBy(select(stage), 1.25),
-                    )
-                  }
-                >
-                  <ZoomIn size={14} />
-                </TooltipIconButton>
-                <TooltipIconButton
-                  aria-label="Zoom out"
-                  className={CONTROL_CLASS}
-                  onPress={() =>
-                    drive((behavior, stage) =>
-                      behavior.scaleBy(select(stage), 0.8),
-                    )
-                  }
-                >
-                  <ZoomOut size={14} />
-                </TooltipIconButton>
-                <TooltipIconButton
-                  aria-label="Reset view"
-                  className={CONTROL_CLASS}
-                  onPress={() =>
-                    drive((behavior, stage) =>
-                      behavior.transform(select(stage), zoomIdentity),
-                    )
-                  }
-                >
-                  <RotateCcw size={14} />
-                </TooltipIconButton>
-                <TooltipIconButton
-                  aria-label="Close"
-                  className={CONTROL_CLASS}
-                  onPress={() => onOpenChange(false)}
-                >
-                  <X size={14} />
-                </TooltipIconButton>
-              </div>
-              <p
-                aria-live="polite"
-                className="pointer-events-none text-[12.5px] text-mute"
-              >
-                {`${Math.round(transform.k * 100)}%`}
-              </p>
-            </div>
-          </div>
-        </RACDialog>
+          </RACDialog>
+        </div>
       </Modal>
     </ModalOverlay>
   );

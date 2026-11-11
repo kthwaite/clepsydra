@@ -1,5 +1,5 @@
 import type { Image, Paragraph } from "mdast";
-import { resolveResourceUrl } from "#/lib/resourceUrl";
+import { AttachmentImage } from "#/components/attachments/AttachmentImage";
 import type { ElementDescriptor } from "../descriptor";
 import type { ImageElement } from "../types";
 import { makeVoidIntegrityRule } from "./voidInline";
@@ -20,11 +20,10 @@ export const imageDescriptor: ElementDescriptor<ImageElement> = {
         contentEditable={false}
         className="mx-0.5 inline-block align-middle"
       >
-        <img
-          src={resolveResourceUrl(element.url)}
+        <AttachmentImage
+          src={element.url}
           alt={element.alt}
           title={element.title}
-          className="max-h-[32rem] max-w-full rounded-[12px] object-contain"
         />
       </span>
       {children}

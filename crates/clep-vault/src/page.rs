@@ -35,6 +35,8 @@ pub struct PageMeta {
     pub title: Option<String>,
     pub tags: Vec<String>,
     pub aliases: Vec<String>,
+    /// Explicitly associated files, relative to the configured attachment folder.
+    pub attachments: Vec<String>,
     /// Declared kind, from frontmatter `type =` only. `None` => inferred.
     /// NOTE: `kind` is intentionally NOT read here; the academic subsystem
     /// uses `kind = "work"` with a different meaning, and we must not hijack it.
@@ -61,6 +63,7 @@ impl PageMeta {
             title: None,
             tags: Vec::new(),
             aliases: Vec::new(),
+            attachments: Vec::new(),
             kind: None,
             project: None,
             readonly: None,
@@ -94,6 +97,7 @@ impl Serialize for PageMeta {
         if !self.aliases.is_empty() {
             map.serialize_entry("aliases", &self.aliases)?;
         }
+        map.serialize_entry("attachments", &self.attachments)?;
         if let Some(kind) = &self.kind {
             map.serialize_entry("type", kind)?;
         }
@@ -353,6 +357,7 @@ fn meta_from_table(mut table: toml::Table) -> Result<(PageMeta, bool), Frontmatt
     let project = take_string(&mut table, "project")?;
     let tags = take_string_array(&mut table, "tags")?;
     let aliases = take_string_array(&mut table, "aliases")?;
+    let attachments = take_string_array(&mut table, "attachments")?;
     let created_at = take_timestamp(&mut table, "created_at")?;
     let updated_at = take_timestamp(&mut table, "updated_at")?;
     let encryption = take_encryption(&mut table)?;
@@ -364,6 +369,7 @@ fn meta_from_table(mut table: toml::Table) -> Result<(PageMeta, bool), Frontmatt
             title,
             tags,
             aliases,
+            attachments,
             kind,
             project,
             created_at,
@@ -510,7 +516,8 @@ fn chrono_to_toml_datetime(dt: &DateTime<Utc>) -> toml::Value {
 /// TOML frontmatter fences.
 ///
 /// Canonical key order: `id`, `title`, `type`, `project`, `tags`, `aliases`,
-/// `created_at`, `updated_at`, `encryption`, then extras in first-seen order.
+/// `attachments`, `created_at`, `updated_at`, `encryption`, then extras in
+/// first-seen order.
 /// Used where no prior formatting exists to preserve; surgical edits go
 /// through `toml_patch` instead.
 pub fn write_page_content(meta: &PageMeta, body: &str) -> String {
@@ -539,6 +546,18 @@ pub fn write_page_content(meta: &PageMeta, body: &str) -> String {
             "aliases".into(),
             toml::Value::Array(
                 meta.aliases
+                    .iter()
+                    .cloned()
+                    .map(toml::Value::String)
+                    .collect(),
+            ),
+        );
+    }
+    if !meta.attachments.is_empty() {
+        system.insert(
+            "attachments".into(),
+            toml::Value::Array(
+                meta.attachments
                     .iter()
                     .cloned()
                     .map(toml::Value::String)

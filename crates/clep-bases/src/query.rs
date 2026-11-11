@@ -2080,6 +2080,7 @@ mod tests {
                 title: Some("Daily log".into()),
                 tags: vec!["Research".into(), "journal".into(), "research".into()],
                 aliases: vec!["Log".into(), "Daily".into()],
+                attachments: Vec::new(),
                 kind: None,
                 project: Some("clepsydra".into()),
                 created_at: Some("2026-08-15T09:30:00Z".parse().unwrap()),

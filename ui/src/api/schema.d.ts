@@ -3372,6 +3372,8 @@ export interface components {
         PageMetaResponse: {
             aliases?: string[] | null;
             archive?: null | components["schemas"]["ArchiveMetaResponse"];
+            /** @description Explicitly associated files, relative to the configured attachment folder. */
+            attachments: string[];
             /**
              * @description Person pages a MEETING names, as wikilink strings. Clepsydra always
              *     writes an array; a hand-written single wikilink
@@ -4091,6 +4093,8 @@ export interface components {
         };
         UpdatePageRequest: {
             aliases?: string[] | null;
+            /** @description Replace associated attachment-folder-relative file paths. Omit to preserve; [] clears. */
+            attachments?: string[] | null;
             body?: string | null;
             expected_revision: string;
             /**

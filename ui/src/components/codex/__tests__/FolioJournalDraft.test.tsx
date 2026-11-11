@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { type ReactNode, useState } from "react";
+import { createEditor, type Editor } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "./FolioProperties.mock";
 
@@ -70,14 +71,17 @@ vi.mock("#/editor/SlateEditor", () => ({
     onChange,
     onSaveNow,
   }: {
-    onChange: (value: unknown[]) => void;
+    onChange: (value: unknown[], editor: Editor) => void;
     onSaveNow: () => void;
   }) => (
     <>
       <button
         type="button"
         onClick={() =>
-          onChange([{ type: "paragraph", children: [{ text: "First line" }] }])
+          onChange(
+            [{ type: "paragraph", children: [{ text: "First line" }] }],
+            createEditor(),
+          )
         }
       >
         Edit journal body

@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Descendant } from "slate";
+import { createEditor, type Descendant, type Editor } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "./FolioProperties.mock";
 
@@ -199,18 +199,21 @@ vi.mock("#/editor/SlateEditor", () => ({
     onChange,
   }: {
     initialValue: Array<{ children?: Array<{ text?: string }> }>;
-    onChange: (value: Descendant[]) => void;
+    onChange: (value: Descendant[], editor: Editor) => void;
   }) => (
     <textarea
       aria-label="Page body"
       defaultValue={initialValue[0]?.children?.[0]?.text ?? ""}
       onChange={(event) =>
-        onChange([
-          {
-            type: "paragraph",
-            children: [{ text: event.currentTarget.value }],
-          } as Descendant,
-        ])
+        onChange(
+          [
+            {
+              type: "paragraph",
+              children: [{ text: event.currentTarget.value }],
+            } as Descendant,
+          ],
+          createEditor(),
+        )
       }
     />
   ),

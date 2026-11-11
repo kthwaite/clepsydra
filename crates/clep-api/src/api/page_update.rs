@@ -13,6 +13,7 @@ use crate::api::pages::UpdatePageRequest;
 use crate::vault::encryption::validate_age_armor;
 use crate::vault::mutation_coordinator::{ProjectAssignment, UpdatePageCommand};
 use crate::vault::page::{Page, page_revision};
+use crate::vault::path::VaultPath;
 
 /// Refuse a page that is not the one `expected_uuid` names: the id's page
 /// moved away and another page now sits at its old path.
@@ -72,6 +73,28 @@ pub(crate) fn plan_page_update(
     }
     if let Some(aliases) = body.aliases {
         meta.aliases = aliases;
+    }
+    if let Some(attachments) = body.attachments {
+        let mut normalized = Vec::with_capacity(attachments.len());
+        for attachment in attachments {
+            if attachment.contains(':')
+                || attachment.chars().any(char::is_control)
+                || attachment.ends_with('/')
+            {
+                return Err(ApiError::bad_request(
+                    "attachments must be plain attachment-folder-relative file paths".to_string(),
+                ));
+            }
+            let path = VaultPath::new(&attachment)
+                .map_err(|error| {
+                    ApiError::bad_request(format!("invalid attachment path: {error}"))
+                })?
+                .to_string();
+            if !normalized.contains(&path) {
+                normalized.push(path);
+            }
+        }
+        meta.attachments = normalized;
     }
     if let Some(readonly) = body.readonly {
         meta.readonly = Some(readonly);

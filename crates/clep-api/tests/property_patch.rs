@@ -214,6 +214,8 @@ async fn reserved_system_keys_are_rejected() {
         serde_json::json!({ "set": { "id": "not-yours" }, "expected_revision": revision }),
         serde_json::json!({ "set": { "type": "NOTE" }, "expected_revision": revision }),
         serde_json::json!({ "clear": ["created_at"], "expected_revision": revision }),
+        serde_json::json!({ "set": { "attachments": ["report.pdf"] }, "expected_revision": revision }),
+        serde_json::json!({ "clear": ["attachments"], "expected_revision": revision }),
     ] {
         let res = server
             .patch(&format!("/api/vault/pages/by-id/{PAGE_ID}/properties"))

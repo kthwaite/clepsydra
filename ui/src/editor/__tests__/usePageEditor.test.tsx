@@ -16,6 +16,15 @@ vi.mock("#/api/pages", () => ({
   useUpdatePage: useUpdatePageMock,
 }));
 
+// The runtime supports withResolvers; the app's TypeScript lib predates it.
+const promiseWithResolvers = Promise as PromiseConstructor & {
+  withResolvers<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (reason?: unknown) => void;
+  };
+};
+
 function paragraph(text: string): Descendant[] {
   return [{ type: "paragraph", children: [{ text }] }] as Descendant[];
 }
@@ -39,10 +48,11 @@ interface MockPage {
     title: string | null;
     tags: string[];
     aliases: string[];
+    attachments: string[];
   };
 }
 
-function makePage(body: string) {
+function makePage(body: string): MockPage {
   return {
     path: "notes/page.md",
     canonical_name: "page",
@@ -56,6 +66,7 @@ function makePage(body: string) {
       title: null,
       tags: [],
       aliases: [],
+      attachments: [],
     },
   };
 }
@@ -106,6 +117,142 @@ describe("usePageEditor save sequencing", () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it("unions same-tick attachments and edits during a serialized save", async () => {
+    const page = makePage("A");
+    page.meta.attachments = ["existing.pdf"];
+    usePageMock.mockReturnValue({
+      data: page,
+      isLoading: false,
+      error: null,
+      refetch: refetchPageMock,
+    });
+    const pending: {
+      request: { body: Record<string, unknown> };
+      resolve: (page: MockPage) => void;
+    }[] = [];
+    const mutateAsync = vi.fn((request: { body: Record<string, unknown> }) => {
+      const { promise, resolve } =
+        promiseWithResolvers.withResolvers<MockPage>();
+      pending.push({ request, resolve });
+      return promise;
+    });
+    useUpdatePageMock.mockReturnValue({ mutateAsync });
+    const { result, unmount } = renderHook(() =>
+      usePageEditor("notes/page.md"),
+    );
+
+    let flight!: Promise<void>;
+    act(() => {
+      result.current.attachAttachment("photos/cafe\u0301.png");
+      result.current.attachAttachment("photos/café.png");
+      result.current.attachAttachment("report.pdf");
+      result.current.setBodyMarkdown("Body B\n");
+      flight = result.current.saveNow();
+    });
+    const firstAttachments = ["existing.pdf", "photos/café.png", "report.pdf"];
+    expect(result.current.attachments).toEqual(firstAttachments);
+    expect(pending).toHaveLength(1);
+    expect(pending[0].request.body).toMatchObject({
+      expected_revision: "rev-a",
+      attachments: firstAttachments,
+      body: "Body B\n",
+    });
+
+    act(() => {
+      result.current.attachAttachment("later.png");
+      result.current.setBodyMarkdown("Body C\n");
+      flight = result.current.saveNow();
+    });
+    await act(async () => {
+      pending[0].resolve({
+        ...makePage("Body B"),
+        revision: "rev-b",
+        meta: { ...page.meta, attachments: firstAttachments },
+      });
+      await Promise.resolve();
+    });
+
+    const allAttachments = [...firstAttachments, "later.png"];
+    expect(pending).toHaveLength(2);
+    expect(pending[1].request.body).toMatchObject({
+      expected_revision: "rev-b",
+      attachments: allAttachments,
+      body: "Body C\n",
+    });
+    await act(async () => {
+      pending[1].resolve({
+        ...makePage("Body C"),
+        revision: "rev-c",
+        meta: { ...page.meta, attachments: allAttachments },
+      });
+      await flight;
+    });
+    expect(result.current.attachments).toEqual(allAttachments);
+    expect(result.current.getPlaintext()).toBe("Body C\n");
+    expect(result.current.saveStatus).toBe("saved");
+    unmount();
+  });
+
+  it("attaches without serializing an untouched body and skips duplicates", async () => {
+    const page = makePage("<custom>Preserve unsupported Markdown</custom>");
+    usePageMock.mockReturnValue({
+      data: page,
+      isLoading: false,
+      error: null,
+      refetch: refetchPageMock,
+    });
+    mutateAsyncMock.mockResolvedValue({
+      ...page,
+      revision: "rev-b",
+      meta: { ...page.meta, attachments: ["report.pdf"] },
+    });
+    useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });
+    const { result } = renderHook(() => usePageEditor("notes/page.md"));
+    await act(async () => {
+      result.current.attachAttachment("report.pdf");
+      await result.current.saveNow();
+    });
+    expect(mutateAsyncMock.mock.calls[0][0].body).toEqual({
+      expected_revision: "rev-a",
+      attachments: ["report.pdf"],
+    });
+    await act(async () => {
+      result.current.attachAttachment("report.pdf");
+      await result.current.saveNow();
+    });
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(result.current.getPlaintext()).toBe(page.body);
+  });
+
+  it("does not attach an upload completing after navigation, including a return to the old path", () => {
+    useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });
+    const { result, rerender } = renderHook(
+      ({ path }: { path: string }) => usePageEditor(path),
+      { initialProps: { path: "notes/page.md" } },
+    );
+    const attachToOldPage = result.current.attachAttachment;
+    usePageMock.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      error: null,
+      refetch: refetchPageMock,
+    });
+    rerender({ path: "notes/other.md" });
+    act(() => attachToOldPage("late.png"));
+    expect(result.current.attachments).toEqual([]);
+
+    usePageMock.mockReturnValue({
+      data: makePage("A"),
+      isLoading: false,
+      error: null,
+      refetch: refetchPageMock,
+    });
+    rerender({ path: "notes/page.md" });
+    act(() => attachToOldPage("late.png"));
+    expect(result.current.attachments).toEqual([]);
+    expect(mutateAsyncMock).not.toHaveBeenCalled();
   });
 
   it("exposes archive metadata from the existing page query", () => {
@@ -281,13 +428,18 @@ describe("usePageEditor save sequencing", () => {
     const latest = {
       ...makePage("External"),
       revision: "rev-b",
-      meta: { ...makePage("External").meta, title: "External title" },
+      meta: {
+        ...makePage("External").meta,
+        title: "External title",
+        attachments: ["external.pdf"],
+      },
     };
     refetchPageMock.mockResolvedValue({ data: latest });
 
     const { result } = renderHook(() => usePageEditor("notes/page.md"));
     const editorRevision = result.current.editorRevision;
     act(() => result.current.onSlateChange(paragraph("B"), astChangeEditor()));
+    act(() => result.current.attachAttachment("local.png"));
     await act(async () => {
       vi.advanceTimersByTime(1500);
       await Promise.resolve();
@@ -300,6 +452,7 @@ describe("usePageEditor save sequencing", () => {
 
     expect(refetchPageMock).toHaveBeenCalledTimes(1);
     expect(result.current.title).toBe("External title");
+    expect(result.current.attachments).toEqual(["external.pdf"]);
     expect(result.current.editorRevision).toBeGreaterThan(editorRevision);
     expect(result.current.revisionConflict).toBeNull();
     expect(result.current.saveStatus).toBe("saved");
@@ -403,6 +556,64 @@ describe("usePageEditor draft mode", () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it("unions template attachments with uploads made before and during draft creation", async () => {
+    const template = {
+      ...ensuredPage(),
+      meta: { ...ensuredPage().meta, attachments: ["template.pdf"] },
+    };
+    const creation = promiseWithResolvers.withResolvers<{
+      page: typeof template;
+      created: boolean;
+    }>();
+    const ensure = vi.fn(() => creation.promise);
+    mutateAsyncMock.mockImplementation(async (request) => ({
+      ...makePage("Draft"),
+      path: template.path,
+      revision: "rev-f",
+      meta: {
+        ...makePage("Draft").meta,
+        ...template.meta,
+        attachments: request.body.attachments,
+      },
+    }));
+    const { result } = renderHook(() => usePageEditor(TODAY_PATH, { ensure }));
+    let flight!: Promise<void>;
+    act(() => {
+      result.current.attachAttachment("first.png");
+      result.current.setBodyMarkdown("Draft\n");
+      flight = result.current.saveNow();
+    });
+    act(() => {
+      result.current.attachAttachment("second.png");
+      flight = result.current.saveNow();
+    });
+    await act(async () => {
+      creation.resolve({ page: template, created: true });
+      await flight;
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(2);
+    expect(mutateAsyncMock.mock.calls[0][0]).toMatchObject({
+      params: { path: { path: CANONICAL_TODAY_PATH } },
+      body: {
+        expected_revision: "rev-e",
+        attachments: ["template.pdf", "first.png"],
+        body: "Draft\n",
+      },
+    });
+    expect(mutateAsyncMock.mock.calls[1][0].body).toEqual({
+      expected_revision: "rev-f",
+      attachments: ["template.pdf", "first.png", "second.png"],
+    });
+    expect(result.current.attachments).toEqual([
+      "template.pdf",
+      "first.png",
+      "second.png",
+    ]);
+    expect(result.current.getPlaintext()).toBe("Draft\n");
+    expect(result.current.saveStatus).toBe("saved");
   });
 
   it("enters draft state on 404 when ensure is provided", () => {

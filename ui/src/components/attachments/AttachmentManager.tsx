@@ -15,6 +15,7 @@ import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import {
   attachmentReferences,
   canonicalAttachmentPath,
+  createAttachmentResolver,
 } from "#/lib/markdown/attachmentReferences";
 import {
   type PendingAttachmentAction,
@@ -25,6 +26,9 @@ interface AttachmentManagerProps {
   onInsertMarkdown?: (markdown: string) => void;
   protectedPage?: boolean;
   pageMarkdown?: string;
+  pagePath?: string;
+  attachedPaths?: readonly string[];
+  onAttachAttachment?: (path: string) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -37,10 +41,15 @@ function isImage(attachment: AttachmentInfo): boolean {
   return attachmentMarkdown(attachment).startsWith("!");
 }
 
+const EMPTY_PATHS: readonly string[] = [];
+
 export function AttachmentManager({
   onInsertMarkdown,
   pageMarkdown,
+  pagePath,
   protectedPage = false,
+  attachedPaths = EMPTY_PATHS,
+  onAttachAttachment,
 }: AttachmentManagerProps) {
   const { data: attachments, isLoading, error } = useAttachments();
   const upload = useUploadAttachment();
@@ -55,19 +64,28 @@ export function AttachmentManager({
   const referencedPaths = useMemo(
     () =>
       new Set(
-        attachmentReferences(pageMarkdown ?? "").map(
-          (reference) => reference.path,
-        ),
+        attachmentReferences(
+          pageMarkdown ?? "",
+          pagePath
+            ? createAttachmentResolver(pagePath, attachments ?? [])
+            : undefined,
+        ).map((reference) => reference.path),
       ),
-    [pageMarkdown],
+    [pageMarkdown, pagePath, attachments],
+  );
+  const associatedPaths = useMemo(
+    () => new Set(attachedPaths.map(canonicalAttachmentPath)),
+    [attachedPaths],
   );
   const [showAll, setShowAll] = useState(false);
   const referencedAttachments = useMemo(
     () =>
-      (attachments ?? []).filter((attachment) =>
-        referencedPaths.has(canonicalAttachmentPath(attachment.path)),
+      (attachments ?? []).filter(
+        (attachment) =>
+          referencedPaths.has(canonicalAttachmentPath(attachment.path)) ||
+          associatedPaths.has(canonicalAttachmentPath(attachment.path)),
       ),
-    [attachments, referencedPaths],
+    [attachments, referencedPaths, associatedPaths],
   );
   const visibleAttachments = useMemo(() => {
     if (!attachments || !scopedToPage || showAll) return attachments;
@@ -87,6 +105,7 @@ export function AttachmentManager({
     setActionError(null);
     try {
       const attachment = await upload.mutateAsync({ file });
+      onAttachAttachment?.(attachment.path);
       setShowAll(true);
       return attachment;
     } catch (uploadError) {
@@ -121,7 +140,8 @@ export function AttachmentManager({
         if (!attachment) return;
         onInsertMarkdown?.(attachmentMarkdown(attachment));
       } else {
-        onInsertMarkdown?.(action.markdown);
+        onAttachAttachment?.(action.attachment.path);
+        if (action.kind === "insert") onInsertMarkdown?.(action.markdown);
       }
       succeeded = true;
     } finally {
@@ -210,7 +230,7 @@ export function AttachmentManager({
           )}
         >
           {showAll
-            ? `Show referenced attachments (${referencedAttachments.length})`
+            ? `Show page attachments (${referencedAttachments.length})`
             : `Show all attachments (${attachments.length})`}
         </button>
       ) : null}
@@ -224,7 +244,7 @@ export function AttachmentManager({
         <p className="text-[13px] text-mute">No attachments in this vault.</p>
       ) : !visibleAttachments?.length ? (
         <p className="text-[13px] text-mute">
-          No attachments referenced by this page.
+          No attachments associated with or referenced by this page.
         </p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
@@ -265,6 +285,33 @@ export function AttachmentManager({
                   />
                 </div>
                 <div className="mt-1.5 flex items-center gap-3">
+                  {onAttachAttachment ? (
+                    associatedPaths.has(
+                      canonicalAttachmentPath(attachment.path),
+                    ) ? (
+                      <span className="text-[12px] text-mute">
+                        Attached to page
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={`Attach ${attachment.name} to page`}
+                        className={cn(
+                          "cursor-pointer rounded text-[13px] text-accent hover:underline",
+                          FOCUS_RING_NATIVE,
+                        )}
+                        onClick={() => {
+                          if (protectedPage) {
+                            setPendingAction({ kind: "attach", attachment });
+                          } else {
+                            onAttachAttachment(attachment.path);
+                          }
+                        }}
+                      >
+                        Attach to page
+                      </button>
+                    )
+                  ) : null}
                   {onInsertMarkdown ? (
                     <button
                       type="button"
@@ -280,6 +327,7 @@ export function AttachmentManager({
                             markdown,
                           });
                         } else {
+                          onAttachAttachment?.(attachment.path);
                           onInsertMarkdown(markdown);
                         }
                       }}

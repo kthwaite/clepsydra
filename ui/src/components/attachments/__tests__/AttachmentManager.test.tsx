@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { attachmentUrl } from "#/api/attachments";
 import { AttachmentManager } from "#/components/attachments/AttachmentManager";
@@ -61,6 +62,23 @@ interface PromiseConstructorWithResolvers extends PromiseConstructor {
 const promiseWithResolvers =
   Promise as unknown as PromiseConstructorWithResolvers;
 
+function AssociationHarness({
+  protectedPage = false,
+}: {
+  protectedPage?: boolean;
+}) {
+  const [attachedPaths, setAttachedPaths] = useState<string[]>([]);
+  return (
+    <AttachmentManager
+      pageMarkdown=""
+      protectedPage={protectedPage}
+      attachedPaths={attachedPaths}
+      onAttachAttachment={(path) =>
+        setAttachedPaths((paths) => [...paths, path])
+      }
+    />
+  );
+}
 describe("AttachmentManager", () => {
   it("shows honest loading and empty states", () => {
     mocks.useAttachments.mockReturnValueOnce({
@@ -391,6 +409,48 @@ describe("AttachmentManager", () => {
       });
     });
 
+    it("keeps an explicitly attached file on the page without inserting Markdown", async () => {
+      const user = userEvent.setup();
+      render(<AssociationHarness />);
+      await user.click(
+        screen.getByRole("button", { name: /show all attachments/i }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Attach b.pdf to page" }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: /show page attachments/i }),
+      );
+      expect(screen.getByRole("link", { name: "b.pdf" })).toBeVisible();
+      expect(
+        screen.queryByRole("link", { name: "a.png" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Attached to page")).toBeVisible();
+    });
+
+    it("does not associate a protected file until its plaintext disclosure is accepted", async () => {
+      const user = userEvent.setup();
+      render(<AssociationHarness protectedPage />);
+      await user.click(
+        screen.getByRole("button", { name: /show all attachments/i }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Attach b.pdf to page" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByText("Attached to page")).not.toBeInTheDocument();
+      await user.click(
+        screen.getByRole("button", { name: "Attach b.pdf to page" }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: "I understand, attach" }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: /show page attachments/i }),
+      );
+      expect(screen.getByRole("link", { name: "b.pdf" })).toBeVisible();
+    });
+
     it("defaults to attachments referenced by the page", () => {
       const pageMarkdown = `![shot](${attachmentUrl("a.png")})`;
       render(<AttachmentManager pageMarkdown={pageMarkdown} />);
@@ -414,7 +474,7 @@ describe("AttachmentManager", () => {
       expect(screen.getByText("a.png")).toBeVisible();
       expect(screen.getByText("b.pdf")).toBeVisible();
       const toggle = screen.getByRole("button", {
-        name: /show referenced attachments \(1\)/i,
+        name: /show page attachments/i,
       });
       expect(toggle).toBeVisible();
 
@@ -440,23 +500,11 @@ describe("AttachmentManager", () => {
       await waitFor(() =>
         expect(
           screen.getByRole("button", {
-            name: /show referenced attachments \(1\)/i,
+            name: /show page attachments/i,
           }),
         ).toBeVisible(),
       );
       expect(screen.getByText("b.pdf")).toBeVisible();
-    });
-
-    it("scoped empty state", () => {
-      const pageMarkdown = "No attachment references here.";
-      render(<AttachmentManager pageMarkdown={pageMarkdown} />);
-
-      expect(
-        screen.getByText("No attachments referenced by this page."),
-      ).toBeVisible();
-      expect(
-        screen.getByRole("button", { name: /show all attachments \(2\)/i }),
-      ).toBeVisible();
     });
 
     it("vault-wide empty state unchanged", () => {
@@ -483,7 +531,7 @@ describe("AttachmentManager", () => {
         screen.queryByRole("button", { name: /show all attachments/i }),
       ).not.toBeInTheDocument();
       expect(
-        screen.queryByRole("button", { name: /show referenced attachments/i }),
+        screen.queryByRole("button", { name: /show page attachments/i }),
       ).not.toBeInTheDocument();
     });
   });

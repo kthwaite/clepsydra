@@ -162,4 +162,16 @@ describe("Lightbox", () => {
       }
     },
   );
+
+  it.each(["ArrowLeft", "ArrowRight"])(
+    "shields %s while initial focus is on the dialog itself",
+    async (key) => {
+      const onParentKeyDown = vi.fn();
+      const { dialog } = await openLightbox({ onParentKeyDown });
+      onParentKeyDown.mockClear();
+      dialog.focus();
+      fireEvent.keyDown(dialog, { key });
+      expect(onParentKeyDown).not.toHaveBeenCalled();
+    },
+  );
 });
