@@ -16,6 +16,7 @@ import {
   useActivateTabWithFolioHistory,
   useFolioHistoryController,
   useLeaveFolioWorkspace,
+  useOpenSavedQuireWithFolioHistory,
   useOpenTabWithFolioHistory,
 } from "#/hooks/useFolioHistoryNavigation";
 import {
@@ -25,6 +26,7 @@ import {
   readFolioHistoryRestorationRequest,
   registerFolioHistoryCapture,
 } from "#/store/folioRestoration";
+import type { SavedQuireSnapshot } from "#/store/quires";
 import {
   registerWorkspaceTransitionGuard,
   useWorkspaceStore,
@@ -41,6 +43,7 @@ type HookControls = {
   open: OpenTabWithFolioHistory;
   activate: ActivateTabWithFolioHistory;
   leave: LeaveFolioWorkspace;
+  openSavedQuire: (snapshot: SavedQuireSnapshot) => void;
 };
 
 type MemoryHistory = RouterHistory;
@@ -125,6 +128,7 @@ function Probe() {
     open: useOpenTabWithFolioHistory(),
     activate: useActivateTabWithFolioHistory(),
     leave: useLeaveFolioWorkspace(),
+    openSavedQuire: useOpenSavedQuireWithFolioHistory(),
   };
   return null;
 }
@@ -233,6 +237,55 @@ describe("Folio history initialization", () => {
 });
 
 describe("programmatic Folio navigation", () => {
+  it("records a saved quire's first available page so Back returns to the previous folio", async () => {
+    const { history } = renderHarness();
+    await waitForController();
+    const captured: string[] = [];
+    registerCapture("alpha", "notes/alpha.md", () => {
+      captured.push(useWorkspaceStore.getState().activeTabId ?? "");
+      return restoration("alpha", "notes/alpha.md");
+    });
+
+    act(() => {
+      currentControls().openSavedQuire({
+        id: "saved-research",
+        revision: "revision-1",
+        name: "Research",
+        color: "slate",
+        members: [
+          { page_id: "gone", path: "gone.md", label: "Gone", missing: true },
+          {
+            page_id: "beta-page",
+            path: "notes/beta.md",
+            label: "Beta",
+            missing: false,
+          },
+        ],
+      });
+    });
+
+    await waitFor(() =>
+      expect(readFolioHistoryDestination(history.location.state)).toMatchObject(
+        {
+          folioTabId: "beta",
+          folioPath: "notes/beta.md",
+        },
+      ),
+    );
+    expect(captured).toEqual(["alpha"]);
+    expect(history.length).toBe(2);
+
+    act(() => history.back());
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().activeTabId).toBe("alpha"),
+    );
+    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      "alpha",
+      "graph",
+      "beta",
+    ]);
+  });
+
   it("captures the outgoing page before opening and pushes the actual page tuple", async () => {
     const { actions, history } = renderHarness();
     await waitForController();

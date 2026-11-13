@@ -8,6 +8,7 @@ import {
   readFolioHistoryDestination,
   requestFolioHistoryRestoration,
 } from "#/store/folioRestoration";
+import type { SavedQuireSnapshot } from "#/store/quires";
 import {
   type OpenTabTarget,
   runWorkspaceTransition,
@@ -282,6 +283,35 @@ export function useOpenTabWithFolioHistory(): OpenTabWithFolioHistory {
         const folioOriginTabId = onWorkspaceRoute ? current.activeTabId : null;
         captureTrackedHistoryDestination();
         current.openTab(type, path, label, target);
+        const destinationState = activeDestinationState(folioOriginTabId);
+        void navigate({
+          to: "/workspace",
+          state: (state) => ({ ...state, ...destinationState }),
+        });
+      });
+    },
+    [navigate, onWorkspaceRoute],
+  );
+}
+
+export function useOpenSavedQuireWithFolioHistory(): (
+  snapshot: SavedQuireSnapshot,
+) => void {
+  const navigate = useNavigate();
+  const onWorkspaceRoute = useRouterState({
+    select: (state) => routeViewFromMatches(state.matches) === "workspace",
+  });
+
+  return useCallback(
+    (snapshot) => {
+      if (!snapshot.members.some((member) => !member.missing)) return;
+      runWorkspaceTransition(() => {
+        const workspace = useWorkspaceStore.getState();
+        const folioOriginTabId = onWorkspaceRoute
+          ? workspace.activeTabId
+          : null;
+        captureTrackedHistoryDestination();
+        workspace.openSavedQuire(snapshot);
         const destinationState = activeDestinationState(folioOriginTabId);
         void navigate({
           to: "/workspace",

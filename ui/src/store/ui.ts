@@ -8,6 +8,10 @@ export type SettingsSection =
   | "editor"
   | "advanced";
 
+export type SavedQuireDialogRequest =
+  | { kind: "picker" }
+  | { kind: "save" | "update"; quireId: string };
+
 interface UiState {
   isSettingsOpen: boolean;
   activeSettingsSection: SettingsSection;
@@ -21,6 +25,9 @@ interface UiState {
   isBooting: boolean;
   isContentsOpen: boolean;
   isTabGridOpen: boolean;
+  savedQuireDialog: SavedQuireDialogRequest | null;
+  openSavedQuires: (request: SavedQuireDialogRequest) => void;
+  closeSavedQuires: () => void;
   setTabGridOpen: (open: boolean) => void;
   setContentsOpen: (open: boolean) => void;
   toggleContents: () => void;
@@ -60,6 +67,9 @@ export const useUiStore = create<UiState>((set) => ({
   isBooting: false,
   isContentsOpen: false,
   isTabGridOpen: false,
+  savedQuireDialog: null,
+  openSavedQuires: (request) => set({ savedQuireDialog: request }),
+  closeSavedQuires: () => set({ savedQuireDialog: null }),
   setTabGridOpen: (open) => set({ isTabGridOpen: open }),
   setContentsOpen: (open) => set({ isContentsOpen: open }),
   toggleContents: () =>

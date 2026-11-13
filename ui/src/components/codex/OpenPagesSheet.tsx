@@ -10,7 +10,12 @@ import { useFolioReorder } from "#/hooks/useFolioReorder";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { resolveKindFromPath } from "#/lib/kind";
-import { quireColorVar, sheafRuns, sheafSegments } from "#/store/quires";
+import {
+  type Quire,
+  quireColorVar,
+  sheafRuns,
+  sheafSegments,
+} from "#/store/quires";
 import { useUiStore } from "#/store/ui";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
@@ -33,6 +38,7 @@ export function OpenPagesSheet({ isOpen, onOpenChange }: OpenPagesSheetProps) {
   const quires = useWorkspaceStore((s) => s.quires);
   const closeAllTabs = useWorkspaceStore((s) => s.closeAllTabs);
   const openInscribe = useUiStore((s) => s.openInscribe);
+  const openSavedQuires = useUiStore((s) => s.openSavedQuires);
   const pageTabs = tabs.filter((tab) => tab.type === "page");
   const runs = sheafRuns(sheafSegments(pageTabs, quires)).filter((run) =>
     run.kind === "quire" ? run.members.length > 0 : run.tabs.length > 0,
@@ -71,6 +77,16 @@ export function OpenPagesSheet({ isOpen, onOpenChange }: OpenPagesSheetProps) {
             </Button>
           )}
         </div>
+        <Button
+          variant="secondary"
+          className="min-h-11 self-start"
+          onPress={() => {
+            close();
+            openSavedQuires({ kind: "picker" });
+          }}
+        >
+          Saved quires…
+        </Button>
         {pageTabs.length > 1 && (
           <p id={hintId} className="text-sm text-mute">
             Move pages with the up and down buttons. Crossing a quire boundary
@@ -118,6 +134,7 @@ export function OpenPagesSheet({ isOpen, onOpenChange }: OpenPagesSheetProps) {
               key={run.quire.id}
               name={run.quire.name}
               color={quireColorVar(run.quire.color)}
+              quire={run.quire}
               tabs={run.members}
               onPicked={close}
               movement={movement}
@@ -140,6 +157,7 @@ export function OpenPagesSheet({ isOpen, onOpenChange }: OpenPagesSheetProps) {
 function PageGroup({
   name,
   color,
+  quire,
   tabs,
   onPicked,
   movement,
@@ -147,10 +165,12 @@ function PageGroup({
   name: string;
   /** Quire hue; absent for loose pages. */
   color?: string;
+  quire?: Quire;
   tabs: TabDescriptor[];
   onPicked: () => void;
   movement: PageMovement;
 }) {
+  const openSavedQuires = useUiStore((s) => s.openSavedQuires);
   const rule = color
     ? "shadow-[inset_0_-1px_0_color-mix(in_srgb,var(--q)_45%,transparent)]"
     : "shadow-[inset_0_-1px_0_var(--rule)]";
@@ -177,6 +197,34 @@ function PageGroup({
         )}
         {name}
       </div>
+      {quire && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          <Button
+            variant="ghost"
+            className="min-h-11"
+            aria-label={`Save quire ${name}`}
+            onPress={() => {
+              onPicked();
+              openSavedQuires({ kind: "save", quireId: quire.id });
+            }}
+          >
+            Save quire…
+          </Button>
+          {quire.savedId && (
+            <Button
+              variant="ghost"
+              className="min-h-11"
+              aria-label={`Update saved quire ${name}`}
+              onPress={() => {
+                onPicked();
+                openSavedQuires({ kind: "update", quireId: quire.id });
+              }}
+            >
+              Update saved quire
+            </Button>
+          )}
+        </div>
+      )}
       {tabs.map((tab) => (
         <PageRow
           key={tab.id}

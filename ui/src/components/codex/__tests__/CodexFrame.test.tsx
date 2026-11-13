@@ -18,6 +18,7 @@ const {
   openLocationMock,
   openSearchMock,
   openSettingsMock,
+  openSavedQuiresMock,
   referenceIssuesState,
   toggleThemeMock,
   workspaceState,
@@ -31,6 +32,7 @@ const {
   openLocationMock: vi.fn(),
   openSearchMock: vi.fn(),
   openSettingsMock: vi.fn(),
+  openSavedQuiresMock: vi.fn(),
   referenceIssuesState: { total: 7 },
   toggleThemeMock: vi.fn(),
   workspaceState: {
@@ -177,6 +179,7 @@ vi.mock("#/store/ui", () => ({
       openLocation: () => void;
       openSearch: () => void;
       openSettings: () => void;
+      openSavedQuires: typeof openSavedQuiresMock;
       isSettingsOpen: boolean;
       isSearchOpen: boolean;
       isContentsOpen: boolean;
@@ -189,6 +192,7 @@ vi.mock("#/store/ui", () => ({
       openLocation: openLocationMock,
       openSearch: openSearchMock,
       openSettings: openSettingsMock,
+      openSavedQuires: openSavedQuiresMock,
       isSettingsOpen: false,
       isSearchOpen: false,
       isContentsOpen: false,
@@ -231,6 +235,16 @@ function renderFrame(forceView?: "folio" | "archive") {
     </CodexFrame>,
   );
 }
+
+it("opens Saved quires on desktop with no tabs, even outside the workspace", async () => {
+  workspaceState.tabs = [];
+  workspaceState.activeTabId = null;
+  mobileLayoutState.matches = false;
+  locationState.pathname = "/docs/getting-started";
+  renderFrame();
+  await userEvent.click(screen.getByRole("button", { name: "Saved quires" }));
+  expect(openSavedQuiresMock).toHaveBeenCalledWith({ kind: "picker" });
+});
 
 function StatefulRouteProbe({
   onMount,

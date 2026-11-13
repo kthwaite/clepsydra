@@ -11,6 +11,7 @@ import {
   normalizeQuires,
   type Quire,
   type QuireColor,
+  type SavedQuireSnapshot,
 } from "#/store/quires";
 
 export type NavigationMode = "replace" | "new" | "smart";
@@ -191,6 +192,9 @@ interface WorkspaceActions {
   toggleQuireCollapse: (quireId: string) => void;
   closeQuireTabs: (quireId: string) => void;
   ungroupQuire: (quireId: string) => void;
+  openSavedQuire: (snapshot: SavedQuireSnapshot) => void;
+  linkSavedQuire: (quireId: string, savedId: string, revision: string) => void;
+  unlinkSavedQuire: (savedId: string) => void;
 }
 
 function tabKey(type: TabType, path?: string): string {
@@ -703,6 +707,118 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         set({ navigationMode: mode });
       },
 
+      openSavedQuire(snapshot) {
+        const members = snapshot.members.filter((member) => !member.missing);
+        if (members.length === 0) return;
+        if (workspaceTransitionDepth === 0) {
+          runWorkspaceTransition(() => get().openSavedQuire(snapshot));
+          return;
+        }
+
+        const state = get();
+        const previous = Object.values(state.quires).find(
+          (quire) => quire.savedId === snapshot.id,
+        );
+        const quire: Quire = {
+          id: previous?.id ?? crypto.randomUUID(),
+          name: snapshot.name,
+          color: snapshot.color,
+          collapsed: false,
+          savedId: snapshot.id,
+          savedRevision: snapshot.revision,
+        };
+        const byPageId = new Map<string, TabDescriptor>();
+        const unidentifiedByPath = new Map<string, TabDescriptor>();
+        for (const tab of state.tabs) {
+          if (tab.type !== "page") continue;
+          if (tab.pageId) byPageId.set(tab.pageId, tab);
+          else if (tab.path) unidentifiedByPath.set(tab.path, tab);
+        }
+        const reusedIds = new Set<string>();
+        const movedPaths = new Set<string>();
+        const now = Date.now();
+        const restored = members.map((member, index): TabDescriptor => {
+          const existing =
+            byPageId.get(member.page_id) ?? unidentifiedByPath.get(member.path);
+          if (existing) {
+            reusedIds.add(existing.id);
+            if (existing.path && existing.path !== member.path) {
+              movedPaths.add(existing.path);
+              clearFolioRestoration(existing.id);
+              clearFolioHistoryForTab(existing.id);
+            }
+          }
+          return {
+            ...(existing ? withoutTabFocus(existing) : {}),
+            id: existing?.id ?? crypto.randomUUID(),
+            type: "page",
+            pageId: member.page_id,
+            path: member.path,
+            label: member.label,
+            quireId: quire.id,
+            lastActiveAt: index === 0 ? now : existing?.lastActiveAt,
+          };
+        });
+        // Reopening replaces only group membership, never closes extra pages
+        // browsed since saving. Shared tabs move here without losing their IDs.
+        const remaining: TabDescriptor[] = [];
+        let insertAt: number | undefined;
+        for (const tab of state.tabs) {
+          if (previous && tab.quireId === previous.id) {
+            insertAt ??= remaining.length;
+          }
+          if (reusedIds.has(tab.id)) continue;
+          const next = withoutTabFocus(tab);
+          remaining.push(
+            previous && next.quireId === previous.id
+              ? { ...next, quireId: undefined }
+              : next,
+          );
+        }
+        remaining.splice(insertAt ?? remaining.length, 0, ...restored);
+        set(
+          normalized(
+            remaining,
+            { ...state.quires, [quire.id]: quire },
+            {
+              activeTabId: restored[0].id,
+              openHistory: pushOpenHistory(
+                state.openHistory.filter(
+                  (entry) => !movedPaths.has(entry.path),
+                ),
+                restored[0].path ?? members[0].path,
+                now,
+              ),
+            },
+          ),
+        );
+      },
+
+      linkSavedQuire(quireId, savedId, revision) {
+        set((state) => {
+          const quire = state.quires[quireId];
+          if (!quire) return state;
+          return {
+            quires: {
+              ...state.quires,
+              [quireId]: { ...quire, savedId, savedRevision: revision },
+            },
+          };
+        });
+      },
+
+      unlinkSavedQuire(savedId) {
+        set((state) => ({
+          quires: Object.fromEntries(
+            Object.entries(state.quires).map(([id, quire]) => {
+              if (quire.savedId !== savedId) return [id, quire];
+              const { savedId: _, savedRevision: __, ...local } = quire;
+              return [id, local];
+            }),
+          ),
+        }));
+      },
+
       createQuire(tabIds, name) {
         const selectedIds = new Set(tabIds);
         set((state) => {
@@ -745,7 +861,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           // Existing members keep their order; newcomers follow in workspace
           // order, regardless of checkbox selection order.
           const incomingIds = new Set(incoming.map((tab) => tab.id));
-          const remaining = state.tabs.filter((tab) => !incomingIds.has(tab.id));
+          const remaining = state.tabs.filter(
+            (tab) => !incomingIds.has(tab.id),
+          );
           const lastMemberIdx = remaining.reduce(
             (acc, tab, index) => (tab.quireId === quireId ? index : acc),
             -1,

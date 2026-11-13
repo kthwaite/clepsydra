@@ -1809,6 +1809,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/quires": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_quires"];
+        put?: never;
+        post: operations["create_quire"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/quires/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_quire"];
+        put: operations["update_quire"];
+        post?: never;
+        delete: operations["delete_quire"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/resolve": {
         parameters: {
             query?: never;
@@ -2899,6 +2931,11 @@ export interface components {
             tags?: string[] | null;
             title?: string | null;
         };
+        CreateSavedQuire: {
+            color: components["schemas"]["SavedQuireColor"];
+            members: components["schemas"]["SavedQuireMemberInput"][];
+            name: string;
+        };
         /**
          * @description An empty or whitespace-only `cycle`, `assignee`, `estimate`, `task_type`,
          *     `due`, `start`, or `link` is treated as absent.
@@ -2966,6 +3003,9 @@ export interface components {
             expected_revision: string;
         };
         DeleteFeedRequest: {
+            expected_revision: string;
+        };
+        DeleteSavedQuire: {
             expected_revision: string;
         };
         EmptyRubbishItemOutcome: {
@@ -3840,6 +3880,26 @@ export interface components {
             page_id: string;
             path: string;
         };
+        SavedQuire: {
+            color: components["schemas"]["SavedQuireColor"];
+            id: string;
+            members: components["schemas"]["SavedQuireMember"][];
+            name: string;
+            revision: string;
+        };
+        /** @enum {string} */
+        SavedQuireColor: "sepia" | "verdigris" | "slate" | "madder" | "ochre" | "indigo";
+        SavedQuireMember: {
+            label: string;
+            missing: boolean;
+            page_id: string;
+            path: string;
+        };
+        SavedQuireMemberInput: {
+            label: string;
+            page_id?: string | null;
+            path: string;
+        };
         SearchResultEntry: {
             page_id: string;
             path: string;
@@ -4105,6 +4165,13 @@ export interface components {
             readonly?: boolean | null;
             tags?: string[] | null;
             title?: string | null;
+        };
+        UpdateSavedQuire: {
+            color: components["schemas"]["SavedQuireColor"];
+            expected_revision: string;
+            /** @description Omit to rename without replacing the saved membership. */
+            members?: components["schemas"]["SavedQuireMemberInput"][] | null;
+            name: string;
         };
         /** @description Request body for `PUT /tasks/status`. */
         UpdateStatusRequest: {
@@ -10340,6 +10407,219 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_quires: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Saved snapshots resolved against current pages */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedQuire"][];
+                };
+            };
+            /** @description Unsafe storage path */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Storage failure */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    create_quire: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSavedQuire"];
+            };
+        };
+        responses: {
+            /** @description Snapshot created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedQuire"];
+                };
+            };
+            /** @description Invalid snapshot */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_quire: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Saved snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedQuire"];
+                };
+            };
+            /** @description Invalid UUID or unsafe path */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Snapshot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    update_quire: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSavedQuire"];
+            };
+        };
+        responses: {
+            /** @description Snapshot updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedQuire"];
+                };
+            };
+            /** @description Invalid snapshot */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Snapshot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Snapshot revision changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    delete_quire: {
+        parameters: {
+            query: {
+                expected_revision: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Snapshot deleted; pages unchanged */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Snapshot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Snapshot revision changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
             };
         };
     };
