@@ -189,6 +189,7 @@ export function invalidatePageContent(
     invalidateByPath(qc, queryKeys.pages.pathPrefix);
   }
   invalidateByPath(qc, queryKeys.index.pathPrefix);
+  invalidateByPath(qc, queryKeys.query.pathPrefix);
   invalidateByPath(qc, "/api/vault/base-render/render");
   qc.invalidateQueries({ queryKey: queryKeys.blocks.all });
   qc.invalidateQueries({ queryKey: queryKeys.tasks.all });

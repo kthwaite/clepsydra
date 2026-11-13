@@ -9,12 +9,16 @@ const {
   usePageEditorMock,
   usePageMock,
   commitMock,
+  historyMock,
+  outlinksMock,
 } = vi.hoisted(() => ({
   collapsibleRailState: { collapsed: false },
   mobileLayoutState: { matches: false },
   usePageEditorMock: vi.fn(),
   usePageMock: vi.fn(),
   commitMock: vi.fn(),
+  historyMock: vi.fn(),
+  outlinksMock: vi.fn(),
 }));
 // The rail calendar queries the index; Folio mounts here without a QueryClient.
 vi.mock("#/components/calendar/FolioCalendarSection", () => ({
@@ -55,11 +59,17 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 vi.mock("#/editor/SaveIndicator", () => ({ SaveIndicator: () => null }));
 vi.mock("#/editor/SlateEditor", () => ({ SlateEditor: () => null }));
+vi.mock("#/api/meetingHistory", () => ({ useMeetingHistory: historyMock }));
+vi.mock("#/api/outlinks", () => ({ useOutlinks: outlinksMock }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: [] }),
   useUnlinkedMentions: () => ({ data: [] }),
   useOutlinks: () => ({ data: [] }),
-  useSimilar: () => ({ data: [] }),
+  useSimilar: () => ({
+    data: {
+      items: [{ path: "meetings/similar.md", title: "Similar meeting", score: 1 }],
+    },
+  }),
   useTags: () => ({ data: [] }),
   useTagSuggestions: () => ({
     data: [],
@@ -176,6 +186,8 @@ describe("Folio meeting header band", () => {
     mobileLayoutState.matches = false;
     collapsibleRailState.collapsed = false;
     usePageEditorMock.mockReturnValue(meetingEditor());
+    historyMock.mockReturnValue({ data: [], isPending: false, error: null });
+    outlinksMock.mockReturnValue({ data: [], isSuccess: true, error: null });
     usePageMock.mockReturnValue({
       data: {
         path: PATH,
@@ -188,6 +200,119 @@ describe("Folio meeting header band", () => {
       },
     });
     useWorkspaceStore.setState({ tabs: [], activeTabId: null });
+  });
+
+  it("shows API-ordered meeting links and dates directly above Similar", () => {
+    usePageEditorMock.mockReturnValue({ ...meetingEditor(), tags: ["1:1"] });
+    historyMock.mockReturnValue({
+      data: [
+        {
+          id: "later",
+          path: "meetings/later.md",
+          title: "Later meeting",
+          columns: { occurred_at: "2026-11-12T12:00:00Z" },
+        },
+        {
+          id: "earlier",
+          path: "meetings/earlier.md",
+          title: "Earlier meeting",
+          columns: { occurred_at: null },
+        },
+      ],
+      isPending: false,
+      error: null,
+    });
+    render(<Folio tabId="t1" path={PATH} />);
+    const rail = screen.getByRole("complementary", { name: "Page links" });
+    const headings = within(rail)
+      .getAllByRole("heading")
+      .map((heading) => heading.textContent);
+    expect(headings.slice(-2)).toEqual(["1:1 meetings", "Similar"]);
+    const section = within(rail)
+      .getByRole("heading", { name: "1:1 meetings" })
+      .closest("section");
+    expect(section).not.toBeNull();
+    if (!section) throw new Error("Missing meeting section");
+    expect(
+      within(section)
+        .getAllByRole("link")
+        .map((link) => link.firstElementChild?.textContent),
+    ).toEqual(["Later meeting", "Earlier meeting"]);
+    const date = within(section).getByText(/12.*November.*2026|November.*12.*2026/);
+    expect(date).toHaveAttribute("datetime", "2026-11-12T12:00:00Z");
+    expect(
+      within(section).getByRole("link", { name: /Later meeting/ }),
+    ).toHaveAttribute("href", "/pages/meetings%2Flater.md");
+  });
+
+  it.each([
+    { tags: [] },
+    { tags: ["1:1"], kind: "NOTE" },
+    { tags: ["1:1"], isDraft: true },
+    { tags: ["1:1"], encrypted: true },
+    { tags: ["1:1"], encrypted: true, encryptionState: { status: "locked" } },
+  ])("does not request history for an ineligible source %j", (state) => {
+    usePageEditorMock.mockReturnValue({ ...meetingEditor(), ...state });
+    render(<Folio tabId="t1" path={PATH} />);
+    expect(historyMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "1:1 meetings" })).toBeNull();
+  });
+
+  it("removes history immediately when the pending tag is removed", () => {
+    usePageEditorMock.mockReturnValue({ ...meetingEditor(), tags: ["1:1"] });
+    const view = render(<Folio tabId="t1" path={PATH} />);
+    expect(screen.getByText("No other 1:1 meetings yet.")).toBeVisible();
+    usePageEditorMock.mockReturnValue(meetingEditor());
+    view.rerender(<Folio tabId="t1" path={PATH} />);
+    expect(screen.queryByRole("heading", { name: "1:1 meetings" })).toBeNull();
+  });
+
+  it.each([{ attendees: [] }, { attendees: ["Ada", "Grace"] }])(
+    "hides history unless there is one attendee: %j",
+    ({ attendees }) => {
+      usePageEditorMock.mockReturnValue({ ...meetingEditor(), tags: ["1:1"] });
+      usePageMock.mockReturnValue({ data: { meta: { attendees } } });
+      render(<Folio tabId="t1" path={PATH} />);
+      expect(screen.queryByRole("heading", { name: "1:1 meetings" })).toBeNull();
+      expect(historyMock).toHaveBeenCalledWith(PATH, null);
+    },
+  );
+
+  it("waits for outlinks before falling back to the attendee name", () => {
+    usePageEditorMock.mockReturnValue({
+      ...meetingEditor(),
+      computedTags: ["1:1"],
+    });
+    outlinksMock.mockReturnValue({
+      data: undefined,
+      isSuccess: false,
+      error: null,
+    });
+    const view = render(<Folio tabId="t1" path={PATH} />);
+    expect(historyMock).toHaveBeenLastCalledWith(PATH, null);
+    expect(screen.getByText("Loading 1:1 meetings…")).toBeVisible();
+    outlinksMock.mockReturnValue({
+      data: [{ source_field: "attendees", target_id: "ada-id", target_raw: "Ada" }],
+      isSuccess: true,
+      error: null,
+    });
+    view.rerender(<Folio tabId="t1" path={PATH} />);
+    expect(historyMock).toHaveBeenLastCalledWith(PATH, "ada-id");
+    outlinksMock.mockReturnValue({ data: [], isSuccess: true, error: null });
+    view.rerender(<Folio tabId="t1" path={PATH} />);
+    expect(historyMock).toHaveBeenLastCalledWith(PATH, "Ada");
+  });
+
+  it("keeps history failures local to the section", () => {
+    usePageEditorMock.mockReturnValue({ ...meetingEditor(), tags: ["1:1"] });
+    historyMock.mockReturnValue({
+      data: undefined,
+      error: new Error("Unavailable"),
+      isPending: false,
+    });
+    render(<Folio tabId="t1" path={PATH} />);
+    expect(screen.getByText("Could not load 1:1 meetings.")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Similar" })).toBeVisible();
   });
 
   it("keeps meeting facts in the document alongside the accessible page-details rail", () => {

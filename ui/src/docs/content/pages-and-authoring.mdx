@@ -149,6 +149,13 @@ naming exactly one person, `attendees:>1` more than one, `attendees:0` those
 naming nobody, and `kind:meeting tag:1:1` the 1:1s (see
 [Full-text search](/docs/links-search-graph-and-repair)).
 
+On a meeting tagged `1:1` with exactly one attendee, the right sidebar shows
+**1:1 meetings** above **Similar**. It lists other meetings tagged `1:1` that
+name the same attendee, newest `occurred_at` first, with undated meetings last.
+Resolved attendee links match across aliases and paths; an unresolved attendee
+matches the same link target. The current meeting is excluded. Select a meeting
+to open it.
+
 `occurred_at` is an **unquoted** TOML date-time, which is what lets Bases and
 queries sort and filter on it; a quoted string is inert text, so the server
 refuses one. Accepted forms are `2026-08-27T14:00:00Z`, the same without an

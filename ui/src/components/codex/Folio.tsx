@@ -55,6 +55,7 @@ import {
 } from "#/components/codex/highlightMatch";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { LockedFolio } from "#/components/codex/LockedFolio";
+import { MeetingHistory } from "#/components/codex/MeetingHistory";
 import { MobileFolioLayout } from "#/components/codex/MobileFolioLayout";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { RawMarkdownEditor } from "#/components/codex/RawMarkdownEditor";
@@ -1102,6 +1103,13 @@ export function Folio({ tabId, path }: FolioProps) {
           }))}
         />
       </Section>
+
+      {!editor.isDraft &&
+      !encrypted &&
+      editor.kind === "MEETING" &&
+      effectiveTags.includes("1:1") ? (
+        <MeetingHistory path={path} />
+      ) : null}
 
       {similarItems.length > 0 ? (
         <Section compact pip="dim" label="Similar">
