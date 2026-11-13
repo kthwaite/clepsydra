@@ -51,6 +51,20 @@ export function SheafContextMenu({
   const quire = target.kind === "quire" ? quires[target.quireId] : undefined;
 
   const handleRootAction = (key: React.Key) => {
+    if (key === "saved-quires") {
+      useUiStore.getState().openSavedQuires({ kind: "picker" });
+      return;
+    }
+    if (key === "save-quire" || key === "update-saved-quire") {
+      const quireId = target.kind === "quire" ? target.quireId : tab?.quireId;
+      if (quireId) {
+        useUiStore.getState().openSavedQuires({
+          kind: key === "save-quire" ? "save" : "update",
+          quireId,
+        });
+      }
+      return;
+    }
     if (key === "show-all-tabs") {
       useUiStore.getState().setTabGridOpen(true);
       return;
@@ -169,6 +183,11 @@ export function SheafContextMenu({
           onAction={handleRootAction}
         >
           <MenuItem id="show-all-tabs">Show all tabs</MenuItem>
+          <MenuItem id="saved-quires">Saved quires…</MenuItem>
+          {tab.quireId && <MenuItem id="save-quire">Save quire…</MenuItem>}
+          {tab.quireId && quires[tab.quireId]?.savedId && (
+            <MenuItem id="update-saved-quire">Update saved quire</MenuItem>
+          )}
           <MenuSeparator />
           <MenuItem id="close">Close</MenuItem>
           <MenuItem id="close-others">Close others</MenuItem>
@@ -207,6 +226,11 @@ export function SheafContextMenu({
           onAction={handleRootAction}
         >
           <MenuItem id="show-all-tabs">Show all tabs</MenuItem>
+          <MenuItem id="saved-quires">Saved quires…</MenuItem>
+          <MenuItem id="save-quire">Save quire…</MenuItem>
+          {quire.savedId && (
+            <MenuItem id="update-saved-quire">Update saved quire</MenuItem>
+          )}
           <MenuSeparator />
           <MenuItem id="rename">Rename…</MenuItem>
           <SubmenuTrigger>

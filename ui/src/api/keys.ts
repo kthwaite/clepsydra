@@ -58,6 +58,7 @@ export const queryKeys = {
   academic: { pathPrefix: "/api/vault/academic" },
 
   feeds: { pathPrefix: "/api/vault/feeds" },
+  quires: { pathPrefix: "/api/vault/quires" },
   rubbish: {
     all: ["get", "/api/vault/rubbish"] as const,
     pathPrefix: "/api/vault/rubbish",

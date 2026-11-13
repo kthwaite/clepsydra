@@ -34,6 +34,7 @@ pub mod pagination;
 pub mod projects;
 pub mod properties;
 pub mod query;
+pub mod quires;
 pub mod rubbish;
 pub mod sync;
 pub mod tag_management;
@@ -287,6 +288,7 @@ pub fn api_router_with_archive_limit(
         .nest("/base-templates", base_templates::router())
         .nest("/base-render", base_render::router())
         .nest("/query", query::router())
+        .nest("/quires", quires::router())
         .nest("/blocks", blocks::router())
         .route("/bcl", axum::routing::get(bcl::get_bcl))
         .route(

@@ -27,6 +27,22 @@ export interface Quire {
   name: string;
   color: QuireColor;
   collapsed: boolean;
+  /** Explicitly saved snapshot; local edits never write through this link. */
+  savedId?: string;
+  savedRevision?: string;
+}
+
+export interface SavedQuireSnapshot {
+  id: string;
+  name: string;
+  color: QuireColor;
+  revision: string;
+  members: {
+    page_id: string;
+    path: string;
+    label: string;
+    missing: boolean;
+  }[];
 }
 
 export function quireColorVar(color: QuireColor): string {

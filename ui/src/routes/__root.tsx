@@ -30,6 +30,11 @@ const InscribeModal = lazy(() =>
     default: module.InscribeModal,
   })),
 );
+const SavedQuiresDialog = lazy(() =>
+  import("#/components/codex/SavedQuiresDialog").then((module) => ({
+    default: module.SavedQuiresDialog,
+  })),
+);
 const CaptureAsideModal = lazy(() =>
   import("#/components/codex/CaptureAsideModal").then((module) => ({
     default: module.CaptureAsideModal,
@@ -71,6 +76,8 @@ export function GlobalOverlays() {
   const skyOpen = useUiStore((state) => state.isSkyOpen);
   const shortcutHelpOpen = useUiStore((state) => state.isShortcutHelpOpen);
   const booting = useUiStore((state) => state.isBooting);
+  const savedQuireDialog = useUiStore((state) => state.savedQuireDialog);
+  const closeSavedQuires = useUiStore((state) => state.closeSavedQuires);
   const closeSearch = useUiStore((state) => state.closeSearch);
   const closeSettings = useUiStore((state) => state.closeSettings);
   const closeInscribe = useUiStore((state) => state.closeInscribe);
@@ -97,6 +104,11 @@ export function GlobalOverlays() {
       {inscribeOpen && (
         <OverlayBoundary onDismiss={closeInscribe} label="Inscribe">
           <InscribeModal />
+        </OverlayBoundary>
+      )}
+      {savedQuireDialog && (
+        <OverlayBoundary onDismiss={closeSavedQuires} label="Saved quires">
+          <SavedQuiresDialog />
         </OverlayBoundary>
       )}
       {captureOpen && (

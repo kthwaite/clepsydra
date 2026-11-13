@@ -6,6 +6,8 @@ vi.hoisted(async () => {
   const { installMemoryStorage } = await import("#/test/memoryStorage");
   installMemoryStorage();
 });
+
+import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 import { type MenuTarget, SheafContextMenu } from "../SheafContextMenu";
 
@@ -56,6 +58,33 @@ function quireNames() {
     (quire) => quire.name,
   );
 }
+
+describe("SheafContextMenu — saved snapshots", () => {
+  it("opens the central save dialog from a quire", async () => {
+    seed();
+    const user = await renderMenu({ kind: "quire", quireId: "q1" });
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Save quire…" }),
+    );
+    expect(useUiStore.getState().savedQuireDialog).toEqual({
+      kind: "save",
+      quireId: "q1",
+    });
+  });
+
+  it("offers explicit update on a linked quire's page", async () => {
+    seed();
+    useWorkspaceStore.getState().linkSavedQuire("q1", "saved-1", "revision-1");
+    const user = await renderMenu({ kind: "tab", tabId: "t2" });
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Update saved quire" }),
+    );
+    expect(useUiStore.getState().savedQuireDialog).toEqual({
+      kind: "update",
+      quireId: "q1",
+    });
+  });
+});
 
 describe("SheafContextMenu — tab target", () => {
   it("closes the target tab", async () => {

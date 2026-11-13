@@ -66,6 +66,7 @@ impl Modify for SchemaOverrides {
     ),
     tags(
         (name = "Pages", description = "Page CRUD endpoints"),
+        (name = "Quires", description = "Explicit saved page collections"),
         (name = "Rubbish", description = "Reversible page archival, restore, and permanent purge lifecycle"),
         (name = "Folders", description = "Folder operations"),
         (name = "Attachments", description = "Attachment upload and retrieval"),
@@ -96,6 +97,11 @@ impl Modify for SchemaOverrides {
         // Features
         crate::api::features::get_features,
         // Pages
+        crate::api::quires::list_quires,
+        crate::api::quires::create_quire,
+        crate::api::quires::get_quire,
+        crate::api::quires::update_quire,
+        crate::api::quires::delete_quire,
         crate::api::pages::list_pages,
         crate::api::pages::create_default_page,
         crate::api::pages::get_page,
@@ -272,6 +278,13 @@ impl Modify for SchemaOverrides {
             crate::api::error::ApiError,
             crate::api::features::FeatureFlagsResponse,
             crate::vault::kind::Kind,
+            crate::api::quires::SavedQuireColor,
+            crate::api::quires::SavedQuireMemberInput,
+            crate::api::quires::SavedQuireMember,
+            crate::api::quires::SavedQuire,
+            crate::api::quires::CreateSavedQuire,
+            crate::api::quires::UpdateSavedQuire,
+            crate::api::quires::DeleteSavedQuire,
             // Bases
             clep_bases::base_render::RenderSelection,
             clep_bases::base_render::RenderOutput,

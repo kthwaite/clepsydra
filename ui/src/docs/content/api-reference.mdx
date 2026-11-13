@@ -464,6 +464,40 @@ Protect page by ID. Responses: `200` Protected page; `400` Invalid encryption de
 ### `POST /api/vault/pages/by-id/{uuid}/unprotect`
 Unprotect page by ID. Responses: `200` Unprotected page; `400` Page is not protected; `404` Page not found; `409` Page changed since it was loaded; `500` Internal server error.
 
+## Quires
+
+Saved quires are explicit, vault-backed snapshots, separate from browser tabs.
+Members are ordered page references, not copies of page content. Reads resolve
+current paths and titles by stable page ID; missing members retain their saved
+identity, path, and label with `missing: true`. Reads never change the revision.
+Colours are `sepia`, `verdigris`, `slate`, `madder`, `ochre`, or `indigo`.
+
+### `GET /api/vault/quires`
+List saved snapshots with their revisions and resolved members. Responses:
+`200` Array of saved quires; `400` Unsafe storage path; `500` Storage failure.
+
+### `POST /api/vault/quires`
+Save `{name, color, members: [{page_id?, path, label}]}`. The server resolves
+each member's identity and metadata; a supplied `page_id` takes precedence over
+`path`. Members must identify distinct existing pages. Responses: `201` Saved
+quire with server-minted ID and revision; `400` Invalid snapshot.
+
+### `GET /api/vault/quires/{id}`
+Read one snapshot with freshly resolved members before reopening it. Responses:
+`200` Saved quire; `400` Invalid UUID or unsafe path; `404` Snapshot not found.
+
+### `PUT /api/vault/quires/{id}`
+Send `{expected_revision, name, color, members?}`. Omit `members` to preserve
+membership when renaming; supply it to replace the ordered snapshot. Missing
+members already in this snapshot may be retained by their IDs, but cannot be
+introduced as new members. Responses: `200` Updated snapshot; `400` Invalid
+snapshot; `404` Snapshot not found; `409` Revision conflict.
+
+### `DELETE /api/vault/quires/{id}`
+Delete only the saved snapshot, with `expected_revision` as a required query
+parameter. Pages and browser tabs are untouched. Responses: `204` Deleted;
+`400` Invalid request; `404` Snapshot not found; `409` Revision conflict.
+
 ## Rubbish
 
 ### `GET /api/vault/rubbish`

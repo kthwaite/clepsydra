@@ -66,12 +66,13 @@ On desktop, the **Sheaf** is the horizontal page-tab strip:
   **Close**, **Close others**, and **Close all**. The last asks for
   confirmation and closes every tab;
 - right-click a page tab and choose **New quire…** or add it to an existing
-  quire. A quire is only a local tab group, not a vault folder or shared
-  collection;
+  quire. An open quire is a local tab group, not a vault folder. Save it to
+  keep a reusable collection independently of open tabs;
 - choose a quire label to collapse or expand it. Collapsing hides every member
   without exceptions. Its context menu can rename, recolor, ungroup, or close
   the quire. **Close quire** closes every member and dissolves the empty quire.
-  **Close all tabs** does the same for the whole workspace, after confirmation;
+  Saved snapshots remain available. **Close all tabs** does the same for the
+  whole workspace, after confirmation;
 - a new page opened while an expanded quire member is active inherits that
   quire, creating a self-assembling research context. Graph tabs never join;
 - hover a non-active page tab briefly to open a passive preview of its Folio and
@@ -112,6 +113,36 @@ are ordered by activation, newest first, in the open-files accordion. The
 workspace, tab paths and labels, recent history, navigation mode, and quire
 state persist in browser local storage under `clepsydra.workspace`; they are not
 written into Folio Markdown.
+
+### Save and reopen quires
+
+Choose **Save quire…** from a quire's menu to save its name, colour, and ordered
+page membership. **Saved quires** lists the collections in this vault, including
+when no tabs are open, and lets you reopen, rename, or delete them.
+
+Saving is explicit: browsing, moving tabs, closing a quire, or changing its local
+name or colour does not change its saved snapshot. **Update saved quire**
+replaces the linked snapshot with the quire's current name, colour, and open
+members. Review the replacement before confirming; pages closed since saving
+will no longer belong to the snapshot. Use **Save quire…** to save a separate
+collection instead.
+
+Reopening restores saved order and expands the group without closing unrelated
+tabs. Pages already open are reused and moved into the restored quire, rather
+than duplicated. Pages added to an already-open instance since saving stay open
+outside the restored group. Reopening respects the unsaved-edit navigation guard.
+
+Saved references use page IDs, so moving or renaming a page does not break the
+collection. Missing or binned pages are listed before reopening; you can open
+the available pages without removing missing references from the snapshot.
+If every member is unavailable, the workspace is left unchanged.
+
+Snapshots live in `.clepsydra/quires/<id>.json` inside the vault, separate from
+Folio Markdown and browser workspace state. They travel with the vault through
+backup and git-backed sync. Deleting a saved quire deletes only its snapshot,
+never pages or open tabs. Concurrent changes produce a revision conflict rather
+than overwriting another browser's saved version; reload the saved collection
+before deciding what to save next.
 
 ### Read and edit AI conversation Folios
 
@@ -186,7 +217,8 @@ Unprotected Folio bodies, titles, tags, aliases, project names, conversation
 turns, provider names, and conversation-ledger hashes are plaintext vault data.
 The web UI can read that data from the local server. Tab paths and labels,
 recent history, navigation mode, and quires also persist as plaintext browser
-local storage. A quire is organizational UI state, not an encryption boundary.
+local storage. Saved quire names, colours, page IDs, paths, and labels are
+plaintext vault data. A quire is organizational state, not an encryption boundary.
 
 Protection encrypts the Folio body only. Frontmatter metadata, filenames,
 paths, attachment metadata and bytes, and browser workspace state remain

@@ -7,17 +7,28 @@ vi.hoisted(async () => {
   installMemoryStorage();
 });
 
-const { activateMock, openInscribeMock } = vi.hoisted(() => ({
-  activateMock: vi.fn(),
-  openInscribeMock: vi.fn(),
-}));
+const { activateMock, openInscribeMock, openSavedQuiresMock } = vi.hoisted(
+  () => ({
+    activateMock: vi.fn(),
+    openInscribeMock: vi.fn(),
+    openSavedQuiresMock: vi.fn(),
+  }),
+);
 
 vi.mock("#/hooks/useFolioHistoryNavigation", () => ({
   useActivateTabWithFolioHistory: () => activateMock,
 }));
 vi.mock("#/store/ui", () => ({
-  useUiStore: (sel: (s: { openInscribe: () => void }) => unknown) =>
-    sel({ openInscribe: openInscribeMock }),
+  useUiStore: (
+    sel: (s: {
+      openInscribe: () => void;
+      openSavedQuires: typeof openSavedQuiresMock;
+    }) => unknown,
+  ) =>
+    sel({
+      openInscribe: openInscribeMock,
+      openSavedQuires: openSavedQuiresMock,
+    }),
 }));
 
 import { OpenPagesSheet } from "#/components/codex/OpenPagesSheet";
@@ -209,6 +220,37 @@ describe("OpenPagesSheet", () => {
     ).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "New page" }));
     expect(openInscribeMock).toHaveBeenCalledOnce();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+  it("keeps Saved quires reachable with no open pages", async () => {
+    useWorkspaceStore.setState({ tabs: [], activeTabId: null, quires: {} });
+    const onOpenChange = vi.fn();
+    render(<OpenPagesSheet isOpen onOpenChange={onOpenChange} />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Saved quires…" }),
+    );
+    expect(openSavedQuiresMock).toHaveBeenCalledWith({ kind: "picker" });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("offers mobile save and explicit update actions for a linked quire", async () => {
+    useWorkspaceStore.getState().linkSavedQuire("q1", "saved-1", "revision-1");
+    const onOpenChange = vi.fn();
+    render(<OpenPagesSheet isOpen onOpenChange={onOpenChange} />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save quire Research" }),
+    );
+    expect(openSavedQuiresMock).toHaveBeenCalledWith({
+      kind: "save",
+      quireId: "q1",
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Update saved quire Research" }),
+    );
+    expect(openSavedQuiresMock).toHaveBeenCalledWith({
+      kind: "update",
+      quireId: "q1",
+    });
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

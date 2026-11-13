@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { Settings } from "lucide-react";
+import { Library, Settings } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
@@ -12,6 +12,7 @@ import {
   goToView,
   VIEW_REGISTRY,
 } from "#/components/codex/viewRegistry";
+import { IconButton } from "#/components/ui/icon-button";
 import {
   useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
@@ -48,6 +49,7 @@ export function DesktopCodexFrame({
   const contentsOpen = useUiStore((s) => s.isContentsOpen);
   const tabGridOpen = useUiStore((s) => s.isTabGridOpen);
   const setTabGridOpen = useUiStore((s) => s.setTabGridOpen);
+  const openSavedQuires = useUiStore((s) => s.openSavedQuires);
   const activeTabId = useWorkspaceStore((s) => s.activeTabId);
   const openTab = useOpenTab();
   const activateTab = useActivateTabWithFolioHistory();
@@ -114,6 +116,12 @@ export function DesktopCodexFrame({
         </nav>
 
         <div className="flex-1" />
+        <IconButton
+          aria-label="Saved quires"
+          onPress={() => openSavedQuires({ kind: "picker" })}
+        >
+          <Library aria-hidden />
+        </IconButton>
 
         <button
           type="button"
