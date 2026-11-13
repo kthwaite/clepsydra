@@ -522,6 +522,7 @@ impl VaultIndex {
 
         // 3. Execute schema
         conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(crate::mcp_analytics::SCHEMA)?;
 
         // 4. Migration: ensure links.target_id has ON DELETE SET NULL
         migrate_links_fk(conn)?;

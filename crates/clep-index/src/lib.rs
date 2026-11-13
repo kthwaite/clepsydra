@@ -9,6 +9,7 @@ pub mod hooks;
 pub mod index;
 pub mod index_handle;
 pub mod index_policy;
+mod mcp_analytics;
 pub mod reference_issues;
 mod search;
 pub mod sync;

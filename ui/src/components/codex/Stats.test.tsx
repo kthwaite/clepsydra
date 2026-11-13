@@ -83,13 +83,16 @@ describe("Stats", () => {
     statsMocks.lastIndexedAt = null;
   });
 
-  it("titles the page with a Vault eyebrow and a Stats heading", () => {
+  it("titles the page Stats and selects the Vault tab by default", () => {
     render(<Stats />);
 
     expect(
       screen.getByRole("heading", { level: 1, name: "Stats" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Vault")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Vault" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(screen.queryByText(/last collated/)).toBeNull();
   });
 

@@ -1612,6 +1612,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/mcp/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Rolling UTC window, inclusive at both ends; 0 means all history through now.
+         *     Catalog tools remain visible with zero usage. Page and recent lists cap at 50;
+         *     daily totals include every active date in the requested window.
+         */
+        get: operations["get_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/mcp/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a bounded metadata envelope atomically. Repeated call IDs are ignored.
+         *     No arguments, bodies, results, search text or error messages are accepted.
+         */
+        post: operations["record_telemetry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/pages": {
         parameters: {
             query?: never;
@@ -3314,6 +3355,116 @@ export interface components {
         MarkFeedEntriesReadResponse: {
             /** Format: int64 */
             marked: number;
+        };
+        McpCallRecord: {
+            call_id: string;
+            /** Format: int64 */
+            duration_ms: number;
+            /** Format: int32 */
+            error_code?: number | null;
+            outcome: string;
+            pages: components["schemas"]["McpPageReference"][];
+            started_at: string;
+            tool: string;
+        };
+        McpClientStats: {
+            /** Format: double */
+            average_duration_ms: number;
+            /** Format: int64 */
+            calls: number;
+            client_name: string;
+            client_version: string;
+            /** Format: int64 */
+            failures: number;
+            last_used_at: string;
+            name: string;
+            /** Format: int64 */
+            sessions: number;
+        };
+        McpDailyStats: {
+            /** Format: int64 */
+            calls: number;
+            date: string;
+            /** Format: int64 */
+            failures: number;
+        };
+        McpPageReference: {
+            page_id?: string | null;
+            path?: string | null;
+            source: string;
+        };
+        McpPageStats: {
+            /** Format: int64 */
+            calls: number;
+            last_used_at: string;
+            page_id?: string | null;
+            path?: string | null;
+            /** Format: int64 */
+            result_calls: number;
+            /** Format: int64 */
+            target_calls: number;
+            /** @description Current indexed title (or path for an untitled page); null only if unresolved. */
+            title?: string | null;
+        };
+        McpRecentCall: {
+            agent_label?: string | null;
+            call_id: string;
+            client_name: string;
+            /** Format: int64 */
+            duration_ms: number;
+            /** Format: int32 */
+            error_code?: number | null;
+            outcome: string;
+            pages: components["schemas"]["McpPageReference"][];
+            started_at: string;
+            tool: string;
+        };
+        McpStatsResponse: {
+            /** Format: int64 */
+            agents: number;
+            /** Format: double */
+            average_duration_ms: number;
+            clients: components["schemas"]["McpClientStats"][];
+            daily: components["schemas"]["McpDailyStats"][];
+            /** Format: int32 */
+            days: number;
+            /** Format: int64 */
+            failed_calls: number;
+            page_activity: components["schemas"]["McpPageStats"][];
+            /** Format: int64 */
+            pages: number;
+            recent_calls: components["schemas"]["McpRecentCall"][];
+            /** Format: int64 */
+            sessions: number;
+            /** Format: int64 */
+            successful_calls: number;
+            tools: components["schemas"]["McpToolStats"][];
+            /** Format: int64 */
+            total_calls: number;
+            tracking_since?: string | null;
+        };
+        McpTelemetryRequest: {
+            agent_label?: string | null;
+            call?: null | components["schemas"]["McpCallRecord"];
+            client_name?: string;
+            client_version?: string;
+            session_id: string;
+            tools?: components["schemas"]["McpToolDefinition"][];
+        };
+        McpToolDefinition: {
+            name: string;
+            read_only: boolean;
+        };
+        McpToolStats: {
+            /** Format: double */
+            average_duration_ms: number;
+            /** Format: int64 */
+            calls: number;
+            /** Format: int64 */
+            failures: number;
+            last_used_at?: string | null;
+            name: string;
+            read_only: boolean;
         };
         /** @description A whole-view aggregate, optionally presented against a numeric target. */
         MetricDefinition: {
@@ -9398,6 +9549,83 @@ export interface operations {
             };
             /** @description Latitude or longitude out of range */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_stats: {
+        parameters: {
+            query?: {
+                /** @description Rolling UTC days: 7, 30 (default), 90, or 0 for all history */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description MCP usage metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpStatsResponse"];
+                };
+            };
+            /** @description Unsupported window */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    record_telemetry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpTelemetryRequest"];
+            };
+        };
+        responses: {
+            /** @description Metadata recorded (duplicate calls are idempotent) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid metadata */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Metadata exceeds 2 MiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid JSON shape */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

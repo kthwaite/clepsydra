@@ -412,6 +412,35 @@ Get location. Responses: `200` Vault location (fields null when unconfigured).
 ### `PUT /api/vault/location`
 Update location. Responses: `200` Updated vault location; `400` Latitude or longitude out of range.
 
+## MCP
+
+### `GET /api/vault/mcp/stats`
+Read local MCP usage aggregates. `days` accepts `7`, `30` (default), `90`, or
+`0` for all history. Windows include both boundaries and end at the server's
+current UTC time. Returns call outcomes and durations, session/agent counts,
+known tools including zero-use tools, client/version rankings, page activity,
+daily totals, and the latest calls. Page activity and recent calls are capped
+at 50 rows; summary totals are not. Responses: `200` Usage statistics;
+`400` Unsupported window.
+
+### `POST /api/vault/mcp/telemetry`
+Record an MCP metadata envelope: `session_id`, reported `client_name` and
+`client_version`, optional `agent_label`, a `tools` catalog, and an optional
+`call`. A call supplies `call_id`, `tool`, UTC RFC3339 `started_at`,
+`duration_ms`, `outcome`, optional protocol `error_code`, and `pages`.
+Page references contain `page_id` and/or vault-relative `path`, with
+`source: "target"` or `"result"`. Outcomes are `success`, `tool_error`,
+`protocol_error`, or `cancelled`. Session and call IDs are UUIDs.
+
+Repeated call IDs are ignored atomically, including their envelope metadata.
+Full arguments, result payloads, and arbitrary extra fields are rejected.
+Limits: 2 MiB JSON, 512 tool definitions, 1,000 page references, 128-byte tool
+names, 256-byte client/label fields, and 4,096-byte paths. Identity is
+self-reported, not authenticated. Responses: `204` Recorded or duplicate;
+`400` Invalid metadata; `413` Oversized body; `422` Invalid JSON shape.
+See [MCP usage analytics](/docs/mcp#usage-analytics) for interpretation,
+privacy, and delivery limits.
+
 ## Pages
 
 ### `GET /api/vault/pages`

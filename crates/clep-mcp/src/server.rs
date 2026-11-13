@@ -619,12 +619,16 @@ const ARCHIVE_URL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 #[derive(Clone)]
 pub struct VaultMcpServer {
     client: Arc<ApiClient>,
+    telemetry: Arc<crate::telemetry::Telemetry>,
 }
 
 #[tool_router]
 impl VaultMcpServer {
     pub fn new(client: Arc<ApiClient>) -> Self {
-        Self { client }
+        Self {
+            telemetry: Arc::new(crate::telemetry::Telemetry::new(Arc::clone(&client))),
+            client,
+        }
     }
 
     #[tool(
@@ -1651,6 +1655,7 @@ impl VaultMcpServer {
         let id = self
             .resolve_board_ref(&params.task, BoardKind::Task)
             .await?;
+        crate::telemetry::resolved_target(&id);
         let value = self
             .client
             .patch_json(
@@ -1731,6 +1736,7 @@ impl VaultMcpServer {
         let id = self
             .resolve_board_ref(&params.cycle, BoardKind::Cycle)
             .await?;
+        crate::telemetry::resolved_target(&id);
         let value = self
             .client
             .patch_json(
@@ -1787,6 +1793,56 @@ impl VaultMcpServer {
 
 #[tool_handler]
 impl ServerHandler for VaultMcpServer {
+    async fn initialize(
+        &self,
+        request: rmcp::model::InitializeRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::InitializeResult, rmcp::ErrorData> {
+        context.peer.set_peer_info(request.clone());
+        let result = self.negotiate_initialize(&request);
+        self.telemetry
+            .register(Some(&request.client_info), Self::tool_router().list_all())
+            .await;
+        result
+    }
+
+    async fn discover(
+        &self,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::DiscoverResult, rmcp::ErrorData> {
+        self.telemetry
+            .register(
+                context.client_info().as_ref(),
+                Self::tool_router().list_all(),
+            )
+            .await;
+        Ok(rmcp::model::DiscoverResult::from_server_info(
+            self.supported_protocol_versions().into_owned(),
+            self.get_info(),
+        ))
+    }
+
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
+        let mut observation = self
+            .telemetry
+            .start(&request, context.client_info().as_ref());
+        let cancellation = context.ct.clone();
+        let tool_context =
+            rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        let result = observation
+            .observe(
+                cancellation.cancelled(),
+                Self::tool_router().call(tool_context),
+            )
+            .await;
+        observation.finish(&result).await;
+        result
+    }
+
     fn get_info(&self) -> rmcp::model::ServerConfig {
         let mut info = rmcp::model::ServerConfig::new(
             rmcp::model::ServerCapabilities::builder()

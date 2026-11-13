@@ -10,6 +10,7 @@ mod properties;
 mod reading;
 pub mod server;
 pub mod tasking;
+mod telemetry;
 
 use std::sync::Arc;
 

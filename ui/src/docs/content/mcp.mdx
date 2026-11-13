@@ -380,6 +380,81 @@ The response contract and outcomes are:
 `created` returns HTTP 201 for a new Folio. `appended` and `unchanged` return
 HTTP 200. A conflict has no success response and writes nothing.
 
+## Usage analytics
+
+Open **Stats → MCP** to see calls over the last 7, 30, or 90 days, or all
+recorded history. The tab summarizes tool usage (including known tools with
+no calls in the selected period), clients and agent labels, referenced pages,
+daily activity, failures, durations, and recent calls. Collection starts with
+the updated MCP process; earlier activity cannot be reconstructed. Restart
+both `clep serve` and your host's `clep mcp` connection after upgrading.
+
+Each dispatched tool call records its tool name, UTC start time, elapsed
+milliseconds, outcome, session, client identity, and page references. Duration
+excludes the telemetry request. Tool errors, invalid tool arguments, and
+unknown tools count as failures. Invalid JSON and protocol envelopes rejected
+before tool dispatch are not recorded.
+
+### Identify clients and agents
+
+Client names and versions come from the MCP host's initialization handshake.
+They identify the calling application, not necessarily the model or subagent.
+Each MCP process has a separate session identifier. To distinguish agent
+configurations that report the same client name, set `CLEP_MCP_AGENT` in that
+host's MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "clepsydra": {
+      "command": "clep",
+      "args": ["mcp"],
+      "env": { "CLEP_MCP_AGENT": "research-agent" }
+    }
+  }
+}
+```
+
+Rankings use the explicit label when present, otherwise the reported client
+name. Versions remain visible separately. These are self-reported labels,
+not authenticated identities. Subagents sharing one connection and label
+cannot be distinguished.
+
+### Interpret page activity
+
+**Targets** are pages explicitly addressed by a call, including unsuccessful
+attempts. **Results** are page references returned by a tool, including
+discovery tools such as search and listing; they do not prove the agent read
+the whole page. A page can be both a target and a result of the same call,
+but the total counts that call once. This is not a trace of every internal
+HTTP request or proof that the agent used the returned information.
+
+Page UUIDs keep known pages grouped across moves. Historical references are
+retained when a page is removed; the log does not retain its body.
+
+Page attribution is bounded to 1,000 references or a 512 KiB metadata budget per
+call. Larger result sets still record the call, but page counts can be partial;
+the MCP process reports omitted references on stderr.
+
+### Storage and delivery
+
+Analytics are stored locally in the vault's SQLite index database, not in
+Markdown or git-backed vault sync. Ordinary index rebuilds retain them;
+deleting the database removes the history. There is no automatic expiry.
+Paths, page identifiers, client labels, and usage times are plaintext metadata.
+Full arguments, result payloads, prompts, bodies, search terms, custom
+property values, and raw error messages are not stored.
+
+Telemetry is best-effort, with a two-second request timeout. A failed telemetry
+write emits an MCP stderr diagnostic without changing the tool's real result;
+otherwise a successful mutation could appear to fail and be repeated.
+Unavailable servers and abruptly terminated processes can leave gaps, so this
+is usage analytics rather than a guaranteed audit trail.
+
+A cancelled call means the caller stopped waiting, not that its operation was
+rolled back. In-flight HTTP work can still complete, including a mutation;
+inspect the page before attempting the same write again.
+
 ## Failures and conflicts
 
 - **Server unreachable** — MCP reports the configured base URL and tells the

@@ -7,6 +7,8 @@ import {
   useStats,
   useTags,
 } from "#/api/index";
+import { McpStats } from "#/components/codex/McpStats";
+import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 import { formatRelativeTime } from "#/lib/time";
@@ -17,6 +19,36 @@ import { Tick } from "./Tick";
 const REFERENCE_ISSUE_COUNT_FILTERS = { limit: 1, offset: 0 };
 
 export function Stats() {
+  return (
+    <div className="mx-auto flex max-w-[1600px] flex-col gap-8 px-4 pt-7 pb-10 md:px-10 md:pt-8">
+      <div className="flex flex-col gap-2.5">
+        <span className="flex items-center gap-2.5">
+          <Tick />
+          <span className="font-serif text-[19px] italic text-mute">
+            Local activity
+          </span>
+        </span>
+        <h1 className="font-serif text-[44px] leading-none tracking-[-0.015em] text-ink md:text-[56px]">
+          Stats
+        </h1>
+      </div>
+      <Tabs defaultSelectedKey="vault" className="min-w-0 gap-8">
+        <TabList aria-label="Statistics">
+          <Tab id="vault">Vault</Tab>
+          <Tab id="mcp">MCP</Tab>
+        </TabList>
+        <TabPanel id="vault">
+          <VaultStats />
+        </TabPanel>
+        <TabPanel id="mcp">
+          <McpStats />
+        </TabPanel>
+      </Tabs>
+    </div>
+  );
+}
+
+function VaultStats() {
   const navigate = useNavigate();
   const { data: tags } = useTags();
   const { data: stats } = useStats();
@@ -44,26 +76,13 @@ export function Stats() {
   const lastIndexedAt = stats?.last_indexed_at;
 
   return (
-    <div className="mx-auto flex max-w-[1600px] flex-col gap-11 px-4 pt-7 pb-10 md:px-10 md:pt-8">
-      <div className="flex flex-wrap items-end gap-x-7 gap-y-3">
-        <div className="flex flex-col gap-2.5">
-          <span className="flex items-center gap-2.5">
-            <Tick />
-            <span className="font-serif text-[19px] italic text-mute">
-              Vault
-            </span>
-          </span>
-          <h1 className="font-serif text-[44px] leading-none tracking-[-0.015em] text-ink md:text-[56px]">
-            Stats
-          </h1>
-        </div>
-        {lastIndexedAt ? (
-          <span className="pb-1.5 text-[14px] text-mute">
-            Counts from the index, last collated{" "}
-            {formatRelativeTime(lastIndexedAt)}
-          </span>
-        ) : null}
-      </div>
+    <div className="flex min-w-0 flex-col gap-11">
+      {lastIndexedAt ? (
+        <p className="m-0 text-[14px] text-mute">
+          Counts from the index, last collated{" "}
+          {formatRelativeTime(lastIndexedAt)}
+        </p>
+      ) : null}
 
       <Section
         label="Inventory"

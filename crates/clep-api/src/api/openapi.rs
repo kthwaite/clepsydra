@@ -84,12 +84,15 @@ impl Modify for SchemaOverrides {
         (name = "BCL", description = "Brimley-Cocoon Line countdown"),
         (name = "Location", description = "Vault geographic location"),
         (name = "Uptime", description = "Server uptime"),
+        (name = "MCP", description = "Metadata-only MCP tool usage telemetry and analytics"),
         (name = "Board", description = "TASKING board: read model and task/cycle mutations"),
         (name = "Feeds", description = "RSS/Atom subscriptions, entries, and refresh"),
         (name = "Deeplink", description = "clepsydra:// / obsidian:// deep-link resolution"),
         (name = "Sync", description = "Git-backed vault synchronisation")
     ),
     paths(
+        crate::api::mcp_analytics::record_telemetry,
+        crate::api::mcp_analytics::get_stats,
         crate::api::external_previews::status,
         crate::api::external_previews::request,
         crate::api::external_previews::embed,
@@ -267,6 +270,16 @@ impl Modify for SchemaOverrides {
     ),
     components(
         schemas(
+            crate::api::mcp_analytics::McpTelemetryRequest,
+            crate::api::mcp_analytics::McpToolDefinition,
+            crate::api::mcp_analytics::McpCallRecord,
+            crate::api::mcp_analytics::McpPageReference,
+            crate::api::mcp_analytics::McpStatsResponse,
+            crate::api::mcp_analytics::McpToolStats,
+            crate::api::mcp_analytics::McpClientStats,
+            crate::api::mcp_analytics::McpPageStats,
+            crate::api::mcp_analytics::McpDailyStats,
+            crate::api::mcp_analytics::McpRecentCall,
             crate::api::external_previews::PreviewRequest,
             crate::api::external_previews::PreviewStatus,
             crate::external_previews::PreviewResponse,

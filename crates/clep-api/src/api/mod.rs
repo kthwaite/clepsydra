@@ -25,6 +25,7 @@ pub mod folders;
 pub mod index_routes;
 pub mod journal;
 pub mod location;
+pub mod mcp_analytics;
 pub mod openapi;
 pub mod page_export;
 pub(crate) mod page_identity;
@@ -278,6 +279,7 @@ pub fn api_router_with_archive_limit(
         )
         .nest("/cas", archive::cas_router())
         .nest("/index", index_routes::router())
+        .nest("/mcp", mcp_analytics::router())
         .nest("/journal", journal::router())
         .nest("/ai-journal", ai_journal::router())
         .nest("/tasks", tasks::router())
