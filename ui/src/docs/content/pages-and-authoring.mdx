@@ -102,6 +102,7 @@ orphans.
 | `BOOK` | `books` |
 | `CAPTURE` | `captures` |
 | `CODE` | `code` |
+| `ADR` | `adrs` |
 | `PERSON` | `people` |
 | `TASK` | `tasks` |
 | `CYCLE` | `cycles` |
@@ -116,6 +117,16 @@ Kind keeps the current top-level folder, and no declared Project keeps the
 current subfolder. Explicitly clearing Project removes its subfolder. A
 successful projected move keeps the filename and updates links as one planned
 mutation.
+
+### Record an architecture decision
+
+Choose **ADR** (Architecture Decision Record) in **New Folio**, or change an
+existing page's **Kind** to ADR. ADRs use the normal Markdown editor; suggested
+headings are **Status**, **Context**, **Decision**, and **Consequences**.
+
+The stored kind is `type = "ADR"`, with the computed tag `adr`. Pages are filed
+under `adrs/`, or `adrs/<project>/` when assigned to a Project. Find them with
+`kind:ADR`. Numbering and decision status are not managed automatically.
 
 ### Record a meeting or a 1:1
 

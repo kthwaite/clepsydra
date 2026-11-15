@@ -644,6 +644,7 @@ mod tests {
                 "BOOK",
                 "CAPTURE",
                 "CODE",
+                "ADR",
                 "PERSON",
                 "TASK",
                 "CYCLE",

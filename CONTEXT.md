@@ -28,6 +28,10 @@ _Avoid_: Check, Markdown task
 A scope that groups related tasks.
 _Avoid_: Operation, op
 
+**ADR (Architecture Decision Record)**:
+A page recording an architectural decision, its context, and its consequences. An ADR may belong to a Project.
+_Avoid_: Task, implementation plan
+
 **Cycle**:
 An optional, time-bounded planning interval with a goal. A cycle may be planned, active, or closed.
 _Avoid_: Sprint, cadence window

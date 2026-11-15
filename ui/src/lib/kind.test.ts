@@ -132,6 +132,7 @@ describe("assignable kinds", () => {
 describe("sortKindsByLabel", () => {
   it("orders kinds alphabetically by display label, not token", () => {
     expect(sortKindsByLabel(ASSIGNABLE_KINDS)).toEqual([
+      "ADR",
       "AI_CONVERSATION",
       "AI_JOURNAL",
       "ARCHIVE",
@@ -210,6 +211,7 @@ describe("kind colours (Stone & Lamp)", () => {
     expect(Object.fromEntries(KINDS.map((k) => [k, kindColorVar(k)]))).toEqual({
       PROJECT: "var(--accent)",
       TASK: "var(--quire-verdigris)",
+      ADR: "var(--quire-verdigris)",
       TODO: "var(--quire-verdigris)",
       CYCLE: "var(--ink-2)",
       JOURNAL: "var(--quire-ochre)",

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { KindSelect } from "#/components/codex/KindSelect";
 
 const ALPHABETICAL_LABELS = [
+  "ADR",
   "AI conversation",
   "AI journal",
   "Archive",

@@ -23,6 +23,7 @@ import {
   MessagesSquare,
   Quote,
   Repeat,
+  Split,
   SquareCheckBig,
   User,
   Users,
@@ -46,6 +47,7 @@ export const KINDS = [
   "BOOK",
   "CAPTURE",
   "CODE",
+  "ADR",
   "PERSON",
   "TASK",
   "CYCLE",
@@ -88,6 +90,7 @@ export const KIND_META: Record<Kind, KindMeta> = {
   QUOTE: { label: "QUOTE", color: "var(--quire-slate)", icon: Quote },
   BOOK: { label: "BOOK", color: "var(--quire-sepia)", icon: BookOpen },
   CODE: { label: "CODE", color: "var(--ink)", icon: Code },
+  ADR: { label: "ADR", color: "var(--quire-verdigris)", icon: Split },
   PERSON: { label: "PERSON", color: "var(--quire-madder)", icon: User },
   CAPTURE: { label: "CAPTURE", color: "var(--quire-slate)", icon: Inbox },
   NOTE: { label: "NOTE", color: "var(--mute)", icon: FileText },
@@ -118,6 +121,7 @@ export const kindLabel = (kind: Kind): string => KIND_META[kind].label;
 /** The kind label in sentence case ("Note", "AI journal") for prose-like
  *  chrome such as the Folio meta line. */
 export const kindDisplayLabel = (kind: Kind): string => {
+  if (kind === "ADR") return "ADR";
   const label = KIND_META[kind].label;
   const sentence = label.charAt(0) + label.slice(1).toLowerCase();
   return sentence.replace(/^Ai\b/, "AI");
@@ -164,6 +168,8 @@ const FOLDER_KIND: Record<string, Kind> = {
   clippings: "CAPTURE",
   code: "CODE",
   snippets: "CODE",
+  adrs: "ADR",
+  adr: "ADR",
   people: "PERSON",
   persons: "PERSON",
   person: "PERSON",

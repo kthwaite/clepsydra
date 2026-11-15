@@ -15,6 +15,7 @@ export const KIND_FOLDER: Record<Kind, string> = {
   BOOK: "books",
   CAPTURE: "captures",
   CODE: "code",
+  ADR: "adrs",
   PERSON: "people",
   TASK: "tasks",
   CYCLE: "cycles",
