@@ -530,7 +530,14 @@ fn compile_node(
     match filter {
         Filter::All(children) => compile_group(children, " AND ", "1=1", ctx, params),
         Filter::Any(children) => compile_group(children, " OR ", "1=0", ctx, params),
-        Filter::Not(child) => Ok(format!("NOT ({})", compile_node(child, ctx, params)?)),
+        // A comparison on a NULL system column (an untitled page, a page
+        // without a project) is unknown in SQL, and `NOT unknown` is still
+        // unknown. A filter is two-valued: a page that does not satisfy the
+        // child satisfies its negation, as in `base_matches_meta`.
+        Filter::Not(child) => Ok(format!(
+            "NOT COALESCE(({}), 0)",
+            compile_node(child, ctx, params)?
+        )),
         Filter::Cmp { field, op, value } => compile_cmp(field, *op, value, ctx, params),
     }
 }
@@ -3453,6 +3460,52 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
             TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["b.md"]);
+    }
+
+    #[test]
+    fn not_over_a_missing_system_field_matches_the_page() {
+        // No fixture page has a project or a journal date, so none of them
+        // satisfies the positive comparison and every book satisfies `not`.
+        let (_tmp, index, base) = fixture();
+        for child in [
+            serde_json::json!({ "field": "project", "op": "eq", "value": "px" }),
+            serde_json::json!({ "field": "project", "op": "contains", "value": "p" }),
+            serde_json::json!({ "field": "project", "op": "starts_with", "value": "p" }),
+            serde_json::json!({ "field": "project", "op": "ends_with", "value": "x" }),
+            serde_json::json!({ "field": "project", "op": "gte", "value": "a" }),
+            serde_json::json!({ "field": "project", "op": "in", "value": ["px"] }),
+            serde_json::json!({ "field": "journal_date", "op": "is_today" }),
+            serde_json::json!({ "field": "journal_date", "op": "gt", "value": "2000-01-01" }),
+            serde_json::json!({ "all": [
+                { "field": "project", "op": "eq", "value": "px" },
+                { "field": "kind", "op": "eq", "value": "BOOK" }
+            ]}),
+        ] {
+            let positive = run(
+                &index,
+                &base,
+                serde_json::json!({ "all": [
+                    { "field": "kind", "op": "eq", "value": "BOOK" },
+                    child.clone()
+                ]}),
+                TEST_TODAY,
+            );
+            assert!(flat_paths(&positive).is_empty(), "{child}");
+            let negated = run(
+                &index,
+                &base,
+                serde_json::json!({ "all": [
+                    { "field": "kind", "op": "eq", "value": "BOOK" },
+                    { "not": child.clone() }
+                ]}),
+                TEST_TODAY,
+            );
+            assert_eq!(
+                flat_paths(&negated),
+                vec!["a.md", "b.md", "c.md", "e.md"],
+                "{child}"
+            );
+        }
     }
 
     #[test]
