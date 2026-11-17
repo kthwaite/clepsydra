@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, TextMergeWithOffset};
+use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd, TextMergeWithOffset};
 use regex::Regex;
 
 /// A link extracted from a page body or frontmatter property.
@@ -63,6 +63,73 @@ fn wikilink_regex() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"\[\[([^\[\]]+)\]\]").unwrap())
 }
 
+/// A `[[target]]` / `[[target|display]]` wikilink found in the source.
+pub(crate) struct WikilinkMatch {
+    /// Byte range of the whole `[[…]]`.
+    pub(crate) span: Range<usize>,
+    /// Byte range of the text between the brackets.
+    pub(crate) inner: Range<usize>,
+}
+
+/// Finds wikilinks in the source text rather than inside single `Text`
+/// events, so that inline markup in the target (`[[__init__]]`, `[[a*b*c]]`)
+/// or a link reference definition for the same label (`[Alpha]: x` with
+/// `[[Alpha]]`) cannot break one apart.
+///
+/// The scanner feeds it, while walking the parser events, the source ranges
+/// that are live text. A `[[…]]` is a wikilink when both bracket pairs lie in
+/// live text and no line break sits between them; what the parser made of the
+/// characters in between does not matter.
+#[derive(Default)]
+pub(crate) struct WikilinkScan {
+    live: Vec<Range<usize>>,
+}
+
+impl WikilinkScan {
+    /// Record the source range of a `Text` event outside code and HTML blocks.
+    pub(crate) fn text(&mut self, range: &Range<usize>) {
+        self.live.push(range.clone());
+    }
+
+    /// Record the outer brackets of a shortcut reference link or a footnote
+    /// reference (`[Alpha]`, `[^1]`): they are plain text unless a definition
+    /// for that label happens to exist, and must not hide a wikilink.
+    pub(crate) fn label_brackets(&mut self, range: &Range<usize>) {
+        if range.len() >= 2 {
+            self.live.push(range.start..range.start + 1);
+            self.live.push(range.end - 1..range.end);
+        }
+    }
+
+    /// The wikilinks of `content`, in source order.
+    pub(crate) fn matches(mut self, content: &str) -> Vec<WikilinkMatch> {
+        // Merge touching ranges so that a bracket pair may straddle two.
+        self.live.sort_by_key(|range| range.start);
+        let mut live: Vec<Range<usize>> = Vec::with_capacity(self.live.len());
+        for range in self.live {
+            match live.last_mut() {
+                Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+                _ => live.push(range),
+            }
+        }
+        let is_live = |range: Range<usize>| {
+            let next = live.partition_point(|candidate| candidate.start <= range.start);
+            next > 0 && range.end <= live[next - 1].end
+        };
+
+        wikilink_regex()
+            .captures_iter(content)
+            .filter_map(|cap| {
+                let span = cap.get(0).unwrap().range();
+                let inner = cap.get(1).unwrap().range();
+                let on_one_line = !content[span.clone()].contains(['\n', '\r']);
+                (on_one_line && is_live(span.start..inner.start) && is_live(inner.end..span.end))
+                    .then_some(WikilinkMatch { span, inner })
+            })
+            .collect()
+    }
+}
+
 /// Return a lazily compiled regex for block references: `((10-12 alphanumeric chars))`.
 fn block_ref_regex() -> &'static Regex {
     use std::sync::OnceLock;
@@ -79,15 +146,30 @@ fn is_external(url: &str) -> bool {
         || url.starts_with('#')
 }
 
+/// Parser options for the link scanners (`extract_links` and the rewriter).
+///
+/// Only footnotes are switched on, in the same flavour as
+/// [`crate::markdown::markdown_options`]: without them a footnote definition
+/// such as `[^1]: Ibid.` reads as a link reference definition, its body is
+/// never scanned, and every `[^1]` becomes a Markdown link to the footnote
+/// text. Every other extension stays off so that link spans do not move.
+pub(crate) fn link_scan_options() -> Options {
+    Options::ENABLE_FOOTNOTES | Options::ENABLE_OLD_FOOTNOTES
+}
+
 /// Extract all internal links from a Markdown body.
 ///
-/// Uses pulldown-cmark for structure awareness (skipping code blocks and HTML
-/// blocks) and a regex pass on `Text` events for wikilinks.
+/// Uses pulldown-cmark for structure awareness (skipping code blocks, inline
+/// code and HTML). Wikilinks are found by [`WikilinkScan`]; block references
+/// by a regex pass on `Text` events. A Markdown link that lies inside a
+/// wikilink is not reported: the wikilink wins. Links are returned in source
+/// order.
 pub fn extract_links(body: &str) -> Vec<Link> {
-    let raw_iter = Parser::new_ext(body, Options::empty()).into_offset_iter();
+    let raw_iter = Parser::new_ext(body, link_scan_options()).into_offset_iter();
     let parser = TextMergeWithOffset::new(raw_iter);
 
     let mut links = Vec::new();
+    let mut wikilinks = WikilinkScan::default();
     let mut in_code_block = false;
     let mut in_html_block = false;
 
@@ -108,7 +190,14 @@ pub fn extract_links(body: &str) -> Vec<Link> {
             }
 
             // --- markdown links ---
-            Event::Start(Tag::Link { dest_url, .. }) if !in_code_block && !in_html_block => {
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                ..
+            }) if !in_code_block && !in_html_block => {
+                if link_type == LinkType::Shortcut {
+                    wikilinks.label_brackets(&range);
+                }
                 let url = dest_url.as_ref();
                 if !is_external(url) {
                     links.push(Link {
@@ -119,29 +208,17 @@ pub fn extract_links(body: &str) -> Vec<Link> {
                 }
             }
 
-            // --- wikilinks inside text events ---
+            Event::FootnoteReference(_) if !in_code_block && !in_html_block => {
+                wikilinks.label_brackets(&range);
+            }
+
+            // --- wikilinks and block references in text events ---
             Event::Text(_) if !in_code_block && !in_html_block => {
+                wikilinks.text(&range);
+
                 // Apply the regex on the original source slice so that match
                 // offsets map directly to body byte positions.
                 let source_slice = &body[range.start..range.end];
-                let re = wikilink_regex();
-                for cap in re.captures_iter(source_slice) {
-                    let m = cap.get(0).unwrap();
-                    let inner = &cap[1];
-                    // If `[[target|display]]`, keep only the target (before `|`).
-                    let target = match inner.split_once('|') {
-                        Some((t, _)) => t,
-                        None => inner,
-                    };
-                    let start = range.start + m.start();
-                    let end = range.start + m.end();
-                    links.push(Link {
-                        target_raw: target.to_string(),
-                        span: start..end,
-                        kind: LinkKind::Wiki,
-                    });
-                }
-
                 let block_ref_re = block_ref_regex();
                 for cap in block_ref_re.captures_iter(source_slice) {
                     let m = cap.get(0).unwrap();
@@ -162,6 +239,28 @@ pub fn extract_links(body: &str) -> Vec<Link> {
             _ => {}
         }
     }
+
+    let wikilinks = wikilinks.matches(body);
+    links.retain(|link| {
+        link.kind != LinkKind::Markdown
+            || !wikilinks.iter().any(|wikilink| {
+                wikilink.span.start <= link.span.start && link.span.end <= wikilink.span.end
+            })
+    });
+    for wikilink in wikilinks {
+        let inner = &body[wikilink.inner];
+        // If `[[target|display]]`, keep only the target (before `|`).
+        let target = match inner.split_once('|') {
+            Some((t, _)) => t,
+            None => inner,
+        };
+        links.push(Link {
+            target_raw: target.to_string(),
+            span: wikilink.span,
+            kind: LinkKind::Wiki,
+        });
+    }
+    links.sort_by_key(|link| link.span.start);
 
     links
 }
