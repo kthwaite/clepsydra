@@ -49,8 +49,7 @@ pub fn update_frontmatter_title(full_text: &str, new_title: &str) -> String {
 /// If `line_text` is a frontmatter `title:` line, return the rename range and
 /// placeholder for the (possibly quoted) title value on `line_number`.
 ///
-/// Replicates the exact logic from `prepare_rename` Case 2 so the inline
-/// arithmetic can be replaced with a single call here.
+/// Columns are UTF-8 byte offsets within `line_text`.
 pub fn frontmatter_title_rename_range(
     line_text: &str,
     line_number: u32,
@@ -59,24 +58,35 @@ pub fn frontmatter_title_rename_range(
     let rest = trimmed.strip_prefix("title:")?;
     let value = rest.trim();
 
-    // Whether the value is wrapped in matching single or double quotes.
-    let is_quoted = (value.starts_with('"') && value.ends_with('"'))
-        || (value.starts_with('\'') && value.ends_with('\''));
+    // Whether the value is wrapped in a pair of single or double quotes. One
+    // quote character alone both starts and ends the value but is not a pair
+    // (the line while a quoted title is being typed): it is an unquoted value.
+    let is_quoted = value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')));
 
-    // Strip surrounding quotes if present (replicates prepare_rename exactly,
-    // including the absence of a len >= 2 guard on the slice).
+    // Strip the surrounding quotes if present.
     let title_value = if is_quoted {
         &value[1..value.len() - 1]
     } else {
-        value.trim_end_matches('\n')
+        value
     };
 
-    // Compute character offset of the title value within line_text. For a quoted
-    // value, skip past the opening quote.
-    let value_start_in_line = if is_quoted {
-        line_text.find(value).unwrap_or(0) + 1
+    // Column of the value within `line_text`, measured from the stripped
+    // prefixes. Searching the line for the value text would find an earlier
+    // occurrence inside the `title` key (`title: title`, `title: t`).
+    let rest_start = line_text.len() - rest.len();
+    let value_start = if value.is_empty() {
+        // No value: the empty range sits at the end of the line's content.
+        rest_start + rest.trim_end_matches(['\r', '\n']).len()
     } else {
-        line_text.find(value).unwrap_or(0)
+        rest_start + (rest.len() - rest.trim_start().len())
+    };
+    // For a quoted value, skip past the opening quote.
+    let value_start_in_line = if is_quoted {
+        value_start + 1
+    } else {
+        value_start
     };
     let value_end_in_line = value_start_in_line + title_value.len();
 
@@ -341,6 +351,43 @@ mod tests {
             }
             _ => panic!("expected RangeWithPlaceholder"),
         }
+    }
+
+    /// Unwrap the range and placeholder of a title line on line 0.
+    fn title_range(line: &str) -> (u32, u32, String) {
+        match frontmatter_title_rename_range(line, 0) {
+            Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) => {
+                (range.start.character, range.end.character, placeholder)
+            }
+            other => panic!("expected RangeWithPlaceholder, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lone_quote_title_is_an_unquoted_value() {
+        // A half-typed quoted title: one quote character both starts and
+        // ends the value, but there is nothing between a pair to strip.
+        assert_eq!(title_range("title: \"\n"), (7, 8, "\"".to_string()));
+        assert_eq!(title_range("title: '"), (7, 8, "'".to_string()));
+    }
+
+    #[test]
+    fn empty_quoted_title_has_an_empty_range_between_the_quotes() {
+        assert_eq!(title_range("title: \"\"\n"), (8, 8, String::new()));
+    }
+
+    #[test]
+    fn title_range_is_the_value_when_the_value_occurs_in_the_key() {
+        assert_eq!(title_range("title: title"), (7, 12, "title".to_string()));
+        assert_eq!(title_range("title: t\n"), (7, 8, "t".to_string()));
+        assert_eq!(title_range("  title:   it\n"), (11, 13, "it".to_string()));
+        assert_eq!(title_range("title: \"e\"\n"), (8, 9, "e".to_string()));
+    }
+
+    #[test]
+    fn empty_title_range_sits_after_the_key() {
+        assert_eq!(title_range("title:\n"), (6, 6, String::new()));
+        assert_eq!(title_range("title: \r\n"), (7, 7, String::new()));
     }
 
     #[test]
