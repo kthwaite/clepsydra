@@ -71,7 +71,8 @@ pulldown-cmark = "0.13"
 regex = "1"
 quick-xml = "0.37"
 reqwest = { version = "0.12", features = ["json"] }
-ropey = "1"
+# No `unicode_lines`: LSP lines end only at LF, CRLF or CR (`cr_lines`).
+ropey = { version = "1", default-features = false, features = ["cr_lines", "simd"] }
 rusqlite = { version = "0.33", features = ["backup", "bundled"] }
 rustix = { version = "1.1", features = ["fs"] }
 rust-embed = "8.11.0"

@@ -172,4 +172,54 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn only_lf_crlf_and_cr_end_a_line() {
+        // LSP 3.17: lines end at `\n`, `\r\n` or `\r`. Unicode line and
+        // paragraph separators, form feed, vertical tab and NEL are ordinary
+        // characters to the client, so they must not start a new line here.
+        for separator in ["\u{2028}", "\u{2029}", "\u{0c}", "\u{0b}", "\u{85}"] {
+            let doc = Document::from_text(&format!("a{separator}[[Alpha]]\nnext\n"), 1);
+            let start = 1 + separator.len() as u32;
+            let range = doc.link_to_range(&doc.links[0]);
+            assert_eq!(
+                (range.start, range.end),
+                (
+                    Position {
+                        line: 0,
+                        character: start
+                    },
+                    Position {
+                        line: 0,
+                        character: start + 9
+                    }
+                ),
+                "separator {separator:?}"
+            );
+            assert!(doc.link_at_position(range.start).is_some());
+            assert_eq!(doc.rope.len_lines(), 3, "separator {separator:?}");
+        }
+    }
+
+    #[test]
+    fn lf_crlf_and_lone_cr_each_end_a_line() {
+        for terminator in ["\n", "\r\n", "\r"] {
+            let doc = Document::from_text(&format!("a{terminator}[[Alpha]]"), 1);
+            let range = doc.link_to_range(&doc.links[0]);
+            assert_eq!(
+                (range.start, range.end),
+                (
+                    Position {
+                        line: 1,
+                        character: 0
+                    },
+                    Position {
+                        line: 1,
+                        character: 9
+                    }
+                ),
+                "terminator {terminator:?}"
+            );
+        }
+    }
 }
