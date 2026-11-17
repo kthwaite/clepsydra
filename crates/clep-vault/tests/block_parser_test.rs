@@ -268,3 +268,44 @@ fn heading_with_block_id() {
     assert_eq!(blocks[0].content, "My Title");
     assert_eq!(blocks[0].block_id.as_deref(), Some("abc123DEF0"));
 }
+
+#[test]
+fn inline_property_values_keep_their_punctuation() {
+    // Property values are data: quotes, dashes and dots stay as typed, not
+    // typographic replacements.
+    let blocks = parse_blocks("- t [k:: it's a--b...] [q:: \"x\"] [r:: a---b]\n");
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].content, "t");
+    let prop = |key: &str| blocks[0].properties.get(key).map(String::as_str);
+    assert_eq!(prop("k"), Some("it's a--b..."));
+    assert_eq!(prop("q"), Some("\"x\""));
+    assert_eq!(prop("r"), Some("a---b"));
+}
+
+#[test]
+fn block_content_keeps_its_punctuation() {
+    let content = |md: &str| parse_blocks(md)[0].content.clone();
+    assert_eq!(content("don't -- stop...\n"), "don't -- stop...");
+    assert_eq!(
+        content("- [ ] say \"hi\" to 'them'\n"),
+        "say \"hi\" to 'them'"
+    );
+    assert_eq!(content("# It's a heading\n"), "It's a heading");
+    assert_eq!(content("> quote's end...\n"), "quote's end...");
+    // A wikilink target in block text must stay resolvable.
+    assert_eq!(content("- see [[Bob's page]]\n"), "see [[Bob's page]]");
+}
+
+#[test]
+fn literal_punctuation_does_not_change_block_structure() {
+    let md = "- [x] it's done ^abc123DEF0\n  - \"child\" -- one\n\nPara...\n";
+    let blocks = parse_blocks(md);
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(blocks[0].checkbox, Some(CheckboxState::Done));
+    assert_eq!(blocks[0].block_id.as_deref(), Some("abc123DEF0"));
+    assert_eq!(blocks[0].content, "it's done");
+    assert_eq!(blocks[1].parent_index, Some(0));
+    assert_eq!(blocks[1].content, "\"child\" -- one");
+    assert_eq!(blocks[2].block_type, BlockType::Paragraph);
+    assert_eq!(blocks[2].content, "Para...");
+}

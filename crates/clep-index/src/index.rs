@@ -160,7 +160,7 @@ pub struct BuildStats {
 // ---------------------------------------------------------------------------
 
 const TAG_DERIVATION_VERSION: &str = "1";
-const BLOCK_DERIVATION_VERSION: &str = "2";
+const BLOCK_DERIVATION_VERSION: &str = "4";
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS pages (
