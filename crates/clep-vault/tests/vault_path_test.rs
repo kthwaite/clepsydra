@@ -124,6 +124,18 @@ fn from_title_replaces_illegal() {
 }
 
 #[test]
+fn from_title_without_legal_characters_is_untitled() {
+    // Nothing survives cleaning: the path must not be the hidden, stemless
+    // file `.md`. Same fallback as `slugify_title`.
+    for title in ["", "?", "::", "-", "\u{0}", "<>|"] {
+        let p = VaultPath::from_title(title);
+        assert_eq!(p.as_str(), "untitled.md", "title {title:?}");
+        assert_eq!(p.stem(), "untitled", "title {title:?}");
+        assert_eq!(p.decode_slug(), "untitled", "title {title:?}");
+    }
+}
+
+#[test]
 fn from_title_collapses_dashes() {
     let p = VaultPath::from_title("a:::b");
     assert_eq!(p.as_str(), "a-b.md");
