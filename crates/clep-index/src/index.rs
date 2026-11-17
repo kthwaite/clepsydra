@@ -3527,6 +3527,27 @@ mod tests {
     }
 
     #[test]
+    fn search_runs_every_bare_word_count_the_parser_accepts() {
+        // The parser accepts up to 64 positive text leaves. SQLite joins at
+        // most 64 tables, so the words must not cost one join each.
+        let index = search_index();
+
+        for count in [2, 62, 63, 64] {
+            let query = ["clep", "stray"]
+                .into_iter()
+                .cycle()
+                .take(count)
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert_paths(index.search(&query, 20).unwrap(), &["notes/stray.md"]);
+        }
+        let mixed = format!("{} \"stray\"", vec!["clep"; 63].join(" "));
+        assert_paths(index.search(&mixed, 20).unwrap(), &["notes/stray.md"]);
+        let none = format!("{} zzzmissing", vec!["clep"; 63].join(" "));
+        assert_paths(index.search(&none, 20).unwrap(), &[]);
+    }
+
+    #[test]
     fn search_supports_phrases_fields_and_exact_metadata_values() {
         let index = search_index();
 
