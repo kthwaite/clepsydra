@@ -60,7 +60,7 @@ fn collect_edits(
     wikilink_replacements: &[(&str, &str)],
     markdown_replacements: &[(&str, &str)],
 ) -> Vec<Edit> {
-    let raw_iter = Parser::new_ext(content, Options::empty()).into_offset_iter();
+    let raw_iter = Parser::new_ext(content, crate::link::link_scan_options()).into_offset_iter();
     let parser = TextMergeWithOffset::new(raw_iter);
     let mut in_code_block = false;
     let mut in_html_block = false;
@@ -103,10 +103,7 @@ fn collect_edits(
                 ..
             }) if !in_code_block && !in_html_block => {
                 let url = dest_url.as_ref();
-                // `[^1]: …` is a footnote in the vault dialect, not a link target.
-                if !id.starts_with('^')
-                    && let Some((old, new)) =
-                        markdown_replacements.iter().find(|(old, _)| *old == url)
+                if let Some((old, new)) = markdown_replacements.iter().find(|(old, _)| *old == url)
                 {
                     matched_references.push((id.to_string(), old, new));
                 }
@@ -177,7 +174,7 @@ fn collect_edits(
 /// once. A definition that no matching link uses is not touched.
 fn reference_definition_edits(content: &str, references: Vec<(String, &str, &str)>) -> Vec<Edit> {
     // Definitions produce no event; they are read from the parser's table.
-    let parser = Parser::new_ext(content, Options::empty());
+    let parser = Parser::new_ext(content, crate::link::link_scan_options());
     let definitions = parser.reference_definitions();
 
     let mut edits: Vec<Edit> = Vec::new();
