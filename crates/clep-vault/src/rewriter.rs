@@ -44,15 +44,51 @@ pub fn rewrite_links_in_content(
         return content.to_string();
     }
 
-    let edits = collect_edits(content, wikilink_replacements, markdown_replacements);
+    rewrite_links_with(content, |syntax, target| {
+        let replacements = match syntax {
+            LinkSyntax::Wiki => wikilink_replacements,
+            LinkSyntax::Markdown => markdown_replacements,
+        };
+        replacements
+            .iter()
+            .find(|(old, _)| *old == target)
+            .map(|(_, new)| (*new).to_string())
+    })
+}
+
+/// The syntax a link is written in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkSyntax {
+    /// `[[target]]` / `[[target|display]]`.
+    Wiki,
+    /// `[label](destination)`, or a reference-style link and its definition.
+    Markdown,
+}
+
+/// Rewrite links in Markdown `content`, asking `new_target` about every link.
+///
+/// `new_target` receives the link's syntax and its target exactly as written
+/// (the text before `|` of a wikilink, padding included; the parsed
+/// destination of a Markdown link) and returns the target to write instead,
+/// or `None` to leave the link as it is. The caller decides which links to
+/// rewrite, for example by what each target resolves to, rather than by
+/// comparing text.
+///
+/// Everything else is as for [`rewrite_links_in_content`]: only the target
+/// bytes change, delete sentinels apply to wikilinks, reference-style links
+/// are rewritten at their definition, and code and HTML are left untouched.
+pub fn rewrite_links_with(
+    content: &str,
+    new_target: impl Fn(LinkSyntax, &str) -> Option<String>,
+) -> String {
+    let edits = collect_edits(content, &new_target);
     apply_edits(content, edits)
 }
 
-/// Scan `content` for links matching any replacement and return edits.
+/// Scan `content` for links that `new_target` rewrites and return edits.
 fn collect_edits(
     content: &str,
-    wikilink_replacements: &[(&str, &str)],
-    markdown_replacements: &[(&str, &str)],
+    new_target: &dyn Fn(LinkSyntax, &str) -> Option<String>,
 ) -> Vec<Edit> {
     let raw_iter = Parser::new_ext(content, crate::link::link_scan_options()).into_offset_iter();
     let parser = TextMergeWithOffset::new(raw_iter);
@@ -60,10 +96,10 @@ fn collect_edits(
     let mut in_html_block = false;
     // Labels of reference-style links (`[x][r]`, `[r][]`, `[r]`) whose
     // destination matches a replacement, with that replacement.
-    let mut matched_references: Vec<(Range<usize>, String, &str, &str)> = Vec::new();
+    let mut matched_references: Vec<(Range<usize>, String, String, String)> = Vec::new();
     let mut wikilinks = WikilinkScan::default();
     let mut edits = Vec::new();
-    let mut pending_link: Option<PendingLink<'_>> = None;
+    let mut pending_link: Option<PendingLink> = None;
 
     for (event, range) in parser {
         match event {
@@ -80,15 +116,12 @@ fn collect_edits(
                 ..
             }) if !in_code_block && !in_html_block => {
                 let url = dest_url.as_ref();
-                pending_link = markdown_replacements
-                    .iter()
-                    .find(|(old, _)| *old == url)
-                    .map(|(old, new)| PendingLink {
-                        old_url: old,
-                        new_url: new,
-                        // Just past the opening `[`; label events push it on.
-                        label_end: range.start + 1,
-                    });
+                pending_link = new_target(LinkSyntax::Markdown, url).map(|new_url| PendingLink {
+                    old_url: url.to_string(),
+                    new_url,
+                    // Just past the opening `[`; label events push it on.
+                    label_end: range.start + 1,
+                });
             }
             // --- reference-style links: the destination is in the definition ---
             Event::Start(Tag::Link {
@@ -102,9 +135,8 @@ fn collect_edits(
                     wikilinks.label_brackets(&range);
                 }
                 let url = dest_url.as_ref();
-                if let Some((old, new)) = markdown_replacements.iter().find(|(old, _)| *old == url)
-                {
-                    matched_references.push((range, id.to_string(), old, new));
+                if let Some(new_url) = new_target(LinkSyntax::Markdown, url) {
+                    matched_references.push((range, id.to_string(), url.to_string(), new_url));
                 }
             }
             Event::End(TagEnd::Link) => {
@@ -112,8 +144,8 @@ fn collect_edits(
                     && let Some(edit) = rewrite_markdown_link(
                         content,
                         link.label_end..range.end,
-                        link.old_url,
-                        link.new_url,
+                        &link.old_url,
+                        &link.new_url,
                     )
                 {
                     edits.push(edit);
@@ -151,10 +183,10 @@ fn collect_edits(
             Some((t, d)) => (t, Some(d)),
             None => (inner, None),
         };
-        if let Some((_old, new)) = wikilink_replacements.iter().find(|(old, _)| *old == target) {
+        if let Some(new) = new_target(LinkSyntax::Wiki, target) {
             edits.push(Edit {
                 range: wikilink.span.clone(),
-                replacement: build_wikilink_replacement(new, target, display),
+                replacement: build_wikilink_replacement(&new, target, display),
             });
         }
     }
@@ -178,7 +210,7 @@ fn collect_edits(
 /// once. A definition that no matching link uses is not touched.
 fn reference_definition_edits(
     content: &str,
-    references: Vec<(Range<usize>, String, &str, &str)>,
+    references: Vec<(Range<usize>, String, String, String)>,
 ) -> Vec<Edit> {
     // Definitions produce no event; they are read from the parser's table.
     let parser = Parser::new_ext(content, crate::link::link_scan_options());
@@ -196,7 +228,7 @@ fn reference_definition_edits(
             continue;
         }
         if let Some(from) = definition_destination_start(content, def.span.clone())
-            && let Some(edit) = rewrite_destination(content, from..def.span.end, old_url, new_url)
+            && let Some(edit) = rewrite_destination(content, from..def.span.end, &old_url, &new_url)
         {
             edits.push(edit);
         }
@@ -227,9 +259,9 @@ fn build_wikilink_replacement(
 
 /// An inline Markdown link whose destination matches a replacement, open
 /// between its `Start` and `End` events.
-struct PendingLink<'a> {
-    old_url: &'a str,
-    new_url: &'a str,
+struct PendingLink {
+    old_url: String,
+    new_url: String,
     /// End of the last label event seen so far: the `](` that opens the
     /// destination is searched for from here, never inside the label.
     label_end: usize,
