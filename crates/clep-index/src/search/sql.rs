@@ -559,12 +559,30 @@ fn fts_expression(
     Ok(expression)
 }
 
+/// Characters that are not alphanumeric to Rust but that the index tokenizer
+/// (`unicode61`) keeps inside a token: the combining diacritics it strips
+/// (a subset of U+0300..=U+0331, the same set as SQLite's
+/// `sqlite3FtsUnicodeIsdiacritic`) and private-use characters.
+///
+/// Splitting a bare word on them would cut a decomposed `nai\u{308}ve` into
+/// `nai` and `ve`, while the index holds the single token `naive`.
+fn stays_inside_fts_token(character: char) -> bool {
+    const DIACRITICS_FROM_0300: u32 = 0x0802_9FDF;
+    const DIACRITICS_FROM_0320: u32 = 0x0003_61F8;
+    match u32::from(character) {
+        code @ 0x0300..=0x031F => DIACRITICS_FROM_0300 & (1 << (code - 0x0300)) != 0,
+        code @ 0x0320..=0x0331 => DIACRITICS_FROM_0320 & (1 << (code - 0x0320)) != 0,
+        0xE000..=0xF8FF | 0xF_0000..=0xF_FFFD | 0x10_0000..=0x10_FFFD => true,
+        _ => false,
+    }
+}
+
 fn prefix_fts_expression(value: &str) -> String {
     let mut expression = String::with_capacity(value.len().saturating_add(3));
 
     for term in value
-        .split(|character: char| !character.is_alphanumeric())
-        .filter(|term| !term.is_empty())
+        .split(|character: char| !character.is_alphanumeric() && !stays_inside_fts_token(character))
+        .filter(|term| term.chars().any(char::is_alphanumeric))
     {
         if !expression.is_empty() {
             expression.push_str(" AND ");
@@ -609,6 +627,65 @@ mod tests {
             )
             .unwrap(),
             r#""say ""hi"" OR *""#
+        );
+    }
+
+    /// How many tokens the index tokenizer makes of `text`.
+    fn fts_token_count(connection: &Connection, text: &str) -> i64 {
+        connection
+            .execute("INSERT INTO probe(text) VALUES (?1)", [text])
+            .unwrap();
+        let count = connection
+            .query_row("SELECT COUNT(*) FROM probe_vocab", [], |row| row.get(0))
+            .unwrap();
+        connection
+            .execute("INSERT INTO probe(probe) VALUES ('delete-all')", [])
+            .unwrap();
+        count
+    }
+
+    #[test]
+    fn prefix_split_keeps_the_characters_the_tokenizer_keeps_inside_a_token() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE VIRTUAL TABLE probe USING fts5(
+                     text, content='', tokenize='porter unicode61'
+                 );
+                 CREATE VIRTUAL TABLE probe_vocab USING fts5vocab(probe, 'row');",
+            )
+            .unwrap();
+
+        let candidates = (0x0300..=0x036F)
+            .chain([0xE000, 0xE001, 0xF8FF, 0xF0000, 0xFFFFD, 0x100000, 0x10FFFD])
+            .chain([
+                0x002D, 0x0027, 0x00AD, 0x200D, 0x05B0, 0x0483, 0x20D0, 0xFE0F,
+            ])
+            .filter_map(char::from_u32)
+            .filter(|character| !character.is_alphanumeric());
+        for character in candidates {
+            let word = format!("qa{character}zu");
+            let one_token = fts_token_count(&connection, &word) == 1;
+            let one_term = prefix_fts_expression(&word) == format!("\"{word}\"*");
+            assert_eq!(
+                one_term,
+                one_token,
+                "U+{:04X}: tokenizer keeps it in the token: {one_token}",
+                u32::from(character)
+            );
+        }
+    }
+
+    #[test]
+    fn decomposed_word_compiles_to_one_prefix_term() {
+        assert_eq!(
+            fts_expression("nai\u{308}ve", "nai\u{308}ve", TextMode::Prefix, span(7)).unwrap(),
+            "\"nai\u{308}ve\"*"
+        );
+        // A mark the tokenizer does not keep still separates, as in the index.
+        assert_eq!(
+            fts_expression("nai\u{332}ve", "nai\u{332}ve", TextMode::Prefix, span(7)).unwrap(),
+            "\"nai\"* AND \"ve\"*"
         );
     }
 
