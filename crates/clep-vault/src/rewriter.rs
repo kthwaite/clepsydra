@@ -37,6 +37,9 @@ struct Edit {
 /// - `\x00PLAIN:text` replaces `[[target]]` with `text` (plain text, no syntax)
 /// - `\x00UNLINK:text` replaces `[[target]]` with `~~text~~` (strikethrough)
 ///
+/// A reference-style link (`[x][r]` with `[r]: target`) is rewritten at its
+/// definition; the usages stay as written.
+///
 /// Links inside code blocks, inline code, and HTML blocks are left untouched.
 pub fn rewrite_links_in_content(
     content: &str,
@@ -59,10 +62,12 @@ fn collect_edits(
 ) -> Vec<Edit> {
     let raw_iter = Parser::new_ext(content, Options::empty()).into_offset_iter();
     let parser = TextMergeWithOffset::new(raw_iter);
-
-    let mut edits = Vec::new();
     let mut in_code_block = false;
     let mut in_html_block = false;
+    // Labels of reference-style links (`[x][r]`, `[r][]`, `[r]`) whose
+    // destination matches a replacement, with that replacement.
+    let mut matched_references: Vec<(String, &str, &str)> = Vec::new();
+    let mut edits = Vec::new();
     let mut pending_link: Option<PendingLink<'_>> = None;
 
     for (event, range) in parser {
@@ -89,6 +94,22 @@ fn collect_edits(
                         // Just past the opening `[`; label events push it on.
                         label_end: range.start + 1,
                     });
+            }
+            // --- reference-style links: the destination is in the definition ---
+            Event::Start(Tag::Link {
+                link_type: LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut,
+                dest_url,
+                id,
+                ..
+            }) if !in_code_block && !in_html_block => {
+                let url = dest_url.as_ref();
+                // `[^1]: …` is a footnote in the vault dialect, not a link target.
+                if !id.starts_with('^')
+                    && let Some((old, new)) =
+                        markdown_replacements.iter().find(|(old, _)| *old == url)
+                {
+                    matched_references.push((id.to_string(), old, new));
+                }
             }
             Event::End(TagEnd::Link) => {
                 if let Some(link) = pending_link.take()
@@ -144,6 +165,38 @@ fn collect_edits(
         }
     }
 
+    if !matched_references.is_empty() {
+        edits.extend(reference_definition_edits(content, matched_references));
+    }
+
+    edits
+}
+
+/// Edits for the link reference definitions behind the reference-style links
+/// in `references` (`(label, old_url, new_url)`); each definition is edited
+/// once. A definition that no matching link uses is not touched.
+fn reference_definition_edits(content: &str, references: Vec<(String, &str, &str)>) -> Vec<Edit> {
+    // Definitions produce no event; they are read from the parser's table.
+    let parser = Parser::new_ext(content, Options::empty());
+    let definitions = parser.reference_definitions();
+
+    let mut edits: Vec<Edit> = Vec::new();
+    for (label, old_url, new_url) in references {
+        let Some(def) = definitions.get(&label) else {
+            continue;
+        };
+        if edits
+            .iter()
+            .any(|edit| def.span.contains(&edit.range.start))
+        {
+            continue;
+        }
+        if let Some(from) = definition_destination_start(content, def.span.clone())
+            && let Some(edit) = rewrite_destination(content, from..def.span.end, old_url, new_url)
+        {
+            edits.push(edit);
+        }
+    }
     edits
 }
 
@@ -189,12 +242,39 @@ fn rewrite_markdown_link(
     old_url: &str,
     new_url: &str,
 ) -> Option<Edit> {
+    let open = tail.start + content[tail.clone()].find("](")? + 2;
+    rewrite_destination(content, open..tail.end, old_url, new_url)
+}
+
+/// Offset just past the `[label]:` that opens the link reference definition
+/// at `span`.
+fn definition_destination_start(content: &str, span: Range<usize>) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut i = span.start + content[span.clone()].find('[')? + 1;
+    while i < span.end {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b']' => break,
+            _ => i += 1,
+        }
+    }
+    (bytes.get(i + 1) == Some(&b':') && i + 2 <= span.end).then_some(i + 2)
+}
+
+/// Replace the link destination that starts at or after `within.start`
+/// (leading whitespace is skipped) if it reads back as `old_url`.
+fn rewrite_destination(
+    content: &str,
+    within: Range<usize>,
+    old_url: &str,
+    new_url: &str,
+) -> Option<Edit> {
     // Delete sentinels are wikilink-only: never write one into a destination.
-    if new_url.starts_with('\x00') {
+    // An empty destination cannot be written in a reference definition.
+    if new_url.starts_with('\x00') || new_url.is_empty() {
         return None;
     }
-    let open = tail.start + content[tail.clone()].find("](")? + 2;
-    let (range, angle) = locate_destination(content, open, tail.end)?;
+    let (range, angle) = locate_destination(content, within.start, within.end)?;
     let found = &content[range.clone()];
     let found_reads_as_old = if angle {
         destination_parses_to(&format!("<{found}>"), old_url)
