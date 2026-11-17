@@ -1,7 +1,7 @@
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 use tower_lsp::lsp_types::*;
 
-use clep_vault::markdown::markdown_options;
+use clep_vault::markdown::{markdown_options, panic_safe_options};
 
 /// A parsed heading with its level and byte span in the body.
 #[derive(Debug)]
@@ -14,7 +14,7 @@ struct Heading {
 
 /// Extract headings from a markdown body.
 fn extract_headings(body: &str) -> Vec<Heading> {
-    let parser = Parser::new_ext(body, markdown_options());
+    let parser = Parser::new_ext(body, panic_safe_options(body, markdown_options()));
     let mut headings = Vec::new();
     let mut in_heading = false;
     let mut current_level: u8 = 0;

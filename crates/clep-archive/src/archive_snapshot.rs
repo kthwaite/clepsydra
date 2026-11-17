@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 use url::Url;
 
-use clep_vault::markdown::markdown_options;
+use clep_vault::markdown::{markdown_options, panic_safe_options};
 
 use crate::cas::ContentStore;
 
@@ -849,7 +849,10 @@ pub fn rewrite_markdown_images(
     base_url: &str,
 ) -> String {
     let mut candidates = Vec::new();
-    for (event, source) in Parser::new_ext(markdown, markdown_options()).into_offset_iter() {
+    for (event, source) in
+        Parser::new_ext(markdown, panic_safe_options(markdown, markdown_options()))
+            .into_offset_iter()
+    {
         let Event::Start(Tag::Image { dest_url, .. }) = event else {
             continue;
         };

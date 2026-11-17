@@ -47,7 +47,10 @@ pub(super) fn render(
 ) -> Result<String, String> {
     // Wiki parsing is enabled only at this presentation boundary: destinations are
     // never exported. Code spans/blocks remain literal parser events.
-    let options = clep_vault::markdown::markdown_options() | Options::ENABLE_WIKILINKS;
+    let options = clep_vault::markdown::panic_safe_options(
+        markdown,
+        clep_vault::markdown::markdown_options() | Options::ENABLE_WIKILINKS,
+    );
     let events = presentable(Parser::new_ext(markdown, options), &mut load_image)?;
     let mut body = String::with_capacity(markdown.len() * 2);
     pulldown_cmark::html::push_html(&mut body, events.into_iter());

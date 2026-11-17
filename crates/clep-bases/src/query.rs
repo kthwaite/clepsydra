@@ -21,7 +21,7 @@ use crate::base::{
 };
 use clep_vault::canonical::CanonicalName;
 use clep_vault::link::normalize_links_to_target;
-use clep_vault::markdown::markdown_options;
+use clep_vault::markdown::{markdown_options, panic_safe_options};
 use clep_vault::page::Page;
 use clep_vault::toml_json::toml_value_to_json;
 
@@ -1730,7 +1730,7 @@ pub fn body_excerpt(markdown: &str) -> String {
     let mut excerpt = String::with_capacity(BODY_EXCERPT_MAX_CHARS);
     let mut scalar_count = 0;
     let mut pending_space = false;
-    for event in Parser::new_ext(markdown, markdown_options()) {
+    for event in Parser::new_ext(markdown, panic_safe_options(markdown, markdown_options())) {
         let full = match event {
             Event::Text(text)
             | Event::Code(text)

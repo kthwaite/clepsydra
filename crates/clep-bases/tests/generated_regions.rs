@@ -88,3 +88,11 @@ fn unsupported_descriptor_fields_remain_repair_only() {
     );
     assert!(parse_regions(&source).is_err());
 }
+
+#[test]
+fn parse_regions_survives_setext_inputs_that_panic_the_markdown_parser() {
+    // pulldown-cmark 0.13.6 panics on these with heading attributes enabled
+    // (see clep_vault::markdown::panic_safe_options).
+    assert_eq!(parse_regions("- [ ] \\\n  ---").unwrap().len(), 0);
+    assert_eq!(parse_regions(">]\n>  {}\n>-").unwrap().len(), 0);
+}
