@@ -304,3 +304,29 @@ fn wikilink_delimiters_must_be_live_text_on_one_line() {
     assert_eq!(link_shapes("[[a\nb]]"), vec![]);
     assert_eq!(link_shapes("[[a\n\nb]]"), vec![]);
 }
+
+// ---------------------------------------------------------------------------
+// Reference links: the span is the whole link
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reference_link_span_covers_the_whole_link() {
+    // Collapsed form: the trailing `[]` belongs to the link.
+    assert_eq!(
+        link_shapes("[r1][]\n\n[r1]: alpha.md"),
+        vec![("alpha.md".to_string(), 0..6, LinkKind::Markdown)]
+    );
+    assert_eq!(
+        link_shapes("see [*r1*][] now\n\n[*r1*]: alpha.md"),
+        vec![("alpha.md".to_string(), 4..12, LinkKind::Markdown)]
+    );
+    // Full and shortcut forms.
+    assert_eq!(
+        link_shapes("[x][r1]\n\n[r1]: alpha.md"),
+        vec![("alpha.md".to_string(), 0..7, LinkKind::Markdown)]
+    );
+    assert_eq!(
+        link_shapes("[r1] []\n\n[r1]: alpha.md"),
+        vec![("alpha.md".to_string(), 0..4, LinkKind::Markdown)]
+    );
+}
