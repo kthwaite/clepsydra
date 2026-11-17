@@ -504,12 +504,43 @@ fn parse_or_repair_frontmatter_inner(content: &str) -> (PageMeta, String, bool, 
 }
 
 /// Render a chrono timestamp as a native TOML offset date-time.
+///
+/// TOML years are `0000..=9999`. A date-time read with an offset can fall
+/// outside that range once converted to UTC (`9999-12-31T23:59:59-01:00`).
+/// Such an instant is written with the smallest whole-hour offset that brings
+/// its year back in range, so it reads back as the same instant. An instant no
+/// offset can bring in range (never produced by reading a page) is clamped to
+/// the nearest TOML date-time.
 fn chrono_to_toml_datetime(dt: &DateTime<Utc>) -> toml::Value {
-    let text = dt.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
-    let parsed = text
-        .parse::<toml::value::Datetime>()
-        .expect("RFC 3339 UTC timestamp is always a valid TOML date-time");
-    toml::Value::Datetime(parsed)
+    use chrono::{Datelike, FixedOffset, SecondsFormat};
+
+    let utc = dt.to_rfc3339_opts(SecondsFormat::AutoSi, true);
+    if let Ok(parsed) = utc.parse::<toml::value::Datetime>() {
+        return toml::Value::Datetime(parsed);
+    }
+
+    let after_range = dt.year() > 9999;
+    let in_range = (1..=23).find_map(|hours| {
+        let offset = if after_range {
+            FixedOffset::west_opt(hours * 3600)?
+        } else {
+            FixedOffset::east_opt(hours * 3600)?
+        };
+        dt.with_timezone(&offset)
+            .to_rfc3339_opts(SecondsFormat::AutoSi, false)
+            .parse::<toml::value::Datetime>()
+            .ok()
+    });
+    let clamped = if after_range {
+        "9999-12-31T23:59:59Z"
+    } else {
+        "0000-01-01T00:00:00Z"
+    };
+    toml::Value::Datetime(in_range.unwrap_or_else(|| {
+        clamped
+            .parse()
+            .expect("the TOML range bounds are valid TOML date-times")
+    }))
 }
 
 /// Serialize a [`PageMeta`] and body into a complete markdown document with
@@ -803,6 +834,49 @@ Body begins here.
         assert!(rewrote);
         assert!(warning.is_none());
         assert!(!meta.id.is_nil());
+    }
+
+    #[test]
+    fn timestamp_past_year_9999_in_utc_is_written_back_in_range() {
+        // 9999-12-31T23:59:59-01:00 is 00:59:59 on 1 January 10000 in UTC,
+        // a year TOML cannot spell.
+        let content = "+++\nid = \"01900000-0000-7000-8000-000000000001\"\ncreated_at = 9999-12-31T23:59:59-01:00\nupdated_at = 9999-12-31T20:30:00.5-05:00\n+++\nBody\n";
+        let (meta, body) = parse_frontmatter(content).unwrap();
+
+        let written = write_page_content(&meta, &body);
+        assert!(written.contains("created_at = 9999-12-31T23:59:59-01:00\n"));
+        assert!(written.contains("updated_at = 9999-12-31T23:30:00.5-02:00\n"));
+
+        let (reread, body) = parse_frontmatter(&written).unwrap();
+        assert_eq!(reread.created_at, meta.created_at);
+        assert_eq!(reread.updated_at, meta.updated_at);
+        assert_eq!(body, "Body\n");
+    }
+
+    #[test]
+    fn timestamp_before_year_0000_in_utc_is_written_back_in_range() {
+        // Missing id: the repair path asks for exactly this full write.
+        let content = "+++\nupdated_at = 0000-01-01T00:00:00+01:00\n+++\nBody\n";
+        let (meta, body, rewrote, warning) = parse_or_repair_frontmatter(content);
+        assert!(rewrote);
+        assert!(warning.is_none());
+
+        let written = write_page_content(&meta, &body);
+        assert!(written.contains("updated_at = 0000-01-01T00:00:00+01:00\n"));
+        let (reread, _) = parse_frontmatter(&written).unwrap();
+        assert_eq!(reread.updated_at, meta.updated_at);
+    }
+
+    #[test]
+    fn timestamp_no_offset_can_bring_in_range_is_clamped_not_a_panic() {
+        let mut meta = PageMeta::new();
+        meta.created_at = Some(Utc.with_ymd_and_hms(10000, 1, 2, 0, 0, 0).unwrap());
+        meta.updated_at = Some(Utc.with_ymd_and_hms(-1, 12, 30, 0, 0, 0).unwrap());
+
+        let written = write_page_content(&meta, "Body\n");
+        assert!(written.contains("created_at = 9999-12-31T23:59:59Z\n"));
+        assert!(written.contains("updated_at = 0000-01-01T00:00:00Z\n"));
+        parse_frontmatter(&written).unwrap();
     }
 
     #[test]
