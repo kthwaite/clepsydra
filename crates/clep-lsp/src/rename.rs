@@ -123,17 +123,38 @@ pub fn compute_new_vault_path(old_vp: &VaultPath, new_name: &str) -> Option<Vaul
 ///
 /// Used as the replacement range for the frontmatter-title edit so that
 /// the entire document is replaced in one `TextEdit`.
+///
+/// The end is the position just past the last byte, counted the way an LSP
+/// client counts: a line ends at `\n`, `\r\n` or a lone `\r`, and a text
+/// that ends with a terminator ends at column 0 of the line after it. The
+/// character is in UTF-8 bytes.
 pub fn full_document_range(text: &str) -> Range {
-    let line_count = text.lines().count();
-    let last_line = text.lines().last().unwrap_or("");
+    let bytes = text.as_bytes();
+    let mut line = 0u32;
+    let mut last_line_start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let terminator_len = match bytes[i] {
+            b'\r' if bytes.get(i + 1) == Some(&b'\n') => 2,
+            b'\r' | b'\n' => 1,
+            _ => 0,
+        };
+        if terminator_len == 0 {
+            i += 1;
+        } else {
+            i += terminator_len;
+            line += 1;
+            last_line_start = i;
+        }
+    }
     Range {
         start: Position {
             line: 0,
             character: 0,
         },
         end: Position {
-            line: line_count.saturating_sub(1) as u32,
-            character: last_line.len() as u32,
+            line,
+            character: (bytes.len() - last_line_start) as u32,
         },
     }
 }
@@ -397,14 +418,47 @@ mod tests {
         assert_eq!(r.end.character, 5); // "third" is 5 chars
     }
 
-    #[test]
-    fn full_document_range_trailing_newline() {
-        // str::lines() strips the trailing newline: "line one\n" yields a
-        // single line "line one" (count = 1, last = "line one", 8 chars).
-        let text = "line one\n";
+    /// The end position of the full-document range, as `(line, character)`.
+    fn full_end(text: &str) -> (u32, u32) {
         let r = full_document_range(text);
-        assert_eq!(r.end.line, 0);
-        assert_eq!(r.end.character, 8);
+        assert_eq!((r.start.line, r.start.character), (0, 0));
+        (r.end.line, r.end.character)
+    }
+
+    #[test]
+    fn full_document_range_covers_the_trailing_newline() {
+        // The text ends with a line terminator, so the document ends at the
+        // start of the (empty) line after it. Ending at (0, 8) would leave
+        // the final newline outside the edit and a rename would append a
+        // blank line.
+        assert_eq!(full_end("line one\n"), (1, 0));
+        assert_eq!(full_end("a\nb\n"), (2, 0));
+        assert_eq!(full_end("a\n\n"), (2, 0));
+        assert_eq!(full_end("\n"), (1, 0));
+    }
+
+    #[test]
+    fn full_document_range_counts_crlf_as_one_terminator() {
+        assert_eq!(full_end("a\r\nbc"), (1, 2));
+        assert_eq!(full_end("a\r\nb\r\n"), (2, 0));
+    }
+
+    #[test]
+    fn full_document_range_counts_lone_cr_as_a_terminator() {
+        assert_eq!(full_end("a\rb"), (1, 1));
+        assert_eq!(full_end("a\r"), (1, 0));
+        assert_eq!(full_end("a\r\rb\n"), (3, 0));
+        assert_eq!(full_end("a\n\rb"), (2, 1));
+    }
+
+    #[test]
+    fn full_document_range_of_empty_text_is_empty() {
+        assert_eq!(full_end(""), (0, 0));
+    }
+
+    #[test]
+    fn full_document_range_last_line_is_in_utf8_bytes() {
+        assert_eq!(full_end("a\nZoë"), (1, 4));
     }
 
     // ──────────────────────────────────────────────
