@@ -12,6 +12,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
+use crate::vault::block::{CheckboxState, parse_blocks};
 use crate::vault::index::find_body_start;
 use crate::vault::mutation_coordinator::ReplacePageContentCommand;
 use crate::vault::page::parse_frontmatter;
@@ -488,29 +489,44 @@ pub async fn list_tasks(
 // PUT /tasks/status — update_task_status
 // ---------------------------------------------------------------------------
 
-/// Byte offset of the checkbox marker relative to `span_start`.
+/// Byte offset, relative to `span_start`, of the checkbox marker of the task
+/// list item that starts at `span_start`, with the state the marker holds.
 ///
-/// `span_start` points at the beginning of the list item, which looks like
-/// `- [ ] ...`, `- [x] ...` or `- [-] ...`, so the marker sits within the first
-/// few characters. `span_start` must be a character boundary in `body_text`.
-///
-/// The search window is capped in bytes but trimmed back to a character
-/// boundary: task text is arbitrary Markdown, and a multi-byte character
-/// straddling the cap would otherwise panic the slice.
-fn find_checkbox_offset(body_text: &str, span_start: usize) -> Option<usize> {
-    const SEARCH_WINDOW_BYTES: usize = 20;
-
-    let mut region_end = body_text.len().min(span_start + SEARCH_WINDOW_BYTES);
-    while !body_text.is_char_boundary(region_end) {
-        region_end -= 1;
+/// The marker sits at a fixed place in the item's first line: the list marker
+/// (`-`, `*`, `+`, or up to nine digits and `.` or `)`), then spaces or tabs,
+/// then `[ ]`, `[x]`, `[X]` or `[-]`. Nothing else is searched, so marker-like
+/// text further along the line, in a child item or in the next item is never
+/// taken for this item's checkbox. `span_start` must be a character boundary.
+fn task_marker_at(body_text: &str, span_start: usize) -> Option<(usize, CheckboxState)> {
+    let bytes = body_text.as_bytes().get(span_start..)?;
+    let list_marker_len = match bytes.first()? {
+        b'-' | b'*' | b'+' => 1,
+        _ => {
+            let digits = bytes
+                .iter()
+                .take_while(|byte| byte.is_ascii_digit())
+                .count();
+            if !(1..=9).contains(&digits) || !matches!(bytes.get(digits)?, b'.' | b')') {
+                return None;
+            }
+            digits + 1
+        }
+    };
+    let gap = bytes[list_marker_len..]
+        .iter()
+        .take_while(|byte| matches!(byte, b' ' | b'\t'))
+        .count();
+    if gap == 0 {
+        return None;
     }
-    let search_region = &body_text[span_start..region_end];
-
-    search_region
-        .find("[ ]")
-        .or_else(|| search_region.find("[x]"))
-        .or_else(|| search_region.find("[X]"))
-        .or_else(|| search_region.find("[-]"))
+    let offset = list_marker_len + gap;
+    let state = match bytes.get(offset..offset + 3)? {
+        b"[ ]" => CheckboxState::Todo,
+        b"[x]" | b"[X]" => CheckboxState::Done,
+        b"[-]" => CheckboxState::Cancelled,
+        _ => return None,
+    };
+    Some((offset, state))
 }
 
 #[utoipa::path(
@@ -579,9 +595,24 @@ pub async fn update_task_status(
         )));
     }
 
-    let checkbox_offset = find_checkbox_offset(body_text, span_start).ok_or_else(|| {
-        ApiError::bad_request(format!("no checkbox found near span_start {span_start}"))
-    })?;
+    // The offset must be the start of a task in the file as it is now: the
+    // parser says a task list item starts there, and the marker read at the
+    // item's marker position agrees with it. Anything else (a stale offset, a
+    // paragraph, a line inside a code block) is refused before any write.
+    let stale = || {
+        ApiError::conflict(format!(
+            "Task target is stale: no task starts at path={}, span_start={span_start}",
+            body.page_path
+        ))
+    };
+    let task_state = parse_blocks(body_text)
+        .into_iter()
+        .find(|block| block.span.start == span_start && block.checkbox.is_some())
+        .and_then(|block| block.checkbox)
+        .ok_or_else(stale)?;
+    let (checkbox_offset, _) = task_marker_at(body_text, span_start)
+        .filter(|(_, marker_state)| *marker_state == task_state)
+        .ok_or_else(stale)?;
 
     let replacement = match new_status {
         "done" => "[x]",
@@ -702,69 +733,73 @@ pub async fn update_task_status(
 
 #[cfg(test)]
 mod tests {
-    use super::find_checkbox_offset;
+    use super::task_marker_at;
+    use crate::vault::block::CheckboxState;
 
     #[test]
-    fn finds_each_checkbox_marker() {
+    fn reads_each_checkbox_marker_after_each_list_marker() {
         for (body, expected) in [
-            ("- [ ] todo", 2),
-            ("- [x] done", 2),
-            ("- [X] done", 2),
-            ("- [-] cancelled", 2),
-            ("  - [ ] indented", 4),
+            ("- [ ] todo", (2, CheckboxState::Todo)),
+            ("- [x] done", (2, CheckboxState::Done)),
+            ("- [X] done", (2, CheckboxState::Done)),
+            ("- [-] cancelled", (2, CheckboxState::Cancelled)),
+            ("* [ ] star", (2, CheckboxState::Todo)),
+            ("+ [ ] plus", (2, CheckboxState::Todo)),
+            ("1. [ ] ordered", (3, CheckboxState::Todo)),
+            ("123456789) [x] ordered", (11, CheckboxState::Done)),
+            ("-   [ ] wide gap", (4, CheckboxState::Todo)),
+            ("-\t[ ] tab gap", (2, CheckboxState::Todo)),
+            ("- [ ]", (2, CheckboxState::Todo)),
         ] {
-            assert_eq!(
-                find_checkbox_offset(body, 0),
-                Some(expected),
-                "body: {body}"
-            );
+            assert_eq!(task_marker_at(body, 0), Some(expected), "body: {body}");
         }
     }
 
     #[test]
-    fn finds_checkbox_at_a_nonzero_span_start() {
+    fn reads_the_marker_at_a_nonzero_span_start() {
         let body = "intro\n\n- [ ] todo\n";
         let span_start = body.find("- [ ]").unwrap();
-        assert_eq!(find_checkbox_offset(body, span_start), Some(2));
+        assert_eq!(
+            task_marker_at(body, span_start),
+            Some((2, CheckboxState::Todo))
+        );
     }
 
     #[test]
-    fn reports_no_checkbox_when_the_window_holds_none() {
-        assert_eq!(find_checkbox_offset("- plain list item", 0), None);
-        assert_eq!(find_checkbox_offset("", 0), None);
-    }
-
-    #[test]
-    fn window_end_never_splits_a_character() {
-        // Regression: the window was sliced at `span_start + 20` bytes. Here a
-        // four-byte character occupies bytes 18..22, so that cap lands inside
-        // it and the slice used to panic.
-        let body = "- [ ] abcdefghijkl\u{1F570} wind the clepsydra";
-        assert!(!body.is_char_boundary(20));
-        assert_eq!(find_checkbox_offset(body, 0), Some(2));
-    }
-
-    #[test]
-    fn window_end_never_splits_a_character_at_any_offset() {
-        // Sweep multi-byte fillers so the cap lands on every possible
-        // continuation-byte position within the window.
-        for filler in ["\u{00e9}", "\u{2192}", "\u{1F570}"] {
-            for pad in 0..12usize {
-                let body = format!("{}- [ ] {}", filler.repeat(pad), filler.repeat(12));
-                let span_start = body.find("- [ ]").unwrap();
-                assert_eq!(
-                    find_checkbox_offset(&body, span_start),
-                    Some(2),
-                    "filler={filler:?} pad={pad}"
-                );
-            }
+    fn reads_only_the_marker_position_of_the_item() {
+        for body in [
+            "- plain list item",
+            "- plain\n- [ ] next item",
+            "- see [ ] later in the line",
+            "- `[x]` in a code span",
+            "intro\n\n- [ ] task",
+            "  - [ ] offset is before the indent",
+            "-[ ] no gap",
+            "- [y] unknown state",
+            "1234567890. [ ] too many digits",
+            "1 [ ] no delimiter",
+            "- [ ",
+            "-",
+            "",
+        ] {
+            assert_eq!(task_marker_at(body, 0), None, "body: {body}");
         }
+        assert_eq!(task_marker_at("- [ ]", 5), None);
+        assert_eq!(task_marker_at("- [ ]", 6), None);
     }
 
     #[test]
-    fn window_shorter_than_the_cap_is_handled() {
-        let body = "- [ ]";
-        assert_eq!(find_checkbox_offset(body, 0), Some(2));
-        assert_eq!(find_checkbox_offset(body, body.len()), None);
+    fn multibyte_text_near_the_marker_is_never_sliced() {
+        for filler in ["\u{00e9}", "\u{2192}", "\u{1F570}"] {
+            let body = format!("{filler}\n- [ ] {filler}");
+            let span_start = body.find("- [ ]").unwrap();
+            assert_eq!(
+                task_marker_at(&body, span_start),
+                Some((2, CheckboxState::Todo)),
+                "filler={filler:?}"
+            );
+            assert_eq!(task_marker_at(&format!("- {filler}"), 0), None);
+            assert_eq!(task_marker_at(&format!("-{filler}"), 0), None);
+        }
     }
 }
