@@ -80,7 +80,8 @@ impl Document {
     /// Convert an LSP [`Position`] to a byte offset within the *body*.
     ///
     /// Returns `None` if the position falls within the frontmatter
-    /// (i.e. before `body_byte_offset`).
+    /// (i.e. before `body_byte_offset`). A character past the end of its
+    /// line is clamped to the end of that line.
     pub fn position_to_body_byte_offset(&self, pos: Position) -> Option<usize> {
         if self.encrypted {
             return None;
@@ -91,13 +92,26 @@ impl Document {
         }
 
         let line_start_byte = self.rope.line_to_byte(line);
-        let abs = line_start_byte + pos.character as usize;
+        // A character past the end of the line means the end of the line
+        // (LSP `Position`), not a place in the lines that follow.
+        let character = (pos.character as usize).min(self.line_content_len(line));
+        let abs = line_start_byte + character;
 
         if abs < self.body_byte_offset {
             return None;
         }
 
         Some(abs - self.body_byte_offset)
+    }
+
+    /// Byte length of `line` without its line terminator.
+    fn line_content_len(&self, line: usize) -> usize {
+        let slice = self.rope.line(line);
+        let mut end = slice.len_chars();
+        while end > 0 && matches!(slice.char(end - 1), '\n' | '\r') {
+            end -= 1;
+        }
+        slice.char_to_byte(end)
     }
 
     /// Find the link whose span contains the given position.
@@ -171,5 +185,70 @@ mod tests {
                 character: 3
             }
         );
+    }
+
+    #[test]
+    fn character_past_the_line_end_clamps_to_the_line_end() {
+        // LSP 3.17 `Position`: "If the character value is greater than the
+        // line length it defaults back to the line length."
+        let doc = Document::from_text("x\nalpha [[Beta]] tail\n", 1);
+        let past_end = Position {
+            line: 0,
+            character: 9,
+        };
+        // Unclamped, byte 9 is inside the link on line 1.
+        assert!(doc.link_at_position(past_end).is_none());
+        assert_eq!(doc.position_to_body_byte_offset(past_end), Some(1));
+    }
+
+    #[test]
+    fn clamped_position_stops_before_the_line_terminator() {
+        for (text, line_end) in [("ab\r\ncd", 2), ("ab\rcd", 2), ("ab\ncd", 2)] {
+            let doc = Document::from_text(text, 1);
+            let past_end = Position {
+                line: 0,
+                character: 40,
+            };
+            assert_eq!(
+                doc.position_to_body_byte_offset(past_end),
+                Some(line_end),
+                "text {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn character_past_the_end_of_the_last_line_is_the_document_end() {
+        let doc = Document::from_text("ab\ncd", 1);
+        let past_end = Position {
+            line: 1,
+            character: 40,
+        };
+        assert_eq!(doc.position_to_body_byte_offset(past_end), Some(5));
+        // A link that ends the document is not under a cursor past its end.
+        let doc = Document::from_text("[[Alpha]]", 1);
+        assert!(doc.link_at_position(past_end).is_none());
+        assert!(
+            doc.link_at_position(Position {
+                line: 0,
+                character: 40
+            })
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn character_within_the_line_is_unchanged() {
+        let doc = Document::from_text("---\ntitle: T\n---\nab [[Alpha]]\n", 1);
+        let at = |character| Position { line: 3, character };
+        assert_eq!(doc.position_to_body_byte_offset(at(0)), Some(0));
+        assert_eq!(doc.position_to_body_byte_offset(at(12)), Some(12));
+        assert!(doc.link_at_position(at(11)).is_some());
+        // Frontmatter positions stay outside the body, clamped or not.
+        let in_frontmatter = Position {
+            line: 1,
+            character: 40,
+        };
+        assert_eq!(doc.position_to_body_byte_offset(in_frontmatter), None);
     }
 }
