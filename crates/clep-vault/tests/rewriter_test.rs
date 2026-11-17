@@ -289,3 +289,50 @@ fn rewrite_leaves_footnote_text_alone() {
         content
     );
 }
+
+// ---------------------------------------------------------------------------
+// Wikilinks are recognised from the source, not from single text runs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rewrite_wikilink_whose_target_has_inline_markup() {
+    assert_eq!(
+        rewrite_links_in_content("[[__init__]]", &[("__init__", "setup")], &[]),
+        "[[setup]]"
+    );
+    assert_eq!(
+        rewrite_links_in_content("see [[a*b*c|the *label*]] now", &[("a*b*c", "abc")], &[]),
+        "see [[abc|the *label*]] now"
+    );
+}
+
+#[test]
+fn rewrite_wikilink_that_a_reference_definition_would_hijack() {
+    // The definition is for another page; the wikilink is what moves.
+    assert_eq!(
+        rewrite_links_in_content(
+            "[Alpha]: other.md\n\n[[Alpha]]",
+            &[("Alpha", "Beta")],
+            &[("other.md", "moved.md")]
+        ),
+        "[Alpha]: other.md\n\n[[Beta]]"
+    );
+    // A real shortcut reference next to it still rewrites the definition.
+    assert_eq!(
+        rewrite_links_in_content(
+            "[Alpha]: other.md\n\n[[Alpha]] [Alpha]",
+            &[],
+            &[("other.md", "moved.md")]
+        ),
+        "[Alpha]: moved.md\n\n[[Alpha]] [Alpha]"
+    );
+}
+
+#[test]
+fn rewrite_skips_wikilink_syntax_in_code_spans() {
+    let content = "`a [[Alpha` c]] and [[Alpha `x]]` and `[[Alpha]]`";
+    assert_eq!(
+        rewrite_links_in_content(content, &[("Alpha", "Beta")], &[]),
+        content
+    );
+}
