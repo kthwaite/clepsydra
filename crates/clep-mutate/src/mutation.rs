@@ -329,6 +329,9 @@ impl MutationPlan {
         let mut intents =
             Vec::with_capacity(staged_writes.len() + primary_intents.len() + file_ops.len());
 
+        // A staged write at the destination of a planned move is the moved
+        // file's rewritten content: it is published in place of the move.
+        let mut moved_content = Vec::<(VaultPath, Vec<u8>)>::new();
         for write in staged_writes {
             let relative = write.path.strip_prefix(vault.root()).map_err(vp_err)?;
             let relative = relative.to_str().ok_or_else(|| {
@@ -337,8 +340,23 @@ impl MutationPlan {
                     write.path.display()
                 ))
             })?;
+            let path = VaultPath::new(relative).map_err(vp_err)?;
+            let rewrites_moved_file = primary_intents.iter().any(|intent| {
+                matches!(
+                    intent,
+                    BatchPathIntent::Move {
+                        destination,
+                        expected_source,
+                        ..
+                    } if destination == &path && expected_source == &write.expected_bytes
+                )
+            });
+            if rewrites_moved_file {
+                moved_content.push((path, write.content.into_bytes()));
+                continue;
+            }
             intents.push(BatchPathIntent::Write {
-                path: VaultPath::new(relative).map_err(vp_err)?,
+                path,
                 expected: ExpectedPathState::Bytes(write.expected_bytes),
                 content: write.content.into_bytes(),
             });
@@ -506,7 +524,42 @@ impl MutationPlan {
                 }
             }
         }
-        intents.extend(primary_intents);
+        for intent in primary_intents {
+            match intent {
+                BatchPathIntent::Move {
+                    source,
+                    destination,
+                    expected_source,
+                } => {
+                    let rewritten = moved_content
+                        .iter()
+                        .position(|(path, _)| path == &destination)
+                        .map(|index| moved_content.swap_remove(index).1);
+                    match rewritten {
+                        // The file leaves its source and arrives with new
+                        // bytes: the same guards as a move (source unchanged,
+                        // destination missing), with different content.
+                        Some(content) => {
+                            intents.push(BatchPathIntent::Delete {
+                                path: source,
+                                expected: expected_source,
+                            });
+                            intents.push(BatchPathIntent::Write {
+                                path: destination,
+                                expected: ExpectedPathState::Missing,
+                                content,
+                            });
+                        }
+                        None => intents.push(BatchPathIntent::Move {
+                            source,
+                            destination,
+                            expected_source,
+                        }),
+                    }
+                }
+                other => intents.push(other),
+            }
+        }
 
         Ok(BatchMutationCommand {
             create_directories,
@@ -665,19 +718,50 @@ impl<'a> MutationPlanner<'a> {
         plan.primary_intents.push(BatchPathIntent::Move {
             source: source_vp.clone(),
             destination: dest_vp.clone(),
-            expected_source: source_bytes,
+            expected_source: source_bytes.clone(),
         });
 
-        // 2. Find backlink pages
-        let backlink_pages = self.find_backlink_pages(&source_vp, &old_stem)?;
+        // 2. The moved page's links to itself follow it: its rewritten
+        // content is staged at the destination.
+        if let Ok(content) = std::str::from_utf8(&source_bytes)
+            && !is_protected_content(content)
+        {
+            let old_rel = compute_relative_path(source_vp.as_str(), source_vp.as_str());
+            let new_rel = compute_relative_path(dest_vp.as_str(), dest_vp.as_str());
+            let markdown_replacements = [(old_rel.as_str(), new_rel.as_str())];
+            let new_content = rewriter::rewrite_links_in_content(
+                content,
+                wikilink_replacements,
+                &markdown_replacements,
+            );
+            if new_content != content {
+                for &(old, new) in wikilink_replacements
+                    .iter()
+                    .chain(&markdown_replacements)
+                    .filter(|(old, new)| old != new)
+                {
+                    plan.text_edits.push(PlannedTextEdit {
+                        path: dest_vp.as_str().to_string(),
+                        old_text: old.to_string(),
+                        new_text: new.to_string(),
+                    });
+                }
+                plan.staged_writes.push(StagedWrite {
+                    path: self.vault.resolve(&dest_vp),
+                    expected_bytes: source_bytes,
+                    content: new_content,
+                });
+            }
+        }
 
-        // Filter: don't rewrite the page being moved (it's handled by the rename)
+        // 3. Find the other backlink pages
+        let backlink_pages = self.find_backlink_pages(&source_vp, &old_stem)?;
         let backlink_pages: Vec<_> = backlink_pages
             .into_iter()
-            .filter(|(_, p)| p != source)
+            .filter(|(_, p)| p != source_vp.as_str())
             .collect();
 
-        // 3. For each backlink page, compute replacement pairs and rewrite
+        // 4. For each backlink page, compute replacement pairs and rewrite
         for (_, ref_path_str) in &backlink_pages {
             let ref_vp = VaultPath::new(ref_path_str).map_err(vp_err)?;
             let ref_abs = self.vault.resolve(&ref_vp);
@@ -721,7 +805,7 @@ impl<'a> MutationPlanner<'a> {
             }
         }
 
-        // 4. Index events for source/destination
+        // 5. Index events for source/destination
         plan.index_events
             .push(ChangeEvent::Remove(source_vp.clone()));
         plan.index_events.push(ChangeEvent::Upsert(dest_vp));
@@ -941,15 +1025,19 @@ impl<'a> MutationPlanner<'a> {
             plan.index_events.push(ChangeEvent::Remove(old_vp.clone()));
             plan.index_events.push(ChangeEvent::Upsert(new_vp.clone()));
 
-            let backlink_pages = self
-                .find_backlink_pages(old_vp, &old_stem)?
-                .into_iter()
-                .filter(|(_, path)| !path.starts_with(&source_prefix))
-                .collect::<Vec<_>>();
+            let backlink_pages = self.find_backlink_pages(old_vp, &old_stem)?;
 
             for (_, ref_path_str) in backlink_pages {
                 let ref_vp = VaultPath::new(&ref_path_str).map_err(vp_err)?;
-                let ref_abs = self.vault.resolve(&ref_vp);
+                // A referrer inside the folder moves too: it is read from the
+                // folder snapshot and its rewrite is staged at its destination.
+                let moved_ref = ref_path_str
+                    .starts_with(&source_prefix)
+                    .then(|| md_files.iter().find(|(old, _, _)| old == &ref_vp))
+                    .flatten();
+                let ref_after = moved_ref.map_or(&ref_vp, |(_, new, _)| new);
+                let ref_path_str = ref_after.as_str().to_string();
+                let ref_abs = self.vault.resolve(ref_after);
                 let existing_index = plan
                     .staged_writes
                     .iter()
@@ -957,7 +1045,13 @@ impl<'a> MutationPlanner<'a> {
                 let (content, expected_bytes) = if let Some(index) = existing_index {
                     (plan.staged_writes[index].content.clone(), None)
                 } else {
-                    let content = fs::read_to_string(&ref_abs)?;
+                    let content = match moved_ref {
+                        Some((_, _, snapshot)) => match String::from_utf8(snapshot.clone()) {
+                            Ok(content) => content,
+                            Err(_) => continue,
+                        },
+                        None => fs::read_to_string(&ref_abs)?,
+                    };
                     if is_protected_content(&content) {
                         continue;
                     }
@@ -966,7 +1060,7 @@ impl<'a> MutationPlanner<'a> {
                 };
 
                 let old_rel = compute_relative_path(ref_vp.as_str(), old_vp.as_str());
-                let new_rel = compute_relative_path(ref_vp.as_str(), new_vp.as_str());
+                let new_rel = compute_relative_path(ref_after.as_str(), new_vp.as_str());
                 let markdown_replacements = [(old_rel.as_str(), new_rel.as_str())];
                 let new_content = rewriter::rewrite_links_in_content(
                     &content,
@@ -996,7 +1090,8 @@ impl<'a> MutationPlanner<'a> {
                         content: new_content,
                     });
                 }
-                if !upserted_refs.contains(&ref_path_str) {
+                // A moved referrer is upserted at its destination already.
+                if moved_ref.is_none() && !upserted_refs.contains(&ref_path_str) {
                     plan.index_events.push(ChangeEvent::Upsert(ref_vp));
                     upserted_refs.push(ref_path_str);
                 }
