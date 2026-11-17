@@ -393,7 +393,31 @@ fn merge_document(
             )?;
         }
     }
-    Ok(document.to_string())
+    let merged = document.to_string();
+    ensure_merge_stores_desired(&merged, desired_file)?;
+    Ok(merged)
+}
+
+/// Refuse a merged document that would not load as exactly the desired
+/// definition. The merge edits TOML syntax in place, and some shapes (an
+/// emptied array of tables, an emptied implicit table) render as absence, so
+/// the result is read back before anything is published.
+fn ensure_merge_stores_desired(
+    merged: &str,
+    desired_file: &BaseFile,
+) -> Result<(), BaseDocumentError> {
+    // Compared as TOML values: tables compare without regard to key order
+    // (a mix of inline and table-form properties cannot keep every order),
+    // arrays compare in order.
+    let stored = toml::from_str::<BaseFile>(merged)
+        .ok()
+        .and_then(|file| toml::Value::try_from(file).ok());
+    if stored.is_some() && stored == toml::Value::try_from(desired_file).ok() {
+        return Ok(());
+    }
+    Err(BaseDocumentError::UnsupportedDocument(
+        "the merged document would not store the requested definition".to_owned(),
+    ))
 }
 
 fn validate_view_origins(
@@ -812,7 +836,17 @@ fn merge_table_inline(
             }
             (Some(current_value), Some(desired_value)) => match raw.get_mut(&key) {
                 Some(raw_item) => {
-                    merge_raw_value(raw_item, current_value, desired_value, &child_path)?
+                    merge_raw_value(raw_item, current_value, desired_value, &child_path)?;
+                    if raw_item
+                        .as_array_of_tables()
+                        .is_some_and(ArrayOfTables::is_empty)
+                    {
+                        // An array of tables without tables renders as
+                        // nothing, which would turn a managed empty array
+                        // (an empty `any`/`all` group) into an absent key.
+                        raw.remove(&key);
+                        raw.insert(&key, Item::Value(desired_value.clone()));
+                    }
                 }
                 None => {
                     raw.insert(&key, Item::Value(desired_value.clone()));
@@ -2657,5 +2691,119 @@ layout = "table"
         assert_eq!(stored.definition.file.properties.len(), 1);
         assert_eq!(stored.definition.file.properties[0].0, "status");
         assert!(stored.diagnostics.is_empty());
+    }
+
+    fn stored_filter_json(stored: &StoredBase) -> serde_json::Value {
+        serde_json::to_value(&stored.definition.file.filter).unwrap()
+    }
+
+    #[test]
+    fn emptying_an_array_of_tables_filter_group_keeps_the_empty_group() {
+        for group in ["any", "all"] {
+            let fixture = fixture_base(&format!(
+                "name = \"Reading\"\n\n[[filter.{group}]]\nfield = \"status\"\nop = \"eq\"\nvalue = \"reading\"\n\n[properties]\nrating = {{ type = \"number\" }}\n"
+            ));
+            let current = load_for_test(fixture.root(), "reading");
+            let mut next = current.definition.file.clone();
+            next.filter = Some(match group {
+                "any" => crate::base::Filter::Any(Vec::new()),
+                _ => crate::base::Filter::All(Vec::new()),
+            });
+
+            let stored = update(fixture.root(), "reading", &current.revision, &next, &[]).unwrap();
+
+            // An empty `any` matches no page and no filter matches every page,
+            // so the emptied group must survive as an empty group.
+            assert_eq!(
+                stored_filter_json(&stored),
+                serde_json::json!({ group: [] })
+            );
+            let raw = fs::read_to_string(fixture.path()).unwrap();
+            assert_eq!(
+                raw,
+                format!(
+                    "name = \"Reading\"\n\n[filter]\n{group} = []\n\n[properties]\nrating = {{ type = \"number\" }}\n"
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn emptying_a_nested_array_of_tables_filter_group_keeps_the_empty_group() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\n\n[[filter.all]]\nfield = \"status\"\nop = \"eq\"\nvalue = \"reading\"\n\n[[filter.all]]\n\n[[filter.all.any]]\nfield = \"title\"\nop = \"eq\"\nvalue = \"Dune\"\n",
+        );
+        let current = load_for_test(fixture.root(), "reading");
+        let mut next = current.definition.file.clone();
+        let Some(crate::base::Filter::All(children)) = &mut next.filter else {
+            panic!("fixture filter is an `all` group");
+        };
+        children[1] = crate::base::Filter::Any(Vec::new());
+
+        let stored = update(fixture.root(), "reading", &current.revision, &next, &[]).unwrap();
+
+        assert_eq!(
+            stored_filter_json(&stored),
+            serde_json::json!({ "all": [
+                { "field": "status", "op": "eq", "value": "reading" },
+                { "any": [] },
+            ] })
+        );
+    }
+
+    #[test]
+    fn emptying_a_color_rule_filter_group_keeps_the_base_loadable() {
+        let source = "name = \"Reading\"\n\n[[views]]\nname = \"All\"\n\n[[views.color_rules]]\ncolor = \"sepia\"\n\n[[views.color_rules.filter.any]]\nfield = \"title\"\nop = \"eq\"\nvalue = \"reading\"\n";
+        let fixture = fixture_base(source);
+        let current = load_for_test(fixture.root(), "reading");
+        let mut next = current.definition.file.clone();
+        next.views[0].color_rules[0].filter = crate::base::Filter::Any(Vec::new());
+        let origins = [ViewOrigin::Existing { name: "All".into() }];
+
+        let stored = update(
+            fixture.root(),
+            "reading",
+            &current.revision,
+            &next,
+            &origins,
+        )
+        .unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&stored.definition.file.views[0].color_rules[0].filter).unwrap(),
+            serde_json::json!({ "any": [] })
+        );
+        let reloaded = load_for_test(fixture.root(), "reading");
+        assert_eq!(reloaded.revision, stored.revision);
+    }
+
+    #[test]
+    fn a_merge_that_does_not_store_the_desired_definition_is_refused() {
+        let mut desired = minimal_file();
+        desired.filter = Some(crate::base::Filter::Any(Vec::new()));
+
+        // The merged text parses, but to a base without the desired filter.
+        let unfaithful = ensure_merge_stores_desired("name = \"Reading\"\n", &desired);
+        assert!(matches!(
+            unfaithful,
+            Err(BaseDocumentError::UnsupportedDocument(message))
+                if message.contains("would not store the requested definition")
+        ));
+        // The merged text does not parse as a base at all.
+        let unparsable = ensure_merge_stores_desired(
+            "name = \"Reading\"\n\n[[views]]\nname = \"All\"\n\n[[views.color_rules]]\ncolor = \"sepia\"\n",
+            &desired,
+        );
+        assert!(matches!(
+            unparsable,
+            Err(BaseDocumentError::UnsupportedDocument(_))
+        ));
+        assert!(
+            ensure_merge_stores_desired(
+                "name = \"Reading\"\nplugin = 1\n\n[filter]\nany = []\n",
+                &desired
+            )
+            .is_ok()
+        );
     }
 }
