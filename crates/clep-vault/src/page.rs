@@ -201,17 +201,30 @@ pub(crate) fn split_fenced<'a>(
     Ok((fm_str, body))
 }
 
+/// Skip one UTF-8 byte-order mark when a frontmatter fence follows it.
+///
+/// Some editors save UTF-8 with a leading U+FEFF. The mark is not content, so
+/// it must not hide the fence. Without a fence the text is returned unchanged
+/// and the mark stays part of the body.
+pub(crate) fn skip_bom_before_fence(content: &str) -> &str {
+    match content.strip_prefix('\u{feff}') {
+        Some(rest) if rest.starts_with("+++") || rest.starts_with("---") => rest,
+        _ => content,
+    }
+}
+
 /// Find the byte offset where the body begins (after the closing frontmatter
 /// fence — `+++` or `---`). Returns 0 if no frontmatter is detected.
 pub fn body_offset(content: &str) -> usize {
-    let fence = if content.starts_with("+++") {
+    let fenced = skip_bom_before_fence(content);
+    let fence = if fenced.starts_with("+++") {
         "+++"
-    } else if content.starts_with("---") {
+    } else if fenced.starts_with("---") {
         "---"
     } else {
         return 0;
     };
-    match split_fenced(content, fence) {
+    match split_fenced(fenced, fence) {
         Ok((_, body)) => content.len() - body.len(),
         Err(_) => 0,
     }
@@ -411,8 +424,9 @@ pub(crate) fn ensure_populated_meta(meta: &mut PageMeta) -> bool {
 /// `+++` means TOML; `---` means legacy YAML (dual-read transition). Strict in
 /// both cases: a missing or invalid `id`, or a mistyped system field, is an
 /// error. Returns the deserialized [`PageMeta`] and the body text after the
-/// closing fence.
+/// closing fence. A UTF-8 byte-order mark before the fence is skipped.
 pub fn parse_frontmatter(content: &str) -> Result<(PageMeta, String), FrontmatterError> {
+    let content = skip_bom_before_fence(content);
     if content.starts_with("+++") {
         let (toml_str, body) = split_fenced(content, "+++")?;
         let table: toml::Table = toml_str.parse()?;
@@ -438,6 +452,10 @@ pub fn parse_frontmatter(content: &str) -> Result<(PageMeta, String), Frontmatte
 ///
 /// Content containing git merge conflict markers is never marked for rewrite
 /// (docs/adr/0004).
+///
+/// A UTF-8 byte-order mark before the fence is skipped, so the stored
+/// frontmatter is still recognised. The mark is not part of the returned body:
+/// a file that needs no rewrite keeps it on disk, a rewritten file loses it.
 pub fn parse_or_repair_frontmatter(content: &str) -> (PageMeta, String, bool, Option<String>) {
     if crate::conflict::has_conflict_markers(content) {
         let (meta, body, _rewrote, inner) = parse_or_repair_frontmatter_inner(content);
@@ -453,8 +471,9 @@ pub fn parse_or_repair_frontmatter(content: &str) -> (PageMeta, String, bool, Op
 }
 
 fn parse_or_repair_frontmatter_inner(content: &str) -> (PageMeta, String, bool, Option<String>) {
-    if content.starts_with("+++") {
-        match split_fenced(content, "+++") {
+    let fenced = skip_bom_before_fence(content);
+    if fenced.starts_with("+++") {
+        match split_fenced(fenced, "+++") {
             Ok((toml_str, body)) => match toml_str.parse::<toml::Table>() {
                 Ok(table) => match meta_from_table(table) {
                     Ok((mut meta, id_generated)) => {
@@ -495,8 +514,8 @@ fn parse_or_repair_frontmatter_inner(content: &str) -> (PageMeta, String, bool, 
             // Unterminated fence; treat whole file as body.
             Err(_) => (PageMeta::new(), content.to_string(), true, None),
         }
-    } else if content.starts_with("---") {
-        legacy_yaml::parse_or_repair_frontmatter(content)
+    } else if fenced.starts_with("---") {
+        legacy_yaml::parse_or_repair_frontmatter(fenced)
     } else {
         // No recognizable frontmatter fences; treat whole file as body.
         (PageMeta::new(), content.to_string(), true, None)
@@ -803,6 +822,77 @@ Body begins here.
         assert!(rewrote);
         assert!(warning.is_none());
         assert!(!meta.id.is_nil());
+    }
+
+    #[test]
+    fn utf8_bom_before_toml_fence_keeps_the_stored_frontmatter() {
+        let content = "\u{feff}+++\nid = \"01900000-0000-7000-8000-000000000001\"\ntitle = \"Kept\"\ncreated_at = 2026-08-06T09:00:00Z\nupdated_at = 2026-08-06T09:00:00Z\n+++\nBody\n";
+
+        let (meta, body) = parse_frontmatter(content).unwrap();
+        assert_eq!(meta.id.to_string(), "01900000-0000-7000-8000-000000000001");
+        assert_eq!(meta.title.as_deref(), Some("Kept"));
+        assert_eq!(body, "Body\n");
+
+        let (meta, body, rewrote, warning) = parse_or_repair_frontmatter(content);
+        assert_eq!(meta.id.to_string(), "01900000-0000-7000-8000-000000000001");
+        assert_eq!(meta.title.as_deref(), Some("Kept"));
+        assert_eq!(body, "Body\n");
+        assert!(!rewrote, "a complete page must not be rewritten");
+        assert!(warning.is_none());
+
+        assert_eq!(body_offset(content), content.len() - "Body\n".len());
+        assert_eq!(body_of(content), "Body\n");
+    }
+
+    #[test]
+    fn utf8_bom_before_toml_fence_repairs_in_place_of_prepending() {
+        // Missing id: the repair keeps the stored fields and the body; the
+        // rewritten page has one frontmatter block and no BOM.
+        let content = "\u{feff}+++\ntitle = \"No id here\"\n+++\nBody\n";
+        let (meta, body, rewrote, warning) = parse_or_repair_frontmatter(content);
+        assert!(warning.is_none());
+        assert!(rewrote);
+        assert_eq!(meta.title.as_deref(), Some("No id here"));
+        assert_eq!(body, "Body\n");
+        let written = write_page_content(&meta, &body);
+        assert!(written.starts_with("+++\nid = "));
+        assert_eq!(written.matches("+++\n").count(), 2);
+    }
+
+    #[test]
+    fn utf8_bom_before_unparseable_toml_leaves_file_untouched_with_warning() {
+        let content = "\u{feff}+++\nthis is not = = toml\n+++\nBody\n";
+        let (_, body, rewrote, warning) = parse_or_repair_frontmatter(content);
+        assert!(!rewrote, "unparseable frontmatter must not be rewritten");
+        assert!(warning.is_some());
+        assert_eq!(body, "Body\n");
+    }
+
+    #[test]
+    fn utf8_bom_before_legacy_yaml_fence_keeps_the_stored_frontmatter() {
+        let content = "\u{feff}---\nid: 01900000-0000-7000-8000-000000000001\ntitle: Kept\ncreated_at: 2026-08-06T09:00:00Z\nupdated_at: 2026-08-06T09:00:00Z\n---\nBody\n";
+
+        let (meta, body) = parse_frontmatter(content).unwrap();
+        assert_eq!(meta.id.to_string(), "01900000-0000-7000-8000-000000000001");
+        assert_eq!(body, "Body\n");
+
+        let (meta, body, rewrote, warning) = parse_or_repair_frontmatter(content);
+        assert_eq!(meta.id.to_string(), "01900000-0000-7000-8000-000000000001");
+        assert_eq!(meta.title.as_deref(), Some("Kept"));
+        assert_eq!(body, "Body\n");
+        assert!(!rewrote);
+        assert!(warning.is_none());
+        assert_eq!(body_of(content), "Body\n");
+    }
+
+    #[test]
+    fn utf8_bom_without_a_fence_stays_part_of_the_body() {
+        let content = "\u{feff}Just a body.\n";
+        let (_, body, rewrote, warning) = parse_or_repair_frontmatter(content);
+        assert_eq!(body, content);
+        assert!(rewrote);
+        assert!(warning.is_none());
+        assert_eq!(body_offset(content), 0);
     }
 
     #[test]
