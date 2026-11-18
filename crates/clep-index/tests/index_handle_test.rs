@@ -1042,3 +1042,33 @@ encryption = {{ format = "age", version = 1, key_id = "019fd000-0000-7000-8000-0
     assert_eq!(encrypted, 1);
     assert_eq!(search_hits, 0);
 }
+
+// ---------------------------------------------------------------------------
+// process_sync_events() is the watcher's entry: a file that cannot be read
+// is skipped with a warning and the rest of the batch is applied
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn process_sync_events_applies_the_batch_around_an_unreadable_file() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let handle = build_handle(&vault);
+    handle.build().await.unwrap();
+
+    fs::write(vault.root().join("bad.md"), [0xff, 0xfe, 0x00]).unwrap();
+    let page = r#"---
+id: 00000000-0000-0000-0000-000000000111
+title: Readable
+---
+Still indexed.
+"#;
+    fs::write(vault.root().join("readable.md"), page).unwrap();
+
+    let events = vec![
+        ChangeEvent::Upsert(VaultPath::new("bad.md").unwrap()),
+        ChangeEvent::Upsert(VaultPath::new("readable.md").unwrap()),
+    ];
+    let stats = handle.process_sync_events(events).await.unwrap();
+
+    assert_eq!(stats.pages_indexed, 1);
+    assert_eq!(stats.warnings.len(), 1, "{:?}", stats.warnings);
+}
