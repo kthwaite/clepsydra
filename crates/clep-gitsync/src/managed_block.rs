@@ -34,32 +34,48 @@ pub fn upsert_managed_block(path: &Path, lines: &[&str]) -> Result<usize, SyncEr
         return Ok(0);
     }
 
-    let file_lines: Vec<&str> = text.lines().collect();
-    let start = file_lines.iter().position(|&l| l == BLOCK_START);
-    let end = file_lines.iter().position(|&l| l == BLOCK_END);
+    // The existing text is spliced, never re-joined from its lines: every
+    // byte already in the file — line endings included — stays as it was,
+    // and the added lines take the file's own line ending.
+    let eol = line_ending(&text);
+    let mut offset = 0;
+    let (mut start, mut end) = (None, None);
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let content = content.strip_suffix('\r').unwrap_or(content);
+        if content == BLOCK_START && start.is_none() {
+            start = Some(offset);
+        } else if content == BLOCK_END && end.is_none() {
+            end = Some(offset);
+        }
+        offset += line.len();
+    }
+    let added: String = missing.iter().flat_map(|line| [line, eol]).collect();
 
-    let mut new_lines: Vec<&str> = Vec::with_capacity(file_lines.len() + missing.len() + 2);
+    let mut out = text.clone();
     match (start, end) {
         (Some(start), Some(end)) if start < end => {
             // Insert the missing lines just before the closing marker,
             // keeping everything else (including any lines a user added
             // inside the block) exactly where it was.
-            new_lines.extend_from_slice(&file_lines[..end]);
-            new_lines.extend_from_slice(&missing);
-            new_lines.extend_from_slice(&file_lines[end..]);
+            out.insert_str(end, &added);
         }
         _ => {
             // No existing block (or a malformed one): append a fresh block
             // at EOF, after any existing content.
-            new_lines.extend_from_slice(&file_lines);
-            new_lines.push(BLOCK_START);
-            new_lines.extend_from_slice(&missing);
-            new_lines.push(BLOCK_END);
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push_str(eol);
+            }
+            out.push_str(BLOCK_START);
+            out.push_str(eol);
+            out.push_str(&added);
+            out.push_str(BLOCK_END);
+            out.push_str(eol);
         }
     }
-
-    let mut out = new_lines.join("\n");
-    out.push('\n');
+    if !out.ends_with('\n') {
+        out.push_str(eol);
+    }
 
     if existed {
         atomic_replace(path, out.as_bytes()).map_err(|e| SyncError::io(path, e.into_inner()))?;
@@ -68,6 +84,13 @@ pub fn upsert_managed_block(path: &Path, lines: &[&str]) -> Result<usize, SyncEr
     }
 
     Ok(missing.len())
+}
+
+/// `\r\n` when most of `text`'s lines end that way, else `\n`.
+fn line_ending(text: &str) -> &'static str {
+    let crlf = text.matches("\r\n").count();
+    let lf = text.matches('\n').count() - crlf;
+    if crlf > lf { "\r\n" } else { "\n" }
 }
 
 #[cfg(test)]
@@ -122,6 +145,52 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
             "# >>> clep sync (managed) >>>\nold\nnew\n# <<< clep sync (managed) <<<\nuser-after\n"
+        );
+    }
+
+    #[test]
+    fn a_crlf_file_keeps_its_bytes_and_gains_crlf_lines() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join(".gitignore");
+        fs::write(&path, "*.log\r\nbuild/\r\n").unwrap();
+        assert_eq!(upsert_managed_block(&path, &["build/", "x/"]).unwrap(), 1);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "*.log\r\nbuild/\r\n# >>> clep sync (managed) >>>\r\nx/\r\n# <<< clep sync (managed) <<<\r\n"
+        );
+        // Into the existing block, again without touching any other byte.
+        assert_eq!(upsert_managed_block(&path, &["x/", "y/"]).unwrap(), 1);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "*.log\r\nbuild/\r\n# >>> clep sync (managed) >>>\r\nx/\r\ny/\r\n# <<< clep sync (managed) <<<\r\n"
+        );
+    }
+
+    #[test]
+    fn a_block_that_ends_the_file_unterminated_gains_a_final_newline() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join(".gitignore");
+        fs::write(
+            &path,
+            "# >>> clep sync (managed) >>>\n# <<< clep sync (managed) <<<",
+        )
+        .unwrap();
+        assert_eq!(upsert_managed_block(&path, &["x/"]).unwrap(), 1);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "# >>> clep sync (managed) >>>\nx/\n# <<< clep sync (managed) <<<\n"
+        );
+    }
+
+    #[test]
+    fn a_file_without_a_final_newline_is_terminated_before_the_block() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join(".gitignore");
+        fs::write(&path, "*.log").unwrap();
+        assert_eq!(upsert_managed_block(&path, &["x/"]).unwrap(), 1);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "*.log\n# >>> clep sync (managed) >>>\nx/\n# <<< clep sync (managed) <<<\n"
         );
     }
 }
