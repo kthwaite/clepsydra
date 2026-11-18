@@ -10,7 +10,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use super::page::split_fenced;
+use super::page::{skip_bom_before_fence, split_fenced};
 
 /// Type hint for mapping a JSON patch value into a TOML value.
 ///
@@ -48,8 +48,14 @@ pub enum SpliceError {
 
 /// Apply `edits` to the `+++` frontmatter region of `raw`, returning the full
 /// new page content. Untouched frontmatter lines and the body are preserved
-/// byte-for-byte.
+/// byte-for-byte, including a UTF-8 byte-order mark before the opening fence.
 pub fn splice_frontmatter(raw: &str, edits: &FrontmatterEdits) -> Result<String, SpliceError> {
+    let fenced = skip_bom_before_fence(raw);
+    let bom = &raw[..raw.len() - fenced.len()];
+    splice_fenced(fenced, edits).map(|spliced| format!("{bom}{spliced}"))
+}
+
+fn splice_fenced(raw: &str, edits: &FrontmatterEdits) -> Result<String, SpliceError> {
     if raw.starts_with("---") {
         return Err(SpliceError::LegacyFrontmatter);
     }
@@ -190,6 +196,23 @@ Body line two.\n";
             remove: remove.into_iter().map(String::from).collect(),
             updated_at: None,
         }
+    }
+
+    #[test]
+    fn utf8_bom_page_is_spliced_and_keeps_its_bom() {
+        let raw = "\u{feff}+++\n# hand-tended\na = 1\n+++\nBody\n";
+        let out = splice_frontmatter(raw, &edits(vec![("b", serde_json::json!(2), None)], vec![]))
+            .unwrap();
+        assert_eq!(out, "\u{feff}+++\n# hand-tended\na = 1\nb = 2\n+++\nBody\n");
+    }
+
+    #[test]
+    fn utf8_bom_legacy_page_still_reports_legacy_frontmatter() {
+        let raw = "\u{feff}---\na: 1\n---\nBody\n";
+        assert!(matches!(
+            splice_frontmatter(raw, &FrontmatterEdits::default()),
+            Err(SpliceError::LegacyFrontmatter)
+        ));
     }
 
     #[test]
