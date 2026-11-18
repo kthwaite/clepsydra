@@ -1,6 +1,6 @@
 pub mod watcher;
 
-use crate::index::VaultIndex;
+use crate::index::{LinkTargets, VaultIndex};
 use clep_vault::Vault;
 use clep_vault::path::VaultPath;
 
@@ -22,8 +22,9 @@ pub struct SyncStats {
     pub pages_indexed: usize,
     pub pages_skipped: usize,
     pub pages_removed: usize,
+    /// Links whose resolution changed: newly resolved, unresolved again, or
+    /// pointed at a moved page's new path.
     pub links_resolved: usize,
-    pub deps_reresolved: usize,
 }
 
 /// Processes change events and incrementally updates the vault index.
@@ -33,10 +34,13 @@ impl SyncEngine {
     /// Process a batch of change events against the index.
     ///
     /// For each event:
-    /// - **Upsert**: re-index the page, resolve its links, then re-resolve
-    ///   links from pages that depend on it (reverse deps).
-    /// - **Remove**: collect reverse deps *before* deletion, remove the page,
-    ///   invalidate stale links, then re-resolve affected pages' links.
+    /// - **Upsert**: re-index the page when its bytes changed.
+    /// - **Remove**: remove the page.
+    ///
+    /// Either way, every link aimed at a canonical name or block id the page
+    /// held before or holds now is resolved again from the index as it then
+    /// stands, so a name that gained or lost a holder is decided the way a
+    /// full rebuild decides it. An unchanged page changes no link.
     pub fn process_events(
         events: &[ChangeEvent],
         vault: &Vault,
@@ -56,65 +60,21 @@ impl SyncEngine {
                         continue;
                     }
 
-                    // Collect reverse deps and invalidate links BEFORE re-indexing.
-                    // If canonical names change, stale resolved links must become
-                    // unresolved so they can be re-evaluated against the new state.
-                    let pre_deps = index.reverse_deps(vp)?;
-                    index.invalidate_links_to(vp)?;
-
-                    match index.index_page(vault, vp)? {
-                        true => {
-                            stats.pages_indexed += 1;
-
-                            // Resolve this page's outgoing + incoming links
-                            let resolved = index.resolve_links_for_page(vp)?;
-                            stats.links_resolved += resolved;
-
-                            // Re-resolve reverse dependencies (union of pre- and
-                            // post-index deps covers both old and new canonical names)
-                            let post_deps = index.reverse_deps(vp)?;
-                            let mut all_deps = pre_deps;
-                            for d in post_deps {
-                                if !all_deps
-                                    .iter()
-                                    .any(|existing| existing.as_str() == d.as_str())
-                                {
-                                    all_deps.push(d);
-                                }
-                            }
-                            for dep_path in &all_deps {
-                                let r = index.resolve_links_for_page(dep_path)?;
-                                stats.deps_reresolved += r;
-                            }
-                        }
-                        false => {
-                            stats.pages_skipped += 1;
-                            // Content unchanged — re-resolve any links we invalidated
-                            for dep_path in &pre_deps {
-                                let r = index.resolve_links_for_page(dep_path)?;
-                                stats.deps_reresolved += r;
-                            }
-                        }
+                    let mut targets = LinkTargets::default();
+                    if index.index_page_collecting(vault, vp, &mut targets)? {
+                        stats.pages_indexed += 1;
+                    } else {
+                        stats.pages_skipped += 1;
                     }
+                    stats.links_resolved += index.reresolve_link_targets(&targets)?;
                 }
                 ChangeEvent::Remove(vp) => {
                     tracing::debug!("SyncEngine: removing page {:?}", vp);
-                    // Collect reverse deps BEFORE removing
-                    let deps = index.reverse_deps(vp)?;
-
-                    // Invalidate links pointing to this page
-                    index.invalidate_links_to(vp)?;
-
-                    // Remove the page
-                    if index.remove_page(vp)? {
+                    let mut targets = LinkTargets::default();
+                    if index.remove_page_collecting(vp, &mut targets)? {
                         stats.pages_removed += 1;
                     }
-
-                    // Re-resolve affected pages' links
-                    for dep_path in &deps {
-                        let r = index.resolve_links_for_page(dep_path)?;
-                        stats.deps_reresolved += r;
-                    }
+                    stats.links_resolved += index.reresolve_link_targets(&targets)?;
                 }
                 ChangeEvent::BaseChanged => {
                     tracing::info!(
@@ -143,7 +103,7 @@ impl SyncEngine {
     /// affected-link reconciliation as one SQLite savepoint.
     ///
     /// The callback runs once per event after its page row mutation and before
-    /// any link invalidation or re-resolution for that event.
+    /// any link re-resolution for that event.
     pub fn process_events_atomically<F>(
         events: &[ChangeEvent],
         vault: &Vault,
@@ -170,46 +130,26 @@ impl SyncEngine {
                             )));
                         }
 
-                        let pre_deps = index.reverse_deps(vp)?;
-                        let indexed = index.index_page_opaque(vault, vp)?;
-                        if indexed {
+                        let mut targets = LinkTargets::default();
+                        if index.index_page_opaque(vault, vp, &mut targets)? {
                             stats.pages_indexed += 1;
                         } else {
                             stats.pages_skipped += 1;
                         }
-                        let post_deps = index.reverse_deps(vp)?;
 
                         after_page_mutation(event_index, event, index)?;
 
-                        index.invalidate_links_to(vp)?;
-                        if indexed {
-                            stats.links_resolved += index.resolve_links_for_page(vp)?;
-                        }
-                        let mut all_deps = pre_deps;
-                        for dependency in post_deps {
-                            if !all_deps
-                                .iter()
-                                .any(|existing| existing.as_str() == dependency.as_str())
-                            {
-                                all_deps.push(dependency);
-                            }
-                        }
-                        for dependency in &all_deps {
-                            stats.deps_reresolved += index.resolve_links_for_page(dependency)?;
-                        }
+                        stats.links_resolved += index.reresolve_link_targets(&targets)?;
                     }
                     ChangeEvent::Remove(vp) => {
-                        let dependencies = index.reverse_deps(vp)?;
-                        if index.remove_page(vp)? {
+                        let mut targets = LinkTargets::default();
+                        if index.remove_page_collecting(vp, &mut targets)? {
                             stats.pages_removed += 1;
                         }
 
                         after_page_mutation(event_index, event, index)?;
 
-                        index.invalidate_links_after_removal(vp)?;
-                        for dependency in &dependencies {
-                            stats.deps_reresolved += index.resolve_links_for_page(dependency)?;
-                        }
+                        stats.links_resolved += index.reresolve_link_targets(&targets)?;
                     }
                     ChangeEvent::BaseChanged => {
                         return Err(crate::index::IndexError::Other(
