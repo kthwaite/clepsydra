@@ -1416,3 +1416,133 @@ async fn task_rows_name_the_line_they_are_nested_under() {
         "a top-level Todo has no parent line"
     );
 }
+
+const TOGGLE_FRONT: &str = "+++\nid = \"01951234-0000-7000-8000-ccc000000002\"\ntitle = \"Toggle\"\ncreated_at = 2026-01-01T00:00:00Z\nupdated_at = 2026-01-01T00:00:00Z\n+++\n";
+
+fn setup_toggle_page(body: &'static str) -> (TestServer, TempDir) {
+    setup_server_with_seed(move |root| {
+        std::fs::write(root.join("toggle.md"), format!("{TOGGLE_FRONT}{body}")).unwrap();
+    })
+}
+
+async fn toggle_status(server: &TestServer, span_start: usize, status: &str) -> StatusCode {
+    server
+        .put("/api/vault/tasks/status")
+        .json(&serde_json::json!({
+            "page_path": "toggle.md",
+            "span_start": span_start,
+            "status": status,
+        }))
+        .await
+        .status_code()
+}
+
+fn toggle_page_body(tmp: &TempDir) -> String {
+    let content = std::fs::read_to_string(tmp.path().join("vault/toggle.md")).unwrap();
+    content
+        .strip_prefix(TOGGLE_FRONT)
+        .unwrap_or_else(|| panic!("frontmatter changed: {content:?}"))
+        .to_string()
+}
+
+/// Regression: the handler searched a 20-byte window from the item start for
+/// `[ ]`, then `[x]`, `[X]`, `[-]`, so a short done or cancelled task lost the
+/// edit to any other marker in that window.
+#[tokio::test]
+async fn update_task_status_edits_only_the_addressed_task_marker() {
+    for (body, span_start, status, expected) in [
+        // The next sibling's `[ ]` used to win.
+        (
+            "- [x] milk\n- [ ] eggs\n",
+            0,
+            "cancelled",
+            "- [-] milk\n- [ ] eggs\n",
+        ),
+        (
+            "- [x] milk\n- [ ] eggs\n",
+            0,
+            "todo",
+            "- [ ] milk\n- [ ] eggs\n",
+        ),
+        (
+            "- [X] milk\n- [x] eggs\n",
+            0,
+            "todo",
+            "- [ ] milk\n- [x] eggs\n",
+        ),
+        // A nested child's marker.
+        (
+            "- [x] a\n  - [ ] child\n",
+            0,
+            "cancelled",
+            "- [-] a\n  - [ ] child\n",
+        ),
+        // Marker-like text inside the task, code span included.
+        ("- [-] a `[x]`\n", 0, "todo", "- [ ] a `[x]`\n"),
+        ("- [x] see [ ] box\n", 0, "cancelled", "- [-] see [ ] box\n"),
+        // Other list markers, wide gaps, blockquotes, CRLF.
+        (
+            "1. [x] a\n2. [ ] b\n",
+            0,
+            "cancelled",
+            "1. [-] a\n2. [ ] b\n",
+        ),
+        ("* [x] a\n+ [ ] b\n", 0, "todo", "* [ ] a\n+ [ ] b\n"),
+        ("-   [x] a\n- [ ] b\n", 0, "todo", "-   [ ] a\n- [ ] b\n"),
+        (
+            "> - [-] q\n> - [ ] r\n",
+            2,
+            "done",
+            "> - [x] q\n> - [ ] r\n",
+        ),
+        (
+            "- [x] a\r\n- [ ] b\r\n",
+            0,
+            "todo",
+            "- [ ] a\r\n- [ ] b\r\n",
+        ),
+        // The second task, addressed at its own offset.
+        ("- [ ] a\n- [x] b\n", 8, "cancelled", "- [ ] a\n- [-] b\n"),
+    ] {
+        let (server, tmp) = setup_toggle_page(body);
+        let code = toggle_status(&server, span_start, status).await;
+        assert_eq!(code, StatusCode::OK, "body: {body:?}");
+        assert_eq!(toggle_page_body(&tmp), expected, "body: {body:?}");
+    }
+}
+
+/// Regression: an offset that is not the start of a task rewrote a checkbox
+/// found within 20 bytes and then answered 404. A refused request must not
+/// write.
+#[tokio::test]
+async fn update_task_status_refuses_an_offset_that_is_not_a_task_without_writing() {
+    for (body, span_start) in [
+        // A paragraph before a task.
+        ("intro\n\n- [ ] task\n", 0),
+        // A plain list item before a task.
+        ("- plain\n- [ ] task\n", 0),
+        // Task-like text inside a fenced code block: the fence, then the line.
+        ("```\n- [ ] in code\n```\n", 0),
+        ("```\n- [ ] in code\n```\n", 4),
+        // The middle of a task line, and the task's own marker.
+        ("- [ ] task\n- [ ] next\n", 1),
+        ("- [ ] task\n- [ ] next\n", 2),
+        // The text of a loose task (where a paragraph starts), not the item.
+        ("- [x] a\n\n- [ ] b\n", 6),
+        // The end of the body.
+        ("- [ ] task\n", 11),
+    ] {
+        let (server, tmp) = setup_toggle_page(body);
+        let code = toggle_status(&server, span_start, "done").await;
+        assert_eq!(
+            code,
+            StatusCode::CONFLICT,
+            "body: {body:?} span_start: {span_start}"
+        );
+        assert_eq!(
+            toggle_page_body(&tmp),
+            body,
+            "body: {body:?} span_start: {span_start}"
+        );
+    }
+}
