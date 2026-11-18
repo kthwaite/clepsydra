@@ -156,14 +156,43 @@ fn merge_meta(base: Option<&PageMeta>, ours: &PageMeta, theirs: &PageMeta) -> Op
 }
 
 fn scalar3<T: PartialEq + Clone>(base: Option<&T>, ours: &T, theirs: &T) -> Option<T> {
-    if ours == theirs {
+    merge3(base, ours, theirs, T::eq)
+}
+
+/// [`scalar3`] under a caller-supplied notion of "unchanged".
+fn merge3<T: Clone>(
+    base: Option<&T>,
+    ours: &T,
+    theirs: &T,
+    same: impl Fn(&T, &T) -> bool,
+) -> Option<T> {
+    if same(ours, theirs) {
         return Some(ours.clone());
     }
     match base {
-        Some(b) if b == ours => Some(theirs.clone()),
-        Some(b) if b == theirs => Some(ours.clone()),
+        Some(b) if same(b, ours) => Some(theirs.clone()),
+        Some(b) if same(b, theirs) => Some(ours.clone()),
         // No usable base (add/add, unparseable) or both changed.
         _ => None,
+    }
+}
+
+/// Whether two extra values are the same value. `toml::Value`'s `==` is the
+/// float one, under which `nan != nan`: an untouched `nan` property would
+/// read as changed on both sides and make the page unmergeable.
+fn same_value(a: &toml::Value, b: &toml::Value) -> bool {
+    use toml::Value;
+    match (a, b) {
+        (Value::Float(a), Value::Float(b)) => a == b || (a.is_nan() && b.is_nan()),
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same_value(a, b))
+        }
+        (Value::Table(a), Value::Table(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(key, a)| b.get(key).is_some_and(|b| same_value(a, b)))
+        }
+        _ => a == b,
     }
 }
 
@@ -193,10 +222,15 @@ fn merge_extras(base: Option<&ExtraMap>, ours: &ExtraMap, theirs: &ExtraMap) -> 
     for key in keys {
         // A key absent on a side is `None`: an addition merges in, a
         // deletion sticks, and add-vs-edit disagreement conflicts.
-        let merged = scalar3(
+        let merged = merge3(
             Some(&base.get(key).cloned()),
             &ours.get(key).cloned(),
             &theirs.get(key).cloned(),
+            |a, b| match (a, b) {
+                (Some(a), Some(b)) => same_value(a, b),
+                (None, None) => true,
+                _ => false,
+            },
         )?;
         if let Some(value) = merged {
             out.insert(key.clone(), value);
@@ -372,6 +406,36 @@ mod tests {
                 .unwrap();
         assert_eq!(meta.extra.get("custom").and_then(|v| v.as_str()), Some("y"));
         assert_eq!(meta.extra.get("mine").and_then(|v| v.as_integer()), Some(1));
+    }
+
+    #[test]
+    fn an_untouched_nan_extra_is_not_a_change() {
+        // `nan != nan` under `PartialEq`; nobody changed these keys, so the
+        // disjoint body edits must still merge clean.
+        let fm = "score = nan\nseries = [1.0, nan]\npoint = { x = nan }\n";
+        let base = page("0d", fm, "one\ntwo\nthree\n");
+        let ours = page("0d", fm, "ONE\ntwo\nthree\n");
+        let theirs = page("0d", fm, "one\ntwo\nTHREE\n");
+        let out = merge(&base, &ours, &theirs);
+        assert!(out.clean);
+        let (meta, body) =
+            clep_vault::page::parse_frontmatter(std::str::from_utf8(&out.content).unwrap())
+                .unwrap();
+        assert_eq!(body, "ONE\ntwo\nTHREE\n");
+        assert!(meta.extra["score"].as_float().unwrap().is_nan());
+    }
+
+    #[test]
+    fn a_nan_extra_changed_by_one_side_takes_that_side() {
+        let base = page("0e", "score = nan\n", "b\n");
+        let ours = page("0e", "score = nan\n", "b\n");
+        let theirs = page("0e", "score = 2.5\n", "b\n");
+        let out = merge(&base, &ours, &theirs);
+        assert!(out.clean);
+        let (meta, _) =
+            clep_vault::page::parse_frontmatter(std::str::from_utf8(&out.content).unwrap())
+                .unwrap();
+        assert_eq!(meta.extra["score"].as_float(), Some(2.5));
     }
 
     #[test]
