@@ -268,3 +268,164 @@ fn heading_with_block_id() {
     assert_eq!(blocks[0].content, "My Title");
     assert_eq!(blocks[0].block_id.as_deref(), Some("abc123DEF0"));
 }
+
+/// The fields a loose list must share with its tight twin.
+#[derive(Debug, PartialEq)]
+struct Shape {
+    block_type: BlockType,
+    depth: usize,
+    parent_index: Option<usize>,
+    order_index: usize,
+    content: String,
+    checkbox: Option<CheckboxState>,
+    block_id: Option<String>,
+    status: Option<String>,
+}
+
+fn shape(md: &str) -> Vec<Shape> {
+    parse_blocks(md)
+        .into_iter()
+        .map(|b| Shape {
+            block_type: b.block_type,
+            depth: b.depth,
+            parent_index: b.parent_index,
+            order_index: b.order_index,
+            content: b.content,
+            checkbox: b.checkbox,
+            block_id: b.block_id,
+            status: b.properties.get("status").cloned(),
+        })
+        .collect()
+}
+
+#[test]
+fn loose_task_list_gives_the_same_blocks_as_the_tight_list() {
+    // A blank line between items makes the list loose: pulldown wraps each
+    // item's text in a paragraph. The item must still be the block.
+    let tight = "- [ ] a\n- [x] b ^abc123DEF0\n- [-] c\n- d\n";
+    let loose = "- [ ] a\n\n- [x] b ^abc123DEF0\n\n- [-] c\n\n- d\n";
+    let item =
+        |order_index, content: &str, checkbox, id: Option<&str>, status: Option<&str>| Shape {
+            block_type: BlockType::ListItem,
+            depth: 0,
+            parent_index: None,
+            order_index,
+            content: content.to_string(),
+            checkbox,
+            block_id: id.map(str::to_string),
+            status: status.map(str::to_string),
+        };
+    let expected = || {
+        vec![
+            item(0, "a", Some(CheckboxState::Todo), None, Some("todo")),
+            item(
+                1,
+                "b",
+                Some(CheckboxState::Done),
+                Some("abc123DEF0"),
+                Some("done"),
+            ),
+            item(
+                2,
+                "c",
+                Some(CheckboxState::Cancelled),
+                None,
+                Some("cancelled"),
+            ),
+            item(3, "d", None, None, None),
+        ]
+    };
+    assert_eq!(shape(tight), expected());
+    assert_eq!(shape(loose), expected());
+}
+
+#[test]
+fn loose_list_item_span_is_the_item_marker_through_its_text_line() {
+    // The same source text as the tight item's span: the blank line that
+    // separates loose items is not part of the block, so text appended at
+    // the span end (a generated ` ^id`) lands on the item's own line.
+    let md = "- [ ] a\n\n- b\n\ntail\n";
+    let blocks = parse_blocks(md);
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(&md[blocks[0].span.clone()], "- [ ] a\n");
+    assert_eq!(&md[blocks[1].span.clone()], "- b\n");
+    assert_eq!(blocks[2].block_type, BlockType::Paragraph);
+    assert_eq!(blocks[2].content, "tail");
+}
+
+#[test]
+fn loose_nested_items_have_the_item_as_parent() {
+    let tight = "1. [ ] x\n   - [x] y\n";
+    let loose = "1. [ ] x\n\n   - [x] y\n";
+    assert_eq!(shape(loose), shape(tight));
+    let blocks = parse_blocks(loose);
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0].content, "x");
+    assert_eq!(blocks[1].content, "y");
+    assert_eq!(blocks[1].depth, 1);
+    assert_eq!(blocks[1].parent_index, Some(0));
+}
+
+#[test]
+fn loose_list_in_a_blockquote_keeps_its_items() {
+    let tight = "> - [x] q\n> - r\n";
+    let loose = "> - [x] q\n>\n> - r\n";
+    assert_eq!(shape(loose), shape(tight));
+    let blocks = parse_blocks(loose);
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0].block_type, BlockType::ListItem);
+    assert_eq!(blocks[0].content, "q");
+    assert_eq!(blocks[0].checkbox, Some(CheckboxState::Done));
+}
+
+#[test]
+fn loose_definition_gives_the_same_blocks_as_the_tight_definition() {
+    let tight = "Term\n: Def one\n: [-] two\n";
+    let loose = "Term\n\n: Def one\n\n: [-] two\n";
+    assert_eq!(shape(loose), shape(tight));
+    let blocks = parse_blocks(loose);
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(blocks[1].content, "Def one");
+    // A definition is never a task, loose or tight.
+    assert_eq!(blocks[2].content, "[-] two");
+    assert!(blocks[2].checkbox.is_none());
+}
+
+#[test]
+fn later_paragraphs_of_a_list_item_stay_their_own_blocks() {
+    // Only the lead paragraph is the item's text. A continuation paragraph
+    // was a Paragraph block before and still is.
+    let md = "- [ ] a\n\n  second\n\n- b\n";
+    let blocks = parse_blocks(md);
+    let summary: Vec<(BlockType, &str, Option<CheckboxState>)> = blocks
+        .iter()
+        .map(|b| (b.block_type.clone(), b.content.as_str(), b.checkbox))
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (BlockType::ListItem, "a", Some(CheckboxState::Todo)),
+            (BlockType::Paragraph, "second", None),
+            (BlockType::ListItem, "b", None),
+        ]
+    );
+    let starts: HashSet<usize> = blocks.iter().map(|b| b.span.start).collect();
+    assert_eq!(starts.len(), blocks.len());
+}
+
+#[test]
+fn item_with_a_continuation_paragraph_in_a_blockquote_is_not_dropped() {
+    let md = "> - [ ] a\n>\n>   second\n";
+    let blocks = parse_blocks(md);
+    let summary: Vec<(BlockType, &str, Option<CheckboxState>)> = blocks
+        .iter()
+        .map(|b| (b.block_type.clone(), b.content.as_str(), b.checkbox))
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (BlockType::ListItem, "a", Some(CheckboxState::Todo)),
+            (BlockType::Blockquote, "second", None),
+        ]
+    );
+}
