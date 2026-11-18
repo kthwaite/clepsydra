@@ -297,11 +297,16 @@ struct Block {
 
 /// A block is a `- HH:MM — ` entry plus everything up to the next entry
 /// (multi-line captures land at column 0 — D20), or a headless run of lines
-/// before the first entry.
+/// before the first entry. A line inside a fenced code block is never an
+/// entry, however it is shaped: a capture that quotes a log or another
+/// journal stays one block.
 fn split_blocks(body: &str) -> Vec<Block> {
     let mut blocks: Vec<Block> = Vec::new();
+    let mut fence = Fence::default();
     for line in body.lines() {
-        match entry_time(line) {
+        let fenced = fence.is_open();
+        fence.feed(line);
+        match entry_time(line).filter(|_| !fenced) {
             Some(time) => blocks.push(Block {
                 time: Some(time),
                 text: format!("{line}\n"),
@@ -319,6 +324,43 @@ fn split_blocks(body: &str) -> Vec<Block> {
         }
     }
     blocks
+}
+
+/// The fenced code block (CommonMark) open at the current line, if any: its
+/// fence character and the length of its opening run.
+///
+/// Only a fence indented less than an entry's content (two columns) is
+/// tracked. One indented further belongs to the entry's list item, which the
+/// next column-0 line ends, fence and all — so that line is a real entry.
+#[derive(Default)]
+struct Fence(Option<(u8, usize)>);
+
+impl Fence {
+    fn is_open(&self) -> bool {
+        self.0.is_some()
+    }
+
+    fn feed(&mut self, line: &str) {
+        let rest = line.trim_start_matches(' ');
+        let indent = line.len() - rest.len();
+        let Some(ch) = rest.bytes().next().filter(|b| matches!(b, b'`' | b'~')) else {
+            return;
+        };
+        let run = rest.bytes().take_while(|b| *b == ch).count();
+        let tail = &rest[run..];
+        match self.0 {
+            // A backtick fence's info string cannot hold a backtick.
+            None if indent < 2 && run >= 3 && !(ch == b'`' && tail.contains('`')) => {
+                self.0 = Some((ch, run));
+            }
+            Some((open, len))
+                if indent <= 3 && ch == open && run >= len && tail.trim().is_empty() =>
+            {
+                self.0 = None;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// `- 09:41 — text` -> `Some("09:41")`.
@@ -482,6 +524,64 @@ mod tests {
         assert_eq!(blocks[0].time.as_deref(), Some("09:00"));
         assert_eq!(blocks[0].text, "- 09:00 — first\ncontinued\n");
         assert_eq!(blocks[1].text, "- 10:30 — second\n\nfree text\n");
+    }
+
+    #[test]
+    fn split_blocks_never_starts_an_entry_inside_a_fenced_code_block() {
+        let blocks =
+            split_blocks("- 09:00 — log excerpt\n```\n- 07:00 — quoted\n```\n- 10:00 — next\n");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(
+            blocks[0].text,
+            "- 09:00 — log excerpt\n```\n- 07:00 — quoted\n```\n"
+        );
+        assert_eq!(blocks[1].time.as_deref(), Some("10:00"));
+
+        // A fence closes only on its own character, at least as long as the
+        // opener, with nothing after it.
+        let blocks = split_blocks(
+            "~~~~ text\n```\n- 07:00 — a\n~~~\n- 06:00 — b\n~~~~ x\n- 05:00 — c\n~~~~~\n- 11:00 — after\n",
+        );
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].time, None);
+        assert_eq!(blocks[1].text, "- 11:00 — after\n");
+    }
+
+    #[test]
+    fn split_blocks_ends_a_fence_nested_in_an_entry_at_the_next_entry() {
+        // Indented under the entry, the fence belongs to its list item, and
+        // the next column-0 line ends the item and the fence with it.
+        let blocks = split_blocks("- 09:00 — a\n  ```\n  code\n- 10:00 — b\n");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[1].text, "- 10:00 — b\n");
+    }
+
+    #[test]
+    fn a_fenced_capture_folds_as_one_block() {
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — first\n",
+        );
+        let capture = "- 09:00 — log excerpt\n```\n- 07:00 — quoted\n```\n";
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.bbbbbbbb.md",
+            "02",
+            "2026-08-29T09:00:00Z",
+            capture,
+        );
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges.len(), 1);
+        let text =
+            std::fs::read_to_string(tmp.path().join("journals/20260829.2026-08-29.aaaaaaaa.md"))
+                .unwrap();
+        let (_, body) = clep_vault::page::parse_frontmatter(&text).unwrap();
+        assert_eq!(body, format!("- 08:00 — first\n{capture}"));
     }
 
     #[test]
