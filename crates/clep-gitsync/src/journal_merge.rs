@@ -12,7 +12,7 @@ use std::path::Path;
 
 use chrono::{DateTime, Utc};
 
-use super::conflict_copy::is_conflict_copy_name;
+use super::conflict_copy::{file_stem, is_conflict_copy_name, strip_conflict_suffix};
 use clep_vault::page::{PageMeta, parse_frontmatter, write_page_content};
 use clep_vault::page_filename::extract_journal_date;
 use clep_vault::rewriter::rewrite_links_in_content;
@@ -196,6 +196,9 @@ fn merge_group(
     // A winner cannot carry `conflict_of` by D21, but a copy that lost its
     // original would keep pointing at a page that is no longer there.
     winner.meta.extra.remove("conflict_of");
+    for loser in &losers {
+        fold_meta(&mut winner, loser, warnings);
+    }
     let bodies: Vec<&str> = losers.iter().map(|loser| loser.body.as_str()).collect();
     let content = write_page_content(&winner.meta, &interleave(&winner.body, &bodies));
 
@@ -341,6 +344,90 @@ fn conflict_of(path: &Path) -> Option<String> {
 /// `journals/plan.md` -> `plan.md`.
 fn file_name(rel: &str) -> &str {
     rel.rsplit('/').next().unwrap_or(rel)
+}
+
+/// Fold a loser's frontmatter into the winner's, so deleting the loser loses
+/// none of it. There is no common base to merge against, so the fold only
+/// ever adds: list fields union (the winner's order first), a field or
+/// custom key only the loser sets is taken, and `created_at` is the earlier
+/// of the two, as in the merge driver. Where both pages set a field
+/// differently the winner keeps its own and a warning names what was not
+/// folded in.
+///
+/// A Conflict Copy's own residue — its fresh `id`, `conflict_of`, and the
+/// ` (conflict <shortid>)` title — is not frontmatter anyone wrote.
+fn fold_meta(winner: &mut Member, loser: &Member, warnings: &mut Vec<String>) {
+    let copy = is_conflict_copy_name(file_name(&loser.path));
+    let (meta, theirs) = (&mut winner.meta, &loser.meta);
+    let mut unfolded: Vec<(&str, String)> = Vec::new();
+
+    let title = theirs.title.as_deref().filter(|_| !copy).or_else(|| {
+        // A copy of an untitled page is titled after its original's file.
+        let original = theirs.extra.get("conflict_of")?.as_str().map(file_stem);
+        let title = strip_conflict_suffix(theirs.title.as_deref()?);
+        (Some(title) != original).then_some(title)
+    });
+    if let Some(title) = fill(&mut meta.title, title.map(str::to_string)) {
+        unfolded.push(("title", format!("{title:?}")));
+    }
+    if let Some(kind) = fill(&mut meta.kind, theirs.kind) {
+        unfolded.push(("type", format!("{:?}", kind.as_str())));
+    }
+    if let Some(project) = fill(&mut meta.project, theirs.project.clone()) {
+        unfolded.push(("project", format!("{project:?}")));
+    }
+    if let Some(readonly) = fill(&mut meta.readonly, theirs.readonly) {
+        unfolded.push(("readonly", readonly.to_string()));
+    }
+    for (mine, theirs) in [
+        (&mut meta.tags, &theirs.tags),
+        (&mut meta.aliases, &theirs.aliases),
+        (&mut meta.attachments, &theirs.attachments),
+    ] {
+        for value in theirs {
+            if !mine.contains(value) {
+                mine.push(value.clone());
+            }
+        }
+    }
+    meta.created_at = match (meta.created_at, theirs.created_at) {
+        (Some(mine), Some(theirs)) => Some(mine.min(theirs)),
+        (mine, theirs) => mine.or(theirs),
+    };
+    for (key, value) in &theirs.extra {
+        if key == "conflict_of" {
+            continue;
+        }
+        match meta.extra.get(key) {
+            None => {
+                meta.extra.insert(key.clone(), value.clone());
+            }
+            // Compared as written, so a `nan` equals itself.
+            Some(mine) if mine.to_string() != value.to_string() => {
+                unfolded.push((key, value.to_string()));
+            }
+            Some(_) => {}
+        }
+    }
+    for (field, value) in unfolded {
+        warnings.push(format!(
+            "journal merge: {} keeps its own `{field}`; the value in {} ({value}) was not folded in",
+            winner.path, loser.path
+        ));
+    }
+}
+
+/// Take `theirs` where `mine` is unset. Returns `theirs` when both are set
+/// and differ — the value that was not folded in.
+fn fill<T: PartialEq>(mine: &mut Option<T>, theirs: Option<T>) -> Option<T> {
+    match (&*mine, theirs) {
+        (None, theirs) => {
+            *mine = theirs;
+            None
+        }
+        (Some(mine), Some(theirs)) if *mine != theirs => Some(theirs),
+        _ => None,
+    }
 }
 
 /// Oldest first, with a page that declares no `created_at` sorting last.
@@ -1005,6 +1092,125 @@ mod tests {
 
     /// The two folders are separate journals that happen to share a calendar.
     /// A user's day and an agent's log of it must never fold together.
+    /// A journal page with the given frontmatter lines after `id`.
+    fn journal_with(dir: &std::path::Path, name: &str, id_tail: &str, fm: &str, body: &str) {
+        let path = dir.join("journals").join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            path,
+            format!("+++\nid = \"0192b6c0-0000-7000-8000-0000000000{id_tail}\"\n{fm}+++\n{body}"),
+        )
+        .unwrap();
+    }
+
+    fn winner_meta(dir: &std::path::Path) -> PageMeta {
+        let text =
+            std::fs::read_to_string(dir.join("journals/20260829.2026-08-29.aaaaaaaa.md")).unwrap();
+        parse_frontmatter(&text).unwrap().0
+    }
+
+    #[test]
+    fn a_fold_keeps_the_losers_tags_and_properties() {
+        let tmp = TempDir::new().unwrap();
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "title = \"2026-08-29\"\ntags = [\"a\", \"shared\"]\ncreated_at = 2026-08-29T08:00:00Z\nweather = \"rain\"\n",
+            "- 08:00 — a\n",
+        );
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.bbbbbbbb.md",
+            "02",
+            "title = \"2026-08-29\"\ntags = [\"shared\", \"trip\"]\naliases = [\"the trip\"]\nattachments = [\"map.png\"]\nproject = \"alps\"\ncreated_at = 2026-08-29T09:00:00Z\nweather = \"rain\"\nmood = \"great\"\n",
+            "- 09:00 — b\n",
+        );
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges.len(), 1);
+        let meta = winner_meta(tmp.path());
+        assert_eq!(meta.tags, vec!["a", "shared", "trip"]);
+        assert_eq!(meta.aliases, vec!["the trip"]);
+        assert_eq!(meta.attachments, vec!["map.png"]);
+        assert_eq!(meta.project.as_deref(), Some("alps"));
+        assert_eq!(
+            meta.extra.keys().collect::<Vec<_>>(),
+            vec!["weather", "mood"]
+        );
+        assert_eq!(meta.extra["mood"].as_str(), Some("great"));
+        assert_eq!(
+            meta.created_at.unwrap().to_rfc3339(),
+            "2026-08-29T08:00:00+00:00"
+        );
+    }
+
+    #[test]
+    fn a_fold_warns_about_a_property_the_pages_disagree_on() {
+        let tmp = TempDir::new().unwrap();
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "created_at = 2026-08-29T08:00:00Z\nproject = \"alps\"\nmood = \"fine\"\n",
+            "- 08:00 — a\n",
+        );
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.bbbbbbbb.md",
+            "02",
+            "created_at = 2026-08-29T09:00:00Z\nproject = \"andes\"\nmood = \"great\"\n",
+            "- 09:00 — b\n",
+        );
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert_eq!(merges.len(), 1);
+        let meta = winner_meta(tmp.path());
+        assert_eq!(meta.project.as_deref(), Some("alps"));
+        assert_eq!(meta.extra["mood"].as_str(), Some("fine"));
+        assert_eq!(
+            warnings,
+            vec![
+                "journal merge: journals/20260829.2026-08-29.aaaaaaaa.md keeps its own `project`; the value in journals/20260829.2026-08-29.bbbbbbbb.md (\"andes\") was not folded in",
+                "journal merge: journals/20260829.2026-08-29.aaaaaaaa.md keeps its own `mood`; the value in journals/20260829.2026-08-29.bbbbbbbb.md (\"great\") was not folded in",
+            ]
+        );
+    }
+
+    /// A Conflict Copy's `conflict_of`, suffixed title and fresh id are its
+    /// own residue, not a disagreement; the rest of its frontmatter is the
+    /// other device's and folds in.
+    #[test]
+    fn a_conflict_copys_frontmatter_folds_in_without_its_residue() {
+        let tmp = TempDir::new().unwrap();
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "title = \"2026-08-29\"\ntags = [\"a\"]\ncreated_at = 2026-08-29T08:00:00Z\n",
+            "- 08:00 — a\n",
+        );
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.conflict.abc1234.md",
+            "03",
+            "title = \"2026-08-29 (conflict abc1234)\"\ntags = [\"a\", \"theirs\"]\ncreated_at = 2026-08-29T08:00:00Z\nconflict_of = \"journals/20260829.2026-08-29.aaaaaaaa.md\"\n",
+            "- 10:00 — theirs\n",
+        );
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges.len(), 1);
+        let meta = winner_meta(tmp.path());
+        assert_eq!(meta.title.as_deref(), Some("2026-08-29"));
+        assert_eq!(meta.tags, vec!["a", "theirs"]);
+        assert!(meta.extra.is_empty(), "{:?}", meta.extra);
+    }
+
     #[test]
     fn a_journal_and_an_ai_journal_of_one_date_do_not_group() {
         let tmp = TempDir::new().unwrap();

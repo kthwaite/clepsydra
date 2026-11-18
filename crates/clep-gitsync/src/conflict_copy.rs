@@ -179,7 +179,7 @@ fn in_key_order_of(extra: ExtraMap, like: &ExtraMap) -> ExtraMap {
 }
 
 /// `Plan (conflict abc1234)` -> `Plan`; any other title is returned as is.
-fn strip_conflict_suffix(title: &str) -> &str {
+pub(crate) fn strip_conflict_suffix(title: &str) -> &str {
     let Some(rest) = title.strip_suffix(')') else {
         return title;
     };
