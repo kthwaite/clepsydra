@@ -31,6 +31,11 @@ pub fn write_sync_section(vault_root: &Path, patch: &SyncSectionPatch) -> Result
         String::new()
     };
 
+    // Whether most of the file's lines end in `\r\n`.
+    let crlf = {
+        let crlf = text.matches("\r\n").count();
+        crlf > text.matches('\n').count() - crlf
+    };
     let mut doc = DocumentMut::from_str(&text)
         .map_err(|e| SyncError::Config(format!("{}: {e}", path.display())))?;
 
@@ -50,6 +55,13 @@ pub fn write_sync_section(vault_root: &Path, patch: &SyncSectionPatch) -> Result
     }
 
     let out = doc.to_string();
+    // `toml_edit` reads `\r\n` as `\n` and writes `\n` back; a CRLF file
+    // gets its line endings restored.
+    let out = if crlf {
+        out.replace("\r\n", "\n").replace('\n', "\r\n")
+    } else {
+        out
+    };
     if existed {
         atomic_replace(&path, out.as_bytes()).map_err(|e| SyncError::io(&path, e.into_inner()))?;
     } else {
@@ -102,6 +114,27 @@ mod tests {
         let cfg = clep_vault::config::VaultConfig::load(tmp.path()).unwrap();
         assert_eq!(cfg.sync.branch, "trunk");
         assert_eq!(cfg.sync.author_email.as_deref(), Some("kit@example.com"));
+    }
+
+    #[test]
+    fn a_crlf_config_keeps_its_line_endings() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".clepsydra")).unwrap();
+        let path = tmp.path().join(".clepsydra/config.toml");
+        fs::write(&path, "# mine\r\n[vault]\r\nroot = \"x\"\r\n").unwrap();
+        write_sync_section(
+            tmp.path(),
+            &SyncSectionPatch {
+                branch: None,
+                author_name: Some("Kit".into()),
+                author_email: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "# mine\r\n[vault]\r\nroot = \"x\"\r\n\r\n[sync]\r\nauthor_name = \"Kit\"\r\n"
+        );
     }
 
     #[test]
