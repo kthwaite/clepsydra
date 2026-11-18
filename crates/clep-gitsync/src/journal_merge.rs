@@ -337,6 +337,10 @@ fn entry_time(line: &str) -> Option<String> {
 /// Fold each loser's blocks into the winner's: byte-identical blocks
 /// (trailing whitespace ignored) dedupe; timed blocks insert after the last
 /// block with a time <= theirs; untimed blocks append in source order.
+///
+/// An entry one side extended — the same lines, then more lines under them —
+/// is still one entry: the longer block stands and the shorter is not
+/// repeated beside it. Entries whose continuations differ stay two blocks.
 fn interleave(winner: &str, losers: &[&str]) -> String {
     let mut blocks = split_blocks(winner);
     for loser in losers {
@@ -346,6 +350,15 @@ fn interleave(winner: &str, losers: &[&str]) -> String {
                 .any(|b| b.text.trim_end() == block.text.trim_end())
             {
                 continue;
+            }
+            if block.time.is_some() {
+                if blocks.iter().any(|b| extends(b, &block)) {
+                    continue;
+                }
+                if let Some(shorter) = blocks.iter_mut().find(|b| extends(&block, b)) {
+                    *shorter = block;
+                    continue;
+                }
             }
             match &block.time {
                 Some(time) => {
@@ -366,6 +379,15 @@ fn interleave(winner: &str, losers: &[&str]) -> String {
         }
     }
     blocks.into_iter().map(|b| b.text).collect()
+}
+
+/// Whether `longer` is the entry `shorter` with more lines under it.
+fn extends(longer: &Block, shorter: &Block) -> bool {
+    shorter.time.is_some()
+        && longer
+            .text
+            .strip_prefix(shorter.text.trim_end())
+            .is_some_and(|rest| rest.starts_with('\n'))
 }
 
 /// Rewrite every deleted loser's links to its winner in one vault pass — a
@@ -568,6 +590,62 @@ mod tests {
         );
         // Idempotent: nothing left to merge.
         assert!(merge_duplicate_journals(tmp.path()).0.is_empty());
+    }
+
+    #[test]
+    fn an_entry_one_side_extended_is_not_duplicated() {
+        // The other side holds the same entry without the continuation.
+        assert_eq!(
+            interleave(
+                "- 08:00 — shared\nstray note\n",
+                &["- 08:00 — shared\n- 10:00 — theirs\n"]
+            ),
+            "- 08:00 — shared\nstray note\n- 10:00 — theirs\n"
+        );
+        // The other side holds the longer one: its extra lines are kept.
+        assert_eq!(
+            interleave(
+                "- 08:00 — shared\n- 12:00 — noon\n",
+                &["- 08:00 — shared\nstray note\n"]
+            ),
+            "- 08:00 — shared\nstray note\n- 12:00 — noon\n"
+        );
+        // Two different continuations are two captures; both stay whole.
+        assert_eq!(
+            interleave("- 08:00 — shared\nmine\n", &["- 08:00 — shared\ntheirs\n"]),
+            "- 08:00 — shared\nmine\n- 08:00 — shared\ntheirs\n"
+        );
+        // Sharing a prefix of a line is not sharing the entry.
+        assert_eq!(
+            interleave("- 08:00 — shared\n", &["- 08:00 — shared more\n"]),
+            "- 08:00 — shared\n- 08:00 — shared more\n"
+        );
+    }
+
+    #[test]
+    fn folding_a_conflict_copy_back_does_not_duplicate_a_shared_entry() {
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — shared\nstray note\n",
+        );
+        std::fs::write(
+            tmp.path()
+                .join("journals/20260829.2026-08-29.aaaaaaaa.conflict.abc1234.md"),
+            "+++\nid = \"0192b6c0-0000-7000-8000-000000000003\"\ntitle = \"2026-08-29 (conflict abc1234)\"\nconflict_of = \"journals/20260829.2026-08-29.aaaaaaaa.md\"\n+++\n- 08:00 — shared\n- 10:00 — theirs\n",
+        )
+        .unwrap();
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges.len(), 1);
+        let text =
+            std::fs::read_to_string(tmp.path().join("journals/20260829.2026-08-29.aaaaaaaa.md"))
+                .unwrap();
+        let (_, body) = clep_vault::page::parse_frontmatter(&text).unwrap();
+        assert_eq!(body, "- 08:00 — shared\nstray note\n- 10:00 — theirs\n");
     }
 
     #[test]
