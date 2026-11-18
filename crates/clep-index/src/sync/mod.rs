@@ -30,6 +30,20 @@ pub struct SyncStats {
     pub warnings: Vec<String>,
 }
 
+/// The spelling the filesystem stores for `vault_path`, when the file exists
+/// and that spelling differs from `vault_path` in letter case only.
+///
+/// `None` when the spelling is the stored one, when the file is missing, and
+/// when the canonical path differs in more than case (a symlink).
+fn on_disk_spelling(vault: &Vault, vault_path: &VaultPath) -> Option<VaultPath> {
+    let canonical = std::fs::canonicalize(vault.resolve(vault_path)).ok()?;
+    let relative = canonical.strip_prefix(vault.root()).ok()?;
+    let stored = VaultPath::new(&relative.to_string_lossy().replace('\\', "/")).ok()?;
+    (stored.as_str() != vault_path.as_str()
+        && stored.as_str().to_lowercase() == vault_path.as_str().to_lowercase())
+    .then_some(stored)
+}
+
 /// Processes change events and incrementally updates the vault index.
 pub struct SyncEngine;
 
@@ -97,6 +111,22 @@ impl SyncEngine {
                     }
 
                     let mut targets = LinkTargets::default();
+
+                    // A case-insensitive filesystem also finds the file under
+                    // a spelling it no longer has (after `mv a.md A.md` the
+                    // watcher reports both). The page belongs under the
+                    // spelling the directory holds, as a full build indexes
+                    // it; no page belongs under the other one.
+                    let on_disk = on_disk_spelling(vault, vp);
+                    if on_disk.is_some() && index.remove_page_collecting(vp, &mut targets)? {
+                        stats.pages_removed += 1;
+                    }
+                    let vp = on_disk.as_ref().unwrap_or(vp);
+                    if vault.is_excluded(vp) {
+                        stats.links_resolved += index.reresolve_link_targets(&targets)?;
+                        continue;
+                    }
+
                     match index.index_page_collecting(vault, vp, &mut targets) {
                         Ok(true) => stats.pages_indexed += 1,
                         Ok(false) => stats.pages_skipped += 1,
