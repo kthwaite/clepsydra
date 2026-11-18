@@ -209,3 +209,53 @@ fn destination_that_cannot_be_located_is_left_untouched() {
     let result = rewrite_links_in_content(content, &[], &[("alpha.md", "f.md")]);
     assert_eq!(result, content);
 }
+
+// ---------------------------------------------------------------------------
+// Reference-style Markdown links: the definition's destination is rewritten
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rewrite_reference_style_link_definition() {
+    let content = "[x][r] and [r][] and [R]\n\n[r]: alpha.md";
+    let result = rewrite_links_in_content(content, &[], &[("alpha.md", "f.md")]);
+    assert_eq!(result, "[x][r] and [r][] and [R]\n\n[r]: f.md");
+}
+
+#[test]
+fn rewrite_reference_definition_keeps_title_and_form() {
+    assert_eq!(
+        rewrite_links_in_content(
+            "[x][r]\n\n  [r]:   <My Note.md>  'T'\n",
+            &[],
+            &[("My Note.md", "sub/My Note.md")]
+        ),
+        "[x][r]\n\n  [r]:   <sub/My Note.md>  'T'\n"
+    );
+    assert_eq!(
+        rewrite_links_in_content(
+            "[x][r]\n\n[r]: alpha.md \"T\"\n",
+            &[],
+            &[("alpha.md", "New Name.md")]
+        ),
+        "[x][r]\n\n[r]: <New Name.md> \"T\"\n"
+    );
+    // Label with an escaped bracket; destination on the next line.
+    assert_eq!(
+        rewrite_links_in_content(
+            "[x][a\\]b]\n\n[a\\]b]:\n    alpha.md\n",
+            &[],
+            &[("alpha.md", "f.md")]
+        ),
+        "[x][a\\]b]\n\n[a\\]b]:\n    f.md\n"
+    );
+}
+
+#[test]
+fn rewrite_leaves_other_reference_definitions_alone() {
+    // Not a match, inside a code block, a footnote in the vault dialect, or
+    // a definition that no link uses.
+    let content = "[x][r] [c] note[^1]\n\n[r]: other.md\n\n```\n[c]: alpha.md\n```\n\n\
+                   [^1]: alpha.md\n\n[unused]: alpha.md\n";
+    let result = rewrite_links_in_content(content, &[], &[("alpha.md", "f.md")]);
+    assert_eq!(result, content);
+}
