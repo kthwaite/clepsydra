@@ -91,7 +91,9 @@ impl VaultPath {
     /// 5. Collapse runs of `-` to single `-`
     /// 6. Trim leading/trailing `-`
     /// 7. Truncate to 200 bytes (UTF-8 safe, don't split `%XX` sequences)
-    /// 8. Append `.md`
+    /// 8. Fall back to `untitled` when nothing is left (an empty title, or one
+    ///    made only of illegal characters and dashes)
+    /// 9. Append `.md`
     pub fn from_title(title: &str) -> Self {
         // 1. NFC normalize
         let normalized: String = title.nfc().collect();
@@ -133,8 +135,15 @@ impl VaultPath {
         // 7. Truncate to 200 bytes (UTF-8 safe, don't split %XX sequences)
         let truncated = truncate_safe(trimmed, 200);
 
-        // 8. Append `.md`
-        let path = format!("{truncated}.md");
+        // 8. Never yield the stemless, hidden path `.md`.
+        let stem = if truncated.is_empty() {
+            "untitled"
+        } else {
+            truncated
+        };
+
+        // 9. Append `.md`
+        let path = format!("{stem}.md");
 
         Self { inner: path }
     }
