@@ -88,3 +88,99 @@ fn unsupported_descriptor_fields_remain_repair_only() {
     );
     assert!(parse_regions(&source).is_err());
 }
+
+fn notes_selection() -> clep_bases::base_render::RenderSelection {
+    clep_bases::base_render::RenderSelection {
+        base: "beer".into(),
+        view: None,
+        filter: None,
+        sort: None,
+        limit: None,
+        template: "notes".into(),
+    }
+}
+
+#[test]
+fn output_that_leaves_a_block_open_is_rejected_before_it_swallows_the_end_marker() {
+    use clep_bases::generated_region::{ensure_inert_output, format_region};
+    let id = "019f4d96-7ba5-7b93-b4e3-a93d134b964c";
+    for output in [
+        "```\ncode",
+        "~~~",
+        "<!-- note",
+        "<pre>\ntext",
+        "<script>",
+        "<![CDATA[",
+        "<?x",
+        // A footnote definition directly followed by a list keeps the list
+        // open across the blank line before the end marker.
+        "Claim.[^1]\n\n[^1]: Source.\n- item",
+    ] {
+        let error = ensure_inert_output(output).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "invalid generated region: template output leaves a Markdown block open",
+            "{output:?}"
+        );
+        assert!(
+            format_region(id, &notes_selection(), output).is_err(),
+            "{output:?}"
+        );
+    }
+    for output in [
+        "```\ncode\n```",
+        "<!-- note -->",
+        "<pre>\ntext\n</pre>",
+        "Claim.[^1]\n\n[^1]: Source.\n\n- item",
+        "- item\n\n  continued",
+        "> quote",
+        "",
+    ] {
+        ensure_inert_output(output).unwrap();
+        let region = format_region(id, &notes_selection(), output).unwrap();
+        let regions = parse_regions(&region).unwrap();
+        assert_eq!(regions.len(), 1, "{output:?}");
+        assert_eq!(regions[0].span, 0..region.len(), "{output:?}");
+        assert!(!regions[0].modified, "{output:?}");
+    }
+}
+
+#[test]
+fn regeneration_with_an_open_block_leaves_the_page_untouched() {
+    use clep_bases::generated_region::format_region;
+    let first = format_region(
+        "019f4d96-7ba5-7b93-b4e3-a93d134b964c",
+        &notes_selection(),
+        "One.",
+    )
+    .unwrap();
+    let second = format_region(
+        "019f4d96-7ba5-7b93-b4e3-a93d134b964d",
+        &notes_selection(),
+        "Two.",
+    )
+    .unwrap();
+    let page = format!("Intro.\n\n{first}\n\nBetween.\n\n{second}\n\nAfter.\n");
+    let regions = parse_regions(&page).unwrap();
+    assert_eq!(regions.len(), 2);
+    assert!(replace_region(&page, &regions[0], &notes_selection(), "```\nlisting").is_err());
+}
+
+#[test]
+fn insertion_after_an_unterminated_block_is_rejected() {
+    use clep_bases::generated_region::insert_region;
+    let id = "019f4d96-7ba5-7b93-b4e3-a93d134b964c";
+    // The open block runs to the end of the document, so an insertion there
+    // would land inside it as literal text.
+    for source in ["```\ncode\n", "Intro.\n\n~~~text\n", "<!-- draft\n"] {
+        let error = insert_region(source, source.len(), id, &notes_selection(), "New").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "invalid generated region: insertion must be between Markdown blocks",
+            "{source:?}"
+        );
+    }
+    let closed = "```\ncode\n```\n";
+    let inserted = insert_region(closed, closed.len(), id, &notes_selection(), "New").unwrap();
+    assert_eq!(parse_regions(&inserted).unwrap().len(), 1);
+}
