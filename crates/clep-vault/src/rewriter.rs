@@ -1,19 +1,13 @@
 use std::ops::Range;
 
 use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd, TextMergeWithOffset};
-use regex::Regex;
+
+use crate::link::WikilinkScan;
 
 /// Sentinel prefix: replace the entire link syntax with plain text.
 pub const DELETE_PLAIN: &str = "\x00PLAIN:";
 /// Sentinel prefix: replace the entire link syntax with strikethrough text.
 pub const DELETE_UNLINK: &str = "\x00UNLINK:";
-
-/// Return a lazily compiled regex for wikilinks: `[[target]]` or `[[target|display]]`.
-fn wikilink_regex() -> &'static Regex {
-    use std::sync::OnceLock;
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\[\[([^\[\]]+)\]\]").unwrap())
-}
 
 /// An edit to apply: replace `range` bytes in the source with `replacement`.
 #[derive(Debug)]
@@ -66,7 +60,8 @@ fn collect_edits(
     let mut in_html_block = false;
     // Labels of reference-style links (`[x][r]`, `[r][]`, `[r]`) whose
     // destination matches a replacement, with that replacement.
-    let mut matched_references: Vec<(String, &str, &str)> = Vec::new();
+    let mut matched_references: Vec<(Range<usize>, String, &str, &str)> = Vec::new();
+    let mut wikilinks = WikilinkScan::default();
     let mut edits = Vec::new();
     let mut pending_link: Option<PendingLink<'_>> = None;
 
@@ -97,15 +92,19 @@ fn collect_edits(
             }
             // --- reference-style links: the destination is in the definition ---
             Event::Start(Tag::Link {
-                link_type: LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut,
+                link_type:
+                    link_type @ (LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut),
                 dest_url,
                 id,
                 ..
             }) if !in_code_block && !in_html_block => {
+                if link_type == LinkType::Shortcut {
+                    wikilinks.label_brackets(&range);
+                }
                 let url = dest_url.as_ref();
                 if let Some((old, new)) = markdown_replacements.iter().find(|(old, _)| *old == url)
                 {
-                    matched_references.push((id.to_string(), old, new));
+                    matched_references.push((range, id.to_string(), old, new));
                 }
             }
             Event::End(TagEnd::Link) => {
@@ -121,35 +120,16 @@ fn collect_edits(
                 }
             }
 
-            // --- wikilinks in text events ---
+            Event::FootnoteReference(_) if !in_code_block && !in_html_block => {
+                wikilinks.label_brackets(&range);
+            }
+
+            // --- live text: where wikilink brackets may sit ---
             Event::Text(_) if !in_code_block && !in_html_block => {
                 if let Some(link) = pending_link.as_mut() {
                     link.label_end = link.label_end.max(range.end);
                 }
-                let source_slice = &content[range.start..range.end];
-                let re = wikilink_regex();
-                for cap in re.captures_iter(source_slice) {
-                    let m = cap.get(0).unwrap();
-                    let inner = &cap[1];
-                    // Extract target (before `|` if display text is present)
-                    let (target, display) = match inner.split_once('|') {
-                        Some((t, d)) => (t, Some(d)),
-                        None => (inner, None),
-                    };
-
-                    if let Some((_old, new)) =
-                        wikilink_replacements.iter().find(|(old, _)| *old == target)
-                    {
-                        let abs_start = range.start + m.start();
-                        let abs_end = range.start + m.end();
-
-                        let replacement = build_wikilink_replacement(new, target, display);
-                        edits.push(Edit {
-                            range: abs_start..abs_end,
-                            replacement,
-                        });
-                    }
-                }
+                wikilinks.text(&range);
             }
 
             // Anything else inside a link label (inline code, emphasis,
@@ -162,6 +142,30 @@ fn collect_edits(
         }
     }
 
+    // --- wikilinks ---
+    let wikilinks = wikilinks.matches(content);
+    for wikilink in &wikilinks {
+        let inner = &content[wikilink.inner.clone()];
+        // Extract target (before `|` if display text is present)
+        let (target, display) = match inner.split_once('|') {
+            Some((t, d)) => (t, Some(d)),
+            None => (inner, None),
+        };
+        if let Some((_old, new)) = wikilink_replacements.iter().find(|(old, _)| *old == target) {
+            edits.push(Edit {
+                range: wikilink.span.clone(),
+                replacement: build_wikilink_replacement(new, target, display),
+            });
+        }
+    }
+
+    // A reference link inside a wikilink (`[[Alpha]]` with `[Alpha]: x`) is
+    // part of the wikilink, not a use of the definition.
+    matched_references.retain(|(link, ..)| {
+        !wikilinks
+            .iter()
+            .any(|wikilink| wikilink.span.start <= link.start && link.end <= wikilink.span.end)
+    });
     if !matched_references.is_empty() {
         edits.extend(reference_definition_edits(content, matched_references));
     }
@@ -170,15 +174,18 @@ fn collect_edits(
 }
 
 /// Edits for the link reference definitions behind the reference-style links
-/// in `references` (`(label, old_url, new_url)`); each definition is edited
+/// in `references` (`(link span, label, old_url, new_url)`); each definition is edited
 /// once. A definition that no matching link uses is not touched.
-fn reference_definition_edits(content: &str, references: Vec<(String, &str, &str)>) -> Vec<Edit> {
+fn reference_definition_edits(
+    content: &str,
+    references: Vec<(Range<usize>, String, &str, &str)>,
+) -> Vec<Edit> {
     // Definitions produce no event; they are read from the parser's table.
     let parser = Parser::new_ext(content, crate::link::link_scan_options());
     let definitions = parser.reference_definitions();
 
     let mut edits: Vec<Edit> = Vec::new();
-    for (label, old_url, new_url) in references {
+    for (_link, label, old_url, new_url) in references {
         let Some(def) = definitions.get(&label) else {
             continue;
         };

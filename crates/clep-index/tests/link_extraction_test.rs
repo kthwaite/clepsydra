@@ -250,3 +250,57 @@ fn footnote_reference_is_not_a_markdown_link() {
     assert_eq!(link_shapes("Text[^1].\n\n[^1]: Ibid.\n"), vec![]);
     assert_eq!(link_shapes("Text[^1].\n\n[^1]: alpha.md\n"), vec![]);
 }
+
+// ---------------------------------------------------------------------------
+// Wikilinks are recognised from the source, not from single text runs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn wikilink_target_with_inline_markup_is_extracted() {
+    assert_eq!(
+        link_shapes("[[__init__]]"),
+        vec![("__init__".to_string(), 0..12, LinkKind::Wiki)]
+    );
+    assert_eq!(
+        link_shapes("see [[a*b*c]] now"),
+        vec![("a*b*c".to_string(), 4..13, LinkKind::Wiki)]
+    );
+    assert_eq!(
+        link_shapes("[[say `hi`|label]]"),
+        vec![("say `hi`".to_string(), 0..18, LinkKind::Wiki)]
+    );
+    assert_eq!(
+        link_shapes("[[x <b> y]]"),
+        vec![("x <b> y".to_string(), 0..11, LinkKind::Wiki)]
+    );
+}
+
+#[test]
+fn reference_definition_does_not_hijack_wikilink() {
+    // `[Alpha]` inside the wikilink would resolve as a shortcut reference.
+    assert_eq!(
+        link_shapes("[Alpha]: other.md\n\n[[Alpha]] and [Alpha]"),
+        vec![
+            ("Alpha".to_string(), 19..28, LinkKind::Wiki),
+            ("other.md".to_string(), 33..40, LinkKind::Markdown),
+        ]
+    );
+    // Same for a footnote label.
+    assert_eq!(
+        link_shapes("[[^1]]\n\n[^1]: note text\n"),
+        vec![("^1".to_string(), 0..6, LinkKind::Wiki)]
+    );
+}
+
+#[test]
+fn wikilink_delimiters_must_be_live_text_on_one_line() {
+    // Opening brackets inside a code span.
+    assert_eq!(link_shapes("`a [[b` c]]"), vec![]);
+    // Closing brackets inside a code span.
+    assert_eq!(link_shapes("[[a `b]]` c"), vec![]);
+    // Brackets inside an HTML tag.
+    assert_eq!(link_shapes("<a title=\"[[A]]\">x</a>"), vec![]);
+    // A line break between the brackets.
+    assert_eq!(link_shapes("[[a\nb]]"), vec![]);
+    assert_eq!(link_shapes("[[a\n\nb]]"), vec![]);
+}
