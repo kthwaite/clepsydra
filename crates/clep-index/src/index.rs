@@ -3821,6 +3821,28 @@ mod tests {
     }
 
     #[test]
+    fn nul_in_user_text_never_reaches_sqlite_as_an_error() {
+        let index = search_index();
+
+        // A NUL separates words, as any other non-token character does.
+        for query in [
+            "\"local\0backup\"",
+            "\"\0local backup\"",
+            "\"local backup\0\"",
+        ] {
+            assert_paths(index.search(query, 20).unwrap(), &["notes/backup.md"]);
+        }
+        assert_paths(
+            index.search("title:\"backup\" \"local\0\"", 20).unwrap(),
+            &["notes/backup.md"],
+        );
+        assert_paths(
+            crate::grep::run(&index, "local\0backup", 20, false).unwrap(),
+            &["notes/backup.md"],
+        );
+    }
+
+    #[test]
     fn search_rejects_structural_and_unsearchable_punctuation() {
         let index = search_index();
 

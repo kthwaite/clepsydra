@@ -531,7 +531,7 @@ fn fts_expression(
     let expression = match mode {
         TextMode::Prefix => prefix_fts_expression(value),
         TextMode::Phrase if value.chars().any(char::is_alphanumeric) => {
-            format!("\"{}\"", escape_fts_phrase(value))
+            crate::grep::fts_quote(value)
         }
         TextMode::Phrase => String::new(),
     };
@@ -585,10 +585,6 @@ fn prefix_fts_expression(value: &str) -> String {
     }
 
     expression
-}
-
-fn escape_fts_phrase(value: &str) -> String {
-    value.replace('"', "\"\"")
 }
 
 #[cfg(test)]

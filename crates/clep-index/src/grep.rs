@@ -28,8 +28,12 @@ pub fn run(
 /// and double any embedded `"`. This makes arbitrary input safe to pass to
 /// `MATCH` — stray quotes or bare operators become literal tokens instead of
 /// FTS5 syntax errors.
+///
+/// A NUL becomes a space. FTS5 reads the `MATCH` text as a C string, so a NUL
+/// would end it before the closing quote ("unterminated string"). The
+/// tokenizer treats a NUL as a separator, so a space matches the same pages.
 pub(crate) fn fts_quote(query: &str) -> String {
-    let escaped = query.replace('"', "\"\"");
+    let escaped = query.replace('"', "\"\"").replace('\0', " ");
     format!("\"{escaped}\"")
 }
 
@@ -121,6 +125,14 @@ mod tests {
     #[test]
     fn fts_quote_wraps_plain_phrase() {
         assert_eq!(fts_quote("hello world"), "\"hello world\"");
+    }
+
+    #[test]
+    fn fts_quote_replaces_nul_with_a_separator() {
+        // FTS5 reads the MATCH text as a C string: a NUL would end it before
+        // the closing quote.
+        assert_eq!(fts_quote("tag\0zob"), "\"tag zob\"");
+        assert_eq!(fts_quote("\0tag"), "\" tag\"");
     }
 
     #[test]
