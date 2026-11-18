@@ -2,7 +2,7 @@ use tower_lsp::lsp_types::{
     AnnotatedTextEdit, OneOf, Position, PrepareRenameResponse, Range, TextEdit,
 };
 
-use crate::document::Document;
+use crate::document::{Document, PositionEncoding};
 use clep_vault::canonical::CanonicalName;
 use clep_vault::link::LinkKind;
 use clep_vault::page::{parse_or_repair_frontmatter, write_page_content};
@@ -137,8 +137,8 @@ pub fn compute_new_vault_path(old_vp: &VaultPath, new_name: &str) -> Option<Vaul
 /// The end is the position just past the last byte, counted the way an LSP
 /// client counts: a line ends at `\n`, `\r\n` or a lone `\r`, and a text
 /// that ends with a terminator ends at column 0 of the line after it. The
-/// character is in UTF-8 bytes.
-pub fn full_document_range(text: &str) -> Range {
+/// character is measured in `encoding`.
+pub fn full_document_range(text: &str, encoding: PositionEncoding) -> Range {
     let bytes = text.as_bytes();
     let mut line = 0u32;
     let mut last_line_start = 0;
@@ -164,7 +164,10 @@ pub fn full_document_range(text: &str) -> Range {
         },
         end: Position {
             line,
-            character: (bytes.len() - last_line_start) as u32,
+            character: encoding.column_of_byte(
+                &text[last_line_start..],
+                bytes.len() - last_line_start,
+            ),
         },
     }
 }
@@ -448,7 +451,7 @@ mod tests {
 
     #[test]
     fn full_document_range_single_line() {
-        let r = full_document_range("hello");
+        let r = full_document_range("hello", PositionEncoding::Utf8);
         assert_eq!(r.start.line, 0);
         assert_eq!(r.start.character, 0);
         assert_eq!(r.end.line, 0);
@@ -458,7 +461,7 @@ mod tests {
     #[test]
     fn full_document_range_multi_line() {
         let text = "line one\nline two\nthird";
-        let r = full_document_range(text);
+        let r = full_document_range(text, PositionEncoding::Utf8);
         assert_eq!(r.start.line, 0);
         assert_eq!(r.start.character, 0);
         assert_eq!(r.end.line, 2);
@@ -467,7 +470,7 @@ mod tests {
 
     /// The end position of the full-document range, as `(line, character)`.
     fn full_end(text: &str) -> (u32, u32) {
-        let r = full_document_range(text);
+        let r = full_document_range(text, PositionEncoding::Utf8);
         assert_eq!((r.start.line, r.start.character), (0, 0));
         (r.end.line, r.end.character)
     }
@@ -506,6 +509,16 @@ mod tests {
     #[test]
     fn full_document_range_last_line_is_in_utf8_bytes() {
         assert_eq!(full_end("a\nZoë"), (1, 4));
+    }
+
+    #[test]
+    fn full_document_range_end_column_is_in_the_given_encoding() {
+        // The last line `Zoë 𝒜` is 9 bytes and 6 UTF-16 code units.
+        let text = "one\nZoë 𝒜";
+        let utf8 = full_document_range(text, PositionEncoding::Utf8);
+        assert_eq!((utf8.end.line, utf8.end.character), (1, 9));
+        let utf16 = full_document_range(text, PositionEncoding::Utf16);
+        assert_eq!((utf16.end.line, utf16.end.character), (1, 6));
     }
 
     // ──────────────────────────────────────────────

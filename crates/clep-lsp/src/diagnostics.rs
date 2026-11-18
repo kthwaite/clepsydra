@@ -292,7 +292,7 @@ fn key_line_range(doc: &Document, key: &str) -> Option<Range> {
                 },
                 end: Position {
                     line: idx as u32,
-                    character: trimmed.len() as u32,
+                    character: doc.encoding.column_of_byte(trimmed, trimmed.len()),
                 },
             });
         }
@@ -401,6 +401,26 @@ mod tests {
         );
         // Anchored to the rating line.
         assert_eq!(d.range.start.line, 3);
+    }
+
+    #[test]
+    fn property_diagnostic_range_uses_the_document_position_encoding() {
+        // `rating = "é"` is 13 bytes and 12 UTF-16 code units.
+        let text = "+++\nid = \"0190f8a0-0000-7000-8000-000000000088\"\ntype = \"BOOK\"\nrating = \"é\"\n+++\n";
+        let registry = registry_with(TYPED_BASE);
+        let end_column = |doc: &Document| {
+            compute_property_diagnostics(doc, &registry, "book.md", &HashMap::new())
+                .iter()
+                .find(|d| d.code == Some(NumberOrString::String("property-type".into())))
+                .expect("property-type diagnostic")
+                .range
+                .end
+                .character
+        };
+        assert_eq!(end_column(&Document::from_text(text, 1)), 13);
+        let utf16 = Document::from_text(text, 1)
+            .with_position_encoding(crate::document::PositionEncoding::Utf16);
+        assert_eq!(end_column(&utf16), 12);
     }
 
     #[test]

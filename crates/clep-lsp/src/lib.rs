@@ -68,6 +68,8 @@ pub struct LspBackend {
     /// (`spawn_vault_watcher`, started from `initialized`). `None` before
     /// `initialized` runs and in tests that don't exercise the watcher.
     pub watcher: std::sync::Mutex<Option<clep_index::sync::watcher::VaultWatcher>>,
+    /// The position encoding negotiated in `initialize`. Empty before that.
+    pub position_encoding: std::sync::OnceLock<document::PositionEncoding>,
 }
 
 impl LspBackend {
@@ -82,6 +84,17 @@ impl LspBackend {
     /// State accessor for notification handlers (silently skip before initialize).
     fn state_opt(&self) -> Option<Arc<state::LspState>> {
         self.vault_state.get().cloned()
+    }
+    /// The unit of the columns exchanged with the client. Before
+    /// `initialize` has negotiated one this is the server's native UTF-8.
+    fn position_encoding(&self) -> document::PositionEncoding {
+        self.position_encoding.get().copied().unwrap_or_default()
+    }
+    /// Parse `text` into a [`document::Document`] whose positions use the
+    /// negotiated encoding. Every document the server builds comes from here.
+    fn parse_document(&self, text: &str, version: i32) -> document::Document {
+        document::Document::from_text(text, version)
+            .with_position_encoding(self.position_encoding())
     }
 }
 
@@ -111,9 +124,16 @@ impl LanguageServer for LspBackend {
                 err
             })?;
         let _ = self.vault_state.set(Arc::new(opened));
+        let offered = params
+            .capabilities
+            .general
+            .as_ref()
+            .and_then(|general| general.position_encodings.as_deref());
+        let encoding = document::PositionEncoding::negotiate(offered);
+        let _ = self.position_encoding.set(encoding);
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                position_encoding: Some(PositionEncodingKind::UTF8),
+                position_encoding: Some(encoding.kind()),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
                         open_close: Some(true),
@@ -176,7 +196,7 @@ impl LanguageServer for LspBackend {
         let text = params.text_document.text;
         let version = params.text_document.version;
 
-        let doc = document::Document::from_text(&text, version);
+        let doc = self.parse_document(&text, version);
 
         {
             let mut docs = self.documents.lock().await;
@@ -197,7 +217,7 @@ impl LanguageServer for LspBackend {
 
         // Full sync: take the last (only) content change
         if let Some(change) = params.content_changes.into_iter().last() {
-            let mut doc = document::Document::from_text(&change.text, version);
+            let mut doc = self.parse_document(&change.text, version);
             doc.dirty = true;
             {
                 let mut docs = self.documents.lock().await;
@@ -303,7 +323,8 @@ impl LanguageServer for LspBackend {
             let target_uri = Url::from_file_path(&abs_path)
                 .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
             let range = match tokio::fs::read_to_string(&abs_path).await {
-                Ok(text) => document::Document::from_text(&text, 0)
+                Ok(text) => self
+                    .parse_document(&text, 0)
                     .body_span_to_range(hit.span_start, hit.span_end),
                 Err(_) => Range::default(),
             };
@@ -386,7 +407,7 @@ impl LanguageServer for LspBackend {
                     .unwrap_or(0);
                 let (title, preview) = match tokio::fs::read_to_string(&abs_path).await {
                     Ok(file_content) => {
-                        let target = document::Document::from_text(&file_content, 0);
+                        let target = self.parse_document(&file_content, 0);
                         let preview = crate::hover::extract_preview(&target.body, 10);
                         (target.meta.title, preview)
                     }
@@ -415,7 +436,7 @@ impl LanguageServer for LspBackend {
         let uri = params.text_document_position.text_document.uri;
         let pos = params.text_document_position.position;
 
-        let (line_text, frontmatter_meta, encrypted_body_position) = {
+        let (line_text, character, frontmatter_meta, encrypted_body_position) = {
             let docs = self.documents.lock().await;
             let doc = match docs.get(&uri) {
                 Some(d) => d,
@@ -438,8 +459,11 @@ impl LanguageServer for LspBackend {
                 && line_start_byte < doc.body_byte_offset
                 && line_text.trim_end() != "+++";
             let meta = inside_frontmatter.then(|| doc.meta.clone());
+            // The prefix detectors below slice the line by byte column.
+            let character = doc.encoding.byte_of_column(&line_text, pos.character);
             (
                 line_text,
+                character,
                 meta,
                 doc.encrypted && line_start_byte >= doc.body_byte_offset,
             )
@@ -448,8 +472,6 @@ impl LanguageServer for LspBackend {
         if encrypted_body_position {
             return Ok(None);
         }
-
-        let character = pos.character as usize;
 
         // Wikilink completion works in body and frontmatter alike — relation
         // values (`series = ["[[…`) delegate to the same completer.
@@ -765,6 +787,21 @@ impl LanguageServer for LspBackend {
                 let line_text = doc.rope.line(line_idx).to_string();
                 if let Some(response) = rename::frontmatter_title_rename_range(&line_text, pos.line)
                 {
+                    // The helper reports byte columns within the line.
+                    let response = match response {
+                        PrepareRenameResponse::RangeWithPlaceholder {
+                            mut range,
+                            placeholder,
+                        } => {
+                            for position in [&mut range.start, &mut range.end] {
+                                position.character = doc
+                                    .encoding
+                                    .column_of_byte(&line_text, position.character as usize);
+                            }
+                            PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }
+                        }
+                        other => other,
+                    };
                     return Ok(Some(response));
                 }
             }
@@ -1187,7 +1224,7 @@ impl LspBackend {
         };
 
         let new_text = rename::update_frontmatter_title(&target_text, new_name);
-        let full_range = rename::full_document_range(&target_text);
+        let full_range = rename::full_document_range(&target_text, self.position_encoding());
         let edit = TextDocumentEdit {
             text_document: OptionalVersionedTextDocumentIdentifier {
                 uri: old_uri.clone(),
@@ -1239,7 +1276,7 @@ impl LspBackend {
             };
 
             // Build a throwaway Document to find links
-            let ref_doc = document::Document::from_text(&ref_text, 0);
+            let ref_doc = self.parse_document(&ref_text, 0);
             let text_edits =
                 rename::build_wikilink_text_edits(&ref_doc, old_canonical_names, new_name);
 
@@ -1549,7 +1586,7 @@ impl LspBackend {
         {
             let abs_path = state.vault.resolve(&vp);
             if let Ok(content) = tokio::fs::read_to_string(&abs_path).await {
-                let doc = document::Document::from_text(&content, 0);
+                let doc = self.parse_document(&content, 0);
                 return doc.body_span_to_range(start, end);
             }
         }
@@ -1582,7 +1619,7 @@ impl LspBackend {
             }
         }
         let content = tokio::fs::read_to_string(&abs).await.ok()?;
-        let doc = document::Document::from_text(&content, 0);
+        let doc = self.parse_document(&content, 0);
         Some(Location {
             range: doc.body_span_to_range(start, end),
             uri,
@@ -1803,6 +1840,7 @@ pub async fn run_lsp() {
         documents: Arc::new(Mutex::new(HashMap::new())),
         canonical_names: Arc::new(RwLock::new(HashMap::new())),
         watcher: std::sync::Mutex::new(None),
+        position_encoding: std::sync::OnceLock::new(),
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;
@@ -1842,6 +1880,209 @@ mod tests {
         let result = backend.initialize(params).await.unwrap();
         assert!(result.capabilities.completion_provider.is_some());
         assert!(backend.state().is_ok());
+    }
+
+    /// `initialize` against a fresh vault with the given client encodings.
+    async fn initialize_with_encodings(
+        offered: Option<Vec<PositionEncodingKind>>,
+    ) -> (LspBackend, InitializeResult, tempfile::TempDir) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        clep_vault::init::init_vault(&root).unwrap();
+        let backend = make_uninitialized_backend();
+        #[allow(deprecated)]
+        let params = InitializeParams {
+            root_uri: Some(Url::from_file_path(&root).unwrap()),
+            capabilities: ClientCapabilities {
+                general: Some(GeneralClientCapabilities {
+                    position_encodings: offered,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let result = backend.initialize(params).await.unwrap();
+        (backend, result, tmp)
+    }
+
+    #[tokio::test]
+    async fn initialize_answers_utf16_when_the_client_offers_no_encodings() {
+        // LSP 3.17: UTF-16 is the default; the server may not answer an
+        // encoding the client did not offer.
+        let (backend, result, _tmp) = initialize_with_encodings(None).await;
+        assert_eq!(
+            result.capabilities.position_encoding,
+            Some(PositionEncodingKind::UTF16)
+        );
+        assert_eq!(
+            backend.position_encoding(),
+            crate::document::PositionEncoding::Utf16
+        );
+
+        let (_backend, result, _tmp) =
+            initialize_with_encodings(Some(vec![PositionEncodingKind::UTF16])).await;
+        assert_eq!(
+            result.capabilities.position_encoding,
+            Some(PositionEncodingKind::UTF16)
+        );
+    }
+
+    #[tokio::test]
+    async fn initialize_answers_utf8_when_the_client_offers_it() {
+        let offered = vec![PositionEncodingKind::UTF16, PositionEncodingKind::UTF8];
+        let (backend, result, _tmp) = initialize_with_encodings(Some(offered)).await;
+        assert_eq!(
+            result.capabilities.position_encoding,
+            Some(PositionEncodingKind::UTF8)
+        );
+        assert_eq!(
+            backend.position_encoding(),
+            crate::document::PositionEncoding::Utf8
+        );
+    }
+
+    /// A backend that negotiated UTF-16 positions with its client.
+    fn make_utf16_backend(files: &[(&str, &str)]) -> (LspBackend, tempfile::TempDir) {
+        let (backend, tmp) = make_backend(files);
+        backend
+            .position_encoding
+            .set(crate::document::PositionEncoding::Utf16)
+            .unwrap();
+        (backend, tmp)
+    }
+
+    fn position_params(uri: &Url, line: u32, character: u32) -> TextDocumentPositionParams {
+        TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position { line, character },
+        }
+    }
+
+    fn prepare_rename_range(response: Option<PrepareRenameResponse>) -> (u32, u32) {
+        match response {
+            Some(PrepareRenameResponse::RangeWithPlaceholder { range, .. }) => {
+                (range.start.character, range.end.character)
+            }
+            other => panic!("expected RangeWithPlaceholder, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn utf16_client_gets_utf16_prepare_rename_ranges() {
+        // `Zoë ` is 5 bytes and 4 UTF-16 code units.
+        let text = "---\ntitle: Zoë Note\n---\nZoë [[Target]]\n";
+        let (backend, _tmp) = make_utf16_backend(&[("A.md", text), ("Target.md", "# Target\n")]);
+        let uri = uri_for(&backend, "A.md");
+        open_doc(&backend, &uri, text).await;
+
+        // On the wikilink: columns 4..14 (bytes 5..15).
+        let on_link = backend
+            .prepare_rename(position_params(&uri, 3, 4))
+            .await
+            .unwrap();
+        assert_eq!(prepare_rename_range(on_link), (4, 14));
+        // Column 3 is the space before the link.
+        let before_link = backend
+            .prepare_rename(position_params(&uri, 3, 3))
+            .await
+            .unwrap();
+        assert!(before_link.is_none());
+
+        // On the frontmatter title: columns 7..15 (bytes 7..16).
+        let on_title = backend
+            .prepare_rename(position_params(&uri, 1, 9))
+            .await
+            .unwrap();
+        assert_eq!(prepare_rename_range(on_title), (7, 15));
+    }
+
+    #[tokio::test]
+    async fn utf16_client_completion_reads_the_column_in_utf16_units() {
+        // `日本 [[Tar`: the cursor after `Tar` is column 8 in UTF-16 code
+        // units and byte 12. Read as a byte column, 8 is before the `[[`.
+        let text = "# A\n\n日本 [[Tar";
+        let (backend, _tmp) = make_utf16_backend(&[("A.md", text), ("Target.md", "# Target\n")]);
+        let uri = uri_for(&backend, "A.md");
+        open_doc(&backend, &uri, text).await;
+        let items = complete_at(&backend, &uri, 2, 8)
+            .await
+            .expect("wikilink completion");
+        assert!(items.iter().any(|item| item.label == "Target"));
+    }
+
+    #[tokio::test]
+    async fn utf16_client_gets_utf16_rename_edit_ranges() {
+        // The renamed page ends with `Zoë` (4 bytes, 3 units) and no newline;
+        // the referrer has `Zoë ` before its link.
+        let text = "---\ntitle: Old Note\n---\nZoë";
+        let (backend, _tmp) =
+            make_utf16_backend(&[("Old Note.md", text), ("A.md", "# A\n\nZoë [[Old Note]]\n")]);
+        let uri = uri_for(&backend, "Old Note.md");
+        open_doc(&backend, &uri, text).await;
+        let params = RenameParams {
+            text_document_position: position_params(&uri, 1, 9),
+            new_name: "New Note".to_string(),
+            work_done_progress_params: Default::default(),
+        };
+        let edit = backend
+            .rename(params)
+            .await
+            .unwrap()
+            .expect("workspace edit");
+        let Some(DocumentChanges::Operations(ops)) = edit.document_changes else {
+            panic!("expected document change operations");
+        };
+        let mut ranges = Vec::new();
+        for op in ops {
+            if let DocumentChangeOperation::Edit(doc_edit) = op {
+                let file = doc_edit.text_document.uri.path().to_string();
+                for text_edit in doc_edit.edits {
+                    let range = match text_edit {
+                        OneOf::Left(e) => e.range,
+                        OneOf::Right(e) => e.text_edit.range,
+                    };
+                    ranges.push((file.clone(), range));
+                }
+            }
+        }
+        let range_for = |suffix: &str| {
+            ranges
+                .iter()
+                .find(|(file, _)| file.ends_with(suffix))
+                .unwrap_or_else(|| panic!("no edit for {suffix}: {ranges:?}"))
+                .1
+        };
+        // Whole renamed document: ends on line 3 after `Zoë`.
+        let full = range_for("Old%20Note.md");
+        assert_eq!(
+            (full.start, full.end),
+            (
+                Position {
+                    line: 0,
+                    character: 0
+                },
+                Position {
+                    line: 3,
+                    character: 3
+                }
+            )
+        );
+        // The referring link: columns 4..16 (bytes 5..17).
+        let link = range_for("A.md");
+        assert_eq!(
+            (link.start, link.end),
+            (
+                Position {
+                    line: 2,
+                    character: 4
+                },
+                Position {
+                    line: 2,
+                    character: 16
+                }
+            )
+        );
     }
 
     #[tokio::test]

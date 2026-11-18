@@ -15,8 +15,9 @@ metadata without depending on `clep serve`.
 - Open the vault as the editor workspace. An ancestor `.clepsydra` directory is
   the preferred root marker; otherwise the LSP uses the normal application
   [configuration](/docs/configuration) lookup.
-- Use an LSP client that negotiates UTF-8 positions. Neovim does this
-  automatically; Clepsydra advertises `PositionEncodingKind::UTF8`.
+- Any LSP client works. Clepsydra answers UTF-8 positions when the client
+  offers them in `general.positionEncodings` (Neovim does) and falls back to
+  UTF-16, the LSP default, when it does not.
 
 ## Workflow
 
