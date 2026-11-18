@@ -93,6 +93,10 @@ fn splice_fenced(raw: &str, edits: &FrontmatterEdits) -> Result<String, SpliceEr
                 }
             }
             *replacement.decor_mut() = previous.decor().clone();
+        } else if doc.contains_key(key) {
+            // The key was a `[table]` or `[[array of tables]]` header. Its key
+            // has header spacing, so drop it and insert a fresh `key = value`.
+            doc.remove(key);
         }
         doc[key.as_str()] = toml_edit::Item::Value(replacement);
     }
@@ -213,6 +217,25 @@ Body line two.\n";
             splice_frontmatter(raw, &FrontmatterEdits::default()),
             Err(SpliceError::LegacyFrontmatter)
         ));
+    }
+
+    #[test]
+    fn value_replacing_a_table_is_spelled_like_other_keys() {
+        let raw = "+++\na = 1\n\n[t]\nx = 1\n+++\nBody\n";
+        let out = splice_frontmatter(raw, &edits(vec![("t", serde_json::json!(5), None)], vec![]))
+            .unwrap();
+        assert_eq!(out, "+++\na = 1\nt = 5\n+++\nBody\n");
+    }
+
+    #[test]
+    fn value_replacing_an_array_of_tables_is_spelled_like_other_keys() {
+        let raw = "+++\na = 1\n\n[[t]]\nx = 1\n\n[[t]]\nx = 2\n\n[keep]\ny = 1\n+++\nBody\n";
+        let out = splice_frontmatter(
+            raw,
+            &edits(vec![("t", serde_json::json!(["x"]), None)], vec![]),
+        )
+        .unwrap();
+        assert_eq!(out, "+++\na = 1\nt = [\"x\"]\n\n[keep]\ny = 1\n+++\nBody\n");
     }
 
     #[test]
