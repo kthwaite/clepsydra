@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, TextMergeWithOffset};
+use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd, TextMergeWithOffset};
 use regex::Regex;
 
 /// Sentinel prefix: replace the entire link syntax with plain text.
@@ -27,6 +27,11 @@ struct Edit {
 ///
 /// Each entry is `(old_target, new_target)`. Only the matching syntax is
 /// rewritten; wikilink display text and Markdown link labels are preserved.
+/// For a Markdown link only the destination bytes change: the label, the
+/// title, padding and angle brackets stay as written. The new destination is
+/// written in a form that parses back to `new_target` (angle brackets when it
+/// contains spaces, backslash escapes where needed); a link whose new
+/// destination has no such form is left untouched.
 ///
 /// Special `new_target` prefixes trigger delete-rewrite modes:
 /// - `\x00PLAIN:text` replaces `[[target]]` with `text` (plain text, no syntax)
@@ -58,6 +63,7 @@ fn collect_edits(
     let mut edits = Vec::new();
     let mut in_code_block = false;
     let mut in_html_block = false;
+    let mut pending_link: Option<PendingLink<'_>> = None;
 
     for (event, range) in parser {
         match event {
@@ -67,22 +73,41 @@ fn collect_edits(
             Event::Start(Tag::HtmlBlock) => in_html_block = true,
             Event::End(TagEnd::HtmlBlock) => in_html_block = false,
 
-            // --- standard markdown links [text](url) ---
-            Event::Start(Tag::Link { dest_url, .. }) if !in_code_block && !in_html_block => {
+            // --- inline markdown links [text](url "title") ---
+            Event::Start(Tag::Link {
+                link_type: LinkType::Inline,
+                dest_url,
+                ..
+            }) if !in_code_block && !in_html_block => {
                 let url = dest_url.as_ref();
-                if let Some((_old, new)) = markdown_replacements.iter().find(|(old, _)| *old == url)
+                pending_link = markdown_replacements
+                    .iter()
+                    .find(|(old, _)| *old == url)
+                    .map(|(old, new)| PendingLink {
+                        old_url: old,
+                        new_url: new,
+                        // Just past the opening `[`; label events push it on.
+                        label_end: range.start + 1,
+                    });
+            }
+            Event::End(TagEnd::Link) => {
+                if let Some(link) = pending_link.take()
+                    && let Some(edit) = rewrite_markdown_link(
+                        content,
+                        link.label_end..range.end,
+                        link.old_url,
+                        link.new_url,
+                    )
                 {
-                    // The range covers the entire `[text](url)` syntax.
-                    // We need to replace just the URL portion.
-                    let link_text = &content[range.start..range.end];
-                    if let Some(edit) = rewrite_markdown_link(link_text, new, range.start) {
-                        edits.push(edit);
-                    }
+                    edits.push(edit);
                 }
             }
 
             // --- wikilinks in text events ---
             Event::Text(_) if !in_code_block && !in_html_block => {
+                if let Some(link) = pending_link.as_mut() {
+                    link.label_end = link.label_end.max(range.end);
+                }
                 let source_slice = &content[range.start..range.end];
                 let re = wikilink_regex();
                 for cap in re.captures_iter(source_slice) {
@@ -109,9 +134,13 @@ fn collect_edits(
                 }
             }
 
-            // Inline code — skip entirely
-            Event::Code(_) => {}
-            _ => {}
+            // Anything else inside a link label (inline code, emphasis,
+            // images, …) is skipped, but moves the end of the label on.
+            _ => {
+                if let Some(link) = pending_link.as_mut() {
+                    link.label_end = link.label_end.max(range.end);
+                }
+            }
         }
     }
 
@@ -139,20 +168,141 @@ fn build_wikilink_replacement(
     }
 }
 
-/// Replace just the URL in a markdown link `[text](url)`, returning an Edit
-/// whose range is absolute in the document.
-fn rewrite_markdown_link(link_text: &str, new_url: &str, base_offset: usize) -> Option<Edit> {
-    // Find the last `](` which separates display text from URL.
-    let paren_open = link_text.rfind("](")?;
-    // URL starts right after `(`
-    let url_start = paren_open + 2;
-    // Find the closing `)`
-    let url_end = link_text[url_start..].find(')')? + url_start;
+/// An inline Markdown link whose destination matches a replacement, open
+/// between its `Start` and `End` events.
+struct PendingLink<'a> {
+    old_url: &'a str,
+    new_url: &'a str,
+    /// End of the last label event seen so far: the `](` that opens the
+    /// destination is searched for from here, never inside the label.
+    label_end: usize,
+}
 
-    Some(Edit {
-        range: (base_offset + url_start)..(base_offset + url_end),
-        replacement: new_url.to_string(),
-    })
+/// Replace just the destination of an inline Markdown link. `tail` runs from
+/// the end of the label's content to the end of the link, so it holds
+/// `](destination "title")`. Returns `None`, leaving the link as written, if
+/// the bytes found do not read back as `old_url` (e.g. a destination on a
+/// continuation line behind a `>` blockquote marker).
+fn rewrite_markdown_link(
+    content: &str,
+    tail: Range<usize>,
+    old_url: &str,
+    new_url: &str,
+) -> Option<Edit> {
+    // Delete sentinels are wikilink-only: never write one into a destination.
+    if new_url.starts_with('\x00') {
+        return None;
+    }
+    let open = tail.start + content[tail.clone()].find("](")? + 2;
+    let (range, angle) = locate_destination(content, open, tail.end)?;
+    let found = &content[range.clone()];
+    let found_reads_as_old = if angle {
+        destination_parses_to(&format!("<{found}>"), old_url)
+    } else {
+        destination_parses_to(found, old_url)
+    };
+    if !found_reads_as_old {
+        return None;
+    }
+    let replacement = encode_destination(new_url, angle)?;
+    Some(Edit { range, replacement })
+}
+
+/// Locate the CommonMark link destination that starts at or after `from`
+/// (leading whitespace is skipped). Returns its byte range, without the angle
+/// brackets, and whether it is written in the `<…>` form.
+fn locate_destination(content: &str, from: usize, end: usize) -> Option<(Range<usize>, bool)> {
+    let bytes = content.as_bytes();
+    let mut pos = from;
+    while pos < end && bytes[pos].is_ascii_whitespace() {
+        pos += 1;
+    }
+
+    if pos < end && bytes[pos] == b'<' {
+        let start = pos + 1;
+        let mut i = start;
+        while i < end {
+            match bytes[i] {
+                b'\\' if i + 1 < end && bytes[i + 1].is_ascii_punctuation() => i += 2,
+                b'>' => return Some((start..i, true)),
+                b'<' | b'\n' | b'\r' => return None,
+                _ => i += 1,
+            }
+        }
+        return None;
+    }
+
+    // Bare form: ends at whitespace, a control character, or the first
+    // unbalanced `)`; backslash-escaped punctuation never ends it.
+    let mut depth = 0usize;
+    let mut i = pos;
+    while i < end {
+        match bytes[i] {
+            b'\\' if i + 1 < end && bytes[i + 1].is_ascii_punctuation() => i += 2,
+            b'(' => {
+                depth += 1;
+                i += 1;
+            }
+            b')' if depth == 0 => break,
+            b')' => {
+                depth -= 1;
+                i += 1;
+            }
+            b if b.is_ascii_whitespace() || b.is_ascii_control() => break,
+            _ => i += 1,
+        }
+    }
+    Some((pos..i, false))
+}
+
+/// Write `url` as a link destination that parses back to exactly `url`.
+/// Keeps the `<…>` form when the link already used it, otherwise prefers the
+/// bare form and falls back to `<…>` (needed for spaces). Returns the text to
+/// put in place of the old destination: for an angle-bracket link that is the
+/// inside of the brackets. `None` if no form round-trips (e.g. a line break).
+fn encode_destination(url: &str, angle: bool) -> Option<String> {
+    let bare = [url.to_string(), escape_destination(url, "\\()<&")];
+    let angled = [url.to_string(), escape_destination(url, "\\<>&")];
+
+    if angle {
+        return angled
+            .into_iter()
+            .find(|inner| destination_parses_to(&format!("<{inner}>"), url));
+    }
+    bare.into_iter()
+        .find(|dest| destination_parses_to(dest, url))
+        .or_else(|| {
+            angled
+                .into_iter()
+                .map(|inner| format!("<{inner}>"))
+                .find(|dest| destination_parses_to(dest, url))
+        })
+}
+
+/// Backslash-escape every character of `url` that is in `special`.
+fn escape_destination(url: &str, special: &str) -> String {
+    let mut escaped = String::with_capacity(url.len());
+    for ch in url.chars() {
+        if special.contains(ch) {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+/// True if `[x](destination)` is one inline link whose target is `url`.
+fn destination_parses_to(destination: &str, url: &str) -> bool {
+    let probe = format!("[x]({destination})");
+    Parser::new_ext(&probe, Options::empty())
+        .into_offset_iter()
+        .any(|(event, range)| {
+            matches!(
+                event,
+                Event::Start(Tag::Link { link_type: LinkType::Inline, ref dest_url, .. })
+                    if dest_url.as_ref() == url && range == (0..probe.len())
+            )
+        })
 }
 
 /// Apply collected edits to `content` in reverse byte-offset order.
