@@ -130,13 +130,17 @@ impl IndexHandle {
             .await?
     }
 
-    /// Process a batch of sync events (file creates/modifies/deletes).
+    /// Process a batch of filesystem watcher events (file creates/modifies/
+    /// deletes). A file that cannot be read is skipped and listed in
+    /// `SyncStats::warnings`; the rest of the batch is applied.
     pub async fn process_sync_events(
         &self,
         events: Vec<ChangeEvent>,
     ) -> Result<SyncStats, IndexError> {
-        self.with_index(move |index, vault| SyncEngine::process_events(&events, vault, index))
-            .await?
+        self.with_index(move |index, vault| {
+            SyncEngine::process_watcher_events(&events, vault, index)
+        })
+        .await?
     }
 
     /// Find backlinks to a page with surrounding context.

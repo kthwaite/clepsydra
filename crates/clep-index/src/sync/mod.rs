@@ -25,6 +25,9 @@ pub struct SyncStats {
     /// Links whose resolution changed: newly resolved, unresolved again, or
     /// pointed at a moved page's new path.
     pub links_resolved: usize,
+    /// One line per file a watcher batch could not index (see
+    /// [`SyncEngine::process_watcher_events`]).
+    pub warnings: Vec<String>,
 }
 
 /// Processes change events and incrementally updates the vault index.
@@ -41,10 +44,43 @@ impl SyncEngine {
     /// held before or holds now is resolved again from the index as it then
     /// stands, so a name that gained or lost a holder is decided the way a
     /// full rebuild decides it. An unchanged page changes no link.
+    ///
+    /// The first error ends the batch: this is the entry for callers that
+    /// index files they have just written (the mutation coordinator).
     pub fn process_events(
         events: &[ChangeEvent],
         vault: &Vault,
         index: &mut VaultIndex,
+    ) -> Result<SyncStats, crate::index::IndexError> {
+        Self::process_batch(events, vault, index, false)
+    }
+
+    /// Process a batch of filesystem watcher events against the index.
+    ///
+    /// As [`process_events`](Self::process_events), except that a file which
+    /// cannot be indexed does not end the batch. The watcher reports paths it
+    /// did not write, nobody retries a dropped batch, and one bad file must
+    /// not cost the other events:
+    /// - a file that is gone by now (deleted after the watcher saw it) is
+    ///   handled as a `Remove`;
+    /// - any other I/O failure (not UTF-8, no permission) is logged and added
+    ///   to [`SyncStats::warnings`]; the page keeps its last indexed state,
+    ///   as it does in a startup build.
+    ///
+    /// Errors that are not about one file (SQLite) still end the batch.
+    pub fn process_watcher_events(
+        events: &[ChangeEvent],
+        vault: &Vault,
+        index: &mut VaultIndex,
+    ) -> Result<SyncStats, crate::index::IndexError> {
+        Self::process_batch(events, vault, index, true)
+    }
+
+    fn process_batch(
+        events: &[ChangeEvent],
+        vault: &Vault,
+        index: &mut VaultIndex,
+        isolate_file_errors: bool,
     ) -> Result<SyncStats, crate::index::IndexError> {
         tracing::info!(
             "SyncEngine: processing {} events against index",
@@ -61,10 +97,24 @@ impl SyncEngine {
                     }
 
                     let mut targets = LinkTargets::default();
-                    if index.index_page_collecting(vault, vp, &mut targets)? {
-                        stats.pages_indexed += 1;
-                    } else {
-                        stats.pages_skipped += 1;
+                    match index.index_page_collecting(vault, vp, &mut targets) {
+                        Ok(true) => stats.pages_indexed += 1,
+                        Ok(false) => stats.pages_skipped += 1,
+                        // I/O errors come from reading the file or writing its
+                        // repaired frontmatter, before any index row changes.
+                        Err(crate::index::IndexError::Io(error)) if isolate_file_errors => {
+                            if error.kind() == std::io::ErrorKind::NotFound {
+                                if index.remove_page_collecting(vp, &mut targets)? {
+                                    stats.pages_removed += 1;
+                                }
+                            } else {
+                                tracing::warn!("SyncEngine: cannot index {}: {error}", vp.as_str());
+                                stats
+                                    .warnings
+                                    .push(format!("cannot index {}: {error}", vp.as_str()));
+                            }
+                        }
+                        Err(error) => return Err(error),
                     }
                     stats.links_resolved += index.reresolve_link_targets(&targets)?;
                 }

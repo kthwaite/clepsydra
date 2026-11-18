@@ -239,3 +239,117 @@ fn upsert_repairs_missing_or_incomplete_frontmatter() {
     assert!(page.meta.updated_at.is_some());
     assert_eq!(page.body, "Body without metadata.\n");
 }
+
+// ---------------------------------------------------------------------------
+// Watcher batches: one unreadable file must not cost the rest of the batch
+// ---------------------------------------------------------------------------
+
+fn toml_page(id: u32, body: &str) -> String {
+    format!(
+        "+++\nid = \"00000000-0000-7000-8000-{id:012x}\"\n\
+         created_at = 2026-01-01T00:00:00Z\nupdated_at = 2026-01-01T00:00:00Z\n+++\n{body}\n"
+    )
+}
+
+fn indexed_paths(index: &VaultIndex) -> Vec<String> {
+    snapshot_pages(index)
+        .into_iter()
+        .map(|(_, path, _)| path)
+        .collect()
+}
+
+#[test]
+fn watcher_batch_skips_an_unreadable_file_and_applies_the_rest() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let mut index = VaultIndex::open_in_memory().unwrap();
+    index.build(&vault).unwrap();
+
+    // Not valid UTF-8: `index_page` fails with an I/O error.
+    fs::write(vault.root().join("bad.md"), [0xff, 0xfe, 0x00]).unwrap();
+    fs::write(vault.root().join("c.md"), toml_page(1, "one")).unwrap();
+    let events = vec![
+        ChangeEvent::Upsert(VaultPath::new("bad.md").unwrap()),
+        ChangeEvent::Upsert(VaultPath::new("c.md").unwrap()),
+    ];
+
+    let stats = SyncEngine::process_watcher_events(&events, &vault, &mut index).unwrap();
+
+    assert_eq!(indexed_paths(&index), vec!["c.md".to_string()]);
+    assert_eq!(stats.pages_indexed, 1);
+    assert_eq!(stats.warnings.len(), 1, "{:?}", stats.warnings);
+    assert!(
+        stats.warnings[0].starts_with("cannot index bad.md: "),
+        "{:?}",
+        stats.warnings
+    );
+}
+
+#[test]
+fn watcher_batch_keeps_the_indexed_page_of_a_file_that_became_unreadable() {
+    let (_tmp, vault) = setup_vault(&[("a.md", &toml_page(1, "one"))]);
+    let mut index = VaultIndex::open_in_memory().unwrap();
+    index.build(&vault).unwrap();
+    let before = snapshot_pages(&index);
+
+    fs::write(vault.root().join("a.md"), [0xff, 0xfe, 0x00]).unwrap();
+    let events = vec![ChangeEvent::Upsert(VaultPath::new("a.md").unwrap())];
+
+    let stats = SyncEngine::process_watcher_events(&events, &vault, &mut index).unwrap();
+
+    // Same as a startup `build` over this index: warn, keep the last good row.
+    assert_eq!(snapshot_pages(&index), before);
+    assert_eq!(stats.warnings.len(), 1, "{:?}", stats.warnings);
+}
+
+#[test]
+fn watcher_upsert_of_a_file_that_is_gone_removes_the_page() {
+    let (_tmp, vault) = setup_vault(&[
+        ("a.md", &toml_page(1, "one")),
+        ("c.md", &toml_page(2, "see [[a]]")),
+    ]);
+    let mut index = VaultIndex::open_in_memory().unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    // Deleted between the watcher's `exists()` check and indexing.
+    fs::remove_file(vault.root().join("a.md")).unwrap();
+    fs::write(vault.root().join("d.md"), toml_page(3, "three")).unwrap();
+    let events = vec![
+        ChangeEvent::Upsert(VaultPath::new("a.md").unwrap()),
+        ChangeEvent::Upsert(VaultPath::new("d.md").unwrap()),
+    ];
+
+    let stats = SyncEngine::process_watcher_events(&events, &vault, &mut index).unwrap();
+
+    assert_eq!(
+        indexed_paths(&index),
+        vec!["c.md".to_string(), "d.md".to_string()]
+    );
+    assert_eq!(stats.pages_removed, 1);
+    assert_eq!(stats.pages_indexed, 1);
+    assert!(stats.warnings.is_empty(), "{:?}", stats.warnings);
+    let unresolved: i64 = index
+        .connection()
+        .query_row(
+            "SELECT COUNT(*) FROM links WHERE target_id IS NULL AND target_path IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unresolved, 1, "the link to the removed page is unresolved");
+}
+
+/// The mutation coordinator's entry point stays strict: it indexes files it
+/// has just written, and a failure there is its caller's error.
+#[test]
+fn process_events_still_fails_on_an_unreadable_file() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let mut index = VaultIndex::open_in_memory().unwrap();
+    index.build(&vault).unwrap();
+    fs::write(vault.root().join("bad.md"), [0xff, 0xfe, 0x00]).unwrap();
+    let events = vec![ChangeEvent::Upsert(VaultPath::new("bad.md").unwrap())];
+
+    let result = SyncEngine::process_events(&events, &vault, &mut index);
+
+    assert!(matches!(result, Err(clep_index::index::IndexError::Io(_))));
+}
