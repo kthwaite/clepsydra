@@ -279,6 +279,7 @@ impl Modify for SchemaOverrides {
             crate::api::mcp_analytics::McpClientStats,
             crate::api::mcp_analytics::McpPageStats,
             crate::api::mcp_analytics::McpDailyStats,
+            crate::api::mcp_analytics::McpDailyAgentStats,
             crate::api::mcp_analytics::McpRecentCall,
             crate::api::external_previews::PreviewRequest,
             crate::api::external_previews::PreviewStatus,

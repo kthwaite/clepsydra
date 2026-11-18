@@ -419,9 +419,12 @@ Read local MCP usage aggregates. `days` accepts `7`, `30` (default), `90`, or
 `0` for all history. Windows include both boundaries and end at the server's
 current UTC time. Returns call outcomes and durations, session/agent counts,
 known tools including zero-use tools, client/version rankings, page activity,
-daily totals, and the latest calls. Page activity and recent calls are capped
-at 50 rows; summary totals are not. Responses: `200` Usage statistics;
-`400` Unsupported window.
+daily totals, and the latest calls. `through_date` is the UTC date of the
+window end. `daily` includes calls, failures, and `average_duration_ms` per
+active date; `daily_agents` includes `date`, resolved agent `name`, `calls`,
+and `average_duration_ms` per active agent and date. Page activity and recent
+calls are capped at 50 rows; these aggregates are not.
+Responses: `200` Usage statistics; `400` Unsupported window.
 
 ### `POST /api/vault/mcp/telemetry`
 Record an MCP metadata envelope: `session_id`, reported `client_name` and

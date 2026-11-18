@@ -3381,7 +3381,17 @@ export interface components {
             /** Format: int64 */
             sessions: number;
         };
+        McpDailyAgentStats: {
+            /** Format: double */
+            average_duration_ms: number;
+            /** Format: int64 */
+            calls: number;
+            date: string;
+            name: string;
+        };
         McpDailyStats: {
+            /** Format: double */
+            average_duration_ms: number;
             /** Format: int64 */
             calls: number;
             date: string;
@@ -3426,6 +3436,7 @@ export interface components {
             average_duration_ms: number;
             clients: components["schemas"]["McpClientStats"][];
             daily: components["schemas"]["McpDailyStats"][];
+            daily_agents: components["schemas"]["McpDailyAgentStats"][];
             /** Format: int32 */
             days: number;
             /** Format: int64 */
@@ -3438,6 +3449,8 @@ export interface components {
             sessions: number;
             /** Format: int64 */
             successful_calls: number;
+            /** @description UTC date of the inclusive upper bound of this report. */
+            through_date: string;
             tools: components["schemas"]["McpToolStats"][];
             /** Format: int64 */
             total_calls: number;

@@ -389,6 +389,12 @@ daily activity, failures, durations, and recent calls. Collection starts with
 the updated MCP process; earlier activity cannot be reconstructed. Restart
 both `clep serve` and your host's `clep mcp` connection after upgrading.
 
+Switch the charts between **Calls** and **Average duration** to see daily
+activity overall, compare agents across the selected range, or follow each
+agent over time. The charts combine client versions under the same agent
+label. Averages are per recorded call, not averages of daily averages. A UTC
+day without calls contributes zero calls and has no average duration.
+
 Each dispatched tool call records its tool name, UTC start time, elapsed
 milliseconds, outcome, session, client identity, and page references. Duration
 excludes the telemetry request. Tool errors, invalid tool arguments, and

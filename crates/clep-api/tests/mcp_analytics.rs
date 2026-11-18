@@ -80,9 +80,55 @@ async fn telemetry_is_idempotent_and_catalog_includes_unused_tools() {
     assert_eq!(report["clients"][0]["client_version"], "1.0");
     assert_eq!(
         report["daily"],
-        json!([{"date": "2026-11-13", "calls": 1, "failures": 0}])
+        json!([{"date": "2026-11-13", "calls": 1, "failures": 0, "average_duration_ms": 20.0}])
     );
     assert_eq!(report["recent_calls"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn daily_trends_group_windowed_calls_by_utc_date_and_resolved_agent() {
+    let f = fixture();
+    for (i, (time, label, version, duration)) in [
+        ("2026-11-06T11:59:59Z", None, "1", 800),
+        ("2026-11-06T12:00:00Z", None, "1", 40),
+        ("2026-11-13T08:00:00Z", Some("Research"), "1", 10),
+        ("2026-11-13T09:00:00Z", Some("Research"), "1", 20),
+        ("2026-11-13T10:00:00Z", Some("Research"), "2", 120),
+        ("2026-11-13T12:00:00Z", None, "2", 10),
+        ("2026-11-13T12:00:01Z", None, "2", 900),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = format!("00000000-0000-4000-8000-{i:012}");
+        let mut event = telemetry(&id, time, "success");
+        event["session_id"] = json!(id);
+        event["agent_label"] = json!(label);
+        event["client_version"] = json!(version);
+        event["call"]["duration_ms"] = json!(duration);
+        f.server
+            .post("/api/vault/mcp/telemetry")
+            .json(&event)
+            .await
+            .assert_status_no_content();
+    }
+    let report = stats(&f, 7).await;
+    assert_eq!(report["through_date"], "2026-11-13");
+    assert_eq!(
+        report["daily"],
+        json!([
+            {"date":"2026-11-06","calls":1,"failures":0,"average_duration_ms":40.0},
+            {"date":"2026-11-13","calls":4,"failures":0,"average_duration_ms":40.0}
+        ])
+    );
+    assert_eq!(
+        report["daily_agents"],
+        json!([
+            {"date":"2026-11-06","name":"Test client","calls":1,"average_duration_ms":40.0},
+            {"date":"2026-11-13","name":"Research","calls":3,"average_duration_ms":50.0},
+            {"date":"2026-11-13","name":"Test client","calls":1,"average_duration_ms":10.0}
+        ])
+    );
 }
 
 #[tokio::test]

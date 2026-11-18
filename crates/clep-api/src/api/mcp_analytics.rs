@@ -60,6 +60,8 @@ pub struct McpPageReference {
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct McpStatsResponse {
     pub days: u32,
+    /// UTC date of the inclusive upper bound of this report.
+    pub through_date: String,
     pub tracking_since: Option<String>,
     pub total_calls: u64,
     pub successful_calls: u64,
@@ -72,6 +74,7 @@ pub struct McpStatsResponse {
     pub clients: Vec<McpClientStats>,
     pub page_activity: Vec<McpPageStats>,
     pub daily: Vec<McpDailyStats>,
+    pub daily_agents: Vec<McpDailyAgentStats>,
     pub recent_calls: Vec<McpRecentCall>,
 }
 
@@ -114,6 +117,15 @@ pub struct McpDailyStats {
     pub date: String,
     pub calls: u64,
     pub failures: u64,
+    pub average_duration_ms: f64,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct McpDailyAgentStats {
+    pub date: String,
+    pub name: String,
+    pub calls: u64,
+    pub average_duration_ms: f64,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -394,6 +406,7 @@ fn aggregate(
         |row| {
             Ok(McpStatsResponse {
                 days,
+                through_date: until.split_once('T').unwrap().0.to_owned(),
                 tracking_since: None,
                 total_calls: row.get(0)?,
                 successful_calls: row.get(1)?,
@@ -406,6 +419,7 @@ fn aggregate(
                 clients: Vec::new(),
                 page_activity: Vec::new(),
                 daily: Vec::new(),
+                daily_agents: Vec::new(),
                 recent_calls: Vec::new(),
             })
         },
@@ -442,7 +456,7 @@ fn aggregate(
     }))?.collect::<rusqlite::Result<_>>()?;
     response.daily = conn
         .prepare(
-            "SELECT substr(started_at, 1, 10) AS date, COUNT(*), SUM(outcome != 'success')
+            "SELECT substr(started_at, 1, 10) AS date, COUNT(*), SUM(outcome != 'success'), AVG(duration_ms)
          FROM mcp_calls WHERE started_at >= ?1 AND started_at <= ?2 GROUP BY date ORDER BY date",
         )?
         .query_map(params![since, until], |row| {
@@ -450,6 +464,23 @@ fn aggregate(
                 date: row.get(0)?,
                 calls: row.get(1)?,
                 failures: row.get(2)?,
+                average_duration_ms: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    response.daily_agents = conn
+        .prepare(
+            "SELECT substr(started_at, 1, 10) AS date, COALESCE(agent_label, client_name) AS name,
+                    COUNT(*), AVG(duration_ms)
+             FROM mcp_calls WHERE started_at >= ?1 AND started_at <= ?2
+             GROUP BY date, name ORDER BY date, name",
+        )?
+        .query_map(params![since, until], |row| {
+            Ok(McpDailyAgentStats {
+                date: row.get(0)?,
+                name: row.get(1)?,
+                calls: row.get(2)?,
+                average_duration_ms: row.get(3)?,
             })
         })?
         .collect::<rusqlite::Result<_>>()?;

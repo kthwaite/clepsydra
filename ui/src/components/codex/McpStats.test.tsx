@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -47,6 +48,7 @@ vi.mock("#/api/index", () => ({
 type McpStatsResponse = components["schemas"]["McpStatsResponse"];
 const recorded: McpStatsResponse = {
   days: 30,
+  through_date: "2026-11-14",
   tracking_since: "2026-11-01T09:00:00Z",
   total_calls: 12,
   successful_calls: 11,
@@ -105,7 +107,24 @@ const recorded: McpStatsResponse = {
       last_used_at: "2026-11-12T10:00:00Z",
     },
   ],
-  daily: [{ date: "2026-11-13", calls: 12, failures: 1 }],
+  daily: [
+    { date: "2026-11-11", calls: 2, failures: 0, average_duration_ms: 0 },
+    { date: "2026-11-13", calls: 10, failures: 1, average_duration_ms: 15 },
+  ],
+  daily_agents: [
+    {
+      date: "2026-11-11",
+      name: "Research assistant",
+      calls: 2,
+      average_duration_ms: 0,
+    },
+    {
+      date: "2026-11-13",
+      name: "Research assistant",
+      calls: 10,
+      average_duration_ms: 15,
+    },
+  ],
   recent_calls: [
     {
       call_id: "call-1",
@@ -122,6 +141,7 @@ const recorded: McpStatsResponse = {
 };
 const empty: McpStatsResponse = {
   days: 30,
+  through_date: "2026-11-14",
   tracking_since: null,
   total_calls: 0,
   successful_calls: 0,
@@ -134,6 +154,7 @@ const empty: McpStatsResponse = {
   clients: [],
   page_activity: [],
   daily: [],
+  daily_agents: [],
   recent_calls: [],
 };
 let payload = recorded;
@@ -245,6 +266,34 @@ describe("MCP statistics", () => {
     );
     await waitFor(() =>
       expect(requestedDays).toEqual(["30", "7", "90", "0", "0"]),
+    );
+  });
+
+  it("compares per-call duration and distinguishes a measured zero from a day without calls", async () => {
+    renderStats();
+    const user = await openMcp();
+    const ranking = await screen.findByRole("figure", {
+      name: "Agent ranking",
+    });
+    expect(ranking).toHaveTextContent("12 calls");
+    await user.click(screen.getByRole("button", { name: "Average duration" }));
+    expect(
+      screen.getByRole("figure", { name: "Agent ranking" }),
+    ).toHaveTextContent("12.5 ms");
+
+    const day = screen.getByLabelText("Inspect day (UTC)");
+    const agent = screen.getByRole("figure", { name: "Daily by agent" });
+    fireEvent.change(day, { target: { value: "2026-11-11" } });
+    expect(agent).toHaveTextContent("0 ms");
+    fireEvent.change(day, { target: { value: "2026-11-12" } });
+    expect(agent).toHaveTextContent("No calls");
+
+    await user.selectOptions(screen.getByLabelText("Date range"), "7");
+    expect(
+      await screen.findByRole("figure", { name: "Agent ranking" }),
+    ).toHaveTextContent("12.5 ms");
+    expect(screen.getByLabelText("Inspect day (UTC)")).toHaveValue(
+      "2026-11-12",
     );
   });
 

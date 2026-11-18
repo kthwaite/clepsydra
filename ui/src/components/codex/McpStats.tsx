@@ -7,6 +7,7 @@ import {
   type McpStatsResponse,
   useMcpStats,
 } from "#/api/mcp";
+import { McpTrends } from "#/components/codex/McpTrends";
 import { Section } from "#/components/codex/Section";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
@@ -548,6 +549,11 @@ export function McpStats() {
             </p>
           ) : null}
           <Summary data={data} />
+        </>
+      ) : null}
+      <McpTrends data={data} />
+      {data ? (
+        <>
           <ToolUsage tools={data.tools} />
           <AgentUsage clients={data.clients} />
           <PageActivity pages={data.page_activity} />
