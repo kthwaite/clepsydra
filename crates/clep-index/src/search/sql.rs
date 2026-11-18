@@ -420,20 +420,12 @@ fn compile_ordinary_text(
             )
         })
         .collect::<Vec<_>>();
-    let required = if leaves.len() == 1 {
-        "SELECT page_id FROM text_0".to_owned()
-    } else {
-        let joins = (1..leaves.len())
-            .map(|ordinal| {
-                format!(
-                    "JOIN text_{ordinal} \
-                     ON text_{ordinal}.page_id = text_0.page_id"
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n                     ");
-        format!("SELECT text_0.page_id FROM text_0\n                     {joins}")
-    };
+    // A page is required to match every leaf. INTERSECT, not one JOIN per
+    // leaf: SQLite joins at most 64 tables, and the parser accepts 64 leaves.
+    let required = (0..leaves.len())
+        .map(|ordinal| format!("SELECT page_id FROM text_{ordinal}"))
+        .collect::<Vec<_>>()
+        .join("\n             INTERSECT\n             ");
     let positive_ranks = (0..leaves.len())
         .map(|ordinal| format!("SELECT page_id, rank, {ordinal} AS ordinal FROM text_{ordinal}"))
         .collect::<Vec<_>>()
