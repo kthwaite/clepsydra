@@ -8,10 +8,9 @@
 //! Scheduled for removal — along with the serde_yaml dependency — once the
 //! doctor legacy census reads zero.
 
-use std::collections::HashMap;
-
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use serde::de::{MapAccess, Visitor};
 use uuid::Uuid;
 
 use super::kind::Kind;
@@ -38,7 +37,7 @@ struct YamlPageMeta {
     #[serde(default)]
     updated_at: Option<DateTime<Utc>>,
     #[serde(flatten)]
-    extra: HashMap<String, serde_yaml::Value>,
+    extra: YamlExtras,
 }
 
 /// Loose salvage model: every field optional, used when the strict model fails
@@ -64,7 +63,38 @@ struct LooseYamlPageMeta {
     #[serde(default)]
     updated_at: Option<DateTime<Utc>>,
     #[serde(flatten)]
-    extra: HashMap<String, serde_yaml::Value>,
+    extra: YamlExtras,
+}
+
+/// The keys that are not system fields, in source order.
+///
+/// A hash map would hand them over in a different order on every run, and the
+/// healed TOML would differ between two devices healing the same page.
+#[derive(Debug)]
+struct YamlExtras(Vec<(String, serde_yaml::Value)>);
+
+impl<'de> Deserialize<'de> for YamlExtras {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ExtrasVisitor;
+
+        impl<'de> Visitor<'de> for ExtrasVisitor {
+            type Value = YamlExtras;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a mapping")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut entries = Vec::new();
+                while let Some(entry) = map.next_entry()? {
+                    entries.push(entry);
+                }
+                Ok(YamlExtras(entries))
+            }
+        }
+
+        deserializer.deserialize_map(ExtrasVisitor)
+    }
 }
 
 /// Convert a YAML value into its TOML equivalent.
@@ -102,9 +132,9 @@ pub fn yaml_value_to_toml(value: serde_yaml::Value) -> Option<toml::Value> {
     }
 }
 
-fn convert_extra(extra: HashMap<String, serde_yaml::Value>) -> ExtraMap {
+fn convert_extra(extra: YamlExtras) -> ExtraMap {
     let mut map = ExtraMap::new();
-    for (k, v) in extra {
+    for (k, v) in extra.0 {
         if let Some(converted) = yaml_value_to_toml(v) {
             map.insert(k, converted);
         }
@@ -212,6 +242,59 @@ mod tests {
                 toml::Value::String("identity".into())
             ])
         );
+    }
+
+    const SHUFFLED_KEYS: [&str; 8] = [
+        "zeta", "alpha", "mid", "beta", "omega", "gamma", "delta", "kappa",
+    ];
+
+    fn shuffled_extras_yaml() -> String {
+        SHUFFLED_KEYS
+            .iter()
+            .enumerate()
+            .map(|(i, key)| format!("{key}: {i}\n"))
+            .collect()
+    }
+
+    #[test]
+    fn extras_keep_source_order() {
+        let content = format!(
+            "---\nid: 01900000-0000-7000-8000-000000000001\n{}---\nBody\n",
+            shuffled_extras_yaml()
+        );
+        let (meta, _) = parse_frontmatter(&content).unwrap();
+        let keys: Vec<&str> = meta.extra.keys().map(String::as_str).collect();
+        assert_eq!(keys, SHUFFLED_KEYS);
+    }
+
+    #[test]
+    fn extras_keep_source_order_when_salvaged_without_an_id() {
+        let content = format!("---\n{}---\nBody\n", shuffled_extras_yaml());
+        let (meta, _, rewrote, warning) = parse_or_repair_frontmatter(&content);
+        assert!(rewrote);
+        assert!(warning.is_none());
+        let keys: Vec<&str> = meta.extra.keys().map(String::as_str).collect();
+        assert_eq!(keys, SHUFFLED_KEYS);
+    }
+
+    #[test]
+    fn healed_page_lists_extras_in_source_order() {
+        let content = "---\nid: 01900000-0000-7000-8000-000000000001\ncreated_at: 2026-08-06T09:00:00Z\nupdated_at: 2026-08-06T09:00:00Z\nzeta: 1\nalpha: two\nmid: true\n---\nBody\n";
+        let (meta, body) = parse_frontmatter(content).unwrap();
+        assert_eq!(
+            crate::page::write_page_content(&meta, &body),
+            "+++\nid = \"01900000-0000-7000-8000-000000000001\"\ncreated_at = 2026-08-06T09:00:00Z\nupdated_at = 2026-08-06T09:00:00Z\nzeta = 1\nalpha = \"two\"\nmid = true\n+++\nBody\n"
+        );
+    }
+
+    #[test]
+    fn scalar_top_level_key_is_kept_as_a_string_key() {
+        let content =
+            "---\nid: 01900000-0000-7000-8000-000000000001\nzeta: 0\n1: one\nalpha: 2\n---\nBody\n";
+        let (meta, _) = parse_frontmatter(content).unwrap();
+        let keys: Vec<&str> = meta.extra.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["zeta", "1", "alpha"]);
+        assert_eq!(meta.extra["1"], toml::Value::String("one".into()));
     }
 
     #[test]
