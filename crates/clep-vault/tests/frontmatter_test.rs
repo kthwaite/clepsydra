@@ -3,8 +3,8 @@ use uuid::Uuid;
 
 use clep_vault::encryption::{EncryptionFormat, EncryptionMeta};
 use clep_vault::page::{
-    ExtraMap, FrontmatterError, Page, PageMeta, parse_frontmatter, parse_or_repair_frontmatter,
-    write_page_content,
+    ExtraMap, FrontmatterError, Page, PageMeta, body_of, body_offset, parse_frontmatter,
+    parse_or_repair_frontmatter, write_page_content,
 };
 use clep_vault::path::VaultPath;
 
@@ -261,6 +261,29 @@ fn parse_frontmatter_no_fences() {
     assert!(
         matches!(err, FrontmatterError::NotFound),
         "expected NotFound, got: {err}"
+    );
+}
+
+/// Empty frontmatter closes at the fence on the second line, even when a
+/// later body line starts with `+++`.
+#[test]
+fn empty_frontmatter_closes_at_the_first_fence_line() {
+    let content = "+++\n+++\nfirst\n+++\nrest\n";
+
+    assert_eq!(body_of(content), "first\n+++\nrest\n");
+    assert_eq!(body_offset(content), "+++\n+++\n".len());
+    let (_meta, body, rewrote, warning) = parse_or_repair_frontmatter(content);
+    assert_eq!(warning, None);
+    assert_eq!(body, "first\n+++\nrest\n");
+    assert!(
+        rewrote,
+        "the missing id is minted, as for any empty frontmatter"
+    );
+
+    // Legacy YAML shares the fence scan.
+    assert_eq!(
+        body_of("---\n---\nfirst\n---\nrest\n"),
+        "first\n---\nrest\n"
     );
 }
 
