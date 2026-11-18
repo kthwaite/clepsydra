@@ -1075,12 +1075,16 @@ fn property_matches(
         return match op {
             Op::Ne | Op::NotContains => {
                 let positive = if op == Op::Ne { Op::Eq } else { Op::Contains };
-                items.iter().all(|item| {
-                    !property_scalar_matches(item, property_type, positive, value, today)
-                })
+                items
+                    .iter()
+                    .filter(|item| !toml_value_is_empty(item))
+                    .all(|item| {
+                        !property_scalar_matches(item, property_type, positive, value, today)
+                    })
             }
             _ => items
                 .iter()
+                .filter(|item| !toml_value_is_empty(item))
                 .any(|item| property_scalar_matches(item, property_type, op, value, today)),
         };
     }
@@ -1110,7 +1114,18 @@ fn property_scalar_matches(
     )
 }
 
+/// Emptiness as the index projects it (`clep-index`'s property deriver): an
+/// empty string and an empty array have no row, and neither has an array
+/// whose elements are all empty strings or empty arrays.
 fn toml_value_is_empty(value: &toml::Value) -> bool {
+    match value {
+        toml::Value::String(value) => value.is_empty(),
+        toml::Value::Array(values) => values.iter().all(toml_scalar_is_empty),
+        _ => false,
+    }
+}
+
+fn toml_scalar_is_empty(value: &toml::Value) -> bool {
     match value {
         toml::Value::String(value) => value.is_empty(),
         toml::Value::Array(values) => values.is_empty(),
@@ -1126,13 +1141,23 @@ fn current_scalar(current: &toml::Value, property_type: PropertyType) -> Option<
             _ => None,
         },
         PropertyType::Bool => current.as_bool().map(Comparable::Bool),
+        // The index gives a date face only to a value that has a date: a
+        // bare local time is not one.
         PropertyType::Date | PropertyType::Datetime => match current {
-            toml::Value::Datetime(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            toml::Value::Datetime(value) if value.date.is_some() => {
+                Some(Comparable::Text(Cow::Owned(value.to_string())))
+            }
             _ => None,
         },
-        _ => current
-            .as_str()
-            .map(|value| Comparable::Text(Cow::Borrowed(value))),
+        // The index gives every scalar a text face, whatever its TOML type.
+        _ => match current {
+            toml::Value::String(value) => Some(Comparable::Text(Cow::Borrowed(value))),
+            toml::Value::Integer(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            toml::Value::Float(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            toml::Value::Boolean(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            toml::Value::Datetime(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            toml::Value::Array(_) | toml::Value::Table(_) => None,
+        },
     }
 }
 

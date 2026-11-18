@@ -2443,6 +2443,91 @@ moment  = { type = "datetime" }
     }
 
     #[test]
+    fn in_memory_matcher_reads_wrong_typed_and_empty_values_like_the_index() {
+        // Schemas are advisory, so a text-like key can hold a number, a bool
+        // or a date, a datetime key can hold a bare time, and an array can
+        // hold only empty strings. The index projects a text face for every
+        // scalar, no date face for a bare time, and no row for an empty
+        // element; the in-memory matcher must read the same faces.
+        let (tmp, mut index, mut base) = fixture();
+        let content = page(
+            "0190f8a0-0000-7000-8000-0000000000f0",
+            "BOOK",
+            "Book F",
+            "author = 9\npattern = true\nstatus = 2026-08-09\nmoment = 12:30:00\nthemes = [\"\"]\nseries = [\"\", \"[[Solar Cycle]]\"]\n",
+        );
+        std::fs::write(tmp.path().join("f.md"), &content).unwrap();
+        index.build(&Vault::open(tmp.path()).unwrap()).unwrap();
+        let (meta, _body) = clep_vault::page::parse_frontmatter(&content).unwrap();
+
+        for (filter_json, expected) in [
+            (
+                serde_json::json!({ "field": "author", "op": "eq", "value": "9" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "contains", "value": "9" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "ne", "value": "9" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "pattern", "op": "starts_with", "value": "tr" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "status", "op": "in", "value": ["2026-08-09"] }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "moment", "op": "lt", "value": "T" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "moment", "op": "not_empty" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "is_empty" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "not_empty" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "contains", "value": "" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "series", "op": "not_empty" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "series", "op": "eq", "value": "" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "series", "op": "eq", "value": "[[Solar Cycle]]" }),
+                true,
+            ),
+        ] {
+            base.file.filter = Some(serde_json::from_value(filter_json.clone()).unwrap());
+            let in_memory = crate::base::base_matches_meta_on(&base, &meta, "f.md", TEST_TODAY);
+            let output = run(&index, &base, filter_json.clone(), TEST_TODAY);
+            let sql = flat_paths(&output).iter().any(|path| path == "f.md");
+
+            assert_eq!(sql, expected, "unexpected SQL result for {filter_json}");
+            assert_eq!(
+                in_memory, sql,
+                "in-memory matcher diverged for {filter_json}"
+            );
+        }
+    }
+
+    #[test]
     fn relative_filter_median_and_search_bind_in_sql_order() {
         let (_tmp, index, base) = aggregate_fixture();
         let spec = QuerySpec {
