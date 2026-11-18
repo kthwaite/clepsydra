@@ -254,3 +254,244 @@ fn folder_move_rewrites_path_links_between_the_moved_pages() {
         vec![row("arch/b.md", Some("arch/b.md"))]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Which links follow a move: those that resolve to the moved page
+// ---------------------------------------------------------------------------
+
+fn targets(rows: Vec<(String, Option<String>)>) -> Vec<Option<String>> {
+    rows.into_iter().map(|(_, target)| target).collect()
+}
+
+#[test]
+fn wikilinks_follow_a_rename_however_the_name_is_spelled() {
+    let fixture = Fixture::new(&[
+        ("alpha.md", page(1, "", "one\n")),
+        (
+            "b.md",
+            page(
+                2,
+                "",
+                "[[Alpha]] [[alpha.md]] [[ alpha ]] [[ALPHA.MD|shown]] ![[alpha]]\n",
+            ),
+        ),
+    ]);
+    assert_eq!(
+        targets(fixture.links("b.md")),
+        vec![Some("alpha.md".to_string()); 5]
+    );
+
+    fixture.move_page("alpha.md", "beta.md");
+
+    assert_eq!(
+        fixture.read("b.md"),
+        page(
+            2,
+            "",
+            "[[beta]] [[beta.md]] [[beta]] [[beta.md|shown]] ![[beta]]\n"
+        )
+    );
+    assert_eq!(
+        targets(fixture.links("b.md")),
+        vec![Some("beta.md".to_string()); 5]
+    );
+    assert_eq!(
+        targets(fixture.rebuilt_links("b.md")),
+        vec![Some("beta.md".to_string()); 5]
+    );
+}
+
+#[test]
+fn path_form_wikilinks_follow_a_move_however_the_path_is_spelled() {
+    let fixture = Fixture::new(&[
+        ("box/alpha.md", page(1, "", "one\n")),
+        (
+            "b.md",
+            page(2, "", "[[Box/Alpha]] [[box/alpha.md]] [[alpha]]\n"),
+        ),
+    ]);
+
+    fixture.move_page("box/alpha.md", "arch/beta.md");
+
+    assert_eq!(
+        fixture.read("b.md"),
+        page(2, "", "[[arch/beta]] [[arch/beta.md]] [[beta]]\n")
+    );
+    assert_eq!(
+        targets(fixture.rebuilt_links("b.md")),
+        vec![Some("arch/beta.md".to_string()); 3]
+    );
+}
+
+#[test]
+fn links_by_title_alias_or_id_are_left_as_written() {
+    let body = format!("[[First Page]] [[the first]] [[{}]]\n", id(1));
+    let fixture = Fixture::new(&[
+        (
+            "alpha.md",
+            page(
+                1,
+                "title = \"First Page\"\naliases = [\"The First\"]\n",
+                "one\n",
+            ),
+        ),
+        ("b.md", page(2, "", &body)),
+    ]);
+    assert_eq!(
+        targets(fixture.links("b.md")),
+        vec![Some("alpha.md".to_string()); 3]
+    );
+
+    let plan = fixture.plan(MutationOp::MovePage {
+        source: "alpha.md".into(),
+        destination: "beta.md".into(),
+    });
+    assert!(plan.staged_writes.is_empty());
+    assert!(plan.text_edits.is_empty());
+    fixture.apply(plan);
+
+    assert_eq!(fixture.read("b.md"), page(2, "", &body));
+    assert_eq!(
+        targets(fixture.rebuilt_links("b.md")),
+        vec![Some("beta.md".to_string()); 3]
+    );
+}
+
+#[test]
+fn a_name_that_is_also_the_title_follows_the_file_only_when_spelled_as_the_file() {
+    let fixture = Fixture::new(&[
+        ("target.md", page(1, "title = \"Target\"\n", "one\n")),
+        ("b.md", page(2, "", "[[Target]] [[target]] [[TARGET]]\n")),
+    ]);
+
+    fixture.move_page("target.md", "renamed.md");
+
+    // `Target` in any case still names the page through its title.
+    assert_eq!(
+        fixture.read("b.md"),
+        page(2, "", "[[Target]] [[renamed]] [[TARGET]]\n")
+    );
+    assert_eq!(
+        targets(fixture.rebuilt_links("b.md")),
+        vec![Some("renamed.md".to_string()); 3]
+    );
+}
+
+#[test]
+fn source_relative_markdown_urls_are_still_rewritten() {
+    let fixture = Fixture::new(&[
+        ("people/ada.md", page(1, "", "one\n")),
+        (
+            "notes/b.md",
+            page(2, "", "[[people/ada]] [p](../people/ada.md)\n"),
+        ),
+    ]);
+    assert_eq!(
+        fixture.links("notes/b.md"),
+        vec![
+            row("people/ada", Some("people/ada.md")),
+            row("../people/ada.md", None),
+        ]
+    );
+
+    fixture.move_page("people/ada.md", "people/moved.md");
+
+    assert_eq!(
+        fixture.read("notes/b.md"),
+        page(2, "", "[[people/moved]] [p](../people/moved.md)\n")
+    );
+}
+
+#[test]
+fn an_ambiguous_link_is_not_claimed_by_the_page_that_moves() {
+    let fixture = Fixture::new(&[
+        ("alpha.md", page(1, "", "one\n")),
+        ("box/alpha.md", page(2, "", "two\n")),
+        (
+            "b.md",
+            page(3, "", "[[alpha]] [x](alpha.md) [[box/alpha]]\n"),
+        ),
+    ]);
+    assert_eq!(
+        fixture.links("b.md"),
+        vec![
+            row("alpha", None),
+            row("alpha.md", None),
+            row("box/alpha", Some("box/alpha.md")),
+        ]
+    );
+
+    fixture.move_page("box/alpha.md", "box/gamma.md");
+
+    assert_eq!(
+        fixture.read("b.md"),
+        page(3, "", "[[alpha]] [x](alpha.md) [[box/gamma]]\n")
+    );
+    assert_eq!(
+        fixture.rebuilt_links("b.md"),
+        vec![
+            row("alpha", Some("alpha.md")),
+            row("alpha.md", Some("alpha.md")),
+            row("box/gamma", Some("box/gamma.md")),
+        ]
+    );
+}
+
+#[test]
+fn folder_move_rewrites_each_referrer_once_for_all_moved_pages() {
+    let fixture = Fixture::new(&[
+        ("box/a.md", page(1, "", "[x](b.md) [[Box/B]]\n")),
+        ("box/b.md", page(2, "", "two\n")),
+        (
+            "out.md",
+            page(
+                3,
+                "",
+                "[[box/a]] [[BOX/B.md|second]] [y](box/a.md) [[a]] [[b]]\n",
+            ),
+        ),
+    ]);
+
+    let plan = fixture.plan(MutationOp::MoveFolder {
+        source: "box".into(),
+        destination: "arch".into(),
+    });
+    let mut staged: Vec<_> = plan
+        .staged_writes
+        .iter()
+        .map(|write| write.path.clone())
+        .collect();
+    staged.sort();
+    assert_eq!(
+        staged,
+        vec![fixture.root.join("arch/a.md"), fixture.root.join("out.md")]
+    );
+    fixture.apply(plan);
+
+    assert_eq!(
+        fixture.read("out.md"),
+        page(
+            3,
+            "",
+            "[[arch/a]] [[arch/b.md|second]] [y](arch/a.md) [[a]] [[b]]\n"
+        )
+    );
+    assert_eq!(
+        fixture.read("arch/a.md"),
+        page(1, "", "[x](b.md) [[arch/b]]\n")
+    );
+    assert_eq!(
+        targets(fixture.rebuilt_links("out.md")),
+        vec![
+            Some("arch/a.md".to_string()),
+            Some("arch/b.md".to_string()),
+            Some("arch/a.md".to_string()),
+            Some("arch/a.md".to_string()),
+            Some("arch/b.md".to_string()),
+        ]
+    );
+    assert_eq!(
+        targets(fixture.rebuilt_links("arch/a.md")),
+        vec![Some("arch/b.md".to_string()); 2]
+    );
+}

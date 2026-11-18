@@ -336,3 +336,40 @@ fn rewrite_skips_wikilink_syntax_in_code_spans() {
         content
     );
 }
+
+#[test]
+fn rewrite_links_with_asks_about_every_link_as_written() {
+    use clep_vault::rewriter::{LinkSyntax, rewrite_links_with};
+    use std::cell::RefCell;
+
+    let content = "[[ Alpha |shown]] [x](<Alpha.md> \"tip\") [r][ref] `[[Alpha]]` [[other]]\n\n[ref]: dir/alpha.md\n";
+    let asked = RefCell::new(Vec::new());
+    let rewritten = rewrite_links_with(content, |syntax, target| {
+        asked.borrow_mut().push((syntax, target.to_string()));
+        // Decide by what the target means, not by its spelling.
+        target
+            .trim()
+            .to_lowercase()
+            .contains("alpha")
+            .then(|| match syntax {
+                LinkSyntax::Wiki => "beta".to_string(),
+                LinkSyntax::Markdown => "beta gamma.md".to_string(),
+            })
+    });
+
+    assert_eq!(
+        rewritten,
+        "[[beta|shown]] [x](<beta gamma.md> \"tip\") [r][ref] `[[Alpha]]` [[other]]\n\n[ref]: <beta gamma.md>\n"
+    );
+    let mut asked = asked.into_inner();
+    asked.sort_by(|a, b| a.1.cmp(&b.1));
+    assert_eq!(
+        asked,
+        vec![
+            (LinkSyntax::Wiki, " Alpha ".to_string()),
+            (LinkSyntax::Markdown, "Alpha.md".to_string()),
+            (LinkSyntax::Markdown, "dir/alpha.md".to_string()),
+            (LinkSyntax::Wiki, "other".to_string()),
+        ]
+    );
+}
