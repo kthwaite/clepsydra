@@ -4,7 +4,7 @@ use std::ops::Range;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd, TextMergeWithOffset};
 use regex::Regex;
 
-use crate::markdown::markdown_options;
+use crate::markdown::{markdown_options, panic_safe_options};
 
 /// The structural type of a block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -280,7 +280,7 @@ fn append_text(current: &mut Option<BlockBuilder>, text: String, inline_code: bo
 /// Follows the same `TextMergeWithOffset` pattern as `extract_links` in
 /// `crates/clep-vault/src/link.rs`.
 pub fn parse_blocks(markdown: &str) -> Vec<Block> {
-    let opts = markdown_options();
+    let opts = panic_safe_options(markdown, markdown_options());
     let raw_iter = Parser::new_ext(markdown, opts).into_offset_iter();
     let parser = TextMergeWithOffset::new(raw_iter);
 
@@ -512,6 +512,20 @@ mod tests {
         assert_eq!(blocks[1].content, "[-] not a task");
         assert!(blocks[1].checkbox.is_none());
         assert!(!blocks[1].properties.contains_key("status"));
+    }
+
+    #[test]
+    fn parse_blocks_survives_task_item_backslash_before_setext_underline() {
+        // pulldown-cmark 0.13.6 panics on this input with task lists and
+        // heading attributes both enabled (see
+        // vault::markdown::panic_safe_options). Without heading attributes
+        // the item holds a setext heading whose text is the backslash.
+        let blocks = parse_blocks("- [ ] \\\n  ---");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].block_type, BlockType::ListItem);
+        assert_eq!(blocks[0].content, "");
+        assert_eq!(blocks[1].block_type, BlockType::Heading);
+        assert_eq!(blocks[1].content, "\\");
     }
 
     #[test]

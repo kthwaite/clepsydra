@@ -275,8 +275,14 @@ impl<'a> Snapshot<'a> {
         let mut edits: Vec<(Range<usize>, String)> = Vec::new();
         let mut base_fence: Option<(Range<usize>, String)> = None;
         let mut image: Option<(Range<usize>, String, String)> = None;
-        for (event, range) in
-            Parser::new_ext(body, clep_vault::markdown::markdown_options()).into_offset_iter()
+        for (event, range) in Parser::new_ext(
+            body,
+            clep_vault::markdown::panic_safe_options(
+                body,
+                clep_vault::markdown::markdown_options(),
+            ),
+        )
+        .into_offset_iter()
         {
             match event {
                 Event::FootnoteReference(name) => {
@@ -767,8 +773,11 @@ fn relative_path(source: &str, target: &str) -> Result<String, ApiError> {
 fn heading_section(body: &str, fragment: &str) -> Result<Range<usize>, ApiError> {
     let mut headings = Vec::new();
     let mut current = None;
-    for (event, range) in
-        Parser::new_ext(body, clep_vault::markdown::markdown_options()).into_offset_iter()
+    for (event, range) in Parser::new_ext(
+        body,
+        clep_vault::markdown::panic_safe_options(body, clep_vault::markdown::markdown_options()),
+    )
+    .into_offset_iter()
     {
         match event {
             Event::Start(Tag::Heading { level, .. }) => {

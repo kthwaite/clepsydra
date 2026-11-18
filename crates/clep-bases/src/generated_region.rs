@@ -42,7 +42,12 @@ fn html_blocks(markdown: &str) -> Vec<Range<usize>> {
     let mut depth = 0usize;
     let mut start = None;
     let mut blocks = Vec::new();
-    for (event, range) in Parser::new_ext(markdown, Options::all()).into_offset_iter() {
+    for (event, range) in Parser::new_ext(
+        markdown,
+        clep_vault::markdown::panic_safe_options(markdown, Options::all()),
+    )
+    .into_offset_iter()
+    {
         match event {
             Event::Start(tag) => {
                 if depth == 0 && tag == Tag::HtmlBlock {
@@ -237,7 +242,12 @@ pub fn insert_region(
         return Err(invalid("cannot insert inside a generated region"));
     }
     let mut depth = 0usize;
-    for (event, range) in Parser::new_ext(markdown, Options::all()).into_offset_iter() {
+    for (event, range) in Parser::new_ext(
+        markdown,
+        clep_vault::markdown::panic_safe_options(markdown, Options::all()),
+    )
+    .into_offset_iter()
+    {
         match event {
             Event::Start(_) => {
                 if depth == 0 && range.start < offset && offset < range.end {

@@ -17,7 +17,10 @@ pub(super) fn render(
 ) -> Result<Vec<u8>, String> {
     // Wiki parsing is enabled only at this presentation boundary: destinations are
     // never exported. Code spans/blocks remain literal parser events.
-    let options = clep_vault::markdown::markdown_options() | Options::ENABLE_WIKILINKS;
+    let options = clep_vault::markdown::panic_safe_options(
+        markdown,
+        clep_vault::markdown::markdown_options() | Options::ENABLE_WIKILINKS,
+    );
     let mut definitions = HashMap::new();
     let mut source = Parser::new_ext(markdown, options);
     while let Some(event) = source.next() {
