@@ -42,7 +42,8 @@ pub fn load_note_meta(index: &VaultIndex) -> Result<HashMap<String, NoteMeta>, r
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
-        for (pid, tag) in rows.flatten() {
+        for row in rows {
+            let (pid, tag) = row?;
             tags_by_page.entry(pid).or_default().push(tag);
         }
     }
@@ -73,8 +74,7 @@ pub fn load_note_meta(index: &VaultIndex) -> Result<HashMap<String, NoteMeta>, r
                 row.get(7)?,
             ))
         })?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<_>>()?;
 
     let mut out = HashMap::with_capacity(rows.len());
     for (page_id, path, title, kind, created_at, updated_at, encrypted, word_count) in rows {

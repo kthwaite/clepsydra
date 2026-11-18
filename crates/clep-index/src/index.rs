@@ -887,8 +887,7 @@ impl VaultIndex {
                     row.get::<_, String>(2)?,
                 ))
             })?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<rusqlite::Result<_>>()?;
         drop(stmt);
 
         for (source_id, span_start, target_canonical) in &unresolved {
@@ -917,8 +916,7 @@ impl VaultIndex {
                     row.get::<_, String>(2)?,
                 ))
             })?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<rusqlite::Result<_>>()?;
         drop(block_ref_stmt);
 
         for (source_id, span_start, block_id) in &unresolved_block_refs {
@@ -933,8 +931,7 @@ impl VaultIndex {
                 .query_map(params![block_id], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<rusqlite::Result<_>>()?;
             drop(lookup);
 
             if matches.len() == 1 {
@@ -1362,8 +1359,7 @@ impl VaultIndex {
                     row.get::<_, i64>(5)?,
                 ))
             })?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<rusqlite::Result<_>>()?;
         drop(stmt);
 
         let mut results = Vec::new();
@@ -1384,8 +1380,7 @@ impl VaultIndex {
                             title: row.get(2)?,
                         })
                     })?
-                    .filter_map(|r| r.ok())
-                    .collect();
+                    .collect::<rusqlite::Result<_>>()?;
                 drop(lookup);
 
                 if matches.len() >= 2 {
@@ -1481,8 +1476,7 @@ impl VaultIndex {
                     })
                 },
             )?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<rusqlite::Result<_>>()?;
         drop(stmt);
 
         // 4. For each link, extract context
@@ -1638,8 +1632,7 @@ impl VaultIndex {
                     rank: row.get(4)?,
                 })
             })?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<rusqlite::Result<_>>()?;
 
         Ok(results)
     }
@@ -2215,8 +2208,7 @@ fn migrate_links_fk(conn: &Connection) -> Result<(), IndexError> {
             .query_map([], |row| {
                 Ok((row.get::<_, String>(3)?, row.get::<_, String>(6)?))
             })?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<rusqlite::Result<_>>()?;
         fks.iter()
             .any(|(col, on_delete)| col == "target_id" && on_delete != "SET NULL")
     };
@@ -2612,7 +2604,8 @@ fn prune_stale_pages(
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
-        .filter_map(|r| r.ok())
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
         .filter(|(_, path)| !seen_paths.contains(path))
         .map(|(id, _)| id)
         .collect();
@@ -3591,6 +3584,36 @@ mod tests {
         );
         assert!(index.search("project:kitchen", 20).unwrap().is_empty());
         assert!(index.search("tag:Fermentation", 20).unwrap().is_empty());
+    }
+
+    #[test]
+    fn raw_grep_reports_invalid_fts5_syntax() {
+        let index = search_index();
+
+        // Control: well-formed raw syntax runs, and no hit is not an error.
+        assert_paths(
+            crate::grep::run(&index, "local AND backup", 20, true).unwrap(),
+            &["notes/backup.md"],
+        );
+        assert_paths(
+            crate::grep::run(&index, "zzzmissing", 20, true).unwrap(),
+            &[],
+        );
+        for query in [
+            "\"unterminated",
+            "AND",
+            "local AND",
+            "nosuchcolumn : x",
+            "NEAR(",
+        ] {
+            assert!(
+                matches!(
+                    crate::grep::run(&index, query, 20, true),
+                    Err(IndexError::Sqlite(_))
+                ),
+                "raw grep {query:?} must fail"
+            );
+        }
     }
 
     #[test]
