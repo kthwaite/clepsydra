@@ -252,10 +252,40 @@ fn rewrite_reference_definition_keeps_title_and_form() {
 
 #[test]
 fn rewrite_leaves_other_reference_definitions_alone() {
-    // Not a match, inside a code block, a footnote in the vault dialect, or
-    // a definition that no link uses.
+    // Not a match, inside a code block, a footnote, or a definition that no
+    // link uses.
     let content = "[x][r] [c] note[^1]\n\n[r]: other.md\n\n```\n[c]: alpha.md\n```\n\n\
                    [^1]: alpha.md\n\n[unused]: alpha.md\n";
     let result = rewrite_links_in_content(content, &[], &[("alpha.md", "f.md")]);
     assert_eq!(result, content);
+}
+
+// ---------------------------------------------------------------------------
+// Footnotes: a footnote definition is not a link reference definition
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rewrite_link_alone_in_footnote_definition() {
+    assert_eq!(
+        rewrite_links_in_content("Text[^1].\n\n[^1]: [[Alpha]]\n", &[("Alpha", "Beta")], &[]),
+        "Text[^1].\n\n[^1]: [[Beta]]\n"
+    );
+    assert_eq!(
+        rewrite_links_in_content(
+            "Text[^1].\n\n[^1]: lead '[x](a.md)'\n",
+            &[],
+            &[("a.md", "f.md")]
+        ),
+        "Text[^1].\n\n[^1]: lead '[x](f.md)'\n"
+    );
+}
+
+#[test]
+fn rewrite_leaves_footnote_text_alone() {
+    // The footnote's text happens to equal the moved page's relative path.
+    let content = "Text[^1].\n\n[^1]: alpha.md\n";
+    assert_eq!(
+        rewrite_links_in_content(content, &[], &[("alpha.md", "f.md")]),
+        content
+    );
 }

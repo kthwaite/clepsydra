@@ -218,3 +218,35 @@ fn encrypted_page_emits_no_body_links_while_plain_inbound_link_resolves() {
         Some("019fd000-0000-7000-8000-000000000031")
     );
 }
+
+// ---------------------------------------------------------------------------
+// Footnotes: a footnote definition is not a link reference definition
+// ---------------------------------------------------------------------------
+
+/// `(target, span, kind)` of every extracted link, in source order.
+fn link_shapes(body: &str) -> Vec<(String, std::ops::Range<usize>, LinkKind)> {
+    let mut found: Vec<_> = extract_links(body)
+        .into_iter()
+        .map(|link| (link.target_raw, link.span, link.kind))
+        .collect();
+    found.sort_by_key(|(_, span, _)| span.start);
+    found
+}
+
+#[test]
+fn wikilink_alone_in_footnote_definition_is_extracted() {
+    assert_eq!(
+        link_shapes("[^1]: [[Alpha]]"),
+        vec![("Alpha".to_string(), 6..15, LinkKind::Wiki)]
+    );
+    assert_eq!(
+        link_shapes("Text[^1].\n\n[^1]: lead '[x](a.md)'\n"),
+        vec![("a.md".to_string(), 23..32, LinkKind::Markdown)]
+    );
+}
+
+#[test]
+fn footnote_reference_is_not_a_markdown_link() {
+    assert_eq!(link_shapes("Text[^1].\n\n[^1]: Ibid.\n"), vec![]);
+    assert_eq!(link_shapes("Text[^1].\n\n[^1]: alpha.md\n"), vec![]);
+}

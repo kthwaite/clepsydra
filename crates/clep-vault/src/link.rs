@@ -79,12 +79,23 @@ fn is_external(url: &str) -> bool {
         || url.starts_with('#')
 }
 
+/// Parser options for the link scanners (`extract_links` and the rewriter).
+///
+/// Only footnotes are switched on, in the same flavour as
+/// [`crate::markdown::markdown_options`]: without them a footnote definition
+/// such as `[^1]: Ibid.` reads as a link reference definition, its body is
+/// never scanned, and every `[^1]` becomes a Markdown link to the footnote
+/// text. Every other extension stays off so that link spans do not move.
+pub(crate) fn link_scan_options() -> Options {
+    Options::ENABLE_FOOTNOTES | Options::ENABLE_OLD_FOOTNOTES
+}
+
 /// Extract all internal links from a Markdown body.
 ///
 /// Uses pulldown-cmark for structure awareness (skipping code blocks and HTML
 /// blocks) and a regex pass on `Text` events for wikilinks.
 pub fn extract_links(body: &str) -> Vec<Link> {
-    let raw_iter = Parser::new_ext(body, Options::empty()).into_offset_iter();
+    let raw_iter = Parser::new_ext(body, link_scan_options()).into_offset_iter();
     let parser = TextMergeWithOffset::new(raw_iter);
 
     let mut links = Vec::new();
