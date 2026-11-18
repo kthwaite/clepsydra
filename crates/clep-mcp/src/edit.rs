@@ -16,7 +16,10 @@ pub(crate) fn apply_edit(
     if old.is_empty() {
         return Err("old_string must not be empty".to_string());
     }
-    let count = body.matches(old).count();
+    // Occurrences are counted at every offset: `str::matches` skips a match
+    // that overlaps the previous one ("aa" in "aaa"), which would make an
+    // ambiguous edit look unique.
+    let count = occurrences(body, old);
     match count {
         0 => Err(
             "old_string not found in the page body — re-read the page with vault_get_page \
@@ -24,12 +27,25 @@ pub(crate) fn apply_edit(
                 .to_string(),
         ),
         1 => Ok((body.replacen(old, new, 1), 1)),
-        n if replace_all => Ok((body.replace(old, new), n)),
+        _ if replace_all => Ok((body.replace(old, new), body.matches(old).count())),
         n => Err(format!(
             "old_string matches {n} times — extend it with surrounding context to make it \
              unique, or pass replace_all: true to replace every occurrence"
         )),
     }
+}
+
+/// Number of offsets in `body` at which `needle` (non-empty) occurs,
+/// overlapping occurrences included.
+fn occurrences(body: &str, needle: &str) -> usize {
+    let step = needle.chars().next().map_or(1, char::len_utf8);
+    let mut count = 0;
+    let mut from = 0;
+    while let Some(found) = body[from..].find(needle) {
+        count += 1;
+        from += found + step;
+    }
+    count
 }
 
 /// Append `content` to `body`, optionally at the end of the section opened by
@@ -71,18 +87,39 @@ pub(crate) fn append_to_body(
         .map(|(i, _)| i)
         .unwrap_or(lines.len());
 
-    let section = lines[start..end].join("\n");
-    let mut out = lines[..start].join("\n");
-    if !out.is_empty() {
-        out.push('\n');
+    // Splice at byte offsets so every line outside the insertion keeps its
+    // bytes, line terminator included (rebuilding the body from `lines()`
+    // turned CRLF into LF page-wide and dropped edge blank lines).
+    let mut offsets = Vec::with_capacity(lines.len() + 1);
+    let mut offset = 0;
+    for line in body.split_inclusive('\n') {
+        offsets.push(offset);
+        offset += line.len();
     }
-    out.push_str(&join_block(&section, content));
+    offsets.push(body.len());
+    let (section_start, section_end) = (offsets[start], offsets[end]);
+
+    // The section keeps its text up to its last non-blank line, and that
+    // line keeps its own terminator. A last line that has none (the page
+    // does not end in a newline) gets the terminator the page uses.
+    let kept_end = section_start + body[section_start..section_end].trim_end().len();
+    let trailing = &body[kept_end..section_end];
+    let terminator = match trailing.find('\n') {
+        Some(at) if trailing[..at].ends_with('\r') => "\r\n",
+        Some(_) => "\n",
+        None if body.contains("\r\n") => "\r\n",
+        None => "\n",
+    };
+
+    let mut out = String::with_capacity(body.len() + content.len() + 4);
+    out.push_str(&body[..kept_end]);
+    out.push_str(terminator);
+    out.push('\n');
+    out.push_str(content.trim_end());
+    out.push('\n');
     if end < lines.len() {
         out.push('\n');
-        out.push_str(&lines[end..].join("\n"));
-    }
-    if body.ends_with('\n') && !out.ends_with('\n') {
-        out.push('\n');
+        out.push_str(&body[section_end..]);
     }
     Ok(out)
 }
@@ -133,9 +170,13 @@ fn fence_flags(lines: &[&str]) -> Vec<bool> {
     flags
 }
 
-/// The ATX heading level of `line` (1-6), if it is one.
+/// The ATX heading level of `line` (1-6), if it is one. A heading is
+/// indented by at most three spaces; four or more make an indented code line.
 fn atx_level(line: &str) -> Option<usize> {
-    let trimmed = line.trim_start();
+    let trimmed = line.trim_start_matches(' ');
+    if line.len() - trimmed.len() > 3 {
+        return None;
+    }
     let hashes = trimmed.chars().take_while(|c| *c == '#').count();
     if (1..=6).contains(&hashes)
         && trimmed[hashes..]
@@ -150,9 +191,17 @@ fn atx_level(line: &str) -> Option<usize> {
 }
 
 /// If `line` is an ATX heading whose text matches `wanted`, return its level.
+/// A closing sequence (`## Log ##`: hashes after a space, or nothing but
+/// hashes) is not part of the heading text.
 fn heading_level(line: &str, wanted: &str) -> Option<usize> {
     let level = atx_level(line)?;
     let text = line.trim_start().trim_start_matches('#').trim();
+    let unclosed = text.trim_end_matches('#');
+    let text = if unclosed.is_empty() || unclosed.ends_with([' ', '\t']) {
+        unclosed.trim_end()
+    } else {
+        text
+    };
     text.eq_ignore_ascii_case(wanted.trim()).then_some(level)
 }
 
@@ -278,5 +327,97 @@ mod tests {
         let out = append_to_body(body, "tail", Some("Log")).unwrap();
         // Everything after the open fence is fenced; append goes to the end.
         assert!(out.ends_with("tail\n"), "{out}");
+    }
+
+    #[test]
+    fn apply_edit_rejects_a_match_that_overlaps_itself() {
+        // "aa" occurs at offsets 0 and 1; "\n\n" likewise. `str::matches`
+        // counts one, so the first position used to be edited silently.
+        for (body, old) in [("aaab", "aa"), ("a\n\n\nb", "\n\n"), ("xabababy", "abab")] {
+            let err = apply_edit(body, old, "X", false).unwrap_err();
+            assert!(err.contains("matches 2 times"), "{body:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn apply_edit_replace_all_still_replaces_non_overlapping_matches() {
+        let (body, n) = apply_edit("aaab", "aa", "X", true).unwrap();
+        assert_eq!(body, "Xab");
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn append_under_heading_keeps_crlf_line_endings_of_other_lines() {
+        // Regression: the body was rebuilt from `lines()` joined with `\n`,
+        // which turned every CRLF of the page into LF.
+        let out = append_to_body(
+            "# Log\r\none\r\n\r\n# Other\r\ntwo\r\n",
+            "- new",
+            Some("Log"),
+        )
+        .unwrap();
+        assert_eq!(out, "# Log\r\none\r\n\n- new\n\n# Other\r\ntwo\r\n");
+
+        let out = append_to_body("intro\r\n\r\n# Log\r\none\r\n", "- new", Some("Log")).unwrap();
+        assert_eq!(out, "intro\r\n\r\n# Log\r\none\r\n\n- new\n");
+
+        // No final newline: the last line gets the page's terminator.
+        let out = append_to_body("intro\r\n# Log\r\none", "- new", Some("Log")).unwrap();
+        assert_eq!(out, "intro\r\n# Log\r\none\r\n\n- new\n");
+        let out = append_to_body("intro\n# Log\none", "- new", Some("Log")).unwrap();
+        assert_eq!(out, "intro\n# Log\none\n\n- new\n");
+    }
+
+    #[test]
+    fn append_under_heading_keeps_blank_lines_outside_the_section() {
+        // Same rebuild: a single leading blank line, and the blank line that
+        // ends the page after a later section, were dropped.
+        assert_eq!(
+            append_to_body("\n# Log\none\n", "- new", Some("Log")).unwrap(),
+            "\n# Log\none\n\n- new\n"
+        );
+        assert_eq!(
+            append_to_body("# Log\n# Other\n\n", "- new", Some("Log")).unwrap(),
+            "# Log\n\n- new\n\n# Other\n\n"
+        );
+    }
+
+    #[test]
+    fn append_ignores_a_hash_line_indented_as_code() {
+        // Four spaces of indent make an indented code line, not a heading.
+        let body = "intro\n\n    # Log\n    more code\n\n# Log\nreal\n";
+        assert_eq!(
+            append_to_body(body, "- new", Some("Log")).unwrap(),
+            "intro\n\n    # Log\n    more code\n\n# Log\nreal\n\n- new\n"
+        );
+        // Nor does it end the section it sits in.
+        let body = "# Log\none\n\n    # code\n\n# Other\n";
+        assert_eq!(
+            append_to_body(body, "- new", Some("Log")).unwrap(),
+            "# Log\none\n\n    # code\n\n- new\n\n# Other\n"
+        );
+        // Up to three spaces is still a heading.
+        assert_eq!(
+            append_to_body("   # Log\none\n", "- new", Some("Log")).unwrap(),
+            "   # Log\none\n\n- new\n"
+        );
+    }
+
+    #[test]
+    fn append_matches_a_heading_with_a_closing_hash_sequence() {
+        assert_eq!(
+            append_to_body("## Log ##\none\n", "- new", Some("Log")).unwrap(),
+            "## Log ##\none\n\n- new\n"
+        );
+        assert_eq!(
+            append_to_body("# Log #####  \none\n", "- new", Some("log")).unwrap(),
+            "# Log #####  \none\n\n- new\n"
+        );
+        // Hashes glued to the text are text, not a closing sequence.
+        assert!(append_to_body("# C#\none\n", "- new", Some("C")).is_err());
+        assert_eq!(
+            append_to_body("# C#\none\n", "- new", Some("C#")).unwrap(),
+            "# C#\none\n\n- new\n"
+        );
     }
 }
