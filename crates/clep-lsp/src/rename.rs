@@ -164,10 +164,8 @@ pub fn full_document_range(text: &str, encoding: PositionEncoding) -> Range {
         },
         end: Position {
             line,
-            character: encoding.column_of_byte(
-                &text[last_line_start..],
-                bytes.len() - last_line_start,
-            ),
+            character: encoding
+                .column_of_byte(&text[last_line_start..], bytes.len() - last_line_start),
         },
     }
 }
