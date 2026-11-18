@@ -71,6 +71,26 @@ async fn finds_a_title_mention_case_insensitively() {
 }
 
 #[tokio::test]
+async fn a_name_with_no_letter_or_digit_is_not_searched() {
+    // `???` has no word the full-text index can look up, so it is not a
+    // mention term; the alias still is.
+    let target = "---\nid: 00000000-0000-0000-0000-000000000001\ntitle: \"???\"\naliases: [\"C++\"]\n---\nTarget.\n";
+    let symbols = page(2, "Symbols", "What does ??? mean here.");
+    let both = page(3, "Both", "Is ??? about C++ or not.");
+    let (_tmp, handle) = built(&[
+        ("target.md", target),
+        ("symbols.md", &symbols),
+        ("both.md", &both),
+    ])
+    .await;
+
+    let found = mentions(&handle, "target.md").await;
+
+    assert_eq!(sources(&found), vec!["both.md"]);
+    assert_eq!(found[0].matched, "C++");
+}
+
+#[tokio::test]
 async fn finds_an_alias_mention() {
     let beta = page(2, "Beta", "The first letter of the alphabet matters.");
     let (_tmp, handle) = built(&[("alpha.md", ALPHA), ("beta.md", &beta)]).await;
