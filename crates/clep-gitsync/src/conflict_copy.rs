@@ -125,7 +125,8 @@ pub fn conflict_copy_content(original_rel: &str, theirs: &[u8], short: &str) -> 
 /// the original's and `updated_at` is dropped. On the copy, `conflict_of` is
 /// dropped and a trailing ` (conflict <shortid>)` title suffix is removed; a
 /// title that was only the file-stem fallback becomes absent again when the
-/// original has none. Fails when either side's frontmatter does not parse.
+/// original has none, and custom keys follow the original's order. Fails
+/// when either side's frontmatter does not parse.
 pub fn comparable_pair(original: &str, copy: &str) -> Result<(String, String), FrontmatterError> {
     let (mut local, local_body) = parse_frontmatter(original)?;
     let (mut other, other_body) = parse_frontmatter(copy)?;
@@ -145,10 +146,36 @@ pub fn comparable_pair(original: &str, copy: &str) -> Result<(String, String), F
     {
         other.title = None;
     }
+    other.extra = in_key_order_of(std::mem::take(&mut other.extra), &local.extra);
     Ok((
         write_page_content(&local, &local_body),
         write_page_content(&other, &other_body),
     ))
+}
+
+/// `extra` with its keys in `like`'s order, keys only `extra` has last (in
+/// their own order), tables inside values likewise. `write_page_content`
+/// emits custom keys in insertion order, so without this two pages holding
+/// the same keys written in a different order would compare as different.
+fn in_key_order_of(extra: ExtraMap, like: &ExtraMap) -> ExtraMap {
+    let mut out = ExtraMap::new();
+    for (key, like_value) in like {
+        if let Some(value) = extra.get(key) {
+            let value = match (value, like_value) {
+                (toml::Value::Table(table), toml::Value::Table(like_table)) => {
+                    toml::Value::Table(in_key_order_of(table.clone(), like_table))
+                }
+                (value, _) => value.clone(),
+            };
+            out.insert(key.clone(), value);
+        }
+    }
+    for (key, value) in extra {
+        if !like.contains_key(&key) {
+            out.insert(key, value);
+        }
+    }
+    out
 }
 
 /// `Plan (conflict abc1234)` -> `Plan`; any other title is returned as is.
@@ -366,6 +393,31 @@ mod tests {
         let (local, other) = comparable_pair(&original, &copy).unwrap();
         assert_eq!(local, other);
         assert!(!other.contains("title"), "{other}");
+    }
+
+    #[test]
+    fn comparable_pair_ignores_the_order_of_custom_keys() {
+        let original =
+            "+++\nid = \"0192b6c0-0000-7000-8000-000000000001\"\na = 1\nb = 2\n+++\nbody\n";
+        let copy = "+++\nid = \"0192b6c0-0000-7000-8000-000000000002\"\ntitle = \"plan (conflict abc1234)\"\nconflict_of = \"plan.md\"\nb = 2\na = 1\n+++\nbody\n";
+        let (local, other) = comparable_pair(original, copy).unwrap();
+        assert_eq!(local, other);
+    }
+
+    #[test]
+    fn comparable_pair_lists_copy_only_keys_after_the_shared_ones() {
+        let original =
+            "+++\nid = \"0192b6c0-0000-7000-8000-000000000001\"\na = 1\nb = 2\n+++\nbody\n";
+        let copy = "+++\nid = \"0192b6c0-0000-7000-8000-000000000002\"\nconflict_of = \"plan.md\"\nz = 9\nb = 3\na = 1\n+++\nbody\n";
+        let (local, other) = comparable_pair(original, copy).unwrap();
+        assert_eq!(
+            local,
+            "+++\nid = \"0192b6c0-0000-7000-8000-000000000001\"\na = 1\nb = 2\n+++\nbody\n"
+        );
+        assert_eq!(
+            other,
+            "+++\nid = \"0192b6c0-0000-7000-8000-000000000001\"\na = 1\nb = 3\nz = 9\n+++\nbody\n"
+        );
     }
 
     #[test]
