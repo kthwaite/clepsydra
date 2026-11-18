@@ -3503,6 +3503,20 @@ mod tests {
     }
 
     #[test]
+    fn search_finds_the_same_pages_for_composed_and_decomposed_words() {
+        let index = search_index();
+
+        // `Élan` typed precomposed (NFC), decomposed (NFD), and unaccented.
+        for query in ["\u{c9}lan", "E\u{301}lan", "e\u{301}la", "elan"] {
+            assert_paths(index.search(query, 20).unwrap(), &["notes/unicode.md"]);
+        }
+        assert_paths(
+            index.search("E\u{301}lan vi\u{302}tal", 20).unwrap(),
+            &["notes/unicode.md"],
+        );
+    }
+
+    #[test]
     fn search_title_bounds_typos_and_normalizes_unicode() {
         let index = search_index();
 
