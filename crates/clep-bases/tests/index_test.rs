@@ -1911,13 +1911,14 @@ fn resolve_links_for_page_resolves_block_refs() {
     );
 
     // Also verify outgoing block ref resolution works
-    // Re-index referrer (simulating incremental update) and resolve
+    // Re-index referrer (simulating incremental update): `index_page`
+    // resolves the page's own links, so the per-page pass finds none left.
     index.remove_page(&referrer_vp).unwrap();
     index.index_page(&vault, &referrer_vp).unwrap();
     let resolved2 = index.resolve_links_for_page(&referrer_vp).unwrap();
-    assert!(
-        resolved2 > 0,
-        "outgoing block ref from referrer should resolve"
+    assert_eq!(
+        resolved2, 0,
+        "index_page already resolved the outgoing block ref"
     );
 
     let backlinks2 = index
