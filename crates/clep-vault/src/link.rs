@@ -198,11 +198,19 @@ pub fn extract_links(body: &str) -> Vec<Link> {
                 if link_type == LinkType::Shortcut {
                     wikilinks.label_brackets(&range);
                 }
+                // pulldown-cmark ends a collapsed reference link (`[label][]`)
+                // after the label; the trailing `[]` is part of the link.
+                let span =
+                    if link_type == LinkType::Collapsed && body[range.end..].starts_with("[]") {
+                        range.start..range.end + 2
+                    } else {
+                        range
+                    };
                 let url = dest_url.as_ref();
                 if !is_external(url) {
                     links.push(Link {
                         target_raw: url.to_string(),
-                        span: range,
+                        span,
                         kind: LinkKind::Markdown,
                     });
                 }
