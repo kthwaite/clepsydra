@@ -92,6 +92,13 @@ impl Fixture {
         fs::write(abs, content).unwrap();
     }
 
+    /// What a server start does with its persisted index: `build` skips
+    /// unchanged pages, then `resolve_links` runs.
+    fn restart(&mut self) {
+        self.index.build(&self.vault).unwrap();
+        self.index.resolve_links().unwrap();
+    }
+
     fn events(&mut self, events: &[ChangeEvent]) {
         SyncEngine::process_events(events, &self.vault, &mut self.index).unwrap();
     }
@@ -314,4 +321,90 @@ fn index_page_and_remove_page_keep_link_resolution_current() {
         link("c.md", "d", Some("d.md")),
         link("d.md", "c", Some("c.md")),
     ]);
+}
+
+// ---------------------------------------------------------------------------
+// Startup over a persisted index: files changed while the server was down.
+// The linking page is unchanged, so `build` skips it; its links must still be
+// decided again.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn restart_unresolves_a_link_whose_target_lost_the_name_offline() {
+    let mut fx = Fixture::new(&[
+        ("a.md", &page(1, "title = \"zz\"\n", "one")),
+        ("c.md", &page(2, "", "see [[zz]]")),
+    ]);
+    assert_eq!(links_of(&fx.index), vec![link("c.md", "zz", Some("a.md"))]);
+
+    fx.write("a.md", &page(1, "title = \"q\"\n", "one"));
+    fx.restart();
+
+    fx.assert_links(&[link("c.md", "zz", None)]);
+}
+
+#[test]
+fn restart_unresolves_a_link_whose_name_became_ambiguous_offline() {
+    let mut fx = Fixture::new(&[
+        ("a.md", &page(1, "", "one")),
+        ("c.md", &page(2, "", "see [[a]] and ((blk0000001))")),
+        ("d.md", &page(3, "", "txt ^blk0000001")),
+    ]);
+    assert_eq!(
+        links_of(&fx.index),
+        vec![
+            link("c.md", "a", Some("a.md")),
+            link("c.md", "blk0000001", Some("d.md")),
+        ]
+    );
+
+    fx.write("n/a.md", &page(4, "", "txt ^blk0000001"));
+    fx.restart();
+
+    fx.assert_links(&[link("c.md", "a", None), link("c.md", "blk0000001", None)]);
+}
+
+#[test]
+fn restart_follows_a_page_renamed_offline() {
+    let mut fx = Fixture::new(&[
+        ("a.md", &page(1, "title = \"Alpha\"\n", "one")),
+        ("c.md", &page(2, "", "see [[a]] and [[Alpha]]")),
+    ]);
+
+    fs::rename(fx.root.join("a.md"), fx.root.join("b.md")).unwrap();
+    fx.restart();
+
+    // The filename link has no holder; the title link follows the page and
+    // its `target_path` names the new file.
+    fx.assert_links(&[link("c.md", "a", None), link("c.md", "Alpha", Some("b.md"))]);
+}
+
+#[test]
+fn restart_clears_the_target_path_of_a_link_to_a_page_deleted_offline() {
+    let mut fx = Fixture::new(&[
+        ("a.md", &page(1, "title = \"zz\"\n", "one")),
+        ("c.md", &page(2, "", "see [[zz]]")),
+    ]);
+
+    fs::remove_file(fx.root.join("a.md")).unwrap();
+    fx.restart();
+
+    // `link(.., None)` expects both `target_id` and `target_path` NULL.
+    fx.assert_links(&[link("c.md", "zz", None)]);
+
+    // A stale `target_path` made the dead link a backlink of any later page
+    // created at the old path.
+    fx.write("a.md", &page(3, "", "unrelated"));
+    fx.events(&[upsert("a.md")]);
+    let backlinks = fx
+        .index
+        .backlinks_with_context(&fx.vault, &VaultPath::new("a.md").unwrap(), 40)
+        .unwrap();
+    assert_eq!(
+        backlinks
+            .into_iter()
+            .map(|backlink| backlink.source_path)
+            .collect::<Vec<_>>(),
+        Vec::<String>::new()
+    );
 }
