@@ -95,7 +95,7 @@ pub fn merge_duplicate_journals(root: &Path) -> (Vec<JournalMerge>, Vec<String>)
     let mut warnings = Vec::new();
     // Every group's rewrites are collected first and applied in one pass, so
     // the vault is read once however many pages were folded.
-    let mut repoints: Vec<(String, String)> = Vec::new();
+    let mut repoints: Vec<Repoint> = Vec::new();
     for group in duplicate_journal_groups(root) {
         if let Some(merge) = merge_group(root, &group, &mut repoints, &mut warnings) {
             merges.push(merge);
@@ -103,6 +103,14 @@ pub fn merge_duplicate_journals(root: &Path) -> (Vec<JournalMerge>, Vec<String>)
     }
     repoint_links(root, &repoints, &mut warnings);
     (merges, warnings)
+}
+
+/// A loser that was folded away, for the link rewrites its deletion implies.
+struct Repoint {
+    /// Vault-relative paths.
+    loser: String,
+    winner: String,
+    date: String,
 }
 
 /// One member of a group, parsed.
@@ -123,7 +131,7 @@ struct Member {
 fn merge_group(
     root: &Path,
     group: &JournalGroup,
-    repoints: &mut Vec<(String, String)>,
+    repoints: &mut Vec<Repoint>,
     warnings: &mut Vec<String>,
 ) -> Option<JournalMerge> {
     let mut members: Vec<Member> = Vec::new();
@@ -214,7 +222,11 @@ fn merge_group(
             ));
             continue;
         }
-        repoints.extend(repoint_pairs(&loser.path, &winner.path, &group.date));
+        repoints.push(Repoint {
+            loser: loser.path.clone(),
+            winner: winner.path.clone(),
+            date: group.date.clone(),
+        });
         merged.push(loser.path.clone());
     }
     if merged.is_empty() {
@@ -255,6 +267,58 @@ fn repoint_pairs(loser_rel: &str, winner_rel: &str, date: &str) -> Vec<(String, 
         pairs.push((old_stem, new_stem));
     }
     pairs
+}
+
+/// The Markdown-link rewrites a deleted loser implies in the page at
+/// `from_rel`. A Markdown destination names a page two ways, and both are
+/// repointed:
+///
+/// - by name, as a wikilink does — the index resolves `[x](journals/a.md)`
+///   and `[x](a.md)` through the page's path stem and filename stem from any
+///   folder. These are the [`repoint_pairs`] forms, plus the filename with
+///   its `.md`.
+/// - by a path relative to the linking page (`../journals/a.md`), which is
+///   what CommonMark means and what a page move writes.
+///
+/// `<date>.md` is the Markdown spelling of a bare date link and is left
+/// alone like `[[<date>]]`.
+fn markdown_repoint_pairs(repoint: &Repoint, from_rel: &str) -> Vec<(String, String)> {
+    let Repoint {
+        loser,
+        winner,
+        date,
+    } = repoint;
+    let mut pairs = repoint_pairs(loser, winner, date);
+    let forms = [
+        (file_name(loser).to_string(), file_name(winner).to_string()),
+        (
+            relative_url(from_rel, loser),
+            relative_url(from_rel, winner),
+        ),
+    ];
+    for (old, new) in forms {
+        let is_date_link = old.strip_suffix(".md") == Some(date.as_str());
+        if !is_date_link && !pairs.iter().any(|(seen, _)| *seen == old) {
+            pairs.push((old, new));
+        }
+    }
+    pairs
+}
+
+/// The path of `to_rel` relative to the folder of `from_rel` (both
+/// vault-relative): `notes/a.md` -> `journals/b.md` is `../journals/b.md`.
+fn relative_url(from_rel: &str, to_rel: &str) -> String {
+    let folder = |rel: &str| -> Vec<String> {
+        let mut parts: Vec<String> = rel.split('/').map(str::to_string).collect();
+        parts.pop();
+        parts
+    };
+    let (from, to) = (folder(from_rel), folder(to_rel));
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut parts: Vec<&str> = vec![".."; from.len() - shared];
+    parts.extend(to[shared..].iter().map(String::as_str));
+    parts.push(file_name(to_rel));
+    parts.join("/")
 }
 
 fn read_member(root: &Path, rel: &str) -> Result<Member, String> {
@@ -414,11 +478,15 @@ fn interleave(winner: &str, losers: &[&str]) -> String {
 /// filesystem walk, because the merger runs before any index exists.
 /// Date links (`[[2026-08-29]]`) are deliberately not among the pairs; see
 /// [`repoint_pairs`].
-fn repoint_links(root: &Path, pairs: &[(String, String)], warnings: &mut Vec<String>) {
-    if pairs.is_empty() {
+fn repoint_links(root: &Path, repoints: &[Repoint], warnings: &mut Vec<String>) {
+    if repoints.is_empty() {
         return;
     }
-    let pairs: Vec<(&str, &str)> = pairs
+    let wikilinks: Vec<(String, String)> = repoints
+        .iter()
+        .flat_map(|r| repoint_pairs(&r.loser, &r.winner, &r.date))
+        .collect();
+    let wikilinks: Vec<(&str, &str)> = wikilinks
         .iter()
         .map(|(old, new)| (old.as_str(), new.as_str()))
         .collect();
@@ -434,10 +502,24 @@ fn repoint_links(root: &Path, pairs: &[(String, String)], warnings: &mut Vec<Str
         let Ok(content) = std::fs::read_to_string(entry.path()) else {
             continue;
         };
-        if !pairs.iter().any(|(old, _)| content.contains(old)) {
+        // Every form of a link to a loser, Markdown ones included, contains
+        // one of the wikilink forms.
+        if !wikilinks.iter().any(|(old, _)| content.contains(old)) {
             continue;
         }
-        let rewritten = rewrite_links_in_content(&content, &pairs, &pairs);
+        let Ok(relative) = entry.path().strip_prefix(root) else {
+            continue;
+        };
+        let from_rel = relative.to_string_lossy().replace('\\', "/");
+        let markdown: Vec<(String, String)> = repoints
+            .iter()
+            .flat_map(|r| markdown_repoint_pairs(r, &from_rel))
+            .collect();
+        let markdown: Vec<(&str, &str)> = markdown
+            .iter()
+            .map(|(old, new)| (old.as_str(), new.as_str()))
+            .collect();
+        let rewritten = rewrite_links_in_content(&content, &wikilinks, &markdown);
         if rewritten != content
             && let Err(e) =
                 clep_vault::atomic_file::atomic_replace(entry.path(), rewritten.as_bytes())
@@ -779,6 +861,109 @@ mod tests {
         assert!(
             text.contains("[[journals/20260829.2026-08-29.aaaaaaaa]]"),
             "{text}"
+        );
+    }
+
+    /// A Markdown link names a page two ways: by name, like a wikilink but
+    /// with `.md` (how the index resolves it), or by a path relative to the
+    /// page it is written in (CommonMark, and what a page move writes).
+    #[test]
+    fn markdown_links_to_a_loser_are_repointed_in_every_form() {
+        const A: &str = "20260829.2026-08-29.aaaaaaaa";
+        const B: &str = "20260829.2026-08-29.bbbbbbbb";
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            &format!("{A}.md"),
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — a\n",
+        );
+        journal(
+            tmp.path(),
+            &format!("{B}.md"),
+            "02",
+            "2026-08-29T09:00:00Z",
+            "- 09:00 — b\n",
+        );
+        // A sibling journal of another day, linking by relative path.
+        journal(
+            tmp.path(),
+            "20260830.2026-08-30.cccccccc.md",
+            "03",
+            "2026-08-30T08:00:00Z",
+            &format!("- 08:00 — see [yesterday]({B}.md)\n"),
+        );
+        let links = |stem: &str| {
+            format!(
+                "[relative](../journals/{stem}.md) [path](journals/{stem}.md) [name]({stem}.md) [other](../journals/else.md)\n"
+            )
+        };
+        let referer = note(tmp.path(), "ref.md", "09", &links(B));
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges[0].merged, vec![format!("journals/{B}.md")]);
+        let text = std::fs::read_to_string(&referer).unwrap();
+        assert!(text.ends_with(&links(A)), "{text}");
+        let sibling =
+            std::fs::read_to_string(tmp.path().join("journals/20260830.2026-08-30.cccccccc.md"))
+                .unwrap();
+        assert!(
+            sibling.ends_with(&format!("- 08:00 — see [yesterday]({A}.md)\n")),
+            "{sibling}"
+        );
+    }
+
+    /// The Markdown spelling of a bare date link is left alone like the
+    /// wikilink one (D21); the path forms still name the deleted file.
+    #[test]
+    fn a_legacy_named_loser_leaves_markdown_date_links_alone() {
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — canonical\n",
+        );
+        journal(
+            tmp.path(),
+            "2026-08-29.md",
+            "02",
+            "2026-08-29T09:00:00Z",
+            "- 09:00 — legacy\n",
+        );
+        journal(
+            tmp.path(),
+            "20260830.2026-08-30.cccccccc.md",
+            "03",
+            "2026-08-30T08:00:00Z",
+            "- 08:00 — see [yesterday](2026-08-29.md)\n",
+        );
+        let referer = note(
+            tmp.path(),
+            "ref.md",
+            "09",
+            "[date](2026-08-29.md) [relative](../journals/2026-08-29.md)\n",
+        );
+
+        merge_duplicate_journals(tmp.path());
+
+        let text = std::fs::read_to_string(&referer).unwrap();
+        assert!(
+            text.ends_with(
+                "[date](2026-08-29.md) [relative](../journals/20260829.2026-08-29.aaaaaaaa.md)\n"
+            ),
+            "{text}"
+        );
+        let sibling =
+            std::fs::read_to_string(tmp.path().join("journals/20260830.2026-08-30.cccccccc.md"))
+                .unwrap();
+        assert!(
+            sibling.ends_with("- 08:00 — see [yesterday](2026-08-29.md)\n"),
+            "{sibling}"
         );
     }
 
