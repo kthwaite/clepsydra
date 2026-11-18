@@ -15,6 +15,7 @@ use clep_vault::page::parse_or_repair_frontmatter;
 use clep_vault::path::VaultPath;
 use clep_vault::rewriter::{self, LinkSyntax};
 use clep_vault::rubbish::{RubbishItem, RubbishManifest};
+use clep_vault::toml_patch;
 
 // ---------------------------------------------------------------------------
 // Utility: VaultPath error → IndexError mapping
@@ -1108,6 +1109,44 @@ impl<'a> MutationPlanner<'a> {
     ) -> Result<Option<RetargetedContent>, IndexError> {
         let failure = RefCell::new(None::<IndexError>);
         let edits = RefCell::new(Vec::<(String, String)>::new());
+
+        // Bare values of relation properties (`link = ["alpha"]`) are links
+        // too. The wikilink form (`"[[alpha]]"`) is left to the scan below.
+        let relation_fields = self.relation_fields(referrer_before)?;
+        let with_properties = if relation_fields.is_empty() {
+            None
+        } else {
+            toml_patch::rewrite_frontmatter_strings(content, &relation_fields, |value| {
+                let written = value.trim();
+                if written.starts_with("[[") {
+                    return None;
+                }
+                let new_target = self
+                    .retarget(
+                        LinkSyntax::Wiki,
+                        written,
+                        moved,
+                        referrer_before,
+                        referrer_after,
+                    )
+                    .unwrap_or_else(|error| {
+                        failure.borrow_mut().get_or_insert(error);
+                        None
+                    })?;
+                let edit = (written.to_string(), new_target.clone());
+                let mut edits = edits.borrow_mut();
+                if !edits.contains(&edit) {
+                    edits.push(edit);
+                }
+                // Keep the padding around the name.
+                Some(value.replacen(written, &new_target, 1))
+            })
+            // Frontmatter that cannot be patched is left as it is.
+            .unwrap_or(None)
+        };
+        let original = content;
+        let content = with_properties.as_deref().unwrap_or(content);
+
         let new_content = rewriter::rewrite_links_with(content, |syntax, written| {
             let new_target = self
                 .retarget(syntax, written, moved, referrer_before, referrer_after)
@@ -1125,7 +1164,27 @@ impl<'a> MutationPlanner<'a> {
         if let Some(error) = failure.into_inner() {
             return Err(error);
         }
-        Ok((new_content != content).then(|| (new_content, edits.into_inner())))
+        Ok((new_content != original).then(|| (new_content, edits.into_inner())))
+    }
+
+    /// The relation properties `referrer` has, as the index recorded them:
+    /// the frontmatter keys whose values are links. `tags` and `aliases` are
+    /// labels and names of the referrer itself; they do not follow another
+    /// page's rename.
+    fn relation_fields(&self, referrer: &VaultPath) -> Result<Vec<String>, IndexError> {
+        let mut statement = self.index.connection().prepare(
+            "SELECT DISTINCT l.source_field
+             FROM links l
+             JOIN pages p ON p.id = l.source_id
+             WHERE p.path = ?1 AND l.kind = 'property_ref'
+               AND l.source_field IS NOT NULL
+               AND l.source_field NOT IN ('tags', 'aliases')
+             ORDER BY l.source_field",
+        )?;
+        let fields = statement
+            .query_map(params![referrer.as_str()], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(fields)
     }
 
     /// The target to write in place of `written`, if that link points at a

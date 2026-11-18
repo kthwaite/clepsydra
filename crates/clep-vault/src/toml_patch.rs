@@ -118,6 +118,48 @@ fn splice_fenced(raw: &str, edits: &FrontmatterEdits) -> Result<String, SpliceEr
     Ok(format!("+++\n{doc}+++\n{body}"))
 }
 
+/// Rewrite string values of the top-level frontmatter `keys` in place.
+///
+/// `new_value` is asked about each string held by one of `keys` (the value
+/// itself, or each string element of an array) and returns its replacement,
+/// or `None` to keep it. Only the replaced strings change: the other values,
+/// comments, layout and the body are preserved byte-for-byte.
+///
+/// Returns `Ok(None)` when nothing was replaced, including when the page has
+/// no TOML frontmatter.
+pub fn rewrite_frontmatter_strings(
+    raw: &str,
+    keys: &[String],
+    new_value: impl Fn(&str) -> Option<String>,
+) -> Result<Option<String>, SpliceError> {
+    if !raw.starts_with("+++") {
+        return Ok(None);
+    }
+    let Ok((toml_str, body)) = split_fenced(raw, "+++") else {
+        return Ok(None);
+    };
+    let mut doc = toml_edit::DocumentMut::from_str(toml_str)?;
+
+    let mut changed = false;
+    let mut replace = |value: &mut toml_edit::Value| {
+        if let Some(new) = value.as_str().and_then(&new_value) {
+            let decor = value.decor().clone();
+            *value = toml_edit::Value::from(new);
+            *value.decor_mut() = decor;
+            changed = true;
+        }
+    };
+    for key in keys {
+        match doc.get_mut(key).and_then(toml_edit::Item::as_value_mut) {
+            Some(toml_edit::Value::Array(array)) => array.iter_mut().for_each(&mut replace),
+            Some(value) => replace(value),
+            None => {}
+        }
+    }
+
+    Ok(changed.then(|| format!("+++\n{doc}+++\n{body}")))
+}
+
 /// Map a JSON value into a `toml_edit::Value`, honoring the optional hint.
 ///
 /// Unhinted mapping: string → string, integral number → integer, other
@@ -236,6 +278,35 @@ Body line two.\n";
         )
         .unwrap();
         assert_eq!(out, "+++\na = 1\nt = [\"x\"]\n\n[keep]\ny = 1\n+++\nBody\n");
+    }
+
+    #[test]
+    fn rewrite_frontmatter_strings_replaces_only_the_chosen_strings() {
+        let raw = "+++\n# who\nlink = [\n  \"alpha\", # first\n  'other',\n  3,\n]\nowner = \"alpha\"\nnote = \"alpha\"\n+++\nalpha\n";
+        let keys = [
+            "link".to_string(),
+            "owner".to_string(),
+            "missing".to_string(),
+        ];
+        let rewritten = rewrite_frontmatter_strings(raw, &keys, |value| {
+            (value == "alpha").then(|| "be\"ta".to_string())
+        })
+        .unwrap();
+        assert_eq!(
+            rewritten.as_deref(),
+            Some(
+                "+++\n# who\nlink = [\n  'be\"ta', # first\n  'other',\n  3,\n]\nowner = 'be\"ta'\nnote = \"alpha\"\n+++\nalpha\n"
+            )
+        );
+
+        assert_eq!(
+            rewrite_frontmatter_strings(raw, &keys, |_| None).unwrap(),
+            None
+        );
+        assert_eq!(
+            rewrite_frontmatter_strings("no frontmatter\n", &keys, |_| Some("x".into())).unwrap(),
+            None
+        );
     }
 
     #[test]

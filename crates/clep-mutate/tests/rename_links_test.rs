@@ -495,3 +495,74 @@ fn folder_move_rewrites_each_referrer_once_for_all_moved_pages() {
         vec![Some("arch/b.md".to_string()); 2]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Bare property references
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bare_relation_property_values_follow_a_rename() {
+    let frontmatter = "# people\nattendees = [\n  \"Alpha\", # chair\n  \"[[alpha|A]]\",\n  \"other\",\n]\nlink = \" alpha.md \"\nnote = \"alpha\"\n";
+    let fixture = Fixture::new(&[
+        ("alpha.md", page(1, "", "one\n")),
+        ("other.md", page(2, "", "two\n")),
+        ("b.md", page(3, frontmatter, "three\n")),
+    ]);
+    let sorted_targets = |rows| {
+        let mut targets = targets(rows);
+        targets.sort();
+        targets
+    };
+    let alpha = Some("alpha.md".to_string());
+    let other = Some("other.md".to_string());
+    assert_eq!(
+        sorted_targets(fixture.links("b.md")),
+        vec![alpha.clone(), alpha.clone(), alpha, other.clone()]
+    );
+
+    fixture.move_page("alpha.md", "beta.md");
+
+    // Only the values that resolved to the page change; comments, layout,
+    // padding and the non-linkable `note` are kept.
+    assert_eq!(
+        fixture.read("b.md"),
+        page(
+            3,
+            "# people\nattendees = [\n  \"beta\", # chair\n  \"[[beta|A]]\",\n  \"other\",\n]\nlink = \" beta.md \"\nnote = \"alpha\"\n",
+            "three\n"
+        )
+    );
+    let beta = Some("beta.md".to_string());
+    let resolved = vec![beta.clone(), beta.clone(), beta, other];
+    assert_eq!(sorted_targets(fixture.links("b.md")), resolved);
+    assert_eq!(sorted_targets(fixture.rebuilt_links("b.md")), resolved);
+}
+
+#[test]
+fn a_bare_property_reference_inside_a_moved_page_follows_too() {
+    let fixture = Fixture::new(&[("box/a.md", page(1, "link = [\"box/a\", \"a\"]\n", "one\n"))]);
+
+    fixture.move_folder("box", "arch");
+
+    assert_eq!(
+        fixture.read("arch/a.md"),
+        page(1, "link = [\"arch/a\", \"a\"]\n", "one\n")
+    );
+    assert_eq!(
+        targets(fixture.rebuilt_links("arch/a.md")),
+        vec![Some("arch/a.md".to_string()); 2]
+    );
+}
+
+#[test]
+fn tags_and_aliases_are_not_renamed_with_a_page() {
+    let frontmatter = "tags = [\"alpha\"]\naliases = [\"gamma\"]\n";
+    let fixture = Fixture::new(&[
+        ("alpha.md", page(1, "", "one\n")),
+        ("b.md", page(2, frontmatter, "[[alpha]]\n")),
+    ]);
+
+    fixture.move_page("alpha.md", "beta.md");
+
+    assert_eq!(fixture.read("b.md"), page(2, frontmatter, "[[beta]]\n"));
+}
