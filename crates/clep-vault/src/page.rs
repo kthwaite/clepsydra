@@ -640,6 +640,15 @@ pub fn write_page_content(meta: &PageMeta, body: &str) -> String {
     }
     toml.push_str(&toml::to_string(&extras).expect("PageMeta extras should serialize"));
 
+    // A string value with a line that starts with `+++` would close the
+    // frontmatter early; re-spell it on one line. Pages without such a value
+    // (all pages written before this guard) keep their exact bytes.
+    if super::toml_patch::has_fence_line(&toml)
+        && let Ok(mut doc) = toml.parse::<toml_edit::DocumentMut>()
+    {
+        toml = super::toml_patch::render_without_fence_lines(&mut doc);
+    }
+
     format!("+++\n{toml}+++\n{body}")
 }
 
