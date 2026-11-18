@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use pulldown_cmark::{Event, Parser, Tag, TagEnd, TextMergeWithOffset};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, TextMergeWithOffset};
 use regex::Regex;
 
 use crate::markdown::{markdown_options, panic_safe_options};
@@ -295,6 +295,15 @@ fn append_text(current: &mut Option<BlockBuilder>, text: String, inline_code: bo
     }
 }
 
+/// Parser options for block extraction: the vault dialect without smart
+/// punctuation. Block content and inline property values are stored data
+/// (searched, compared, shown as typed), so `'`, `"`, `--` and `...` must
+/// reach them as written rather than as `’`, `“`, `–` and `…`. The flag only
+/// rewrites text, so the block structure is the same either way.
+fn block_markdown_options() -> Options {
+    markdown_options() - Options::ENABLE_SMART_PUNCTUATION
+}
+
 /// Parse a markdown document into a flat list of blocks with parent-child
 /// relationships encoded via `parent_index`.
 ///
@@ -302,7 +311,7 @@ fn append_text(current: &mut Option<BlockBuilder>, text: String, inline_code: bo
 /// Follows the same `TextMergeWithOffset` pattern as `extract_links` in
 /// `crates/clep-vault/src/link.rs`.
 pub fn parse_blocks(markdown: &str) -> Vec<Block> {
-    let opts = panic_safe_options(markdown, markdown_options());
+    let opts = panic_safe_options(markdown, block_markdown_options());
     let raw_iter = Parser::new_ext(markdown, opts).into_offset_iter();
     let parser = TextMergeWithOffset::new(raw_iter);
 
