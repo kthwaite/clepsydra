@@ -169,18 +169,15 @@ pub(crate) fn split_fenced<'a>(
     // Find the closing fence.
     let rest = &content[after_open..];
     let newline_fence = format!("\n{fence}");
-    let closing = rest
-        .find(&newline_fence)
-        .map(|pos| after_open + pos + 1) // position of the fence in the original string
-        .or_else(|| {
-            // Handle empty frontmatter: closing fence at the start of rest.
-            if rest.starts_with(fence) {
-                Some(after_open)
-            } else {
-                None
-            }
-        })
-        .ok_or(FrontmatterError::Unterminated)?;
+    let closing = if rest.starts_with(fence) {
+        // Empty frontmatter: the closing fence is the very next line. Checked
+        // first, so a later fence-like line in the body is not taken instead.
+        after_open
+    } else {
+        rest.find(&newline_fence)
+            .map(|pos| after_open + pos + 1) // position of the fence in the original string
+            .ok_or(FrontmatterError::Unterminated)?
+    };
 
     let fm_str = &content[after_open..closing];
 
