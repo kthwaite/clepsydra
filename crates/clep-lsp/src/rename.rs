@@ -2,7 +2,7 @@ use tower_lsp::lsp_types::{
     AnnotatedTextEdit, OneOf, Position, PrepareRenameResponse, Range, TextEdit,
 };
 
-use crate::document::Document;
+use crate::document::{Document, PositionEncoding};
 use clep_vault::canonical::CanonicalName;
 use clep_vault::link::LinkKind;
 use clep_vault::page::{parse_or_repair_frontmatter, write_page_content};
@@ -49,8 +49,7 @@ pub fn update_frontmatter_title(full_text: &str, new_title: &str) -> String {
 /// If `line_text` is a frontmatter `title:` line, return the rename range and
 /// placeholder for the (possibly quoted) title value on `line_number`.
 ///
-/// Replicates the exact logic from `prepare_rename` Case 2 so the inline
-/// arithmetic can be replaced with a single call here.
+/// Columns are UTF-8 byte offsets within `line_text`.
 pub fn frontmatter_title_rename_range(
     line_text: &str,
     line_number: u32,
@@ -59,24 +58,35 @@ pub fn frontmatter_title_rename_range(
     let rest = trimmed.strip_prefix("title:")?;
     let value = rest.trim();
 
-    // Whether the value is wrapped in matching single or double quotes.
-    let is_quoted = (value.starts_with('"') && value.ends_with('"'))
-        || (value.starts_with('\'') && value.ends_with('\''));
+    // Whether the value is wrapped in a pair of single or double quotes. One
+    // quote character alone both starts and ends the value but is not a pair
+    // (the line while a quoted title is being typed): it is an unquoted value.
+    let is_quoted = value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')));
 
-    // Strip surrounding quotes if present (replicates prepare_rename exactly,
-    // including the absence of a len >= 2 guard on the slice).
+    // Strip the surrounding quotes if present.
     let title_value = if is_quoted {
         &value[1..value.len() - 1]
     } else {
-        value.trim_end_matches('\n')
+        value
     };
 
-    // Compute character offset of the title value within line_text. For a quoted
-    // value, skip past the opening quote.
-    let value_start_in_line = if is_quoted {
-        line_text.find(value).unwrap_or(0) + 1
+    // Column of the value within `line_text`, measured from the stripped
+    // prefixes. Searching the line for the value text would find an earlier
+    // occurrence inside the `title` key (`title: title`, `title: t`).
+    let rest_start = line_text.len() - rest.len();
+    let value_start = if value.is_empty() {
+        // No value: the empty range sits at the end of the line's content.
+        rest_start + rest.trim_end_matches(['\r', '\n']).len()
     } else {
-        line_text.find(value).unwrap_or(0)
+        rest_start + (rest.len() - rest.trim_start().len())
+    };
+    // For a quoted value, skip past the opening quote.
+    let value_start_in_line = if is_quoted {
+        value_start + 1
+    } else {
+        value_start
     };
     let value_end_in_line = value_start_in_line + title_value.len();
 
@@ -123,17 +133,39 @@ pub fn compute_new_vault_path(old_vp: &VaultPath, new_name: &str) -> Option<Vaul
 ///
 /// Used as the replacement range for the frontmatter-title edit so that
 /// the entire document is replaced in one `TextEdit`.
-pub fn full_document_range(text: &str) -> Range {
-    let line_count = text.lines().count();
-    let last_line = text.lines().last().unwrap_or("");
+///
+/// The end is the position just past the last byte, counted the way an LSP
+/// client counts: a line ends at `\n`, `\r\n` or a lone `\r`, and a text
+/// that ends with a terminator ends at column 0 of the line after it. The
+/// character is measured in `encoding`.
+pub fn full_document_range(text: &str, encoding: PositionEncoding) -> Range {
+    let bytes = text.as_bytes();
+    let mut line = 0u32;
+    let mut last_line_start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let terminator_len = match bytes[i] {
+            b'\r' if bytes.get(i + 1) == Some(&b'\n') => 2,
+            b'\r' | b'\n' => 1,
+            _ => 0,
+        };
+        if terminator_len == 0 {
+            i += 1;
+        } else {
+            i += terminator_len;
+            line += 1;
+            last_line_start = i;
+        }
+    }
     Range {
         start: Position {
             line: 0,
             character: 0,
         },
         end: Position {
-            line: line_count.saturating_sub(1) as u32,
-            character: last_line.len() as u32,
+            line,
+            character: encoding
+                .column_of_byte(&text[last_line_start..], bytes.len() - last_line_start),
         },
     }
 }
@@ -343,6 +375,43 @@ mod tests {
         }
     }
 
+    /// Unwrap the range and placeholder of a title line on line 0.
+    fn title_range(line: &str) -> (u32, u32, String) {
+        match frontmatter_title_rename_range(line, 0) {
+            Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) => {
+                (range.start.character, range.end.character, placeholder)
+            }
+            other => panic!("expected RangeWithPlaceholder, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lone_quote_title_is_an_unquoted_value() {
+        // A half-typed quoted title: one quote character both starts and
+        // ends the value, but there is nothing between a pair to strip.
+        assert_eq!(title_range("title: \"\n"), (7, 8, "\"".to_string()));
+        assert_eq!(title_range("title: '"), (7, 8, "'".to_string()));
+    }
+
+    #[test]
+    fn empty_quoted_title_has_an_empty_range_between_the_quotes() {
+        assert_eq!(title_range("title: \"\"\n"), (8, 8, String::new()));
+    }
+
+    #[test]
+    fn title_range_is_the_value_when_the_value_occurs_in_the_key() {
+        assert_eq!(title_range("title: title"), (7, 12, "title".to_string()));
+        assert_eq!(title_range("title: t\n"), (7, 8, "t".to_string()));
+        assert_eq!(title_range("  title:   it\n"), (11, 13, "it".to_string()));
+        assert_eq!(title_range("title: \"e\"\n"), (8, 9, "e".to_string()));
+    }
+
+    #[test]
+    fn empty_title_range_sits_after_the_key() {
+        assert_eq!(title_range("title:\n"), (6, 6, String::new()));
+        assert_eq!(title_range("title: \r\n"), (7, 7, String::new()));
+    }
+
     #[test]
     fn non_title_line_returns_none() {
         assert!(frontmatter_title_rename_range("tags: [a]", 0).is_none());
@@ -380,7 +449,7 @@ mod tests {
 
     #[test]
     fn full_document_range_single_line() {
-        let r = full_document_range("hello");
+        let r = full_document_range("hello", PositionEncoding::Utf8);
         assert_eq!(r.start.line, 0);
         assert_eq!(r.start.character, 0);
         assert_eq!(r.end.line, 0);
@@ -390,21 +459,64 @@ mod tests {
     #[test]
     fn full_document_range_multi_line() {
         let text = "line one\nline two\nthird";
-        let r = full_document_range(text);
+        let r = full_document_range(text, PositionEncoding::Utf8);
         assert_eq!(r.start.line, 0);
         assert_eq!(r.start.character, 0);
         assert_eq!(r.end.line, 2);
         assert_eq!(r.end.character, 5); // "third" is 5 chars
     }
 
+    /// The end position of the full-document range, as `(line, character)`.
+    fn full_end(text: &str) -> (u32, u32) {
+        let r = full_document_range(text, PositionEncoding::Utf8);
+        assert_eq!((r.start.line, r.start.character), (0, 0));
+        (r.end.line, r.end.character)
+    }
+
     #[test]
-    fn full_document_range_trailing_newline() {
-        // str::lines() strips the trailing newline: "line one\n" yields a
-        // single line "line one" (count = 1, last = "line one", 8 chars).
-        let text = "line one\n";
-        let r = full_document_range(text);
-        assert_eq!(r.end.line, 0);
-        assert_eq!(r.end.character, 8);
+    fn full_document_range_covers_the_trailing_newline() {
+        // The text ends with a line terminator, so the document ends at the
+        // start of the (empty) line after it. Ending at (0, 8) would leave
+        // the final newline outside the edit and a rename would append a
+        // blank line.
+        assert_eq!(full_end("line one\n"), (1, 0));
+        assert_eq!(full_end("a\nb\n"), (2, 0));
+        assert_eq!(full_end("a\n\n"), (2, 0));
+        assert_eq!(full_end("\n"), (1, 0));
+    }
+
+    #[test]
+    fn full_document_range_counts_crlf_as_one_terminator() {
+        assert_eq!(full_end("a\r\nbc"), (1, 2));
+        assert_eq!(full_end("a\r\nb\r\n"), (2, 0));
+    }
+
+    #[test]
+    fn full_document_range_counts_lone_cr_as_a_terminator() {
+        assert_eq!(full_end("a\rb"), (1, 1));
+        assert_eq!(full_end("a\r"), (1, 0));
+        assert_eq!(full_end("a\r\rb\n"), (3, 0));
+        assert_eq!(full_end("a\n\rb"), (2, 1));
+    }
+
+    #[test]
+    fn full_document_range_of_empty_text_is_empty() {
+        assert_eq!(full_end(""), (0, 0));
+    }
+
+    #[test]
+    fn full_document_range_last_line_is_in_utf8_bytes() {
+        assert_eq!(full_end("a\nZoë"), (1, 4));
+    }
+
+    #[test]
+    fn full_document_range_end_column_is_in_the_given_encoding() {
+        // The last line `Zoë 𝒜` is 9 bytes and 6 UTF-16 code units.
+        let text = "one\nZoë 𝒜";
+        let utf8 = full_document_range(text, PositionEncoding::Utf8);
+        assert_eq!((utf8.end.line, utf8.end.character), (1, 9));
+        let utf16 = full_document_range(text, PositionEncoding::Utf16);
+        assert_eq!((utf16.end.line, utf16.end.character), (1, 6));
     }
 
     // ──────────────────────────────────────────────

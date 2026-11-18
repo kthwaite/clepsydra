@@ -12,7 +12,7 @@ use std::path::Path;
 
 use chrono::{DateTime, Utc};
 
-use super::conflict_copy::is_conflict_copy_name;
+use super::conflict_copy::{file_stem, is_conflict_copy_name, strip_conflict_suffix};
 use clep_vault::page::{PageMeta, parse_frontmatter, write_page_content};
 use clep_vault::page_filename::extract_journal_date;
 use clep_vault::rewriter::rewrite_links_in_content;
@@ -95,7 +95,7 @@ pub fn merge_duplicate_journals(root: &Path) -> (Vec<JournalMerge>, Vec<String>)
     let mut warnings = Vec::new();
     // Every group's rewrites are collected first and applied in one pass, so
     // the vault is read once however many pages were folded.
-    let mut repoints: Vec<(String, String)> = Vec::new();
+    let mut repoints: Vec<Repoint> = Vec::new();
     for group in duplicate_journal_groups(root) {
         if let Some(merge) = merge_group(root, &group, &mut repoints, &mut warnings) {
             merges.push(merge);
@@ -103,6 +103,14 @@ pub fn merge_duplicate_journals(root: &Path) -> (Vec<JournalMerge>, Vec<String>)
     }
     repoint_links(root, &repoints, &mut warnings);
     (merges, warnings)
+}
+
+/// A loser that was folded away, for the link rewrites its deletion implies.
+struct Repoint {
+    /// Vault-relative paths.
+    loser: String,
+    winner: String,
+    date: String,
 }
 
 /// One member of a group, parsed.
@@ -123,7 +131,7 @@ struct Member {
 fn merge_group(
     root: &Path,
     group: &JournalGroup,
-    repoints: &mut Vec<(String, String)>,
+    repoints: &mut Vec<Repoint>,
     warnings: &mut Vec<String>,
 ) -> Option<JournalMerge> {
     let mut members: Vec<Member> = Vec::new();
@@ -188,6 +196,9 @@ fn merge_group(
     // A winner cannot carry `conflict_of` by D21, but a copy that lost its
     // original would keep pointing at a page that is no longer there.
     winner.meta.extra.remove("conflict_of");
+    for loser in &losers {
+        fold_meta(&mut winner, loser, warnings);
+    }
     let bodies: Vec<&str> = losers.iter().map(|loser| loser.body.as_str()).collect();
     let content = write_page_content(&winner.meta, &interleave(&winner.body, &bodies));
 
@@ -214,7 +225,11 @@ fn merge_group(
             ));
             continue;
         }
-        repoints.extend(repoint_pairs(&loser.path, &winner.path, &group.date));
+        repoints.push(Repoint {
+            loser: loser.path.clone(),
+            winner: winner.path.clone(),
+            date: group.date.clone(),
+        });
         merged.push(loser.path.clone());
     }
     if merged.is_empty() {
@@ -257,6 +272,58 @@ fn repoint_pairs(loser_rel: &str, winner_rel: &str, date: &str) -> Vec<(String, 
     pairs
 }
 
+/// The Markdown-link rewrites a deleted loser implies in the page at
+/// `from_rel`. A Markdown destination names a page two ways, and both are
+/// repointed:
+///
+/// - by name, as a wikilink does — the index resolves `[x](journals/a.md)`
+///   and `[x](a.md)` through the page's path stem and filename stem from any
+///   folder. These are the [`repoint_pairs`] forms, plus the filename with
+///   its `.md`.
+/// - by a path relative to the linking page (`../journals/a.md`), which is
+///   what CommonMark means and what a page move writes.
+///
+/// `<date>.md` is the Markdown spelling of a bare date link and is left
+/// alone like `[[<date>]]`.
+fn markdown_repoint_pairs(repoint: &Repoint, from_rel: &str) -> Vec<(String, String)> {
+    let Repoint {
+        loser,
+        winner,
+        date,
+    } = repoint;
+    let mut pairs = repoint_pairs(loser, winner, date);
+    let forms = [
+        (file_name(loser).to_string(), file_name(winner).to_string()),
+        (
+            relative_url(from_rel, loser),
+            relative_url(from_rel, winner),
+        ),
+    ];
+    for (old, new) in forms {
+        let is_date_link = old.strip_suffix(".md") == Some(date.as_str());
+        if !is_date_link && !pairs.iter().any(|(seen, _)| *seen == old) {
+            pairs.push((old, new));
+        }
+    }
+    pairs
+}
+
+/// The path of `to_rel` relative to the folder of `from_rel` (both
+/// vault-relative): `notes/a.md` -> `journals/b.md` is `../journals/b.md`.
+fn relative_url(from_rel: &str, to_rel: &str) -> String {
+    let folder = |rel: &str| -> Vec<String> {
+        let mut parts: Vec<String> = rel.split('/').map(str::to_string).collect();
+        parts.pop();
+        parts
+    };
+    let (from, to) = (folder(from_rel), folder(to_rel));
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut parts: Vec<&str> = vec![".."; from.len() - shared];
+    parts.extend(to[shared..].iter().map(String::as_str));
+    parts.push(file_name(to_rel));
+    parts.join("/")
+}
+
 fn read_member(root: &Path, rel: &str) -> Result<Member, String> {
     let text = std::fs::read_to_string(root.join(rel)).map_err(|e| e.to_string())?;
     let (meta, body) = parse_frontmatter(&text).map_err(|e| e.to_string())?;
@@ -279,6 +346,90 @@ fn file_name(rel: &str) -> &str {
     rel.rsplit('/').next().unwrap_or(rel)
 }
 
+/// Fold a loser's frontmatter into the winner's, so deleting the loser loses
+/// none of it. There is no common base to merge against, so the fold only
+/// ever adds: list fields union (the winner's order first), a field or
+/// custom key only the loser sets is taken, and `created_at` is the earlier
+/// of the two, as in the merge driver. Where both pages set a field
+/// differently the winner keeps its own and a warning names what was not
+/// folded in.
+///
+/// A Conflict Copy's own residue — its fresh `id`, `conflict_of`, and the
+/// ` (conflict <shortid>)` title — is not frontmatter anyone wrote.
+fn fold_meta(winner: &mut Member, loser: &Member, warnings: &mut Vec<String>) {
+    let copy = is_conflict_copy_name(file_name(&loser.path));
+    let (meta, theirs) = (&mut winner.meta, &loser.meta);
+    let mut unfolded: Vec<(&str, String)> = Vec::new();
+
+    let title = theirs.title.as_deref().filter(|_| !copy).or_else(|| {
+        // A copy of an untitled page is titled after its original's file.
+        let original = theirs.extra.get("conflict_of")?.as_str().map(file_stem);
+        let title = strip_conflict_suffix(theirs.title.as_deref()?);
+        (Some(title) != original).then_some(title)
+    });
+    if let Some(title) = fill(&mut meta.title, title.map(str::to_string)) {
+        unfolded.push(("title", format!("{title:?}")));
+    }
+    if let Some(kind) = fill(&mut meta.kind, theirs.kind) {
+        unfolded.push(("type", format!("{:?}", kind.as_str())));
+    }
+    if let Some(project) = fill(&mut meta.project, theirs.project.clone()) {
+        unfolded.push(("project", format!("{project:?}")));
+    }
+    if let Some(readonly) = fill(&mut meta.readonly, theirs.readonly) {
+        unfolded.push(("readonly", readonly.to_string()));
+    }
+    for (mine, theirs) in [
+        (&mut meta.tags, &theirs.tags),
+        (&mut meta.aliases, &theirs.aliases),
+        (&mut meta.attachments, &theirs.attachments),
+    ] {
+        for value in theirs {
+            if !mine.contains(value) {
+                mine.push(value.clone());
+            }
+        }
+    }
+    meta.created_at = match (meta.created_at, theirs.created_at) {
+        (Some(mine), Some(theirs)) => Some(mine.min(theirs)),
+        (mine, theirs) => mine.or(theirs),
+    };
+    for (key, value) in &theirs.extra {
+        if key == "conflict_of" {
+            continue;
+        }
+        match meta.extra.get(key) {
+            None => {
+                meta.extra.insert(key.clone(), value.clone());
+            }
+            // Compared as written, so a `nan` equals itself.
+            Some(mine) if mine.to_string() != value.to_string() => {
+                unfolded.push((key, value.to_string()));
+            }
+            Some(_) => {}
+        }
+    }
+    for (field, value) in unfolded {
+        warnings.push(format!(
+            "journal merge: {} keeps its own `{field}`; the value in {} ({value}) was not folded in",
+            winner.path, loser.path
+        ));
+    }
+}
+
+/// Take `theirs` where `mine` is unset. Returns `theirs` when both are set
+/// and differ — the value that was not folded in.
+fn fill<T: PartialEq>(mine: &mut Option<T>, theirs: Option<T>) -> Option<T> {
+    match (&*mine, theirs) {
+        (None, theirs) => {
+            *mine = theirs;
+            None
+        }
+        (Some(mine), Some(theirs)) if *mine != theirs => Some(theirs),
+        _ => None,
+    }
+}
+
 /// Oldest first, with a page that declares no `created_at` sorting last.
 fn cmp_created(a: Option<DateTime<Utc>>, b: Option<DateTime<Utc>>) -> Ordering {
     match (a, b) {
@@ -297,11 +448,16 @@ struct Block {
 
 /// A block is a `- HH:MM — ` entry plus everything up to the next entry
 /// (multi-line captures land at column 0 — D20), or a headless run of lines
-/// before the first entry.
+/// before the first entry. A line inside a fenced code block is never an
+/// entry, however it is shaped: a capture that quotes a log or another
+/// journal stays one block.
 fn split_blocks(body: &str) -> Vec<Block> {
     let mut blocks: Vec<Block> = Vec::new();
+    let mut fence = Fence::default();
     for line in body.lines() {
-        match entry_time(line) {
+        let fenced = fence.is_open();
+        fence.feed(line);
+        match entry_time(line).filter(|_| !fenced) {
             Some(time) => blocks.push(Block {
                 time: Some(time),
                 text: format!("{line}\n"),
@@ -321,6 +477,43 @@ fn split_blocks(body: &str) -> Vec<Block> {
     blocks
 }
 
+/// The fenced code block (CommonMark) open at the current line, if any: its
+/// fence character and the length of its opening run.
+///
+/// Only a fence indented less than an entry's content (two columns) is
+/// tracked. One indented further belongs to the entry's list item, which the
+/// next column-0 line ends, fence and all — so that line is a real entry.
+#[derive(Default)]
+struct Fence(Option<(u8, usize)>);
+
+impl Fence {
+    fn is_open(&self) -> bool {
+        self.0.is_some()
+    }
+
+    fn feed(&mut self, line: &str) {
+        let rest = line.trim_start_matches(' ');
+        let indent = line.len() - rest.len();
+        let Some(ch) = rest.bytes().next().filter(|b| matches!(b, b'`' | b'~')) else {
+            return;
+        };
+        let run = rest.bytes().take_while(|b| *b == ch).count();
+        let tail = &rest[run..];
+        match self.0 {
+            // A backtick fence's info string cannot hold a backtick.
+            None if indent < 2 && run >= 3 && !(ch == b'`' && tail.contains('`')) => {
+                self.0 = Some((ch, run));
+            }
+            Some((open, len))
+                if indent <= 3 && ch == open && run >= len && tail.trim().is_empty() =>
+            {
+                self.0 = None;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// `- 09:41 — text` -> `Some("09:41")`.
 fn entry_time(line: &str) -> Option<String> {
     let rest = line.strip_prefix("- ")?;
@@ -337,6 +530,10 @@ fn entry_time(line: &str) -> Option<String> {
 /// Fold each loser's blocks into the winner's: byte-identical blocks
 /// (trailing whitespace ignored) dedupe; timed blocks insert after the last
 /// block with a time <= theirs; untimed blocks append in source order.
+///
+/// An entry one side extended — the same lines, then more lines under them —
+/// is still one entry: the longer block stands and the shorter is not
+/// repeated beside it. Entries whose continuations differ stay two blocks.
 fn interleave(winner: &str, losers: &[&str]) -> String {
     let mut blocks = split_blocks(winner);
     for loser in losers {
@@ -346,6 +543,15 @@ fn interleave(winner: &str, losers: &[&str]) -> String {
                 .any(|b| b.text.trim_end() == block.text.trim_end())
             {
                 continue;
+            }
+            if block.time.is_some() {
+                if blocks.iter().any(|b| extends(b, &block)) {
+                    continue;
+                }
+                if let Some(shorter) = blocks.iter_mut().find(|b| extends(&block, b)) {
+                    *shorter = block;
+                    continue;
+                }
             }
             match &block.time {
                 Some(time) => {
@@ -368,15 +574,28 @@ fn interleave(winner: &str, losers: &[&str]) -> String {
     blocks.into_iter().map(|b| b.text).collect()
 }
 
+/// Whether `longer` is the entry `shorter` with more lines under it.
+fn extends(longer: &Block, shorter: &Block) -> bool {
+    shorter.time.is_some()
+        && longer
+            .text
+            .strip_prefix(shorter.text.trim_end())
+            .is_some_and(|rest| rest.starts_with('\n'))
+}
+
 /// Rewrite every deleted loser's links to its winner in one vault pass — a
 /// filesystem walk, because the merger runs before any index exists.
 /// Date links (`[[2026-08-29]]`) are deliberately not among the pairs; see
 /// [`repoint_pairs`].
-fn repoint_links(root: &Path, pairs: &[(String, String)], warnings: &mut Vec<String>) {
-    if pairs.is_empty() {
+fn repoint_links(root: &Path, repoints: &[Repoint], warnings: &mut Vec<String>) {
+    if repoints.is_empty() {
         return;
     }
-    let pairs: Vec<(&str, &str)> = pairs
+    let wikilinks: Vec<(String, String)> = repoints
+        .iter()
+        .flat_map(|r| repoint_pairs(&r.loser, &r.winner, &r.date))
+        .collect();
+    let wikilinks: Vec<(&str, &str)> = wikilinks
         .iter()
         .map(|(old, new)| (old.as_str(), new.as_str()))
         .collect();
@@ -392,10 +611,24 @@ fn repoint_links(root: &Path, pairs: &[(String, String)], warnings: &mut Vec<Str
         let Ok(content) = std::fs::read_to_string(entry.path()) else {
             continue;
         };
-        if !pairs.iter().any(|(old, _)| content.contains(old)) {
+        // Every form of a link to a loser, Markdown ones included, contains
+        // one of the wikilink forms.
+        if !wikilinks.iter().any(|(old, _)| content.contains(old)) {
             continue;
         }
-        let rewritten = rewrite_links_in_content(&content, &pairs, &pairs);
+        let Ok(relative) = entry.path().strip_prefix(root) else {
+            continue;
+        };
+        let from_rel = relative.to_string_lossy().replace('\\', "/");
+        let markdown: Vec<(String, String)> = repoints
+            .iter()
+            .flat_map(|r| markdown_repoint_pairs(r, &from_rel))
+            .collect();
+        let markdown: Vec<(&str, &str)> = markdown
+            .iter()
+            .map(|(old, new)| (old.as_str(), new.as_str()))
+            .collect();
+        let rewritten = rewrite_links_in_content(&content, &wikilinks, &markdown);
         if rewritten != content
             && let Err(e) =
                 clep_vault::atomic_file::atomic_replace(entry.path(), rewritten.as_bytes())
@@ -485,6 +718,64 @@ mod tests {
     }
 
     #[test]
+    fn split_blocks_never_starts_an_entry_inside_a_fenced_code_block() {
+        let blocks =
+            split_blocks("- 09:00 — log excerpt\n```\n- 07:00 — quoted\n```\n- 10:00 — next\n");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(
+            blocks[0].text,
+            "- 09:00 — log excerpt\n```\n- 07:00 — quoted\n```\n"
+        );
+        assert_eq!(blocks[1].time.as_deref(), Some("10:00"));
+
+        // A fence closes only on its own character, at least as long as the
+        // opener, with nothing after it.
+        let blocks = split_blocks(
+            "~~~~ text\n```\n- 07:00 — a\n~~~\n- 06:00 — b\n~~~~ x\n- 05:00 — c\n~~~~~\n- 11:00 — after\n",
+        );
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].time, None);
+        assert_eq!(blocks[1].text, "- 11:00 — after\n");
+    }
+
+    #[test]
+    fn split_blocks_ends_a_fence_nested_in_an_entry_at_the_next_entry() {
+        // Indented under the entry, the fence belongs to its list item, and
+        // the next column-0 line ends the item and the fence with it.
+        let blocks = split_blocks("- 09:00 — a\n  ```\n  code\n- 10:00 — b\n");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[1].text, "- 10:00 — b\n");
+    }
+
+    #[test]
+    fn a_fenced_capture_folds_as_one_block() {
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — first\n",
+        );
+        let capture = "- 09:00 — log excerpt\n```\n- 07:00 — quoted\n```\n";
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.bbbbbbbb.md",
+            "02",
+            "2026-08-29T09:00:00Z",
+            capture,
+        );
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges.len(), 1);
+        let text =
+            std::fs::read_to_string(tmp.path().join("journals/20260829.2026-08-29.aaaaaaaa.md"))
+                .unwrap();
+        let (_, body) = clep_vault::page::parse_frontmatter(&text).unwrap();
+        assert_eq!(body, format!("- 08:00 — first\n{capture}"));
+    }
+
+    #[test]
     fn duplicate_groups_pair_same_folder_and_date_and_fold_conflict_copies() {
         let tmp = TempDir::new().unwrap();
         journal(
@@ -568,6 +859,62 @@ mod tests {
         );
         // Idempotent: nothing left to merge.
         assert!(merge_duplicate_journals(tmp.path()).0.is_empty());
+    }
+
+    #[test]
+    fn an_entry_one_side_extended_is_not_duplicated() {
+        // The other side holds the same entry without the continuation.
+        assert_eq!(
+            interleave(
+                "- 08:00 — shared\nstray note\n",
+                &["- 08:00 — shared\n- 10:00 — theirs\n"]
+            ),
+            "- 08:00 — shared\nstray note\n- 10:00 — theirs\n"
+        );
+        // The other side holds the longer one: its extra lines are kept.
+        assert_eq!(
+            interleave(
+                "- 08:00 — shared\n- 12:00 — noon\n",
+                &["- 08:00 — shared\nstray note\n"]
+            ),
+            "- 08:00 — shared\nstray note\n- 12:00 — noon\n"
+        );
+        // Two different continuations are two captures; both stay whole.
+        assert_eq!(
+            interleave("- 08:00 — shared\nmine\n", &["- 08:00 — shared\ntheirs\n"]),
+            "- 08:00 — shared\nmine\n- 08:00 — shared\ntheirs\n"
+        );
+        // Sharing a prefix of a line is not sharing the entry.
+        assert_eq!(
+            interleave("- 08:00 — shared\n", &["- 08:00 — shared more\n"]),
+            "- 08:00 — shared\n- 08:00 — shared more\n"
+        );
+    }
+
+    #[test]
+    fn folding_a_conflict_copy_back_does_not_duplicate_a_shared_entry() {
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — shared\nstray note\n",
+        );
+        std::fs::write(
+            tmp.path()
+                .join("journals/20260829.2026-08-29.aaaaaaaa.conflict.abc1234.md"),
+            "+++\nid = \"0192b6c0-0000-7000-8000-000000000003\"\ntitle = \"2026-08-29 (conflict abc1234)\"\nconflict_of = \"journals/20260829.2026-08-29.aaaaaaaa.md\"\n+++\n- 08:00 — shared\n- 10:00 — theirs\n",
+        )
+        .unwrap();
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges.len(), 1);
+        let text =
+            std::fs::read_to_string(tmp.path().join("journals/20260829.2026-08-29.aaaaaaaa.md"))
+                .unwrap();
+        let (_, body) = clep_vault::page::parse_frontmatter(&text).unwrap();
+        assert_eq!(body, "- 08:00 — shared\nstray note\n- 10:00 — theirs\n");
     }
 
     #[test]
@@ -682,6 +1029,109 @@ mod tests {
         );
     }
 
+    /// A Markdown link names a page two ways: by name, like a wikilink but
+    /// with `.md` (how the index resolves it), or by a path relative to the
+    /// page it is written in (CommonMark, and what a page move writes).
+    #[test]
+    fn markdown_links_to_a_loser_are_repointed_in_every_form() {
+        const A: &str = "20260829.2026-08-29.aaaaaaaa";
+        const B: &str = "20260829.2026-08-29.bbbbbbbb";
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            &format!("{A}.md"),
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — a\n",
+        );
+        journal(
+            tmp.path(),
+            &format!("{B}.md"),
+            "02",
+            "2026-08-29T09:00:00Z",
+            "- 09:00 — b\n",
+        );
+        // A sibling journal of another day, linking by relative path.
+        journal(
+            tmp.path(),
+            "20260830.2026-08-30.cccccccc.md",
+            "03",
+            "2026-08-30T08:00:00Z",
+            &format!("- 08:00 — see [yesterday]({B}.md)\n"),
+        );
+        let links = |stem: &str| {
+            format!(
+                "[relative](../journals/{stem}.md) [path](journals/{stem}.md) [name]({stem}.md) [other](../journals/else.md)\n"
+            )
+        };
+        let referer = note(tmp.path(), "ref.md", "09", &links(B));
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges[0].merged, vec![format!("journals/{B}.md")]);
+        let text = std::fs::read_to_string(&referer).unwrap();
+        assert!(text.ends_with(&links(A)), "{text}");
+        let sibling =
+            std::fs::read_to_string(tmp.path().join("journals/20260830.2026-08-30.cccccccc.md"))
+                .unwrap();
+        assert!(
+            sibling.ends_with(&format!("- 08:00 — see [yesterday]({A}.md)\n")),
+            "{sibling}"
+        );
+    }
+
+    /// The Markdown spelling of a bare date link is left alone like the
+    /// wikilink one (D21); the path forms still name the deleted file.
+    #[test]
+    fn a_legacy_named_loser_leaves_markdown_date_links_alone() {
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — canonical\n",
+        );
+        journal(
+            tmp.path(),
+            "2026-08-29.md",
+            "02",
+            "2026-08-29T09:00:00Z",
+            "- 09:00 — legacy\n",
+        );
+        journal(
+            tmp.path(),
+            "20260830.2026-08-30.cccccccc.md",
+            "03",
+            "2026-08-30T08:00:00Z",
+            "- 08:00 — see [yesterday](2026-08-29.md)\n",
+        );
+        let referer = note(
+            tmp.path(),
+            "ref.md",
+            "09",
+            "[date](2026-08-29.md) [relative](../journals/2026-08-29.md)\n",
+        );
+
+        merge_duplicate_journals(tmp.path());
+
+        let text = std::fs::read_to_string(&referer).unwrap();
+        assert!(
+            text.ends_with(
+                "[date](2026-08-29.md) [relative](../journals/20260829.2026-08-29.aaaaaaaa.md)\n"
+            ),
+            "{text}"
+        );
+        let sibling =
+            std::fs::read_to_string(tmp.path().join("journals/20260830.2026-08-30.cccccccc.md"))
+                .unwrap();
+        assert!(
+            sibling.ends_with("- 08:00 — see [yesterday](2026-08-29.md)\n"),
+            "{sibling}"
+        );
+    }
+
     #[test]
     fn ai_journals_fold_on_their_own() {
         let tmp = TempDir::new().unwrap();
@@ -720,6 +1170,125 @@ mod tests {
 
     /// The two folders are separate journals that happen to share a calendar.
     /// A user's day and an agent's log of it must never fold together.
+    /// A journal page with the given frontmatter lines after `id`.
+    fn journal_with(dir: &std::path::Path, name: &str, id_tail: &str, fm: &str, body: &str) {
+        let path = dir.join("journals").join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            path,
+            format!("+++\nid = \"0192b6c0-0000-7000-8000-0000000000{id_tail}\"\n{fm}+++\n{body}"),
+        )
+        .unwrap();
+    }
+
+    fn winner_meta(dir: &std::path::Path) -> PageMeta {
+        let text =
+            std::fs::read_to_string(dir.join("journals/20260829.2026-08-29.aaaaaaaa.md")).unwrap();
+        parse_frontmatter(&text).unwrap().0
+    }
+
+    #[test]
+    fn a_fold_keeps_the_losers_tags_and_properties() {
+        let tmp = TempDir::new().unwrap();
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "title = \"2026-08-29\"\ntags = [\"a\", \"shared\"]\ncreated_at = 2026-08-29T08:00:00Z\nweather = \"rain\"\n",
+            "- 08:00 — a\n",
+        );
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.bbbbbbbb.md",
+            "02",
+            "title = \"2026-08-29\"\ntags = [\"shared\", \"trip\"]\naliases = [\"the trip\"]\nattachments = [\"map.png\"]\nproject = \"alps\"\ncreated_at = 2026-08-29T09:00:00Z\nweather = \"rain\"\nmood = \"great\"\n",
+            "- 09:00 — b\n",
+        );
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges.len(), 1);
+        let meta = winner_meta(tmp.path());
+        assert_eq!(meta.tags, vec!["a", "shared", "trip"]);
+        assert_eq!(meta.aliases, vec!["the trip"]);
+        assert_eq!(meta.attachments, vec!["map.png"]);
+        assert_eq!(meta.project.as_deref(), Some("alps"));
+        assert_eq!(
+            meta.extra.keys().collect::<Vec<_>>(),
+            vec!["weather", "mood"]
+        );
+        assert_eq!(meta.extra["mood"].as_str(), Some("great"));
+        assert_eq!(
+            meta.created_at.unwrap().to_rfc3339(),
+            "2026-08-29T08:00:00+00:00"
+        );
+    }
+
+    #[test]
+    fn a_fold_warns_about_a_property_the_pages_disagree_on() {
+        let tmp = TempDir::new().unwrap();
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "created_at = 2026-08-29T08:00:00Z\nproject = \"alps\"\nmood = \"fine\"\n",
+            "- 08:00 — a\n",
+        );
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.bbbbbbbb.md",
+            "02",
+            "created_at = 2026-08-29T09:00:00Z\nproject = \"andes\"\nmood = \"great\"\n",
+            "- 09:00 — b\n",
+        );
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert_eq!(merges.len(), 1);
+        let meta = winner_meta(tmp.path());
+        assert_eq!(meta.project.as_deref(), Some("alps"));
+        assert_eq!(meta.extra["mood"].as_str(), Some("fine"));
+        assert_eq!(
+            warnings,
+            vec![
+                "journal merge: journals/20260829.2026-08-29.aaaaaaaa.md keeps its own `project`; the value in journals/20260829.2026-08-29.bbbbbbbb.md (\"andes\") was not folded in",
+                "journal merge: journals/20260829.2026-08-29.aaaaaaaa.md keeps its own `mood`; the value in journals/20260829.2026-08-29.bbbbbbbb.md (\"great\") was not folded in",
+            ]
+        );
+    }
+
+    /// A Conflict Copy's `conflict_of`, suffixed title and fresh id are its
+    /// own residue, not a disagreement; the rest of its frontmatter is the
+    /// other device's and folds in.
+    #[test]
+    fn a_conflict_copys_frontmatter_folds_in_without_its_residue() {
+        let tmp = TempDir::new().unwrap();
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "title = \"2026-08-29\"\ntags = [\"a\"]\ncreated_at = 2026-08-29T08:00:00Z\n",
+            "- 08:00 — a\n",
+        );
+        journal_with(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.conflict.abc1234.md",
+            "03",
+            "title = \"2026-08-29 (conflict abc1234)\"\ntags = [\"a\", \"theirs\"]\ncreated_at = 2026-08-29T08:00:00Z\nconflict_of = \"journals/20260829.2026-08-29.aaaaaaaa.md\"\n",
+            "- 10:00 — theirs\n",
+        );
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges.len(), 1);
+        let meta = winner_meta(tmp.path());
+        assert_eq!(meta.title.as_deref(), Some("2026-08-29"));
+        assert_eq!(meta.tags, vec!["a", "theirs"]);
+        assert!(meta.extra.is_empty(), "{:?}", meta.extra);
+    }
+
     #[test]
     fn a_journal_and_an_ai_journal_of_one_date_do_not_group() {
         let tmp = TempDir::new().unwrap();

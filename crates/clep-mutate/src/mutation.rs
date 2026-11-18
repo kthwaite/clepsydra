@@ -1,7 +1,8 @@
+use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
 
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -12,8 +13,9 @@ use clep_vault::Vault;
 use clep_vault::canonical::CanonicalName;
 use clep_vault::page::parse_or_repair_frontmatter;
 use clep_vault::path::VaultPath;
-use clep_vault::rewriter;
+use clep_vault::rewriter::{self, LinkSyntax};
 use clep_vault::rubbish::{RubbishItem, RubbishManifest};
+use clep_vault::toml_patch;
 
 // ---------------------------------------------------------------------------
 // Utility: VaultPath error → IndexError mapping
@@ -329,6 +331,9 @@ impl MutationPlan {
         let mut intents =
             Vec::with_capacity(staged_writes.len() + primary_intents.len() + file_ops.len());
 
+        // A staged write at the destination of a planned move is the moved
+        // file's rewritten content: it is published in place of the move.
+        let mut moved_content = Vec::<(VaultPath, Vec<u8>)>::new();
         for write in staged_writes {
             let relative = write.path.strip_prefix(vault.root()).map_err(vp_err)?;
             let relative = relative.to_str().ok_or_else(|| {
@@ -337,8 +342,23 @@ impl MutationPlan {
                     write.path.display()
                 ))
             })?;
+            let path = VaultPath::new(relative).map_err(vp_err)?;
+            let rewrites_moved_file = primary_intents.iter().any(|intent| {
+                matches!(
+                    intent,
+                    BatchPathIntent::Move {
+                        destination,
+                        expected_source,
+                        ..
+                    } if destination == &path && expected_source == &write.expected_bytes
+                )
+            });
+            if rewrites_moved_file {
+                moved_content.push((path, write.content.into_bytes()));
+                continue;
+            }
             intents.push(BatchPathIntent::Write {
-                path: VaultPath::new(relative).map_err(vp_err)?,
+                path,
                 expected: ExpectedPathState::Bytes(write.expected_bytes),
                 content: write.content.into_bytes(),
             });
@@ -506,7 +526,42 @@ impl MutationPlan {
                 }
             }
         }
-        intents.extend(primary_intents);
+        for intent in primary_intents {
+            match intent {
+                BatchPathIntent::Move {
+                    source,
+                    destination,
+                    expected_source,
+                } => {
+                    let rewritten = moved_content
+                        .iter()
+                        .position(|(path, _)| path == &destination)
+                        .map(|index| moved_content.swap_remove(index).1);
+                    match rewritten {
+                        // The file leaves its source and arrives with new
+                        // bytes: the same guards as a move (source unchanged,
+                        // destination missing), with different content.
+                        Some(content) => {
+                            intents.push(BatchPathIntent::Delete {
+                                path: source,
+                                expected: expected_source,
+                            });
+                            intents.push(BatchPathIntent::Write {
+                                path: destination,
+                                expected: ExpectedPathState::Missing,
+                                content,
+                            });
+                        }
+                        None => intents.push(BatchPathIntent::Move {
+                            source,
+                            destination,
+                            expected_source,
+                        }),
+                    }
+                }
+                other => intents.push(other),
+            }
+        }
 
         Ok(BatchMutationCommand {
             create_directories,
@@ -521,6 +576,55 @@ impl MutationPlan {
 // ---------------------------------------------------------------------------
 // MutationPlanner
 // ---------------------------------------------------------------------------
+
+/// A referrer's rewritten content and the `(old, new)` link targets rewritten.
+type RetargetedContent = (String, Vec<(String, String)>);
+
+/// A page that the planned operation moves.
+struct MovedPage {
+    old: VaultPath,
+    new: VaultPath,
+    /// The page's id in the index; `None` if the index does not hold it, in
+    /// which case no link resolves to it.
+    id: Option<String>,
+}
+
+impl MovedPage {
+    /// Whether `written` is the page's file name or vault path byte for
+    /// byte, with or without `.md`.
+    fn is_spelled_exactly(&self, written: &str) -> bool {
+        let old_path = self.old.as_str();
+        let written = written.strip_suffix(".md").unwrap_or(written);
+        written == self.old.stem() || written == old_path.strip_suffix(".md").unwrap_or(old_path)
+    }
+
+    /// The new spelling of a wikilink target `written` (canonically
+    /// `canonical`) that resolves to this page, in the form it was written in: the file
+    /// name or the vault path, with `.md` if it had it. `None` if the link
+    /// names the page some other way (title, alias, id), which the move does
+    /// not change, or if the new name is canonically the same.
+    fn renamed_target(&self, written: &str, canonical: &CanonicalName) -> Option<String> {
+        let old_path = self.old.as_str();
+        let old_path_stem = old_path.strip_suffix(".md").unwrap_or(old_path);
+        let new_path = self.new.as_str();
+        let new_path_stem = new_path.strip_suffix(".md").unwrap_or(new_path);
+
+        let new_name =
+            if old_path_stem.contains('/') && *canonical == CanonicalName::new(old_path_stem) {
+                new_path_stem
+            } else if *canonical == CanonicalName::from_filename(self.old.filename()) {
+                self.new.stem()
+            } else {
+                return None;
+            };
+        let new_target = if written.trim().to_lowercase().ends_with(".md") {
+            format!("{new_name}.md")
+        } else {
+            new_name.to_string()
+        };
+        (CanonicalName::new(&new_target) != *canonical).then_some(new_target)
+    }
+}
 
 pub struct MutationPlanner<'a> {
     vault: &'a Vault,
@@ -626,30 +730,7 @@ impl<'a> MutationPlanner<'a> {
         let source_bytes = fs::read(&source_abs)?;
 
         let old_stem = source_vp.stem().to_string();
-        let new_stem = dest_vp.stem().to_string();
-        // Moves change filename/path names, not titles or aliases. Wikilink
-        // paths are vault-relative, unlike source-relative Markdown URLs.
-        let wikilink_replacements = [
-            (old_stem.as_str(), new_stem.as_str()),
-            (source_vp.as_str(), dest_vp.as_str()),
-            (
-                source_vp
-                    .as_str()
-                    .strip_suffix(".md")
-                    .unwrap_or(source_vp.as_str()),
-                dest_vp
-                    .as_str()
-                    .strip_suffix(".md")
-                    .unwrap_or(dest_vp.as_str()),
-            ),
-        ];
-        // At the vault root an extensionless path is already the stem.
-        // Keep its stem semantics, including when only the directory changes.
-        let wikilink_replacements = if source_vp.as_str().contains('/') {
-            &wikilink_replacements[..]
-        } else {
-            &wikilink_replacements[..2]
-        };
+        let moved = [self.moved_page(&source_vp, &dest_vp)?];
 
         let mut plan = MutationPlan::empty();
 
@@ -665,19 +746,39 @@ impl<'a> MutationPlanner<'a> {
         plan.primary_intents.push(BatchPathIntent::Move {
             source: source_vp.clone(),
             destination: dest_vp.clone(),
-            expected_source: source_bytes,
+            expected_source: source_bytes.clone(),
         });
 
-        // 2. Find backlink pages
-        let backlink_pages = self.find_backlink_pages(&source_vp, &old_stem)?;
+        // 2. The moved page's links to itself follow it: its rewritten
+        // content is staged at the destination.
+        if let Ok(content) = std::str::from_utf8(&source_bytes)
+            && !is_protected_content(content)
+            && let Some((new_content, edits)) =
+                self.retarget_links(content, &moved, &source_vp, &dest_vp)?
+        {
+            for (old_text, new_text) in edits {
+                plan.text_edits.push(PlannedTextEdit {
+                    path: dest_vp.as_str().to_string(),
+                    old_text,
+                    new_text,
+                });
+            }
+            plan.staged_writes.push(StagedWrite {
+                path: self.vault.resolve(&dest_vp),
+                expected_bytes: source_bytes,
+                content: new_content,
+            });
+        }
 
-        // Filter: don't rewrite the page being moved (it's handled by the rename)
+        // 3. Find the other backlink pages
+        let backlink_pages = self.find_backlink_pages(&source_vp, &old_stem)?;
         let backlink_pages: Vec<_> = backlink_pages
             .into_iter()
-            .filter(|(_, p)| p != source)
+            .filter(|(_, p)| p != source_vp.as_str())
             .collect();
 
-        // 3. For each backlink page, compute replacement pairs and rewrite
+        // 4. In each backlink page, rewrite the links that resolve to the
+        // moved page
         for (_, ref_path_str) in &backlink_pages {
             let ref_vp = VaultPath::new(ref_path_str).map_err(vp_err)?;
             let ref_abs = self.vault.resolve(&ref_vp);
@@ -687,25 +788,15 @@ impl<'a> MutationPlanner<'a> {
                 continue;
             }
 
-            let old_rel = compute_relative_path(ref_vp.as_str(), source_vp.as_str());
-            let new_rel = compute_relative_path(ref_vp.as_str(), dest_vp.as_str());
-            let markdown_replacements = [(old_rel.as_str(), new_rel.as_str())];
-            let new_content = rewriter::rewrite_links_in_content(
-                &content,
-                wikilink_replacements,
-                &markdown_replacements,
-            );
-            if new_content != content {
-                // Record per-replacement text edits (for dry-run preview)
-                for &(old, new) in wikilink_replacements
-                    .iter()
-                    .chain(&markdown_replacements)
-                    .filter(|(old, new)| old != new)
-                {
+            if let Some((new_content, edits)) =
+                self.retarget_links(&content, &moved, &ref_vp, &ref_vp)?
+            {
+                // Record the rewritten targets (for dry-run preview)
+                for (old_text, new_text) in edits {
                     plan.text_edits.push(PlannedTextEdit {
                         path: ref_path_str.clone(),
-                        old_text: old.to_string(),
-                        new_text: new.to_string(),
+                        old_text,
+                        new_text,
                     });
                 }
 
@@ -721,7 +812,7 @@ impl<'a> MutationPlanner<'a> {
             }
         }
 
-        // 4. Index events for source/destination
+        // 5. Index events for source/destination
         plan.index_events
             .push(ChangeEvent::Remove(source_vp.clone()));
         plan.index_events.push(ChangeEvent::Upsert(dest_vp));
@@ -918,93 +1009,230 @@ impl<'a> MutationPlanner<'a> {
             }
         }
 
-        let mut upserted_refs = Vec::<String>::new();
-        let source_prefix = format!("{}/", source_vp.as_str());
+        let mut moved = Vec::with_capacity(md_files.len());
+        let mut referrers = Vec::<String>::new();
         for (old_vp, new_vp, _expected_source) in &md_files {
-            let old_stem = old_vp.stem().to_string();
-            let new_stem = new_vp.stem().to_string();
-            let wikilink_replacements = [
-                (old_stem.as_str(), new_stem.as_str()),
-                (old_vp.as_str(), new_vp.as_str()),
-                (
-                    old_vp
-                        .as_str()
-                        .strip_suffix(".md")
-                        .unwrap_or(old_vp.as_str()),
-                    new_vp
-                        .as_str()
-                        .strip_suffix(".md")
-                        .unwrap_or(new_vp.as_str()),
-                ),
-            ];
             plan.moved_pages.push((old_vp.clone(), new_vp.clone()));
             plan.index_events.push(ChangeEvent::Remove(old_vp.clone()));
             plan.index_events.push(ChangeEvent::Upsert(new_vp.clone()));
+            moved.push(self.moved_page(old_vp, new_vp)?);
+            for (_, referrer) in self.find_backlink_pages(old_vp, old_vp.stem())? {
+                if !referrers.contains(&referrer) {
+                    referrers.push(referrer);
+                }
+            }
+        }
 
-            let backlink_pages = self
-                .find_backlink_pages(old_vp, &old_stem)?
-                .into_iter()
-                .filter(|(_, path)| !path.starts_with(&source_prefix))
-                .collect::<Vec<_>>();
-
-            for (_, ref_path_str) in backlink_pages {
-                let ref_vp = VaultPath::new(&ref_path_str).map_err(vp_err)?;
-                let ref_abs = self.vault.resolve(&ref_vp);
-                let existing_index = plan
-                    .staged_writes
-                    .iter()
-                    .position(|write| write.path == ref_abs);
-                let (content, expected_bytes) = if let Some(index) = existing_index {
-                    (plan.staged_writes[index].content.clone(), None)
-                } else {
-                    let content = fs::read_to_string(&ref_abs)?;
-                    if is_protected_content(&content) {
-                        continue;
-                    }
-                    let expected = content.as_bytes().to_vec();
-                    (content, Some(expected))
-                };
-
-                let old_rel = compute_relative_path(ref_vp.as_str(), old_vp.as_str());
-                let new_rel = compute_relative_path(ref_vp.as_str(), new_vp.as_str());
-                let markdown_replacements = [(old_rel.as_str(), new_rel.as_str())];
-                let new_content = rewriter::rewrite_links_in_content(
-                    &content,
-                    &wikilink_replacements,
-                    &markdown_replacements,
-                );
-                if new_content == content {
-                    continue;
-                }
-                for &(old, new) in wikilink_replacements
-                    .iter()
-                    .chain(&markdown_replacements)
-                    .filter(|(old, new)| old != new)
-                {
-                    plan.text_edits.push(PlannedTextEdit {
-                        path: ref_path_str.clone(),
-                        old_text: old.to_string(),
-                        new_text: new.to_string(),
-                    });
-                }
-                if let Some(index) = existing_index {
-                    plan.staged_writes[index].content = new_content;
-                } else {
-                    plan.staged_writes.push(StagedWrite {
-                        path: ref_abs,
-                        expected_bytes: expected_bytes.expect("new staged write has snapshot"),
-                        content: new_content,
-                    });
-                }
-                if !upserted_refs.contains(&ref_path_str) {
-                    plan.index_events.push(ChangeEvent::Upsert(ref_vp));
-                    upserted_refs.push(ref_path_str);
-                }
+        // Each referrer is rewritten once, for all the moved pages together.
+        for ref_path_str in referrers {
+            let ref_vp = VaultPath::new(&ref_path_str).map_err(vp_err)?;
+            // A referrer inside the folder moves too: it is read from the
+            // folder snapshot and its rewrite is staged at its destination.
+            let moved_ref = md_files.iter().find(|(old, _, _)| old == &ref_vp);
+            let ref_after = moved_ref.map_or(&ref_vp, |(_, new, _)| new);
+            let content = match moved_ref {
+                Some((_, _, snapshot)) => match String::from_utf8(snapshot.clone()) {
+                    Ok(content) => content,
+                    Err(_) => continue,
+                },
+                None => fs::read_to_string(self.vault.resolve(&ref_vp))?,
+            };
+            if is_protected_content(&content) {
+                continue;
+            }
+            let Some((new_content, edits)) =
+                self.retarget_links(&content, &moved, &ref_vp, ref_after)?
+            else {
+                continue;
+            };
+            for (old_text, new_text) in edits {
+                plan.text_edits.push(PlannedTextEdit {
+                    path: ref_after.as_str().to_string(),
+                    old_text,
+                    new_text,
+                });
+            }
+            plan.staged_writes.push(StagedWrite {
+                path: self.vault.resolve(ref_after),
+                expected_bytes: content.into_bytes(),
+                content: new_content,
+            });
+            // A moved referrer is upserted at its destination already.
+            if moved_ref.is_none() {
+                plan.index_events.push(ChangeEvent::Upsert(ref_vp));
             }
         }
 
         plan.expose_create_directories();
         Ok(plan)
+    }
+
+    /// The identity of a page this plan moves, as the index knows it.
+    fn moved_page(&self, old: &VaultPath, new: &VaultPath) -> Result<MovedPage, IndexError> {
+        let id = self
+            .index
+            .connection()
+            .query_row(
+                "SELECT id FROM pages WHERE path = ?1",
+                params![old.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(MovedPage {
+            old: old.clone(),
+            new: new.clone(),
+            id,
+        })
+    }
+
+    /// Rewrite, in one referrer's `content`, the links to the `moved` pages.
+    /// Returns the new content and the `(old, new)` link targets it rewrote,
+    /// or `None` when no link changes.
+    ///
+    /// Which wikilinks to rewrite is decided the way the index resolves them:
+    /// the target is canonicalised and must name exactly one page. Its
+    /// spelling (case, padding, `.md`, Unicode form) therefore does not
+    /// matter, and a wikilink that is unresolved or ambiguous is never
+    /// touched. One written as the page's file name gets the new file name,
+    /// one written as its vault path gets the new vault path, and one written
+    /// as its title, an alias or its id still resolves and stays as it is.
+    ///
+    /// A Markdown URL is rewritten when it is the source-relative path from
+    /// the referrer to a moved page: `referrer_before` and `referrer_after`
+    /// are the referrer's own path before and after the operation.
+    fn retarget_links(
+        &self,
+        content: &str,
+        moved: &[MovedPage],
+        referrer_before: &VaultPath,
+        referrer_after: &VaultPath,
+    ) -> Result<Option<RetargetedContent>, IndexError> {
+        let failure = RefCell::new(None::<IndexError>);
+        let edits = RefCell::new(Vec::<(String, String)>::new());
+
+        // Bare values of relation properties (`link = ["alpha"]`) are links
+        // too. The wikilink form (`"[[alpha]]"`) is left to the scan below.
+        let relation_fields = self.relation_fields(referrer_before)?;
+        let with_properties = if relation_fields.is_empty() {
+            None
+        } else {
+            toml_patch::rewrite_frontmatter_strings(content, &relation_fields, |value| {
+                let written = value.trim();
+                if written.starts_with("[[") {
+                    return None;
+                }
+                let new_target = self
+                    .retarget(
+                        LinkSyntax::Wiki,
+                        written,
+                        moved,
+                        referrer_before,
+                        referrer_after,
+                    )
+                    .unwrap_or_else(|error| {
+                        failure.borrow_mut().get_or_insert(error);
+                        None
+                    })?;
+                let edit = (written.to_string(), new_target.clone());
+                let mut edits = edits.borrow_mut();
+                if !edits.contains(&edit) {
+                    edits.push(edit);
+                }
+                // Keep the padding around the name.
+                Some(value.replacen(written, &new_target, 1))
+            })
+            // Frontmatter that cannot be patched is left as it is.
+            .unwrap_or(None)
+        };
+        let original = content;
+        let content = with_properties.as_deref().unwrap_or(content);
+
+        let new_content = rewriter::rewrite_links_with(content, |syntax, written| {
+            let new_target = self
+                .retarget(syntax, written, moved, referrer_before, referrer_after)
+                .unwrap_or_else(|error| {
+                    failure.borrow_mut().get_or_insert(error);
+                    None
+                })?;
+            let edit = (written.to_string(), new_target.clone());
+            let mut edits = edits.borrow_mut();
+            if !edits.contains(&edit) {
+                edits.push(edit);
+            }
+            Some(new_target)
+        });
+        if let Some(error) = failure.into_inner() {
+            return Err(error);
+        }
+        Ok((new_content != original).then(|| (new_content, edits.into_inner())))
+    }
+
+    /// The relation properties `referrer` has, as the index recorded them:
+    /// the frontmatter keys whose values are links. `tags` and `aliases` are
+    /// labels and names of the referrer itself; they do not follow another
+    /// page's rename.
+    fn relation_fields(&self, referrer: &VaultPath) -> Result<Vec<String>, IndexError> {
+        let mut statement = self.index.connection().prepare(
+            "SELECT DISTINCT l.source_field
+             FROM links l
+             JOIN pages p ON p.id = l.source_id
+             WHERE p.path = ?1 AND l.kind = 'property_ref'
+               AND l.source_field IS NOT NULL
+               AND l.source_field NOT IN ('tags', 'aliases')
+             ORDER BY l.source_field",
+        )?;
+        let fields = statement
+            .query_map(params![referrer.as_str()], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(fields)
+    }
+
+    /// The target to write in place of `written`, if that link points at a
+    /// moved page and would stop doing so.
+    fn retarget(
+        &self,
+        syntax: LinkSyntax,
+        written: &str,
+        moved: &[MovedPage],
+        referrer_before: &VaultPath,
+        referrer_after: &VaultPath,
+    ) -> Result<Option<String>, IndexError> {
+        match syntax {
+            LinkSyntax::Wiki => {
+                let canonical = CanonicalName::new(written);
+                let Some(target_id) = self.index.resolve_link_target_id(canonical.as_str())? else {
+                    return Ok(None);
+                };
+                let Some(page) = moved
+                    .iter()
+                    .find(|page| page.id.as_deref() == Some(target_id.as_str()))
+                else {
+                    return Ok(None);
+                };
+                // A name the page also has as its title or an alias keeps
+                // resolving after the move: such a link is left alone unless
+                // it spells the file name or path exactly.
+                if !page.is_spelled_exactly(written) {
+                    let stays_a_name: bool = self.index.connection().query_row(
+                        "SELECT EXISTS(
+                             SELECT 1 FROM canonical_names
+                             WHERE page_id = ?1 AND canonical_name = ?2
+                               AND source IN ('title', 'alias'))",
+                        params![target_id, canonical.as_str()],
+                        |row| row.get(0),
+                    )?;
+                    if stays_a_name {
+                        return Ok(None);
+                    }
+                }
+                Ok(page.renamed_target(written, &canonical))
+            }
+            LinkSyntax::Markdown => Ok(moved.iter().find_map(|page| {
+                let old = compute_relative_path(referrer_before.as_str(), page.old.as_str());
+                let new = compute_relative_path(referrer_after.as_str(), page.new.as_str());
+                (written == old && new != old).then_some(new)
+            })),
+        }
     }
 
     fn find_backlink_pages(

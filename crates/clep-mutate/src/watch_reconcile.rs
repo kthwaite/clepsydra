@@ -105,7 +105,6 @@ pub async fn index_batch<H: WatchHost + ?Sized>(host: &H, batch: Vec<ChangeEvent
                     skipped = stats.pages_skipped,
                     removed = stats.pages_removed,
                     resolved = stats.links_resolved,
-                    deps = stats.deps_reresolved,
                     "sync cycle complete"
                 );
             }

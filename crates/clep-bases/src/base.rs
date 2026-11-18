@@ -324,9 +324,43 @@ pub enum Filter {
     Cmp {
         field: String,
         op: Op,
-        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        #[serde(
+            default,
+            skip_serializing_if = "serde_json::Value::is_null",
+            deserialize_with = "deserialize_operand"
+        )]
         value: serde_json::Value,
     },
+}
+
+/// The key `toml` uses to pass a native date-time through serde.
+const TOML_DATETIME_MARKER: &str = "$__toml_private_datetime";
+
+/// Deserialize a filter operand. A base file may spell a date operand as a
+/// native TOML date (`value = 2026-08-09`), which reaches a JSON value as
+/// `toml`'s private marker object; read it as the ISO string it spells, like
+/// every other TOML date (`toml_value_to_json`).
+fn deserialize_operand<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<serde_json::Value, D::Error> {
+    serde_json::Value::deserialize(deserializer).map(toml_dates_as_strings)
+}
+
+fn toml_dates_as_strings(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(mut fields) => {
+            if fields.len() == 1
+                && let Some(serde_json::Value::String(date)) = fields.get_mut(TOML_DATETIME_MARKER)
+            {
+                return serde_json::Value::String(std::mem::take(date));
+            }
+            serde_json::Value::Object(fields)
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(toml_dates_as_strings).collect())
+        }
+        other => other,
+    }
 }
 
 // The AST is recursive; utoipa's derived schema generation recurses without
@@ -1041,12 +1075,16 @@ fn property_matches(
         return match op {
             Op::Ne | Op::NotContains => {
                 let positive = if op == Op::Ne { Op::Eq } else { Op::Contains };
-                items.iter().all(|item| {
-                    !property_scalar_matches(item, property_type, positive, value, today)
-                })
+                items
+                    .iter()
+                    .filter(|item| !toml_value_is_empty(item))
+                    .all(|item| {
+                        !property_scalar_matches(item, property_type, positive, value, today)
+                    })
             }
             _ => items
                 .iter()
+                .filter(|item| !toml_value_is_empty(item))
                 .any(|item| property_scalar_matches(item, property_type, op, value, today)),
         };
     }
@@ -1076,7 +1114,18 @@ fn property_scalar_matches(
     )
 }
 
+/// Emptiness as the index projects it (`clep-index`'s property deriver): an
+/// empty string and an empty array have no row, and neither has an array
+/// whose elements are all empty strings or empty arrays.
 fn toml_value_is_empty(value: &toml::Value) -> bool {
+    match value {
+        toml::Value::String(value) => value.is_empty(),
+        toml::Value::Array(values) => values.iter().all(toml_scalar_is_empty),
+        _ => false,
+    }
+}
+
+fn toml_scalar_is_empty(value: &toml::Value) -> bool {
     match value {
         toml::Value::String(value) => value.is_empty(),
         toml::Value::Array(values) => values.is_empty(),
@@ -1092,13 +1141,23 @@ fn current_scalar(current: &toml::Value, property_type: PropertyType) -> Option<
             _ => None,
         },
         PropertyType::Bool => current.as_bool().map(Comparable::Bool),
+        // The index gives a date face only to a value that has a date: a
+        // bare local time is not one.
         PropertyType::Date | PropertyType::Datetime => match current {
-            toml::Value::Datetime(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            toml::Value::Datetime(value) if value.date.is_some() => {
+                Some(Comparable::Text(Cow::Owned(value.to_string())))
+            }
             _ => None,
         },
-        _ => current
-            .as_str()
-            .map(|value| Comparable::Text(Cow::Borrowed(value))),
+        // The index gives every scalar a text face, whatever its TOML type.
+        _ => match current {
+            toml::Value::String(value) => Some(Comparable::Text(Cow::Borrowed(value))),
+            toml::Value::Integer(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            toml::Value::Float(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            toml::Value::Boolean(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            toml::Value::Datetime(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            toml::Value::Array(_) | toml::Value::Table(_) => None,
+        },
     }
 }
 
@@ -3567,5 +3626,57 @@ columns = ["body"]
         assert_eq!(date_face("2026-08-28T23:59:00+05:00"), Some(d(2026, 8, 28)));
         assert_eq!(date_face("reading"), None);
         assert_eq!(date_face("2026-08"), None);
+    }
+
+    #[test]
+    fn native_toml_date_filter_operands_load_as_iso_strings() {
+        // A date property is spelled as an unquoted TOML date in frontmatter,
+        // so a filter operand may be spelled the same way.
+        let content = r#"
+name = "Reading"
+filter = { all = [
+    { field = "due", op = "lt", value = 2026-08-09 },
+    { field = "due", op = "in", value = [2026-08-01, "2026-08-02"] },
+    { not = { field = "seen", op = "gte", value = 2026-08-09T12:30:00Z } },
+] }
+
+[properties]
+due = { type = "date" }
+seen = { type = "datetime" }
+
+[[views]]
+name = "Late"
+filter = { field = "due", op = "eq", value = 2026-08-10 }
+color_rules = [{ color = "sepia", filter = { field = "due", op = "gt", value = 2026-08-11 } }]
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/reading.base.toml"), content);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let file = base.unwrap().file;
+
+        assert_eq!(
+            serde_json::to_value(&file.filter).unwrap(),
+            serde_json::json!({ "all": [
+                { "field": "due", "op": "lt", "value": "2026-08-09" },
+                { "field": "due", "op": "in", "value": ["2026-08-01", "2026-08-02"] },
+                { "not": { "field": "seen", "op": "gte", "value": "2026-08-09T12:30:00Z" } },
+            ] })
+        );
+        assert_eq!(
+            serde_json::to_value(&file.views[0].filter).unwrap(),
+            serde_json::json!({ "field": "due", "op": "eq", "value": "2026-08-10" })
+        );
+        assert_eq!(
+            serde_json::to_value(&file.views[0].color_rules[0].filter).unwrap(),
+            serde_json::json!({ "field": "due", "op": "gt", "value": "2026-08-11" })
+        );
+        // The JSON form (the query endpoint) is unchanged.
+        let from_json: Filter = serde_json::from_value(
+            serde_json::json!({ "field": "due", "op": "lt", "value": "2026-08-09" }),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&from_json).unwrap(),
+            serde_json::json!({ "field": "due", "op": "lt", "value": "2026-08-09" })
+        );
     }
 }

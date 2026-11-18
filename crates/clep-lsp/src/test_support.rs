@@ -10,7 +10,6 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService};
 
 use crate::LspBackend;
-use crate::document::Document;
 use crate::state::open_lsp_state;
 use clep_vault::init::init_vault;
 
@@ -58,6 +57,7 @@ pub(crate) fn backend_for_root(root: &Path) -> LspBackend {
         documents: Arc::new(Mutex::new(HashMap::new())),
         canonical_names: Arc::new(RwLock::new(HashMap::new())),
         watcher: std::sync::Mutex::new(None),
+        position_encoding: std::sync::OnceLock::new(),
     }
 }
 
@@ -105,6 +105,7 @@ pub(crate) fn make_uninitialized_backend() -> LspBackend {
         documents: Arc::new(Mutex::new(HashMap::new())),
         canonical_names: Arc::new(RwLock::new(HashMap::new())),
         watcher: std::sync::Mutex::new(None),
+        position_encoding: std::sync::OnceLock::new(),
     }
 }
 
@@ -125,5 +126,5 @@ pub(crate) async fn open_doc(backend: &LspBackend, uri: &Url, text: &str) {
 pub(crate) async fn open_doc_at_version(backend: &LspBackend, uri: &Url, text: &str, version: i32) {
     backend.refresh_canonical_names().await;
     let mut docs = backend.documents.lock().await;
-    docs.insert(uri.clone(), Document::from_text(text, version));
+    docs.insert(uri.clone(), backend.parse_document(text, version));
 }

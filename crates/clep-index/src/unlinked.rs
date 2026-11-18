@@ -35,7 +35,8 @@ impl VaultIndex {
     /// Pages whose body mentions `target`'s title (or file stem when it has
     /// none) or one of its aliases as a whole phrase, ignoring case, and that
     /// do not link to `target`. The target itself and encrypted pages are
-    /// never sources. Sorted by source title, then path; at most `limit`.
+    /// never sources. A name shorter than three characters, or with no letter
+    /// or digit, is not searched. Sorted by source title, then path; at most `limit`.
     pub fn unlinked_mentions(
         &self,
         target: &VaultPath,
@@ -165,12 +166,17 @@ fn meta_aliases(meta_json: &str) -> Vec<String> {
 
 /// The title and aliases, trimmed, deduplicated ignoring case, and at least
 /// [`MIN_TERM_CHARS`] characters long.
+///
+/// A name with no letter or digit (`???`, `...`) is dropped: it holds no word
+/// the full-text prefilter can look up, so it could never bring in a
+/// candidate, and it has no word boundary for the exact scan to respect.
 fn search_terms(title: &str, aliases: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     std::iter::once(title)
         .chain(aliases.iter().map(String::as_str))
         .map(str::trim)
         .filter(|t| t.chars().count() >= MIN_TERM_CHARS)
+        .filter(|t| t.chars().any(char::is_alphanumeric))
         .filter(|t| seen.insert(t.to_lowercase()))
         .map(str::to_string)
         .collect()
@@ -270,4 +276,19 @@ fn context_window(body: &str, start: usize, end: usize) -> String {
         text,
         if to < body.len() { "…" } else { "" },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_terms_drop_names_without_a_letter_or_digit() {
+        let aliases = [
+            "C++".to_string(),
+            "...".to_string(),
+            "\u{1f389}\u{1f389}\u{1f389}".to_string(),
+        ];
+        assert_eq!(search_terms("???", &aliases), ["C++"]);
+    }
 }

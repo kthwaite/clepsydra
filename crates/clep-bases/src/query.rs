@@ -21,7 +21,7 @@ use crate::base::{
 };
 use clep_vault::canonical::CanonicalName;
 use clep_vault::link::normalize_links_to_target;
-use clep_vault::markdown::markdown_options;
+use clep_vault::markdown::{markdown_options, panic_safe_options};
 use clep_vault::page::Page;
 use clep_vault::toml_json::toml_value_to_json;
 
@@ -530,7 +530,14 @@ fn compile_node(
     match filter {
         Filter::All(children) => compile_group(children, " AND ", "1=1", ctx, params),
         Filter::Any(children) => compile_group(children, " OR ", "1=0", ctx, params),
-        Filter::Not(child) => Ok(format!("NOT ({})", compile_node(child, ctx, params)?)),
+        // A comparison on a NULL system column (an untitled page, a page
+        // without a project) is unknown in SQL, and `NOT unknown` is still
+        // unknown. A filter is two-valued: a page that does not satisfy the
+        // child satisfies its negation, as in `base_matches_meta`.
+        Filter::Not(child) => Ok(format!(
+            "NOT COALESCE(({}), 0)",
+            compile_node(child, ctx, params)?
+        )),
         Filter::Cmp { field, op, value } => compile_cmp(field, *op, value, ctx, params),
     }
 }
@@ -1730,7 +1737,7 @@ pub fn body_excerpt(markdown: &str) -> String {
     let mut excerpt = String::with_capacity(BODY_EXCERPT_MAX_CHARS);
     let mut scalar_count = 0;
     let mut pending_space = false;
-    for event in Parser::new_ext(markdown, markdown_options()) {
+    for event in Parser::new_ext(markdown, panic_safe_options(markdown, markdown_options())) {
         let full = match event {
             Event::Text(text)
             | Event::Code(text)
@@ -2431,6 +2438,91 @@ moment  = { type = "datetime" }
                 crate::base::base_matches_meta_on(&base, &meta, "a.md", TEST_TODAY),
                 expected,
                 "{field} {op}"
+            );
+        }
+    }
+
+    #[test]
+    fn in_memory_matcher_reads_wrong_typed_and_empty_values_like_the_index() {
+        // Schemas are advisory, so a text-like key can hold a number, a bool
+        // or a date, a datetime key can hold a bare time, and an array can
+        // hold only empty strings. The index projects a text face for every
+        // scalar, no date face for a bare time, and no row for an empty
+        // element; the in-memory matcher must read the same faces.
+        let (tmp, mut index, mut base) = fixture();
+        let content = page(
+            "0190f8a0-0000-7000-8000-0000000000f0",
+            "BOOK",
+            "Book F",
+            "author = 9\npattern = true\nstatus = 2026-08-09\nmoment = 12:30:00\nthemes = [\"\"]\nseries = [\"\", \"[[Solar Cycle]]\"]\n",
+        );
+        std::fs::write(tmp.path().join("f.md"), &content).unwrap();
+        index.build(&Vault::open(tmp.path()).unwrap()).unwrap();
+        let (meta, _body) = clep_vault::page::parse_frontmatter(&content).unwrap();
+
+        for (filter_json, expected) in [
+            (
+                serde_json::json!({ "field": "author", "op": "eq", "value": "9" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "contains", "value": "9" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "ne", "value": "9" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "pattern", "op": "starts_with", "value": "tr" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "status", "op": "in", "value": ["2026-08-09"] }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "moment", "op": "lt", "value": "T" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "moment", "op": "not_empty" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "is_empty" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "not_empty" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "contains", "value": "" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "series", "op": "not_empty" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "series", "op": "eq", "value": "" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "series", "op": "eq", "value": "[[Solar Cycle]]" }),
+                true,
+            ),
+        ] {
+            base.file.filter = Some(serde_json::from_value(filter_json.clone()).unwrap());
+            let in_memory = crate::base::base_matches_meta_on(&base, &meta, "f.md", TEST_TODAY);
+            let output = run(&index, &base, filter_json.clone(), TEST_TODAY);
+            let sql = flat_paths(&output).iter().any(|path| path == "f.md");
+
+            assert_eq!(sql, expected, "unexpected SQL result for {filter_json}");
+            assert_eq!(
+                in_memory, sql,
+                "in-memory matcher diverged for {filter_json}"
             );
         }
     }
@@ -3453,6 +3545,52 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
             TEST_TODAY,
         );
         assert_eq!(flat_paths(&out), vec!["b.md"]);
+    }
+
+    #[test]
+    fn not_over_a_missing_system_field_matches_the_page() {
+        // No fixture page has a project or a journal date, so none of them
+        // satisfies the positive comparison and every book satisfies `not`.
+        let (_tmp, index, base) = fixture();
+        for child in [
+            serde_json::json!({ "field": "project", "op": "eq", "value": "px" }),
+            serde_json::json!({ "field": "project", "op": "contains", "value": "p" }),
+            serde_json::json!({ "field": "project", "op": "starts_with", "value": "p" }),
+            serde_json::json!({ "field": "project", "op": "ends_with", "value": "x" }),
+            serde_json::json!({ "field": "project", "op": "gte", "value": "a" }),
+            serde_json::json!({ "field": "project", "op": "in", "value": ["px"] }),
+            serde_json::json!({ "field": "journal_date", "op": "is_today" }),
+            serde_json::json!({ "field": "journal_date", "op": "gt", "value": "2000-01-01" }),
+            serde_json::json!({ "all": [
+                { "field": "project", "op": "eq", "value": "px" },
+                { "field": "kind", "op": "eq", "value": "BOOK" }
+            ]}),
+        ] {
+            let positive = run(
+                &index,
+                &base,
+                serde_json::json!({ "all": [
+                    { "field": "kind", "op": "eq", "value": "BOOK" },
+                    child.clone()
+                ]}),
+                TEST_TODAY,
+            );
+            assert!(flat_paths(&positive).is_empty(), "{child}");
+            let negated = run(
+                &index,
+                &base,
+                serde_json::json!({ "all": [
+                    { "field": "kind", "op": "eq", "value": "BOOK" },
+                    { "not": child.clone() }
+                ]}),
+                TEST_TODAY,
+            );
+            assert_eq!(
+                flat_paths(&negated),
+                vec!["a.md", "b.md", "c.md", "e.md"],
+                "{child}"
+            );
+        }
     }
 
     #[test]

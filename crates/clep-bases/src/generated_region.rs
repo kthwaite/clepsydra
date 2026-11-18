@@ -42,7 +42,12 @@ fn html_blocks(markdown: &str) -> Vec<Range<usize>> {
     let mut depth = 0usize;
     let mut start = None;
     let mut blocks = Vec::new();
-    for (event, range) in Parser::new_ext(markdown, Options::all()).into_offset_iter() {
+    for (event, range) in Parser::new_ext(
+        markdown,
+        clep_vault::markdown::panic_safe_options(markdown, Options::all()),
+    )
+    .into_offset_iter()
+    {
         match event {
             Event::Start(tag) => {
                 if depth == 0 && tag == Tag::HtmlBlock {
@@ -176,7 +181,28 @@ pub fn ensure_inert_output(markdown: &str) -> Result<(), RegionError> {
             ));
         }
     }
+    // The end marker follows the payload. A block the output leaves open (an
+    // unclosed fence, an unterminated HTML block, a list after a footnote
+    // definition) would swallow it, and the page's regions could no longer be
+    // parsed. The output is never repaired: closing a block would change it.
+    let payload = region_payload(markdown);
+    let closed = format!("{payload}{CLOSE}");
+    let end_marker_is_live = html_blocks(&closed)
+        .last()
+        .is_some_and(|range| range.start == payload.len() && closed[range.clone()].trim() == CLOSE);
+    if !end_marker_is_live {
+        return Err(invalid("template output leaves a Markdown block open"));
+    }
     Ok(())
+}
+
+/// The payload as a region stores it: LF line endings, one blank line on
+/// each side.
+fn region_payload(markdown: &str) -> String {
+    format!(
+        "\n\n{}\n\n",
+        markdown.replace("\r\n", "\n").trim_matches('\n')
+    )
 }
 
 pub fn format_region(
@@ -186,10 +212,7 @@ pub fn format_region(
 ) -> Result<String, RegionError> {
     ensure_inert_output(markdown)?;
     uuid::Uuid::parse_str(id).map_err(|_| invalid("invalid UUID"))?;
-    let payload = format!(
-        "\n\n{}\n\n",
-        markdown.replace("\r\n", "\n").trim_matches('\n')
-    );
+    let payload = region_payload(markdown);
     let descriptor = GeneratedRegionDescriptor {
         version: 1,
         id: id.to_owned(),
@@ -237,7 +260,12 @@ pub fn insert_region(
         return Err(invalid("cannot insert inside a generated region"));
     }
     let mut depth = 0usize;
-    for (event, range) in Parser::new_ext(markdown, Options::all()).into_offset_iter() {
+    for (event, range) in Parser::new_ext(
+        markdown,
+        clep_vault::markdown::panic_safe_options(markdown, Options::all()),
+    )
+    .into_offset_iter()
+    {
         match event {
             Event::Start(_) => {
                 if depth == 0 && range.start < offset && offset < range.end {
@@ -262,5 +290,15 @@ pub fn insert_region(
         result.push_str("\n\n");
     }
     result.push_str(after);
+    // A block left open before the offset (an unclosed fence at the end of the
+    // document) ends exactly there, so the range check above does not see it.
+    // The inserted region must be live, not literal text inside that block.
+    // The document parsed before the insertion, so a failure here is the
+    // insertion's doing.
+    let live = parse_regions(&result)
+        .is_ok_and(|regions| regions.iter().any(|region| region.descriptor.id == id));
+    if !live {
+        return Err(invalid("insertion must be between Markdown blocks"));
+    }
     Ok(result)
 }

@@ -305,7 +305,7 @@ pub fn heal_task_replacement(
         .unwrap_or_else(Utc::now);
     record_task_transition(&old_meta, &mut new_meta, at);
 
-    if new_content.starts_with("+++") {
+    if crate::page::skip_bom_before_fence(new_content).starts_with("+++") {
         let history = new_meta
             .extra
             .get(TASK_HISTORY_KEY)

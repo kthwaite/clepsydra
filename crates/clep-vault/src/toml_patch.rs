@@ -10,7 +10,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use super::page::split_fenced;
+use super::page::{skip_bom_before_fence, split_fenced};
 
 /// Type hint for mapping a JSON patch value into a TOML value.
 ///
@@ -48,8 +48,14 @@ pub enum SpliceError {
 
 /// Apply `edits` to the `+++` frontmatter region of `raw`, returning the full
 /// new page content. Untouched frontmatter lines and the body are preserved
-/// byte-for-byte.
+/// byte-for-byte, including a UTF-8 byte-order mark before the opening fence.
 pub fn splice_frontmatter(raw: &str, edits: &FrontmatterEdits) -> Result<String, SpliceError> {
+    let fenced = skip_bom_before_fence(raw);
+    let bom = &raw[..raw.len() - fenced.len()];
+    splice_fenced(fenced, edits).map(|spliced| format!("{bom}{spliced}"))
+}
+
+fn splice_fenced(raw: &str, edits: &FrontmatterEdits) -> Result<String, SpliceError> {
     if raw.starts_with("---") {
         return Err(SpliceError::LegacyFrontmatter);
     }
@@ -87,6 +93,10 @@ pub fn splice_frontmatter(raw: &str, edits: &FrontmatterEdits) -> Result<String,
                 }
             }
             *replacement.decor_mut() = previous.decor().clone();
+        } else if doc.contains_key(key) {
+            // The key was a `[table]` or `[[array of tables]]` header. Its key
+            // has header spacing, so drop it and insert a fresh `key = value`.
+            doc.remove(key);
         }
         doc[key.as_str()] = toml_edit::Item::Value(replacement);
     }
@@ -105,7 +115,115 @@ pub fn splice_frontmatter(raw: &str, edits: &FrontmatterEdits) -> Result<String,
         doc["updated_at"] = toml_edit::Item::Value(replacement);
     }
 
-    Ok(format!("+++\n{doc}+++\n{body}"))
+    let frontmatter = render_without_fence_lines(&mut doc);
+    Ok(format!("+++\n{frontmatter}+++\n{body}"))
+}
+
+/// Render `doc` so that no line of the result starts with the `+++` fence.
+///
+/// Every reader ends the frontmatter at the first line that starts with
+/// `+++` (`page::split_fenced`, and the line scans in other tools), without
+/// parsing TOML. A string value holding such a line, spelled as a multi-line
+/// (`"""` or `'''`) string, would therefore close the frontmatter early and
+/// leave the page unparseable. Those strings are re-spelled as single-line
+/// basic strings with `\n` escapes; all other values keep their spelling.
+pub(crate) fn render_without_fence_lines(doc: &mut toml_edit::DocumentMut) -> String {
+    let rendered = doc.to_string();
+    if !has_fence_line(&rendered) {
+        return rendered;
+    }
+    toml_edit::visit_mut::VisitMut::visit_document_mut(&mut FenceLineRespeller, doc);
+    doc.to_string()
+}
+
+/// True when a line of `text` starts with the `+++` fence.
+pub(crate) fn has_fence_line(text: &str) -> bool {
+    text.starts_with("+++") || text.contains("\n+++")
+}
+
+/// Re-spells every string whose current spelling holds a fence line.
+struct FenceLineRespeller;
+
+impl toml_edit::visit_mut::VisitMut for FenceLineRespeller {
+    fn visit_string_mut(&mut self, node: &mut toml_edit::Formatted<String>) {
+        if !node.display_repr().contains("\n+++") {
+            return;
+        }
+        let Ok(toml_edit::Value::String(mut single_line)) =
+            single_line_basic_string(node.value()).parse::<toml_edit::Value>()
+        else {
+            return;
+        };
+        *single_line.decor_mut() = node.decor().clone();
+        *node = single_line;
+    }
+}
+
+/// Spell `value` as a TOML single-line basic string (`"..."`).
+fn single_line_basic_string(value: &str) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            ch if ch.is_control() => {
+                let _ = write!(out, "\\u{:04X}", u32::from(ch));
+            }
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Rewrite string values of the top-level frontmatter `keys` in place.
+///
+/// `new_value` is asked about each string held by one of `keys` (the value
+/// itself, or each string element of an array) and returns its replacement,
+/// or `None` to keep it. Only the replaced strings change: the other values,
+/// comments, layout and the body are preserved byte-for-byte.
+///
+/// Returns `Ok(None)` when nothing was replaced, including when the page has
+/// no TOML frontmatter.
+pub fn rewrite_frontmatter_strings(
+    raw: &str,
+    keys: &[String],
+    new_value: impl Fn(&str) -> Option<String>,
+) -> Result<Option<String>, SpliceError> {
+    if !raw.starts_with("+++") {
+        return Ok(None);
+    }
+    let Ok((toml_str, body)) = split_fenced(raw, "+++") else {
+        return Ok(None);
+    };
+    let mut doc = toml_edit::DocumentMut::from_str(toml_str)?;
+
+    let mut changed = false;
+    let mut replace = |value: &mut toml_edit::Value| {
+        if let Some(new) = value.as_str().and_then(&new_value) {
+            let decor = value.decor().clone();
+            *value = toml_edit::Value::from(new);
+            *value.decor_mut() = decor;
+            changed = true;
+        }
+    };
+    for key in keys {
+        match doc.get_mut(key).and_then(toml_edit::Item::as_value_mut) {
+            Some(toml_edit::Value::Array(array)) => array.iter_mut().for_each(&mut replace),
+            Some(value) => replace(value),
+            None => {}
+        }
+    }
+
+    Ok(changed.then(|| format!("+++\n{doc}+++\n{body}")))
 }
 
 /// Map a JSON value into a `toml_edit::Value`, honoring the optional hint.
@@ -190,6 +308,71 @@ Body line two.\n";
             remove: remove.into_iter().map(String::from).collect(),
             updated_at: None,
         }
+    }
+
+    #[test]
+    fn utf8_bom_page_is_spliced_and_keeps_its_bom() {
+        let raw = "\u{feff}+++\n# hand-tended\na = 1\n+++\nBody\n";
+        let out = splice_frontmatter(raw, &edits(vec![("b", serde_json::json!(2), None)], vec![]))
+            .unwrap();
+        assert_eq!(out, "\u{feff}+++\n# hand-tended\na = 1\nb = 2\n+++\nBody\n");
+    }
+
+    #[test]
+    fn utf8_bom_legacy_page_still_reports_legacy_frontmatter() {
+        let raw = "\u{feff}---\na: 1\n---\nBody\n";
+        assert!(matches!(
+            splice_frontmatter(raw, &FrontmatterEdits::default()),
+            Err(SpliceError::LegacyFrontmatter)
+        ));
+    }
+
+    #[test]
+    fn value_replacing_a_table_is_spelled_like_other_keys() {
+        let raw = "+++\na = 1\n\n[t]\nx = 1\n+++\nBody\n";
+        let out = splice_frontmatter(raw, &edits(vec![("t", serde_json::json!(5), None)], vec![]))
+            .unwrap();
+        assert_eq!(out, "+++\na = 1\nt = 5\n+++\nBody\n");
+    }
+
+    #[test]
+    fn value_replacing_an_array_of_tables_is_spelled_like_other_keys() {
+        let raw = "+++\na = 1\n\n[[t]]\nx = 1\n\n[[t]]\nx = 2\n\n[keep]\ny = 1\n+++\nBody\n";
+        let out = splice_frontmatter(
+            raw,
+            &edits(vec![("t", serde_json::json!(["x"]), None)], vec![]),
+        )
+        .unwrap();
+        assert_eq!(out, "+++\na = 1\nt = [\"x\"]\n\n[keep]\ny = 1\n+++\nBody\n");
+    }
+
+    #[test]
+    fn rewrite_frontmatter_strings_replaces_only_the_chosen_strings() {
+        let raw = "+++\n# who\nlink = [\n  \"alpha\", # first\n  'other',\n  3,\n]\nowner = \"alpha\"\nnote = \"alpha\"\n+++\nalpha\n";
+        let keys = [
+            "link".to_string(),
+            "owner".to_string(),
+            "missing".to_string(),
+        ];
+        let rewritten = rewrite_frontmatter_strings(raw, &keys, |value| {
+            (value == "alpha").then(|| "be\"ta".to_string())
+        })
+        .unwrap();
+        assert_eq!(
+            rewritten.as_deref(),
+            Some(
+                "+++\n# who\nlink = [\n  'be\"ta', # first\n  'other',\n  3,\n]\nowner = 'be\"ta'\nnote = \"alpha\"\n+++\nalpha\n"
+            )
+        );
+
+        assert_eq!(
+            rewrite_frontmatter_strings(raw, &keys, |_| None).unwrap(),
+            None
+        );
+        assert_eq!(
+            rewrite_frontmatter_strings("no frontmatter\n", &keys, |_| Some("x".into())).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -301,5 +484,52 @@ Body line two.\n";
     fn no_frontmatter_is_an_error() {
         let err = splice_frontmatter("Just a body.\n", &FrontmatterEdits::default()).unwrap_err();
         assert!(matches!(err, SpliceError::NoFrontmatter));
+    }
+
+    /// A set value with a line that starts with `+++` must not close the
+    /// frontmatter early: the page must still parse and the body must not
+    /// gain the tail of the value.
+    #[test]
+    fn string_value_with_a_fence_line_stays_inside_the_frontmatter() {
+        let e = edits(
+            vec![
+                ("notes", serde_json::json!("line one\n+++\nline two"), None),
+                ("list", serde_json::json!(["ok", "+++\nleading"]), None),
+                ("map", serde_json::json!({ "q": "it's \"x\"\n+++ y" }), None),
+            ],
+            vec![],
+        );
+        let out = splice_frontmatter(DOC, &e).unwrap();
+
+        assert!(
+            out.contains("notes = \"line one\\n+++\\nline two\"\n"),
+            "fence-line value is written on one line: {out}"
+        );
+        assert_eq!(
+            crate::page::body_of(&out),
+            "Body line one.\nBody line two.\n"
+        );
+        let (meta, _) = crate::page::parse_frontmatter(&out).expect("a spliced page must parse");
+        assert_eq!(
+            meta.extra["notes"],
+            toml::Value::String("line one\n+++\nline two".into())
+        );
+        assert_eq!(
+            meta.extra["list"].as_array().unwrap()[1],
+            toml::Value::String("+++\nleading".into())
+        );
+        assert_eq!(
+            meta.extra["map"]["q"],
+            toml::Value::String("it's \"x\"\n+++ y".into())
+        );
+    }
+
+    /// The fence-line re-spelling keeps the decor of the value it replaces.
+    #[test]
+    fn fence_line_value_keeps_the_trailing_comment() {
+        let raw = "+++\nnotes = \"old\" # keep me\n+++\nBody\n";
+        let e = edits(vec![("notes", serde_json::json!("a\n+++"), None)], vec![]);
+        let out = splice_frontmatter(raw, &e).unwrap();
+        assert_eq!(out, "+++\nnotes = \"a\\n+++\" # keep me\n+++\nBody\n");
     }
 }

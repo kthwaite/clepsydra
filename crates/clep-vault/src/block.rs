@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use pulldown_cmark::{Event, Parser, Tag, TagEnd, TextMergeWithOffset};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, TextMergeWithOffset};
 use regex::Regex;
 
-use crate::markdown::markdown_options;
+use crate::markdown::{markdown_options, panic_safe_options};
 
 /// The structural type of a block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +163,10 @@ struct BlockBuilder {
     /// reuse `BlockType::ListItem` (see its doc comment) but are not list
     /// items, so this stays `false` for them.
     accepts_checkbox: bool,
+    /// End of the paragraph that carries a loose list item's own text (see
+    /// `handle_paragraph_start`). When set it is the block's span end, so the
+    /// span stops at the item's text line as it does for a tight item.
+    lead_paragraph_end: Option<usize>,
 }
 
 /// Emit the in-progress builder (if any), clearing `current`.
@@ -193,6 +197,7 @@ fn start_block_builder(
         span_start,
         span_end,
         accepts_checkbox,
+        lead_paragraph_end: None,
     });
 }
 
@@ -216,9 +221,24 @@ fn set_checkbox(current: &mut Option<BlockBuilder>, checked: bool) {
     }
 }
 
-/// Handle `Start(Paragraph)`. Inside a blockquote a paragraph is represented as
-/// a Blockquote block using the paragraph's own source span; otherwise start a
-/// normal Paragraph builder.
+/// Whether the in-progress builder is a list item (or definition) that has
+/// not received its own text yet.
+fn is_item_awaiting_lead_paragraph(current: &Option<BlockBuilder>) -> bool {
+    current.as_ref().is_some_and(|builder| {
+        builder.block_type == BlockType::ListItem
+            && builder.lead_paragraph_end.is_none()
+            && builder.text_parts.is_empty()
+    })
+}
+
+/// Handle `Start(Paragraph)`.
+///
+/// In a loose list (blank lines between items) pulldown wraps each item's
+/// text in a paragraph. That lead paragraph is the item's own text: the open
+/// item builder keeps collecting it, so a loose item yields the same block as
+/// a tight one. Any other paragraph is its own block: inside a blockquote a
+/// Blockquote block using the paragraph's own source span, otherwise a normal
+/// Paragraph block.
 fn handle_paragraph_start(
     blocks: &mut Vec<Block>,
     current: &mut Option<BlockBuilder>,
@@ -226,38 +246,40 @@ fn handle_paragraph_start(
     range_start: usize,
     range_end: usize,
 ) {
-    if in_blockquote {
-        *current = Some(BlockBuilder {
-            block_type: BlockType::Blockquote,
-            text_parts: Vec::new(),
-            text_len: 0,
-            code_ranges: Vec::new(),
-            checkbox: None,
-            list_depth: 0,
-            span_start: range_start,
-            span_end: range_end,
-            accepts_checkbox: false,
-        });
-    } else {
-        start_block_builder(
-            blocks,
-            current,
-            BlockType::Paragraph,
-            0,
-            range_start,
-            range_end,
-            false,
-        );
+    if is_item_awaiting_lead_paragraph(current) {
+        return;
     }
+    let block_type = if in_blockquote {
+        BlockType::Blockquote
+    } else {
+        BlockType::Paragraph
+    };
+    start_block_builder(
+        blocks,
+        current,
+        block_type,
+        0,
+        range_start,
+        range_end,
+        false,
+    );
 }
 
-/// Handle `End(Paragraph)`: set the builder's span_end to the paragraph range
+/// Handle `End(Paragraph)`. The lead paragraph of a list item ends the item's
+/// text but not the item: record where it ends and leave the builder open for
+/// `End(Item)`. Otherwise set the builder's span_end to the paragraph range
 /// end, then flush.
 fn handle_paragraph_end(
     blocks: &mut Vec<Block>,
     current: &mut Option<BlockBuilder>,
     range_end: usize,
 ) {
+    if let Some(builder) = current.as_mut()
+        && builder.block_type == BlockType::ListItem
+    {
+        builder.lead_paragraph_end.get_or_insert(range_end);
+        return;
+    }
     finish_block(blocks, current, range_end);
 }
 
@@ -273,6 +295,15 @@ fn append_text(current: &mut Option<BlockBuilder>, text: String, inline_code: bo
     }
 }
 
+/// Parser options for block extraction: the vault dialect without smart
+/// punctuation. Block content and inline property values are stored data
+/// (searched, compared, shown as typed), so `'`, `"`, `--` and `...` must
+/// reach them as written rather than as `’`, `“`, `–` and `…`. The flag only
+/// rewrites text, so the block structure is the same either way.
+fn block_markdown_options() -> Options {
+    markdown_options() - Options::ENABLE_SMART_PUNCTUATION
+}
+
 /// Parse a markdown document into a flat list of blocks with parent-child
 /// relationships encoded via `parent_index`.
 ///
@@ -280,7 +311,7 @@ fn append_text(current: &mut Option<BlockBuilder>, text: String, inline_code: bo
 /// Follows the same `TextMergeWithOffset` pattern as `extract_links` in
 /// `crates/clep-vault/src/link.rs`.
 pub fn parse_blocks(markdown: &str) -> Vec<Block> {
-    let opts = markdown_options();
+    let opts = panic_safe_options(markdown, block_markdown_options());
     let raw_iter = Parser::new_ext(markdown, opts).into_offset_iter();
     let parser = TextMergeWithOffset::new(raw_iter);
 
@@ -436,7 +467,7 @@ fn emit_block(blocks: &mut Vec<Block>, builder: BlockBuilder) {
         depth: builder.list_depth,
         parent_index: None, // assigned later
         order_index: 0,     // assigned later
-        span: builder.span_start..builder.span_end,
+        span: builder.span_start..builder.lead_paragraph_end.unwrap_or(builder.span_end),
     });
 }
 
@@ -512,6 +543,20 @@ mod tests {
         assert_eq!(blocks[1].content, "[-] not a task");
         assert!(blocks[1].checkbox.is_none());
         assert!(!blocks[1].properties.contains_key("status"));
+    }
+
+    #[test]
+    fn parse_blocks_survives_task_item_backslash_before_setext_underline() {
+        // pulldown-cmark 0.13.6 panics on this input with task lists and
+        // heading attributes both enabled (see
+        // vault::markdown::panic_safe_options). Without heading attributes
+        // the item holds a setext heading whose text is the backslash.
+        let blocks = parse_blocks("- [ ] \\\n  ---");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].block_type, BlockType::ListItem);
+        assert_eq!(blocks[0].content, "");
+        assert_eq!(blocks[1].block_type, BlockType::Heading);
+        assert_eq!(blocks[1].content, "\\");
     }
 
     #[test]

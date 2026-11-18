@@ -31,25 +31,45 @@ pub fn write_sync_section(vault_root: &Path, patch: &SyncSectionPatch) -> Result
         String::new()
     };
 
+    // Whether most of the file's lines end in `\r\n`.
+    let crlf = {
+        let crlf = text.matches("\r\n").count();
+        crlf > text.matches('\n').count() - crlf
+    };
     let mut doc = DocumentMut::from_str(&text)
         .map_err(|e| SyncError::Config(format!("{}: {e}", path.display())))?;
 
     let sync = doc.entry("sync").or_insert(toml_edit::table());
+    // `as_table_like_mut`, not `as_table_mut`: `sync = { … }` (an inline
+    // table) is the same section to every reader of the config.
     let sync = sync
-        .as_table_mut()
+        .as_table_like_mut()
         .ok_or_else(|| SyncError::Config(format!("{}: [sync] is not a table", path.display())))?;
 
-    if let Some(branch) = &patch.branch {
-        sync["branch"] = value(branch.as_str());
-    }
-    if let Some(author_name) = &patch.author_name {
-        sync["author_name"] = value(author_name.as_str());
-    }
-    if let Some(author_email) = &patch.author_email {
-        sync["author_email"] = value(author_email.as_str());
+    for (key, new) in [
+        ("branch", &patch.branch),
+        ("author_name", &patch.author_name),
+        ("author_email", &patch.author_email),
+    ] {
+        let Some(new) = new else { continue };
+        // An existing key is assigned in place: `insert` would replace the
+        // key as well and drop the comment lines above it.
+        match sync.get_mut(key) {
+            Some(item) => *item = value(new.as_str()),
+            None => {
+                sync.insert(key, value(new.as_str()));
+            }
+        }
     }
 
     let out = doc.to_string();
+    // `toml_edit` reads `\r\n` as `\n` and writes `\n` back; a CRLF file
+    // gets its line endings restored.
+    let out = if crlf {
+        out.replace("\r\n", "\n").replace('\n', "\r\n")
+    } else {
+        out
+    };
     if existed {
         atomic_replace(&path, out.as_bytes()).map_err(|e| SyncError::io(&path, e.into_inner()))?;
     } else {
@@ -105,6 +125,27 @@ mod tests {
     }
 
     #[test]
+    fn a_crlf_config_keeps_its_line_endings() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".clepsydra")).unwrap();
+        let path = tmp.path().join(".clepsydra/config.toml");
+        fs::write(&path, "# mine\r\n[vault]\r\nroot = \"x\"\r\n").unwrap();
+        write_sync_section(
+            tmp.path(),
+            &SyncSectionPatch {
+                branch: None,
+                author_name: Some("Kit".into()),
+                author_email: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "# mine\r\n[vault]\r\nroot = \"x\"\r\n\r\n[sync]\r\nauthor_name = \"Kit\"\r\n"
+        );
+    }
+
+    #[test]
     fn creates_config_when_missing() {
         let tmp = TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join(".clepsydra")).unwrap();
@@ -118,5 +159,68 @@ mod tests {
         )
         .unwrap();
         assert!(tmp.path().join(".clepsydra/config.toml").is_file());
+    }
+
+    #[test]
+    fn sets_keys_in_an_inline_sync_table() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".clepsydra")).unwrap();
+        let path = tmp.path().join(".clepsydra/config.toml");
+        fs::write(&path, "sync = { branch = \"trunk\" }\n").unwrap();
+        write_sync_section(
+            tmp.path(),
+            &SyncSectionPatch {
+                branch: None,
+                author_name: Some("Kit".into()),
+                author_email: None,
+            },
+        )
+        .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("sync = { branch = \"trunk\""), "{text}");
+        let doc: toml::Table = text.parse().unwrap();
+        assert_eq!(doc["sync"]["branch"].as_str(), Some("trunk"));
+        assert_eq!(doc["sync"]["author_name"].as_str(), Some("Kit"));
+        let cfg = clep_vault::config::VaultConfig::load(tmp.path()).unwrap();
+        assert_eq!(cfg.sync.author_name.as_deref(), Some("Kit"));
+    }
+
+    #[test]
+    fn a_comment_above_a_patched_key_survives() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".clepsydra")).unwrap();
+        let path = tmp.path().join(".clepsydra/config.toml");
+        for before in [
+            "# top comment\nsync.branch = \"main\"\n",
+            "[sync]\n# which branch\nbranch = \"main\"\n",
+        ] {
+            fs::write(&path, before).unwrap();
+            let patch = SyncSectionPatch {
+                branch: Some("trunk".into()),
+                ..Default::default()
+            };
+            write_sync_section(tmp.path(), &patch).unwrap();
+            assert_eq!(
+                fs::read_to_string(&path).unwrap(),
+                before.replace("main", "trunk")
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_table_sync_is_still_refused() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".clepsydra")).unwrap();
+        let path = tmp.path().join(".clepsydra/config.toml");
+        fs::write(&path, "sync = 1\n").unwrap();
+        let patch = SyncSectionPatch {
+            branch: Some("main".into()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            write_sync_section(tmp.path(), &patch),
+            Err(SyncError::Config(_))
+        ));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "sync = 1\n");
     }
 }

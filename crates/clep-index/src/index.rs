@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -160,7 +160,9 @@ pub struct BuildStats {
 // ---------------------------------------------------------------------------
 
 const TAG_DERIVATION_VERSION: &str = "1";
-const BLOCK_DERIVATION_VERSION: &str = "2";
+const BLOCK_DERIVATION_VERSION: &str = "4";
+// 2: array rows are numbered after empty elements are dropped.
+const PROPERTY_DERIVATION_VERSION: &str = "2";
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS pages (
@@ -811,9 +813,17 @@ impl VaultIndex {
                 |row| row.get(0),
             )
             .optional()?;
+        let stored_property_derivation_version: Option<String> = tx
+            .query_row(
+                "SELECT value FROM derivation_meta WHERE key = 'property_derivation_version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
         let force_rederive = stored_epoch.as_deref() != Some(epoch.as_str())
             || stored_tag_derivation_version.as_deref() != Some(TAG_DERIVATION_VERSION)
-            || stored_block_derivation_version.as_deref() != Some(BLOCK_DERIVATION_VERSION);
+            || stored_block_derivation_version.as_deref() != Some(BLOCK_DERIVATION_VERSION)
+            || stored_property_derivation_version.as_deref() != Some(PROPERTY_DERIVATION_VERSION);
         let repair_frontmatter = self.repair_frontmatter;
         let (mut parsed_files, seen_paths) = collect_indexed_pages(
             vault,
@@ -843,6 +853,11 @@ impl VaultIndex {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![BLOCK_DERIVATION_VERSION],
         )?;
+        tx.execute(
+            "INSERT INTO derivation_meta (key, value) VALUES ('property_derivation_version', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![PROPERTY_DERIVATION_VERSION],
+        )?;
         tx.commit()?;
         let rubbish_store = RubbishStore::for_vault(vault.root());
         self.reconcile_rubbish_catalog(&rubbish_store)?;
@@ -863,90 +878,27 @@ impl VaultIndex {
         )
     }
 
-    /// Resolve unresolved links by matching `target_canonical` against the
-    /// `canonical_names` table.
+    /// Decide every link from the current index: `target_canonical` against
+    /// the `canonical_names` table, block refs against the `blocks` table.
     ///
     /// A link is resolved only when exactly one page matches the canonical
     /// name. Ambiguous matches (2+ pages) are left unresolved to avoid silent
     /// first-match behavior.
+    ///
+    /// Links that are already resolved are decided again too. `build` skips
+    /// pages whose bytes did not change, so a link in such a page can point
+    /// at a page that lost the name, shares it now, moved or is gone.
     pub fn resolve_links(&mut self) -> Result<(), IndexError> {
         let tx = self.conn.transaction()?;
 
-        // Collect unresolved links
-        let mut stmt = tx.prepare(
-            "SELECT source_id, span_start, target_canonical
-             FROM links
-             WHERE target_id IS NULL AND target_canonical IS NOT NULL",
+        let mut targets = LinkTargets::default();
+        collect_link_row_targets(
+            &tx,
+            "SELECT DISTINCT target_canonical, target_block_id FROM links",
+            [],
+            &mut targets,
         )?;
-
-        let unresolved: Vec<(String, i64, String)> = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(stmt);
-
-        for (source_id, span_start, target_canonical) in &unresolved {
-            if let Some((target_id, target_path)) = unique_link_target(&tx, target_canonical)? {
-                tx.execute(
-                    "UPDATE links SET target_id = ?1, target_path = ?2
-                     WHERE source_id = ?3 AND span_start = ?4",
-                    params![target_id, target_path, source_id, span_start],
-                )?;
-            }
-            // 0 or 2+ matches: leave unresolved
-        }
-
-        // Phase 2: Resolve block_ref links by matching target_block_id against blocks table
-        let mut block_ref_stmt = tx.prepare(
-            "SELECT source_id, span_start, target_block_id
-             FROM links
-             WHERE target_id IS NULL AND kind = 'block_ref' AND target_block_id IS NOT NULL",
-        )?;
-
-        let unresolved_block_refs: Vec<(String, i64, String)> = block_ref_stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(block_ref_stmt);
-
-        for (source_id, span_start, block_id) in &unresolved_block_refs {
-            let mut lookup = tx.prepare(
-                "SELECT b.page_id, p.path
-                 FROM blocks b
-                 JOIN pages p ON p.id = b.page_id
-                 WHERE b.block_id = ?1",
-            )?;
-
-            let matches: Vec<(String, String)> = lookup
-                .query_map(params![block_id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
-            drop(lookup);
-
-            if matches.len() == 1 {
-                let (target_id, target_path) = &matches[0];
-                tx.execute(
-                    "UPDATE links SET target_id = ?1, target_path = ?2
-                     WHERE source_id = ?3 AND span_start = ?4",
-                    params![target_id, target_path, source_id, span_start],
-                )?;
-            }
-            // 0 or 2+ matches: leave unresolved
-        }
+        reresolve_link_targets(&tx, &targets)?;
 
         tx.commit()?;
         Ok(())
@@ -962,12 +914,30 @@ impl VaultIndex {
     /// and upserts into the database. Returns `true` if the page was indexed,
     /// `false` if skipped (content unchanged).
     ///
-    /// This does NOT resolve links — call [`resolve_links`] or
-    /// [`resolve_links_for_page`] after indexing.
+    /// When the page was indexed, every link whose target this change could
+    /// affect is resolved again: the page's own links, and all links aimed at
+    /// a name or block id the page held before or holds now. A name that
+    /// gained a second holder becomes unresolved; one that lost its second
+    /// holder resolves.
     pub fn index_page(
         &mut self,
         vault: &Vault,
         vault_path: &VaultPath,
+    ) -> Result<bool, IndexError> {
+        let mut targets = LinkTargets::default();
+        let indexed = self.index_page_collecting(vault, vault_path, &mut targets)?;
+        self.reresolve_link_targets(&targets)?;
+        Ok(indexed)
+    }
+
+    /// [`index_page`](Self::index_page) without the link re-resolution: the
+    /// affected link targets are added to `targets` and the caller passes
+    /// them to [`reresolve_link_targets`](Self::reresolve_link_targets).
+    pub(crate) fn index_page_collecting(
+        &mut self,
+        vault: &Vault,
+        vault_path: &VaultPath,
+        targets: &mut LinkTargets,
     ) -> Result<bool, IndexError> {
         let abs_path = vault.resolve(vault_path);
         // Single-page path: ask the provider for the effective linkable set
@@ -1069,12 +1039,17 @@ impl VaultIndex {
         if let Some((existing_id, _)) = &existing_page
             && existing_id != &page_id
         {
+            collect_page_link_targets(&tx, existing_id, targets)?;
             tx.execute(
                 "DELETE FROM pages_fts WHERE page_id = ?1",
                 params![existing_id],
             )?;
             tx.execute("DELETE FROM pages WHERE id = ?1", params![existing_id])?;
         }
+
+        // The row with this ID may sit at another path (a rename): the names
+        // and block IDs it holds there are about to be replaced.
+        collect_page_link_targets(&tx, &page_id, targets)?;
 
         tx.execute(
             "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project, encrypted, word_count)
@@ -1150,18 +1125,24 @@ impl VaultIndex {
             deriver.derive(&page, &page_id, &tx)?;
         }
 
+        collect_page_link_targets(&tx, &page_id, targets)?;
+        collect_outgoing_link_targets(&tx, &page_id, targets)?;
+
         tx.commit()?;
         Ok(true)
     }
 
-    /// Index one lifecycle-restored page without repairing or rewriting its bytes.
+    /// Index one lifecycle-restored page without repairing or rewriting its
+    /// bytes. Like [`index_page_collecting`](Self::index_page_collecting),
+    /// this leaves the link re-resolution to the caller.
     pub(crate) fn index_page_opaque(
         &mut self,
         vault: &Vault,
         vault_path: &VaultPath,
+        targets: &mut LinkTargets,
     ) -> Result<bool, IndexError> {
         let repair_frontmatter = std::mem::replace(&mut self.repair_frontmatter, false);
-        let result = self.index_page(vault, vault_path);
+        let result = self.index_page_collecting(vault, vault_path, targets);
         self.repair_frontmatter = repair_frontmatter;
         result
     }
@@ -1170,8 +1151,24 @@ impl VaultIndex {
     ///
     /// Returns `true` if a page was found and removed, `false` if no page
     /// existed at that path. Derived data (links, tags, canonical_names) is
-    /// removed via ON DELETE CASCADE.
+    /// removed via ON DELETE CASCADE. Links aimed at a name or block id the
+    /// page held are resolved again: they become unresolved, or resolve to
+    /// the one holder that is left.
     pub fn remove_page(&mut self, vault_path: &VaultPath) -> Result<bool, IndexError> {
+        let mut targets = LinkTargets::default();
+        let removed = self.remove_page_collecting(vault_path, &mut targets)?;
+        self.reresolve_link_targets(&targets)?;
+        Ok(removed)
+    }
+
+    /// [`remove_page`](Self::remove_page) without the link re-resolution: the
+    /// affected link targets are added to `targets` and the caller passes
+    /// them to [`reresolve_link_targets`](Self::reresolve_link_targets).
+    pub(crate) fn remove_page_collecting(
+        &mut self,
+        vault_path: &VaultPath,
+        targets: &mut LinkTargets,
+    ) -> Result<bool, IndexError> {
         // Remove from FTS before deleting the page
         let page_id: Option<String> = self
             .conn
@@ -1182,6 +1179,7 @@ impl VaultIndex {
             )
             .optional()?;
         if let Some(ref pid) = page_id {
+            collect_page_link_targets(&self.conn, pid, targets)?;
             self.conn
                 .execute("DELETE FROM pages_fts WHERE page_id = ?1", params![pid])?;
         }
@@ -1191,6 +1189,24 @@ impl VaultIndex {
             params![vault_path.as_str()],
         )?;
         Ok(changes > 0)
+    }
+
+    /// Resolve again every link aimed at one of `targets`, whether it is
+    /// resolved now or not, with the rule of [`resolve_links`](Self::resolve_links):
+    /// exactly one holder resolves, none or several leave it unresolved.
+    ///
+    /// Returns the number of links whose resolution changed.
+    pub(crate) fn reresolve_link_targets(
+        &mut self,
+        targets: &LinkTargets,
+    ) -> Result<usize, IndexError> {
+        if targets.names.is_empty() && targets.block_ids.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn.savepoint()?;
+        let changed = reresolve_link_targets(&tx, targets)?;
+        tx.commit()?;
+        Ok(changed)
     }
 
     /// Resolve unresolved links originating from or targeting a specific page.
@@ -1322,21 +1338,6 @@ impl VaultIndex {
         Ok(count)
     }
 
-    /// Clear the retained resolved path after its target page has been removed.
-    ///
-    /// SQLite's `ON DELETE SET NULL` has already cleared `target_id`, so the
-    /// prior target path is the stable key available at this point.
-    pub(crate) fn invalidate_links_after_removal(
-        &mut self,
-        vault_path: &VaultPath,
-    ) -> Result<usize, IndexError> {
-        Ok(self.conn.execute(
-            "UPDATE links SET target_id = NULL, target_path = NULL
-             WHERE target_path = ?1",
-            params![vault_path.as_str()],
-        )?)
-    }
-
     /// Query all unresolved links, enriched with reason and candidates.
     ///
     /// For each link where `target_id IS NULL`:
@@ -1362,8 +1363,7 @@ impl VaultIndex {
                     row.get::<_, i64>(5)?,
                 ))
             })?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<rusqlite::Result<_>>()?;
         drop(stmt);
 
         let mut results = Vec::new();
@@ -1384,8 +1384,7 @@ impl VaultIndex {
                             title: row.get(2)?,
                         })
                     })?
-                    .filter_map(|r| r.ok())
-                    .collect();
+                    .collect::<rusqlite::Result<_>>()?;
                 drop(lookup);
 
                 if matches.len() >= 2 {
@@ -1481,8 +1480,7 @@ impl VaultIndex {
                     })
                 },
             )?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<rusqlite::Result<_>>()?;
         drop(stmt);
 
         // 4. For each link, extract context
@@ -1638,8 +1636,7 @@ impl VaultIndex {
                     rank: row.get(4)?,
                 })
             })?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<rusqlite::Result<_>>()?;
 
         Ok(results)
     }
@@ -1996,6 +1993,12 @@ fn resolve_incoming_block_refs(
             .collect::<Result<_, _>>()?;
         drop(stmt);
 
+        // Same rule as the outgoing pass: a block ID defined more than once
+        // is ambiguous and resolves nothing.
+        if unresolved.is_empty() || unique_block_target(tx, bid)?.is_none() {
+            continue;
+        }
+
         for (source_id, span_start) in &unresolved {
             tx.execute(
                 "UPDATE links SET target_id = ?1, target_path = ?2
@@ -2204,6 +2207,143 @@ fn unique_link_target(
     Ok((matches.len() == 1).then(|| matches.into_iter().next().unwrap()))
 }
 
+/// The page (id, path) holding the block `block_id`, when exactly one block
+/// row carries that ID. The block-ref counterpart of [`unique_link_target`].
+fn unique_block_target(
+    conn: &Connection,
+    block_id: &str,
+) -> Result<Option<(String, String)>, IndexError> {
+    let mut stmt = conn.prepare(
+        "SELECT b.page_id, p.path
+         FROM blocks b
+         JOIN pages p ON p.id = b.page_id
+         WHERE b.block_id = ?1",
+    )?;
+    let matches = stmt
+        .query_map(params![block_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((matches.len() == 1).then(|| matches.into_iter().next().unwrap()))
+}
+
+/// Link targets whose set of holders may have changed: canonical names
+/// (`links.target_canonical`) and block IDs (`links.target_block_id`).
+///
+/// Filled while a page row is replaced or removed, then handed to
+/// `reresolve_link_targets`, which decides every link aimed at one of them
+/// from the current state of the index.
+#[derive(Debug, Default)]
+pub(crate) struct LinkTargets {
+    names: BTreeSet<String>,
+    block_ids: BTreeSet<String>,
+}
+
+/// Add every target through which a link can reach the page `page_id` as the
+/// index stands: its canonical names, the spellings of its ID a link may use,
+/// its block IDs, and the targets of the links resolved to it (their
+/// `target_path` follows the page when it moves).
+fn collect_page_link_targets(
+    conn: &Connection,
+    page_id: &str,
+    targets: &mut LinkTargets,
+) -> Result<(), IndexError> {
+    let mut names =
+        conn.prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
+    for name in names.query_map(params![page_id], |row| row.get::<_, String>(0))? {
+        targets.names.insert(name?);
+    }
+
+    // `unique_link_target` accepts any spelling `Uuid::parse_str` does;
+    // `target_canonical` holds it lowercased.
+    if let Ok(id) = Uuid::parse_str(page_id) {
+        targets.names.insert(id.hyphenated().to_string());
+        targets.names.insert(id.simple().to_string());
+        targets.names.insert(id.braced().to_string());
+        targets.names.insert(id.urn().to_string());
+    }
+
+    let mut block_ids =
+        conn.prepare("SELECT block_id FROM blocks WHERE page_id = ?1 AND block_id IS NOT NULL")?;
+    for block_id in block_ids.query_map(params![page_id], |row| row.get::<_, String>(0))? {
+        targets.block_ids.insert(block_id?);
+    }
+
+    collect_link_row_targets(
+        conn,
+        "SELECT DISTINCT target_canonical, target_block_id FROM links WHERE target_id = ?1",
+        params![page_id],
+        targets,
+    )
+}
+
+/// Add the targets of the links the page `page_id` contains. Freshly derived
+/// link rows are unresolved, so each of them needs a decision.
+fn collect_outgoing_link_targets(
+    conn: &Connection,
+    page_id: &str,
+    targets: &mut LinkTargets,
+) -> Result<(), IndexError> {
+    collect_link_row_targets(
+        conn,
+        "SELECT DISTINCT target_canonical, target_block_id FROM links WHERE source_id = ?1",
+        params![page_id],
+        targets,
+    )
+}
+
+fn collect_link_row_targets(
+    conn: &Connection,
+    sql: &str,
+    params: impl rusqlite::Params,
+    targets: &mut LinkTargets,
+) -> Result<(), IndexError> {
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map(params, |row| {
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, Option<String>>(1)?,
+        ))
+    })?;
+    for row in rows {
+        let (name, block_id) = row?;
+        targets.names.extend(name);
+        targets.block_ids.extend(block_id);
+    }
+    Ok(())
+}
+
+/// Set `target_id` / `target_path` of every link aimed at one of `targets`
+/// to what the index says now: the single holder, or NULL when there is none
+/// or more than one. Links by name first, block refs second, as
+/// `VaultIndex::resolve_links` orders them. Returns the number of link rows
+/// changed.
+fn reresolve_link_targets(conn: &Connection, targets: &LinkTargets) -> Result<usize, IndexError> {
+    let mut changed = 0;
+
+    for name in &targets.names {
+        let (target_id, target_path) = unique_link_target(conn, name)?.unzip();
+        changed += conn.execute(
+            "UPDATE links SET target_id = ?1, target_path = ?2
+             WHERE target_canonical = ?3
+               AND (target_id IS NOT ?1 OR target_path IS NOT ?2)",
+            params![target_id, target_path, name],
+        )?;
+    }
+
+    for block_id in &targets.block_ids {
+        let (target_id, target_path) = unique_block_target(conn, block_id)?.unzip();
+        changed += conn.execute(
+            "UPDATE links SET target_id = ?1, target_path = ?2
+             WHERE kind = 'block_ref' AND target_block_id = ?3
+               AND (target_id IS NOT ?1 OR target_path IS NOT ?2)",
+            params![target_id, target_path, block_id],
+        )?;
+    }
+
+    Ok(changed)
+}
+
 /// Migrate the `links` table so that `target_id` carries `ON DELETE SET NULL`.
 ///
 /// SQLite cannot alter FK constraints in-place, so we check the existing
@@ -2215,8 +2355,7 @@ fn migrate_links_fk(conn: &Connection) -> Result<(), IndexError> {
             .query_map([], |row| {
                 Ok((row.get::<_, String>(3)?, row.get::<_, String>(6)?))
             })?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<rusqlite::Result<_>>()?;
         fks.iter()
             .any(|(col, on_delete)| col == "target_id" && on_delete != "SET NULL")
     };
@@ -2612,7 +2751,8 @@ fn prune_stale_pages(
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
-        .filter_map(|r| r.ok())
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
         .filter(|(_, path)| !seen_paths.contains(path))
         .map(|(id, _)| id)
         .collect();
@@ -3503,6 +3643,20 @@ mod tests {
     }
 
     #[test]
+    fn search_finds_the_same_pages_for_composed_and_decomposed_words() {
+        let index = search_index();
+
+        // `Élan` typed precomposed (NFC), decomposed (NFD), and unaccented.
+        for query in ["\u{c9}lan", "E\u{301}lan", "e\u{301}la", "elan"] {
+            assert_paths(index.search(query, 20).unwrap(), &["notes/unicode.md"]);
+        }
+        assert_paths(
+            index.search("E\u{301}lan vi\u{302}tal", 20).unwrap(),
+            &["notes/unicode.md"],
+        );
+    }
+
+    #[test]
     fn search_title_bounds_typos_and_normalizes_unicode() {
         let index = search_index();
 
@@ -3524,6 +3678,27 @@ mod tests {
             &["notes/clepsydra.md"],
         );
         assert_paths(index.search("tag:ideas -title:clpsydra", 20).unwrap(), &[]);
+    }
+
+    #[test]
+    fn search_runs_every_bare_word_count_the_parser_accepts() {
+        // The parser accepts up to 64 positive text leaves. SQLite joins at
+        // most 64 tables, so the words must not cost one join each.
+        let index = search_index();
+
+        for count in [2, 62, 63, 64] {
+            let query = ["clep", "stray"]
+                .into_iter()
+                .cycle()
+                .take(count)
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert_paths(index.search(&query, 20).unwrap(), &["notes/stray.md"]);
+        }
+        let mixed = format!("{} \"stray\"", vec!["clep"; 63].join(" "));
+        assert_paths(index.search(&mixed, 20).unwrap(), &["notes/stray.md"]);
+        let none = format!("{} zzzmissing", vec!["clep"; 63].join(" "));
+        assert_paths(index.search(&none, 20).unwrap(), &[]);
     }
 
     #[test]
@@ -3556,6 +3731,36 @@ mod tests {
         );
         assert!(index.search("project:kitchen", 20).unwrap().is_empty());
         assert!(index.search("tag:Fermentation", 20).unwrap().is_empty());
+    }
+
+    #[test]
+    fn raw_grep_reports_invalid_fts5_syntax() {
+        let index = search_index();
+
+        // Control: well-formed raw syntax runs, and no hit is not an error.
+        assert_paths(
+            crate::grep::run(&index, "local AND backup", 20, true).unwrap(),
+            &["notes/backup.md"],
+        );
+        assert_paths(
+            crate::grep::run(&index, "zzzmissing", 20, true).unwrap(),
+            &[],
+        );
+        for query in [
+            "\"unterminated",
+            "AND",
+            "local AND",
+            "nosuchcolumn : x",
+            "NEAR(",
+        ] {
+            assert!(
+                matches!(
+                    crate::grep::run(&index, query, 20, true),
+                    Err(IndexError::Sqlite(_))
+                ),
+                "raw grep {query:?} must fail"
+            );
+        }
     }
 
     #[test]
@@ -3782,6 +3987,28 @@ mod tests {
         assert_eq!(
             paths(&index.search("tag:recency-order", 20).unwrap()),
             ["notes/newest.md", "notes/older.md", "notes/missing-date.md"]
+        );
+    }
+
+    #[test]
+    fn nul_in_user_text_never_reaches_sqlite_as_an_error() {
+        let index = search_index();
+
+        // A NUL separates words, as any other non-token character does.
+        for query in [
+            "\"local\0backup\"",
+            "\"\0local backup\"",
+            "\"local backup\0\"",
+        ] {
+            assert_paths(index.search(query, 20).unwrap(), &["notes/backup.md"]);
+        }
+        assert_paths(
+            index.search("title:\"backup\" \"local\0\"", 20).unwrap(),
+            &["notes/backup.md"],
+        );
+        assert_paths(
+            crate::grep::run(&index, "local\0backup", 20, false).unwrap(),
+            &["notes/backup.md"],
         );
     }
 

@@ -1537,6 +1537,63 @@ fn computed_tags_are_searchable_and_project_as_effective_tags() {
 }
 
 #[test]
+fn property_projection_migration_rederives_unchanged_pages_once() {
+    let page = r#"+++
+id = "019fd000-0000-7000-8000-000000000105"
+title = "Unchanged book"
+genres = ["", "sf"]
++++
+Stable body.
+"#;
+    let (_tmp, vault) = setup_vault(&[("notes/book.md", page)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    let genre_rows = |index: &VaultIndex| -> Vec<(i64, String)> {
+        index
+            .connection()
+            .prepare(
+                "SELECT ord, value_text FROM page_properties WHERE key = 'genres' ORDER BY ord",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    assert_eq!(genre_rows(&index), vec![(0, "sf".to_string())]);
+
+    // An index built before rows were numbered after dropping empty
+    // elements: the row keeps its original array position and no version is
+    // recorded.
+    index
+        .connection()
+        .execute_batch(
+            "UPDATE page_properties SET ord = 1 WHERE key = 'genres';
+             DELETE FROM derivation_meta WHERE key = 'property_derivation_version';",
+        )
+        .unwrap();
+    drop(index);
+
+    let mut reopened = VaultIndex::open(&db_path).unwrap();
+    let migration = reopened.build(&vault).unwrap();
+    assert_eq!(
+        (migration.pages_indexed, migration.pages_skipped),
+        (1, 0),
+        "a missing derivation version must bypass the unchanged-page skip",
+    );
+    assert_eq!(genre_rows(&reopened), vec![(0, "sf".to_string())]);
+
+    let unchanged = reopened.build(&vault).unwrap();
+    assert_eq!(
+        (unchanged.pages_indexed, unchanged.pages_skipped),
+        (0, 1),
+        "the stored derivation version must restore unchanged-page skipping",
+    );
+    assert_eq!(genre_rows(&reopened), vec![(0, "sf".to_string())]);
+}
+
+#[test]
 fn computed_tags_migration_rederives_unchanged_pages_once() {
     let journal = r#"+++
 id = "019fd000-0000-7000-8000-000000000104"
@@ -1854,13 +1911,14 @@ fn resolve_links_for_page_resolves_block_refs() {
     );
 
     // Also verify outgoing block ref resolution works
-    // Re-index referrer (simulating incremental update) and resolve
+    // Re-index referrer (simulating incremental update): `index_page`
+    // resolves the page's own links, so the per-page pass finds none left.
     index.remove_page(&referrer_vp).unwrap();
     index.index_page(&vault, &referrer_vp).unwrap();
     let resolved2 = index.resolve_links_for_page(&referrer_vp).unwrap();
-    assert!(
-        resolved2 > 0,
-        "outgoing block ref from referrer should resolve"
+    assert_eq!(
+        resolved2, 0,
+        "index_page already resolved the outgoing block ref"
     );
 
     let backlinks2 = index

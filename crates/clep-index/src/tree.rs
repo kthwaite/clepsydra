@@ -5,6 +5,7 @@ use std::io::{self, Write};
 
 use owo_colors::OwoColorize;
 use serde::Serialize;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::index::VaultIndex;
 use clep_vault::Vault;
@@ -42,7 +43,8 @@ pub fn load_note_meta(index: &VaultIndex) -> Result<HashMap<String, NoteMeta>, r
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
-        for (pid, tag) in rows.flatten() {
+        for row in rows {
+            let (pid, tag) = row?;
             tags_by_page.entry(pid).or_default().push(tag);
         }
     }
@@ -73,8 +75,7 @@ pub fn load_note_meta(index: &VaultIndex) -> Result<HashMap<String, NoteMeta>, r
                 row.get(7)?,
             ))
         })?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<_>>()?;
 
     let mut out = HashMap::with_capacity(rows.len());
     for (page_id, path, title, kind, created_at, updated_at, encrypted, word_count) in rows {
@@ -174,7 +175,10 @@ fn read_dir_sorted(
                 children,
             });
         } else if file_type.is_file() {
-            let entry_kind = if let Some(m) = meta.get(&rel) {
+            // `meta` is keyed by vault path, which is NFC; the name on disk
+            // may be decomposed (NFD).
+            let vault_path: String = rel.nfc().collect();
+            let entry_kind = if let Some(m) = meta.get(&vault_path) {
                 NodeEntry::Note(m.clone())
             } else {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
@@ -373,6 +377,41 @@ mod tests {
         assert!(matches!(alpha.entry, NodeEntry::Note(_)));
         let png = find(&root, "diagram.png").unwrap();
         assert!(matches!(png.entry, NodeEntry::File { .. }));
+    }
+
+    /// macOS tools often write decomposed (NFD) filenames. The index keys a
+    /// page by its vault path, which `VaultPath` normalizes to NFC.
+    #[test]
+    fn build_classifies_a_note_with_a_decomposed_filename() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        clep_vault::init::init_vault(&root).unwrap();
+        // "é" as `e` + U+0301, in a folder name and in a file name.
+        std::fs::create_dir_all(root.join("re\u{301}sume\u{301}")).unwrap();
+        std::fs::write(
+            root.join("re\u{301}sume\u{301}/cafe\u{301}.md"),
+            "one two\n",
+        )
+        .unwrap();
+        let vault = Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open_in_memory().unwrap();
+        index.build(&vault).unwrap();
+        let meta = load_note_meta(&index).unwrap();
+        assert!(meta.contains_key("r\u{e9}sum\u{e9}/caf\u{e9}.md"));
+
+        let tree = build(&vault, &meta);
+
+        let folder = tree
+            .children
+            .iter()
+            .find(|node| node.name.starts_with("re"))
+            .expect("folder listed");
+        assert_eq!(folder.children.len(), 1);
+        assert!(
+            matches!(folder.children[0].entry, NodeEntry::Note(_)),
+            "got {:?}",
+            folder.children[0].entry
+        );
     }
 
     #[test]

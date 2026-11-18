@@ -1,7 +1,84 @@
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp::lsp_types::{Position, PositionEncodingKind, Range};
 
 use clep_vault::link::{Link, extract_links};
 use clep_vault::page::{PageMeta, parse_or_repair_frontmatter};
+
+/// The unit of `Position::character` agreed with the client in `initialize`.
+///
+/// Every column that crosses the wire goes through [`column_of_byte`] or
+/// [`byte_of_column`]; the server works in UTF-8 byte offsets internally.
+///
+/// [`column_of_byte`]: PositionEncoding::column_of_byte
+/// [`byte_of_column`]: PositionEncoding::byte_of_column
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PositionEncoding {
+    /// Columns are UTF-8 bytes: the server's native unit, no conversion.
+    #[default]
+    Utf8,
+    /// Columns are UTF-16 code units: the encoding every client supports.
+    Utf16,
+}
+
+impl PositionEncoding {
+    /// Choose the encoding from the client's `general.positionEncodings`.
+    ///
+    /// LSP 3.17: the server may only pick an encoding the client offers, and
+    /// UTF-16 is the default when the client offers none. UTF-8 is chosen
+    /// whenever it is offered, wherever it sits in the client's list.
+    pub fn negotiate(offered: Option<&[PositionEncodingKind]>) -> Self {
+        match offered {
+            Some(kinds) if kinds.contains(&PositionEncodingKind::UTF8) => Self::Utf8,
+            _ => Self::Utf16,
+        }
+    }
+
+    /// The value to answer in `ServerCapabilities::position_encoding`.
+    pub fn kind(self) -> PositionEncodingKind {
+        match self {
+            Self::Utf8 => PositionEncodingKind::UTF8,
+            Self::Utf16 => PositionEncodingKind::UTF16,
+        }
+    }
+
+    /// Convert a byte column within `line` to a wire column.
+    ///
+    /// For UTF-16, a byte inside a multi-byte character counts as the start
+    /// of that character.
+    pub fn column_of_byte(self, line: &str, byte: usize) -> u32 {
+        match self {
+            Self::Utf8 => byte as u32,
+            Self::Utf16 => {
+                let mut end = byte.min(line.len());
+                while !line.is_char_boundary(end) {
+                    end -= 1;
+                }
+                line[..end].encode_utf16().count() as u32
+            }
+        }
+    }
+
+    /// Convert a wire column to a byte column within `line`.
+    ///
+    /// For UTF-16, a column inside a surrogate pair counts as the start of
+    /// that character, and a column past the end of the line is the end of
+    /// the line's content (before its terminator), as LSP specifies.
+    pub fn byte_of_column(self, line: &str, column: u32) -> usize {
+        match self {
+            Self::Utf8 => column as usize,
+            Self::Utf16 => {
+                let content = line.trim_end_matches(['\n', '\r']);
+                let mut units = 0;
+                for (byte, ch) in content.char_indices() {
+                    if units + ch.len_utf16() > column as usize {
+                        return byte;
+                    }
+                    units += ch.len_utf16();
+                }
+                content.len()
+            }
+        }
+    }
+}
 
 /// An open document tracked by the LSP server.
 ///
@@ -24,13 +101,17 @@ pub struct Document {
     pub version: i32,
     /// Whether the document has unsaved changes relative to the index.
     pub dirty: bool,
+    /// The unit of the columns in every [`Position`] this document produces
+    /// or accepts.
+    pub encoding: PositionEncoding,
 }
 
 impl Document {
     /// Parse a document from its full text content.
     ///
     /// Extracts frontmatter metadata, computes the body byte offset,
-    /// builds a rope, and extracts links from the body.
+    /// builds a rope, and extracts links from the body. Positions are in
+    /// UTF-8 columns; see [`Document::with_position_encoding`].
     pub fn from_text(text: &str, version: i32) -> Self {
         let (meta, parsed_body, _rewrote, _warning) = parse_or_repair_frontmatter(text);
         let body_byte_offset = text.len() - parsed_body.len();
@@ -53,6 +134,29 @@ impl Document {
             links,
             version,
             dirty: false,
+            encoding: PositionEncoding::Utf8,
+        }
+    }
+
+    /// Set the unit of the columns in this document's positions.
+    pub fn with_position_encoding(mut self, encoding: PositionEncoding) -> Self {
+        self.encoding = encoding;
+        self
+    }
+
+    /// Convert a byte column on `line` to a wire column.
+    fn column_of_byte(&self, line: usize, byte: usize) -> u32 {
+        match self.encoding {
+            PositionEncoding::Utf8 => byte as u32,
+            encoding => encoding.column_of_byte(&self.rope.line(line).to_string(), byte),
+        }
+    }
+
+    /// Convert a wire column on `line` to a byte column.
+    fn byte_of_column(&self, line: usize, column: u32) -> usize {
+        match self.encoding {
+            PositionEncoding::Utf8 => column as usize,
+            encoding => encoding.byte_of_column(&self.rope.line(line).to_string(), column),
         }
     }
 
@@ -60,8 +164,8 @@ impl Document {
     ///
     /// The offset is first translated to an absolute byte offset in the
     /// full document, then mapped through the rope to (line, character).
-    /// Since we advertise `PositionEncodingKind::UTF8`, the character
-    /// offset is measured in UTF-8 bytes from the start of the line.
+    /// The character is measured from the start of the line in the
+    /// document's [`PositionEncoding`].
     pub fn byte_offset_to_position(&self, body_offset: usize) -> Position {
         let abs = self.body_byte_offset + body_offset;
         let total_bytes = self.rope.len_bytes();
@@ -69,18 +173,19 @@ impl Document {
 
         let line = self.rope.byte_to_line(clamped);
         let line_start_byte = self.rope.line_to_byte(line);
-        let character = clamped - line_start_byte;
+        let character = self.column_of_byte(line, clamped - line_start_byte);
 
         Position {
             line: line as u32,
-            character: character as u32,
+            character,
         }
     }
 
     /// Convert an LSP [`Position`] to a byte offset within the *body*.
     ///
     /// Returns `None` if the position falls within the frontmatter
-    /// (i.e. before `body_byte_offset`).
+    /// (i.e. before `body_byte_offset`). A character past the end of its
+    /// line is clamped to the end of that line.
     pub fn position_to_body_byte_offset(&self, pos: Position) -> Option<usize> {
         if self.encrypted {
             return None;
@@ -91,13 +196,28 @@ impl Document {
         }
 
         let line_start_byte = self.rope.line_to_byte(line);
-        let abs = line_start_byte + pos.character as usize;
+        // A character past the end of the line means the end of the line
+        // (LSP `Position`), not a place in the lines that follow.
+        let column = self
+            .byte_of_column(line, pos.character)
+            .min(self.line_content_len(line));
+        let abs = line_start_byte + column;
 
         if abs < self.body_byte_offset {
             return None;
         }
 
         Some(abs - self.body_byte_offset)
+    }
+
+    /// Byte length of `line` without its line terminator.
+    fn line_content_len(&self, line: usize) -> usize {
+        let slice = self.rope.line(line);
+        let mut end = slice.len_chars();
+        while end > 0 && matches!(slice.char(end - 1), '\n' | '\r') {
+            end -= 1;
+        }
+        slice.char_to_byte(end)
     }
 
     /// Find the link whose span contains the given position.
@@ -171,5 +291,238 @@ mod tests {
                 character: 3
             }
         );
+    }
+
+    #[test]
+    fn only_lf_crlf_and_cr_end_a_line() {
+        // LSP 3.17: lines end at `\n`, `\r\n` or `\r`. Unicode line and
+        // paragraph separators, form feed, vertical tab and NEL are ordinary
+        // characters to the client, so they must not start a new line here.
+        for separator in ["\u{2028}", "\u{2029}", "\u{0c}", "\u{0b}", "\u{85}"] {
+            let doc = Document::from_text(&format!("a{separator}[[Alpha]]\nnext\n"), 1);
+            let start = 1 + separator.len() as u32;
+            let range = doc.link_to_range(&doc.links[0]);
+            assert_eq!(
+                (range.start, range.end),
+                (
+                    Position {
+                        line: 0,
+                        character: start
+                    },
+                    Position {
+                        line: 0,
+                        character: start + 9
+                    }
+                ),
+                "separator {separator:?}"
+            );
+            assert!(doc.link_at_position(range.start).is_some());
+            assert_eq!(doc.rope.len_lines(), 3, "separator {separator:?}");
+        }
+    }
+
+    #[test]
+    fn lf_crlf_and_lone_cr_each_end_a_line() {
+        for terminator in ["\n", "\r\n", "\r"] {
+            let doc = Document::from_text(&format!("a{terminator}[[Alpha]]"), 1);
+            let range = doc.link_to_range(&doc.links[0]);
+            assert_eq!(
+                (range.start, range.end),
+                (
+                    Position {
+                        line: 1,
+                        character: 0
+                    },
+                    Position {
+                        line: 1,
+                        character: 9
+                    }
+                ),
+                "terminator {terminator:?}"
+            );
+        }
+    }
+
+    fn pos(line: u32, character: u32) -> Position {
+        Position { line, character }
+    }
+
+    fn utf16_doc(text: &str) -> Document {
+        Document::from_text(text, 1).with_position_encoding(PositionEncoding::Utf16)
+    }
+
+    #[test]
+    fn negotiate_defaults_to_utf16_when_the_client_offers_nothing() {
+        assert_eq!(PositionEncoding::negotiate(None), PositionEncoding::Utf16);
+        assert_eq!(
+            PositionEncoding::negotiate(Some(&[])),
+            PositionEncoding::Utf16
+        );
+    }
+
+    #[test]
+    fn negotiate_picks_utf8_only_when_the_client_offers_it() {
+        let utf16_first = [PositionEncodingKind::UTF16, PositionEncodingKind::UTF8];
+        assert_eq!(
+            PositionEncoding::negotiate(Some(&utf16_first)),
+            PositionEncoding::Utf8
+        );
+        let no_utf8 = [PositionEncodingKind::UTF32, PositionEncodingKind::UTF16];
+        assert_eq!(
+            PositionEncoding::negotiate(Some(&no_utf8)),
+            PositionEncoding::Utf16
+        );
+        // UTF-32 alone is not implemented; UTF-16 is mandatory for clients.
+        assert_eq!(
+            PositionEncoding::negotiate(Some(&[PositionEncodingKind::UTF32])),
+            PositionEncoding::Utf16
+        );
+    }
+
+    #[test]
+    fn utf16_columns_count_code_units_not_bytes() {
+        let utf16 = PositionEncoding::Utf16;
+        // `ë` is 2 bytes and 1 unit; `𝒜` is 4 bytes and 2 units.
+        let line = "Zoë 𝒜 x\n";
+        assert_eq!(utf16.column_of_byte(line, 0), 0);
+        assert_eq!(utf16.column_of_byte(line, 4), 3); // after `Zoë`
+        assert_eq!(utf16.column_of_byte(line, 9), 6); // after `Zoë 𝒜`
+        assert_eq!(utf16.column_of_byte(line, 11), 8); // after `x`
+        assert_eq!(utf16.byte_of_column(line, 3), 4);
+        assert_eq!(utf16.byte_of_column(line, 6), 9);
+        assert_eq!(utf16.byte_of_column(line, 8), 11);
+    }
+
+    #[test]
+    fn utf16_columns_inside_a_character_round_down_to_its_start() {
+        let utf16 = PositionEncoding::Utf16;
+        let line = "a𝒜b";
+        assert_eq!(utf16.byte_of_column(line, 2), 1); // inside the surrogate pair
+        assert_eq!(utf16.column_of_byte(line, 3), 1); // inside the 4-byte sequence
+    }
+
+    #[test]
+    fn utf16_column_past_the_line_end_is_the_end_of_its_content() {
+        let utf16 = PositionEncoding::Utf16;
+        assert_eq!(utf16.byte_of_column("ë\n", 9), 2);
+        assert_eq!(utf16.byte_of_column("ë\r\n", 9), 2);
+        assert_eq!(utf16.byte_of_column("", 9), 0);
+    }
+
+    #[test]
+    fn utf8_columns_are_bytes() {
+        let utf8 = PositionEncoding::Utf8;
+        assert_eq!(utf8.column_of_byte("Zoë x", 4), 4);
+        assert_eq!(utf8.byte_of_column("Zoë x", 4), 4);
+    }
+
+    #[test]
+    fn link_range_is_in_utf16_units_for_a_utf16_document() {
+        let doc = utf16_doc("Zoë [[Alpha]]\n");
+        let range = doc.link_to_range(&doc.links[0]);
+        assert_eq!((range.start, range.end), (pos(0, 4), pos(0, 13)));
+
+        // The same document for a UTF-8 client: byte columns.
+        let doc = Document::from_text("Zoë [[Alpha]]\n", 1);
+        let range = doc.link_to_range(&doc.links[0]);
+        assert_eq!((range.start, range.end), (pos(0, 5), pos(0, 14)));
+    }
+
+    #[test]
+    fn utf16_positions_resolve_to_the_link_under_the_cursor() {
+        // Line 3 (after the frontmatter): `𝒜é [[Alpha]] tail`.
+        let doc = utf16_doc("---\ntitle: T\n---\n𝒜é [[Alpha]] tail\n");
+        let range = doc.link_to_range(&doc.links[0]);
+        assert_eq!((range.start, range.end), (pos(3, 4), pos(3, 13)));
+        assert!(doc.link_at_position(pos(3, 3)).is_none());
+        assert!(doc.link_at_position(pos(3, 4)).is_some());
+        assert!(doc.link_at_position(pos(3, 12)).is_some());
+        assert!(doc.link_at_position(pos(3, 13)).is_none());
+        // Body offsets are bytes: `𝒜é ` is 7 bytes.
+        assert_eq!(doc.position_to_body_byte_offset(pos(3, 4)), Some(7));
+        assert_eq!(doc.position_to_body_byte_offset(pos(1, 2)), None);
+    }
+
+    #[test]
+    fn utf16_link_range_after_a_crlf_line() {
+        let doc = utf16_doc("ë\r\n𝒜[[Alpha]]\r\n");
+        let range = doc.link_to_range(&doc.links[0]);
+        assert_eq!((range.start, range.end), (pos(1, 2), pos(1, 11)));
+        assert!(doc.link_at_position(pos(1, 2)).is_some());
+        assert!(doc.link_at_position(pos(1, 1)).is_none());
+    }
+
+    #[test]
+    fn utf16_positions_round_trip_through_body_offsets() {
+        let doc = utf16_doc("日本 a\n𝒜𝒜 b\nZoë\n");
+        for (offset, _) in doc.body.char_indices() {
+            let position = doc.byte_offset_to_position(offset);
+            assert_eq!(doc.position_to_body_byte_offset(position), Some(offset));
+        }
+    }
+
+    #[test]
+    fn character_past_the_line_end_clamps_to_the_line_end() {
+        // LSP 3.17 `Position`: "If the character value is greater than the
+        // line length it defaults back to the line length."
+        let doc = Document::from_text("x\nalpha [[Beta]] tail\n", 1);
+        let past_end = Position {
+            line: 0,
+            character: 9,
+        };
+        // Unclamped, byte 9 is inside the link on line 1.
+        assert!(doc.link_at_position(past_end).is_none());
+        assert_eq!(doc.position_to_body_byte_offset(past_end), Some(1));
+    }
+
+    #[test]
+    fn clamped_position_stops_before_the_line_terminator() {
+        for (text, line_end) in [("ab\r\ncd", 2), ("ab\rcd", 2), ("ab\ncd", 2)] {
+            let doc = Document::from_text(text, 1);
+            let past_end = Position {
+                line: 0,
+                character: 40,
+            };
+            assert_eq!(
+                doc.position_to_body_byte_offset(past_end),
+                Some(line_end),
+                "text {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn character_past_the_end_of_the_last_line_is_the_document_end() {
+        let doc = Document::from_text("ab\ncd", 1);
+        let past_end = Position {
+            line: 1,
+            character: 40,
+        };
+        assert_eq!(doc.position_to_body_byte_offset(past_end), Some(5));
+        // A link that ends the document is not under a cursor past its end.
+        let doc = Document::from_text("[[Alpha]]", 1);
+        assert!(doc.link_at_position(past_end).is_none());
+        assert!(
+            doc.link_at_position(Position {
+                line: 0,
+                character: 40
+            })
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn character_within_the_line_is_unchanged() {
+        let doc = Document::from_text("---\ntitle: T\n---\nab [[Alpha]]\n", 1);
+        let at = |character| Position { line: 3, character };
+        assert_eq!(doc.position_to_body_byte_offset(at(0)), Some(0));
+        assert_eq!(doc.position_to_body_byte_offset(at(12)), Some(12));
+        assert!(doc.link_at_position(at(11)).is_some());
+        // Frontmatter positions stay outside the body, clamped or not.
+        let in_frontmatter = Position {
+            line: 1,
+            character: 40,
+        };
+        assert_eq!(doc.position_to_body_byte_offset(in_frontmatter), None);
     }
 }

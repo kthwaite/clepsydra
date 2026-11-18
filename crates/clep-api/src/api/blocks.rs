@@ -12,7 +12,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
-use crate::vault::block::parse_blocks;
+use crate::vault::block::{Block, BlockType, parse_blocks};
 use crate::vault::block_id::BlockId;
 use crate::vault::mutation_coordinator::ReplacePageContentCommand;
 use crate::vault::page::Page;
@@ -300,7 +300,7 @@ pub async fn assign_block_id(
         ))
     })?;
 
-    let mut content = std::fs::read_to_string(&abs_path)
+    let content = std::fs::read_to_string(&abs_path)
         .map_err(|e| ApiError::internal(format!("Failed to read file: {}", e)))?;
     let expected_content = content.clone();
     let body_offset = find_body_offset(&content);
@@ -311,44 +311,53 @@ pub async fn assign_block_id(
         .map_err(|_| ApiError::conflict("Block target has an invalid span_start"))?;
     let span_end = usize::try_from(span_end)
         .map_err(|_| ApiError::conflict("Block target has an invalid span_end"))?;
-    let current_block = parse_blocks(body).into_iter().find(|block| {
+    let blocks = parse_blocks(body);
+    let target = blocks.iter().position(|block| {
         block.span.start == span_start
             && block.span.end == span_end
             && block.content == indexed_content
             && block.block_id == indexed_block_id
     });
-    if current_block.is_none() {
+    let Some(target) = target else {
         return Err(ApiError::conflict(format!(
             "Block target is stale at path={}, span_start={}",
             page_path, span_start
         )));
-    }
+    };
     if !body.is_char_boundary(span_start) || !body.is_char_boundary(span_end) {
         return Err(ApiError::conflict(
             "Block target is not on UTF-8 boundaries",
         ));
     }
 
-    let file_span_end = body_offset
-        .checked_add(span_end)
-        .ok_or_else(|| ApiError::conflict("Block target span overflowed"))?;
-    if file_span_end > content.len() || !content.is_char_boundary(file_span_end) {
-        return Err(ApiError::conflict("Block target is stale"));
-    }
-    let insert_pos =
-        if file_span_end > 0 && content.as_bytes().get(file_span_end - 1) == Some(&b'\n') {
-            file_span_end - 1
-        } else {
-            file_span_end
-        };
-    if !content.is_char_boundary(insert_pos) {
-        return Err(ApiError::conflict(
-            "Block target is not on a UTF-8 boundary",
-        ));
+    // A block has one id: a second marker would turn the first into text and
+    // break every reference to it.
+    if let Some(existing) = &blocks[target].block_id {
+        return Ok(Json(AssignIdResponse {
+            block_id: existing.clone(),
+        }));
     }
 
     let id_str = BlockId::generate().to_string();
-    content.insert_str(insert_pos, &format!(" ^{}", id_str));
+    let marker = format!(" ^{id_str}");
+    let new_body = id_insertion_offset(body, &blocks, target)
+        .map(|offset| format!("{}{marker}{}", &body[..offset], &body[offset..]))
+        .filter(|new_body| {
+            only_adds_id(
+                &blocks,
+                &parse_blocks(new_body),
+                target,
+                &id_str,
+                marker.len(),
+            )
+        })
+        .ok_or_else(|| {
+            ApiError::bad_request(format!(
+                "Block at path={}, span_start={} cannot carry a block ID at the end of its text",
+                page_path, span_start
+            ))
+        })?;
+    let content = format!("{}{new_body}", &content[..body_offset]);
     let notify = crate::api::mutation_notifier(&state);
     state
         .mutation_coordinator
@@ -371,6 +380,108 @@ pub async fn assign_block_id(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Byte offset in `body` where ` ^id` attaches to `blocks[target]`: the end
+/// of the block's own text, before trailing spaces and the line terminator.
+///
+/// The block's span is not enough to find it. A tight list item's span runs
+/// over its nested children and over the blank line that ends the list, and a
+/// setext heading's span runs over its underline. The block's own text is the
+/// part of the span before the first nested block, less trailing blank lines
+/// (inside a blockquote those hold only `>` markers) and less the underline.
+/// In an ATX heading with a closing sequence (`# Title #`) the id goes before
+/// the closing hashes, which would otherwise become heading text.
+///
+/// Returns `None` for a block whose last line is syntax an id would break: a
+/// code block (the id would be code, or stop the fence closing) and a block
+/// ending in a `$$` math fence.
+fn id_insertion_offset(body: &str, blocks: &[Block], target: usize) -> Option<usize> {
+    const INLINE_SPACE: [char; 3] = [' ', '\t', '\r'];
+
+    let block = &blocks[target];
+    if block.block_type == BlockType::Code {
+        return None;
+    }
+    let own_end = blocks
+        .get(target + 1)
+        .map(|next| next.span.start)
+        .filter(|start| block.span.contains(start))
+        .unwrap_or(block.span.end);
+    let own = body.get(block.span.start..own_end)?;
+
+    // (offset in `own`, text without trailing spaces or line terminator).
+    let mut lines: Vec<(usize, &str)> = Vec::new();
+    let mut offset = 0;
+    for line in own.split_inclusive('\n') {
+        lines.push((
+            offset,
+            line.trim_end_matches('\n').trim_end_matches(INLINE_SPACE),
+        ));
+        offset += line.len();
+    }
+    let is_blank = |text: &str| {
+        text.chars()
+            .all(|ch| INLINE_SPACE.contains(&ch) || ch == '>')
+    };
+    while lines.len() > 1 && lines.last().is_some_and(|(_, text)| is_blank(text)) {
+        lines.pop();
+    }
+    if block.block_type == BlockType::Heading
+        && lines.len() > 1
+        && lines.last().is_some_and(|(_, text)| {
+            let underline = text.trim_start_matches(|ch| INLINE_SPACE.contains(&ch) || ch == '>');
+            !underline.is_empty()
+                && (underline.chars().all(|ch| ch == '=') || underline.chars().all(|ch| ch == '-'))
+        })
+    {
+        lines.pop();
+    }
+
+    let (line_start, mut text) = *lines.last()?;
+    if text.ends_with("$$") {
+        return None;
+    }
+    if block.block_type == BlockType::Heading && lines.len() == 1 && text.starts_with('#') {
+        let without_closing = text.trim_end_matches('#');
+        if without_closing.len() < text.len() && without_closing.ends_with([' ', '\t']) {
+            text = without_closing.trim_end_matches(INLINE_SPACE);
+        }
+    }
+    Some(block.span.start + line_start + text.len())
+}
+
+/// Whether `after` (the blocks of the page with the id marker inserted) is
+/// `before` with `id` on `before[target]` and nothing else changed: the same
+/// blocks, in the same places, with the same text. This is the guard that
+/// keeps an insertion from changing any other block of the user's page.
+fn only_adds_id(
+    before: &[Block],
+    after: &[Block],
+    target: usize,
+    id: &str,
+    marker_len: usize,
+) -> bool {
+    before.len() == after.len()
+        && before
+            .iter()
+            .zip(after)
+            .enumerate()
+            .all(|(index, (old, new))| {
+                let shift = if index > target { marker_len } else { 0 };
+                let id_matches = if index == target {
+                    new.block_id.as_deref() == Some(id)
+                } else {
+                    new.block_id == old.block_id
+                };
+                id_matches
+                    && new.block_type == old.block_type
+                    && new.content == old.content
+                    && new.properties == old.properties
+                    && new.checkbox == old.checkbox
+                    && new.depth == old.depth
+                    && new.span.start == old.span.start + shift
+            })
+}
 
 /// Find the byte offset where the body begins (after the closing frontmatter
 /// fence, `+++` or legacy `---`). Returns 0 if no frontmatter is detected.

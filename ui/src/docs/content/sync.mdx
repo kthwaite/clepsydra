@@ -273,6 +273,12 @@ are repointed to the winner, except a bare date link (`[[2026-08-29]]`), which
 is left alone: once the duplicate is gone it resolves through the winner's own
 title.
 
+Frontmatter folds too, and only ever adds: `tags`, `aliases` and `attachments`
+are unioned, and a field or custom property that only a folded page sets is
+carried over to the winner. Where two pages set the same field differently the
+winner keeps its own value and the sync reports a warning naming the value
+that was not folded in; it is still in the folded page's git history.
+
 Two dates are left alone rather than folded, each with a warning: one whose
 pages include an encrypted page — an encrypted body is a single sealed block,
 so there are no entries to interleave — and one left with nothing but Conflict

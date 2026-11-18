@@ -1,19 +1,13 @@
 use std::ops::Range;
 
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, TextMergeWithOffset};
-use regex::Regex;
+use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd, TextMergeWithOffset};
+
+use crate::link::WikilinkScan;
 
 /// Sentinel prefix: replace the entire link syntax with plain text.
 pub const DELETE_PLAIN: &str = "\x00PLAIN:";
 /// Sentinel prefix: replace the entire link syntax with strikethrough text.
 pub const DELETE_UNLINK: &str = "\x00UNLINK:";
-
-/// Return a lazily compiled regex for wikilinks: `[[target]]` or `[[target|display]]`.
-fn wikilink_regex() -> &'static Regex {
-    use std::sync::OnceLock;
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\[\[([^\[\]]+)\]\]").unwrap())
-}
 
 /// An edit to apply: replace `range` bytes in the source with `replacement`.
 #[derive(Debug)]
@@ -27,10 +21,18 @@ struct Edit {
 ///
 /// Each entry is `(old_target, new_target)`. Only the matching syntax is
 /// rewritten; wikilink display text and Markdown link labels are preserved.
+/// For a Markdown link only the destination bytes change: the label, the
+/// title, padding and angle brackets stay as written. The new destination is
+/// written in a form that parses back to `new_target` (angle brackets when it
+/// contains spaces, backslash escapes where needed); a link whose new
+/// destination has no such form is left untouched.
 ///
 /// Special `new_target` prefixes trigger delete-rewrite modes:
 /// - `\x00PLAIN:text` replaces `[[target]]` with `text` (plain text, no syntax)
 /// - `\x00UNLINK:text` replaces `[[target]]` with `~~text~~` (strikethrough)
+///
+/// A reference-style link (`[x][r]` with `[r]: target`) is rewritten at its
+/// definition; the usages stay as written.
 ///
 /// Links inside code blocks, inline code, and HTML blocks are left untouched.
 pub fn rewrite_links_in_content(
@@ -42,22 +44,62 @@ pub fn rewrite_links_in_content(
         return content.to_string();
     }
 
-    let edits = collect_edits(content, wikilink_replacements, markdown_replacements);
+    rewrite_links_with(content, |syntax, target| {
+        let replacements = match syntax {
+            LinkSyntax::Wiki => wikilink_replacements,
+            LinkSyntax::Markdown => markdown_replacements,
+        };
+        replacements
+            .iter()
+            .find(|(old, _)| *old == target)
+            .map(|(_, new)| (*new).to_string())
+    })
+}
+
+/// The syntax a link is written in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkSyntax {
+    /// `[[target]]` / `[[target|display]]`.
+    Wiki,
+    /// `[label](destination)`, or a reference-style link and its definition.
+    Markdown,
+}
+
+/// Rewrite links in Markdown `content`, asking `new_target` about every link.
+///
+/// `new_target` receives the link's syntax and its target exactly as written
+/// (the text before `|` of a wikilink, padding included; the parsed
+/// destination of a Markdown link) and returns the target to write instead,
+/// or `None` to leave the link as it is. The caller decides which links to
+/// rewrite, for example by what each target resolves to, rather than by
+/// comparing text.
+///
+/// Everything else is as for [`rewrite_links_in_content`]: only the target
+/// bytes change, delete sentinels apply to wikilinks, reference-style links
+/// are rewritten at their definition, and code and HTML are left untouched.
+pub fn rewrite_links_with(
+    content: &str,
+    new_target: impl Fn(LinkSyntax, &str) -> Option<String>,
+) -> String {
+    let edits = collect_edits(content, &new_target);
     apply_edits(content, edits)
 }
 
-/// Scan `content` for links matching any replacement and return edits.
+/// Scan `content` for links that `new_target` rewrites and return edits.
 fn collect_edits(
     content: &str,
-    wikilink_replacements: &[(&str, &str)],
-    markdown_replacements: &[(&str, &str)],
+    new_target: &dyn Fn(LinkSyntax, &str) -> Option<String>,
 ) -> Vec<Edit> {
-    let raw_iter = Parser::new_ext(content, Options::empty()).into_offset_iter();
+    let raw_iter = Parser::new_ext(content, crate::link::link_scan_options()).into_offset_iter();
     let parser = TextMergeWithOffset::new(raw_iter);
-
-    let mut edits = Vec::new();
     let mut in_code_block = false;
     let mut in_html_block = false;
+    // Labels of reference-style links (`[x][r]`, `[r][]`, `[r]`) whose
+    // destination matches a replacement, with that replacement.
+    let mut matched_references: Vec<(Range<usize>, String, String, String)> = Vec::new();
+    let mut wikilinks = WikilinkScan::default();
+    let mut edits = Vec::new();
+    let mut pending_link: Option<PendingLink> = None;
 
     for (event, range) in parser {
         match event {
@@ -67,54 +109,130 @@ fn collect_edits(
             Event::Start(Tag::HtmlBlock) => in_html_block = true,
             Event::End(TagEnd::HtmlBlock) => in_html_block = false,
 
-            // --- standard markdown links [text](url) ---
-            Event::Start(Tag::Link { dest_url, .. }) if !in_code_block && !in_html_block => {
+            // --- inline markdown links [text](url "title") ---
+            Event::Start(Tag::Link {
+                link_type: LinkType::Inline,
+                dest_url,
+                ..
+            }) if !in_code_block && !in_html_block => {
                 let url = dest_url.as_ref();
-                if let Some((_old, new)) = markdown_replacements.iter().find(|(old, _)| *old == url)
+                pending_link = new_target(LinkSyntax::Markdown, url).map(|new_url| PendingLink {
+                    old_url: url.to_string(),
+                    new_url,
+                    // Just past the opening `[`; label events push it on.
+                    label_end: range.start + 1,
+                });
+            }
+            // --- reference-style links: the destination is in the definition ---
+            Event::Start(Tag::Link {
+                link_type:
+                    link_type @ (LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut),
+                dest_url,
+                id,
+                ..
+            }) if !in_code_block && !in_html_block => {
+                if link_type == LinkType::Shortcut {
+                    wikilinks.label_brackets(&range);
+                }
+                let url = dest_url.as_ref();
+                if let Some(new_url) = new_target(LinkSyntax::Markdown, url) {
+                    matched_references.push((range, id.to_string(), url.to_string(), new_url));
+                }
+            }
+            Event::End(TagEnd::Link) => {
+                if let Some(link) = pending_link.take()
+                    && let Some(edit) = rewrite_markdown_link(
+                        content,
+                        link.label_end..range.end,
+                        &link.old_url,
+                        &link.new_url,
+                    )
                 {
-                    // The range covers the entire `[text](url)` syntax.
-                    // We need to replace just the URL portion.
-                    let link_text = &content[range.start..range.end];
-                    if let Some(edit) = rewrite_markdown_link(link_text, new, range.start) {
-                        edits.push(edit);
-                    }
+                    edits.push(edit);
                 }
             }
 
-            // --- wikilinks in text events ---
+            Event::FootnoteReference(_) if !in_code_block && !in_html_block => {
+                wikilinks.label_brackets(&range);
+            }
+
+            // --- live text: where wikilink brackets may sit ---
             Event::Text(_) if !in_code_block && !in_html_block => {
-                let source_slice = &content[range.start..range.end];
-                let re = wikilink_regex();
-                for cap in re.captures_iter(source_slice) {
-                    let m = cap.get(0).unwrap();
-                    let inner = &cap[1];
-                    // Extract target (before `|` if display text is present)
-                    let (target, display) = match inner.split_once('|') {
-                        Some((t, d)) => (t, Some(d)),
-                        None => (inner, None),
-                    };
-
-                    if let Some((_old, new)) =
-                        wikilink_replacements.iter().find(|(old, _)| *old == target)
-                    {
-                        let abs_start = range.start + m.start();
-                        let abs_end = range.start + m.end();
-
-                        let replacement = build_wikilink_replacement(new, target, display);
-                        edits.push(Edit {
-                            range: abs_start..abs_end,
-                            replacement,
-                        });
-                    }
+                if let Some(link) = pending_link.as_mut() {
+                    link.label_end = link.label_end.max(range.end);
                 }
+                wikilinks.text(&range);
             }
 
-            // Inline code — skip entirely
-            Event::Code(_) => {}
-            _ => {}
+            // Anything else inside a link label (inline code, emphasis,
+            // images, …) is skipped, but moves the end of the label on.
+            _ => {
+                if let Some(link) = pending_link.as_mut() {
+                    link.label_end = link.label_end.max(range.end);
+                }
+            }
         }
     }
 
+    // --- wikilinks ---
+    let wikilinks = wikilinks.matches(content);
+    for wikilink in &wikilinks {
+        let inner = &content[wikilink.inner.clone()];
+        // Extract target (before `|` if display text is present)
+        let (target, display) = match inner.split_once('|') {
+            Some((t, d)) => (t, Some(d)),
+            None => (inner, None),
+        };
+        if let Some(new) = new_target(LinkSyntax::Wiki, target) {
+            edits.push(Edit {
+                range: wikilink.span.clone(),
+                replacement: build_wikilink_replacement(&new, target, display),
+            });
+        }
+    }
+
+    // A reference link inside a wikilink (`[[Alpha]]` with `[Alpha]: x`) is
+    // part of the wikilink, not a use of the definition.
+    matched_references.retain(|(link, ..)| {
+        !wikilinks
+            .iter()
+            .any(|wikilink| wikilink.span.start <= link.start && link.end <= wikilink.span.end)
+    });
+    if !matched_references.is_empty() {
+        edits.extend(reference_definition_edits(content, matched_references));
+    }
+
+    edits
+}
+
+/// Edits for the link reference definitions behind the reference-style links
+/// in `references` (`(link span, label, old_url, new_url)`); each definition is edited
+/// once. A definition that no matching link uses is not touched.
+fn reference_definition_edits(
+    content: &str,
+    references: Vec<(Range<usize>, String, String, String)>,
+) -> Vec<Edit> {
+    // Definitions produce no event; they are read from the parser's table.
+    let parser = Parser::new_ext(content, crate::link::link_scan_options());
+    let definitions = parser.reference_definitions();
+
+    let mut edits: Vec<Edit> = Vec::new();
+    for (_link, label, old_url, new_url) in references {
+        let Some(def) = definitions.get(&label) else {
+            continue;
+        };
+        if edits
+            .iter()
+            .any(|edit| def.span.contains(&edit.range.start))
+        {
+            continue;
+        }
+        if let Some(from) = definition_destination_start(content, def.span.clone())
+            && let Some(edit) = rewrite_destination(content, from..def.span.end, &old_url, &new_url)
+        {
+            edits.push(edit);
+        }
+    }
     edits
 }
 
@@ -139,20 +257,168 @@ fn build_wikilink_replacement(
     }
 }
 
-/// Replace just the URL in a markdown link `[text](url)`, returning an Edit
-/// whose range is absolute in the document.
-fn rewrite_markdown_link(link_text: &str, new_url: &str, base_offset: usize) -> Option<Edit> {
-    // Find the last `](` which separates display text from URL.
-    let paren_open = link_text.rfind("](")?;
-    // URL starts right after `(`
-    let url_start = paren_open + 2;
-    // Find the closing `)`
-    let url_end = link_text[url_start..].find(')')? + url_start;
+/// An inline Markdown link whose destination matches a replacement, open
+/// between its `Start` and `End` events.
+struct PendingLink {
+    old_url: String,
+    new_url: String,
+    /// End of the last label event seen so far: the `](` that opens the
+    /// destination is searched for from here, never inside the label.
+    label_end: usize,
+}
 
-    Some(Edit {
-        range: (base_offset + url_start)..(base_offset + url_end),
-        replacement: new_url.to_string(),
-    })
+/// Replace just the destination of an inline Markdown link. `tail` runs from
+/// the end of the label's content to the end of the link, so it holds
+/// `](destination "title")`. Returns `None`, leaving the link as written, if
+/// the bytes found do not read back as `old_url` (e.g. a destination on a
+/// continuation line behind a `>` blockquote marker).
+fn rewrite_markdown_link(
+    content: &str,
+    tail: Range<usize>,
+    old_url: &str,
+    new_url: &str,
+) -> Option<Edit> {
+    let open = tail.start + content[tail.clone()].find("](")? + 2;
+    rewrite_destination(content, open..tail.end, old_url, new_url)
+}
+
+/// Offset just past the `[label]:` that opens the link reference definition
+/// at `span`.
+fn definition_destination_start(content: &str, span: Range<usize>) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut i = span.start + content[span.clone()].find('[')? + 1;
+    while i < span.end {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b']' => break,
+            _ => i += 1,
+        }
+    }
+    (bytes.get(i + 1) == Some(&b':') && i + 2 <= span.end).then_some(i + 2)
+}
+
+/// Replace the link destination that starts at or after `within.start`
+/// (leading whitespace is skipped) if it reads back as `old_url`.
+fn rewrite_destination(
+    content: &str,
+    within: Range<usize>,
+    old_url: &str,
+    new_url: &str,
+) -> Option<Edit> {
+    // Delete sentinels are wikilink-only: never write one into a destination.
+    // An empty destination cannot be written in a reference definition.
+    if new_url.starts_with('\x00') || new_url.is_empty() {
+        return None;
+    }
+    let (range, angle) = locate_destination(content, within.start, within.end)?;
+    let found = &content[range.clone()];
+    let found_reads_as_old = if angle {
+        destination_parses_to(&format!("<{found}>"), old_url)
+    } else {
+        destination_parses_to(found, old_url)
+    };
+    if !found_reads_as_old {
+        return None;
+    }
+    let replacement = encode_destination(new_url, angle)?;
+    Some(Edit { range, replacement })
+}
+
+/// Locate the CommonMark link destination that starts at or after `from`
+/// (leading whitespace is skipped). Returns its byte range, without the angle
+/// brackets, and whether it is written in the `<…>` form.
+fn locate_destination(content: &str, from: usize, end: usize) -> Option<(Range<usize>, bool)> {
+    let bytes = content.as_bytes();
+    let mut pos = from;
+    while pos < end && bytes[pos].is_ascii_whitespace() {
+        pos += 1;
+    }
+
+    if pos < end && bytes[pos] == b'<' {
+        let start = pos + 1;
+        let mut i = start;
+        while i < end {
+            match bytes[i] {
+                b'\\' if i + 1 < end && bytes[i + 1].is_ascii_punctuation() => i += 2,
+                b'>' => return Some((start..i, true)),
+                b'<' | b'\n' | b'\r' => return None,
+                _ => i += 1,
+            }
+        }
+        return None;
+    }
+
+    // Bare form: ends at whitespace, a control character, or the first
+    // unbalanced `)`; backslash-escaped punctuation never ends it.
+    let mut depth = 0usize;
+    let mut i = pos;
+    while i < end {
+        match bytes[i] {
+            b'\\' if i + 1 < end && bytes[i + 1].is_ascii_punctuation() => i += 2,
+            b'(' => {
+                depth += 1;
+                i += 1;
+            }
+            b')' if depth == 0 => break,
+            b')' => {
+                depth -= 1;
+                i += 1;
+            }
+            b if b.is_ascii_whitespace() || b.is_ascii_control() => break,
+            _ => i += 1,
+        }
+    }
+    Some((pos..i, false))
+}
+
+/// Write `url` as a link destination that parses back to exactly `url`.
+/// Keeps the `<…>` form when the link already used it, otherwise prefers the
+/// bare form and falls back to `<…>` (needed for spaces). Returns the text to
+/// put in place of the old destination: for an angle-bracket link that is the
+/// inside of the brackets. `None` if no form round-trips (e.g. a line break).
+fn encode_destination(url: &str, angle: bool) -> Option<String> {
+    let bare = [url.to_string(), escape_destination(url, "\\()<&")];
+    let angled = [url.to_string(), escape_destination(url, "\\<>&")];
+
+    if angle {
+        return angled
+            .into_iter()
+            .find(|inner| destination_parses_to(&format!("<{inner}>"), url));
+    }
+    bare.into_iter()
+        .find(|dest| destination_parses_to(dest, url))
+        .or_else(|| {
+            angled
+                .into_iter()
+                .map(|inner| format!("<{inner}>"))
+                .find(|dest| destination_parses_to(dest, url))
+        })
+}
+
+/// Backslash-escape every character of `url` that is in `special`.
+fn escape_destination(url: &str, special: &str) -> String {
+    let mut escaped = String::with_capacity(url.len());
+    for ch in url.chars() {
+        if special.contains(ch) {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+/// True if `[x](destination)` is one inline link whose target is `url`.
+fn destination_parses_to(destination: &str, url: &str) -> bool {
+    let probe = format!("[x]({destination})");
+    Parser::new_ext(&probe, Options::empty())
+        .into_offset_iter()
+        .any(|(event, range)| {
+            matches!(
+                event,
+                Event::Start(Tag::Link { link_type: LinkType::Inline, ref dest_url, .. })
+                    if dest_url.as_ref() == url && range == (0..probe.len())
+            )
+        })
 }
 
 /// Apply collected edits to `content` in reverse byte-offset order.

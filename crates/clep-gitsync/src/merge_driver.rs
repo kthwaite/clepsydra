@@ -129,41 +129,81 @@ fn text_merge(base: &[u8], ours: &[u8], theirs: &[u8]) -> Option<(Vec<u8>, bool)
 /// Field-wise 3-way frontmatter merge; `None` means a field both sides
 /// changed to different values — the whole file is a residual conflict.
 fn merge_meta(base: Option<&PageMeta>, ours: &PageMeta, theirs: &PageMeta) -> Option<PageMeta> {
-    let mut meta = ours.clone();
-    meta.title = scalar3(base.map(|b| &b.title), &ours.title, &theirs.title)?;
-    meta.kind = scalar3(base.map(|b| &b.kind), &ours.kind, &theirs.kind)?;
-    meta.project = scalar3(base.map(|b| &b.project), &ours.project, &theirs.project)?;
-    meta.readonly = scalar3(base.map(|b| &b.readonly), &ours.readonly, &theirs.readonly)?;
-    meta.encryption = scalar3(
-        base.map(|b| &b.encryption),
-        &ours.encryption,
-        &theirs.encryption,
-    )?;
-    meta.tags = set3(
-        base.map(|b| b.tags.as_slice()).unwrap_or(&[]),
-        &ours.tags,
-        &theirs.tags,
-    );
-    meta.aliases = set3(
-        base.map(|b| b.aliases.as_slice()).unwrap_or(&[]),
-        &ours.aliases,
-        &theirs.aliases,
-    );
-    meta.created_at = min_time(ours.created_at, theirs.created_at);
-    meta.updated_at = max_time(ours.updated_at, theirs.updated_at);
-    meta.extra = merge_extras(base.map(|b| &b.extra), &ours.extra, &theirs.extra)?;
-    Some(meta)
+    // A struct literal, not `ours.clone()` plus assignments: a field added to
+    // `PageMeta` later must be given a merge rule here to compile, instead of
+    // silently taking ours.
+    Some(PageMeta {
+        // The caller only gets here when both sides agree on the id.
+        id: ours.id,
+        title: scalar3(base.map(|b| &b.title), &ours.title, &theirs.title)?,
+        tags: set3(
+            base.map(|b| b.tags.as_slice()).unwrap_or(&[]),
+            &ours.tags,
+            &theirs.tags,
+        ),
+        aliases: set3(
+            base.map(|b| b.aliases.as_slice()).unwrap_or(&[]),
+            &ours.aliases,
+            &theirs.aliases,
+        ),
+        // An ordered list, so not a set: whichever side changed it wins.
+        attachments: scalar3(
+            base.map(|b| &b.attachments),
+            &ours.attachments,
+            &theirs.attachments,
+        )?,
+        kind: scalar3(base.map(|b| &b.kind), &ours.kind, &theirs.kind)?,
+        project: scalar3(base.map(|b| &b.project), &ours.project, &theirs.project)?,
+        created_at: min_time(ours.created_at, theirs.created_at),
+        updated_at: max_time(ours.updated_at, theirs.updated_at),
+        encryption: scalar3(
+            base.map(|b| &b.encryption),
+            &ours.encryption,
+            &theirs.encryption,
+        )?,
+        readonly: scalar3(base.map(|b| &b.readonly), &ours.readonly, &theirs.readonly)?,
+        extra: merge_extras(base.map(|b| &b.extra), &ours.extra, &theirs.extra)?,
+    })
 }
 
 fn scalar3<T: PartialEq + Clone>(base: Option<&T>, ours: &T, theirs: &T) -> Option<T> {
-    if ours == theirs {
+    merge3(base, ours, theirs, T::eq)
+}
+
+/// [`scalar3`] under a caller-supplied notion of "unchanged".
+fn merge3<T: Clone>(
+    base: Option<&T>,
+    ours: &T,
+    theirs: &T,
+    same: impl Fn(&T, &T) -> bool,
+) -> Option<T> {
+    if same(ours, theirs) {
         return Some(ours.clone());
     }
     match base {
-        Some(b) if b == ours => Some(theirs.clone()),
-        Some(b) if b == theirs => Some(ours.clone()),
+        Some(b) if same(b, ours) => Some(theirs.clone()),
+        Some(b) if same(b, theirs) => Some(ours.clone()),
         // No usable base (add/add, unparseable) or both changed.
         _ => None,
+    }
+}
+
+/// Whether two extra values are the same value. `toml::Value`'s `==` is the
+/// float one, under which `nan != nan`: an untouched `nan` property would
+/// read as changed on both sides and make the page unmergeable.
+fn same_value(a: &toml::Value, b: &toml::Value) -> bool {
+    use toml::Value;
+    match (a, b) {
+        (Value::Float(a), Value::Float(b)) => a == b || (a.is_nan() && b.is_nan()),
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same_value(a, b))
+        }
+        (Value::Table(a), Value::Table(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(key, a)| b.get(key).is_some_and(|b| same_value(a, b)))
+        }
+        _ => a == b,
     }
 }
 
@@ -193,10 +233,15 @@ fn merge_extras(base: Option<&ExtraMap>, ours: &ExtraMap, theirs: &ExtraMap) -> 
     for key in keys {
         // A key absent on a side is `None`: an addition merges in, a
         // deletion sticks, and add-vs-edit disagreement conflicts.
-        let merged = scalar3(
+        let merged = merge3(
             Some(&base.get(key).cloned()),
             &ours.get(key).cloned(),
             &theirs.get(key).cloned(),
+            |a, b| match (a, b) {
+                (Some(a), Some(b)) => same_value(a, b),
+                (None, None) => true,
+                _ => false,
+            },
         )?;
         if let Some(value) = merged {
             out.insert(key.clone(), value);
@@ -372,6 +417,69 @@ mod tests {
                 .unwrap();
         assert_eq!(meta.extra.get("custom").and_then(|v| v.as_str()), Some("y"));
         assert_eq!(meta.extra.get("mine").and_then(|v| v.as_integer()), Some(1));
+    }
+
+    fn merged_attachments(out: &DriverOutcome) -> Vec<String> {
+        clep_vault::page::parse_frontmatter(std::str::from_utf8(&out.content).unwrap())
+            .unwrap()
+            .0
+            .attachments
+    }
+
+    #[test]
+    fn attachments_take_the_side_that_changed_them() {
+        // Theirs attaches a file while ours edits the body.
+        let base = page("0b", "attachments = [\"a.png\"]\n", "one\ntwo\n");
+        let ours = page("0b", "attachments = [\"a.png\"]\n", "ONE\ntwo\n");
+        let theirs = page("0b", "attachments = [\"a.png\", \"b.png\"]\n", "one\ntwo\n");
+        let out = merge(&base, &ours, &theirs);
+        assert!(out.clean);
+        assert_eq!(merged_attachments(&out), vec!["a.png", "b.png"]);
+
+        // Theirs detaches a file: the removal is not resurrected.
+        let out = merge(&theirs, &theirs, &base);
+        assert!(out.clean);
+        assert_eq!(merged_attachments(&out), vec!["a.png"]);
+    }
+
+    #[test]
+    fn attachments_changed_on_both_sides_differently_conflict() {
+        let base = page("0c", "attachments = [\"a.png\"]\n", "b\n");
+        let ours = page("0c", "attachments = [\"a.png\", \"o.png\"]\n", "b\n");
+        let theirs = page("0c", "attachments = [\"a.png\", \"t.png\"]\n", "b\n");
+        let out = merge(&base, &ours, &theirs);
+        assert!(!out.clean);
+        assert_eq!(out.content, ours);
+    }
+
+    #[test]
+    fn an_untouched_nan_extra_is_not_a_change() {
+        // `nan != nan` under `PartialEq`; nobody changed these keys, so the
+        // disjoint body edits must still merge clean.
+        let fm = "score = nan\nseries = [1.0, nan]\npoint = { x = nan }\n";
+        let base = page("0d", fm, "one\ntwo\nthree\n");
+        let ours = page("0d", fm, "ONE\ntwo\nthree\n");
+        let theirs = page("0d", fm, "one\ntwo\nTHREE\n");
+        let out = merge(&base, &ours, &theirs);
+        assert!(out.clean);
+        let (meta, body) =
+            clep_vault::page::parse_frontmatter(std::str::from_utf8(&out.content).unwrap())
+                .unwrap();
+        assert_eq!(body, "ONE\ntwo\nTHREE\n");
+        assert!(meta.extra["score"].as_float().unwrap().is_nan());
+    }
+
+    #[test]
+    fn a_nan_extra_changed_by_one_side_takes_that_side() {
+        let base = page("0e", "score = nan\n", "b\n");
+        let ours = page("0e", "score = nan\n", "b\n");
+        let theirs = page("0e", "score = 2.5\n", "b\n");
+        let out = merge(&base, &ours, &theirs);
+        assert!(out.clean);
+        let (meta, _) =
+            clep_vault::page::parse_frontmatter(std::str::from_utf8(&out.content).unwrap())
+                .unwrap();
+        assert_eq!(meta.extra["score"].as_float(), Some(2.5));
     }
 
     #[test]

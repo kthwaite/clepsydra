@@ -7,7 +7,7 @@ use std::ops::Range;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 
 use crate::vault::block::parse_blocks;
-use crate::vault::markdown::markdown_options;
+use crate::vault::markdown::{markdown_options, panic_safe_options};
 
 /// Upper bound on the description length, in Unicode scalars.
 pub(crate) const DESCRIPTION_MAX_CHARS: usize = 1500;
@@ -54,7 +54,7 @@ fn strip_counted_checks(body: &str) -> String {
 
 /// Source ranges of every list item, in document order.
 fn item_ranges(body: &str) -> Vec<Range<usize>> {
-    Parser::new_ext(body, markdown_options())
+    Parser::new_ext(body, panic_safe_options(body, markdown_options()))
         .into_offset_iter()
         .filter_map(|(event, range)| matches!(event, Event::Start(Tag::Item)).then_some(range))
         .collect()
@@ -91,7 +91,9 @@ fn cap_at_block_boundary(text: &str, max: usize) -> &str {
     let mut depth = 0usize;
     let mut best: Option<usize> = None;
     let mut first_top: Option<usize> = None;
-    for (event, range) in Parser::new_ext(text, markdown_options()).into_offset_iter() {
+    for (event, range) in
+        Parser::new_ext(text, panic_safe_options(text, markdown_options())).into_offset_iter()
+    {
         match event {
             Event::Start(_) => depth += 1,
             Event::End(end) => {
