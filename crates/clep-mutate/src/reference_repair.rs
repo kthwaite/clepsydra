@@ -216,7 +216,7 @@ fn prepare_replace(
     };
 
     let (before, after, content) = if issue.kind == ReferenceIssueKind::InvalidRelationTarget {
-        replace_property_reference(&issue, &source, &explicit_target)?
+        replace_property_reference(index, &issue, &source, &explicit_target)?
     } else {
         replace_body_reference(&issue, &source, &explicit_target)?
     };
@@ -308,7 +308,33 @@ fn replace_body_reference(
     Ok((before, after, content))
 }
 
+/// Which of its field's string values a property issue names, counting from
+/// zero. The index numbers a page's property references `-1, -2, …` in field
+/// order (`links.span_start`), so the references of the same field that come
+/// before this one give its position. `None` if the issue carries no ordinal.
+fn property_value_position(
+    index: &VaultIndex,
+    issue: &ReferenceIssue,
+    field: &str,
+) -> Result<Option<usize>, ReferenceRepairError> {
+    let Some(ordinal) = issue.span_start.filter(|span| *span < 0) else {
+        return Ok(None);
+    };
+    let earlier: i64 = index
+        .connection()
+        .query_row(
+            "SELECT COUNT(*) FROM links
+             WHERE source_id = ?1 AND source_field = ?2
+               AND span_start < 0 AND span_start > ?3",
+            rusqlite::params![issue.source_id, field, ordinal],
+            |row| row.get(0),
+        )
+        .map_err(IndexError::Sqlite)?;
+    Ok(usize::try_from(earlier).ok())
+}
+
 fn replace_property_reference(
+    index: &VaultIndex,
     issue: &ReferenceIssue,
     source: &str,
     explicit_target: &str,
@@ -348,6 +374,7 @@ fn replace_property_reference(
         &mut value,
         old_target,
         explicit_target,
+        property_value_position(index, issue, field)?,
         &mut replacements,
         &mut before,
         &mut after,
@@ -386,11 +413,20 @@ fn rewrite_property_value(
     value: &mut toml::Value,
     old_target: &str,
     explicit_target: &str,
+    position: Option<usize>,
     replacements: &mut usize,
     before: &mut Option<String>,
     after: &mut Option<String>,
 ) -> Result<(), ReferenceRepairError> {
+    // With a position, only the string value at that position is a
+    // candidate, so one of several equal values can be repaired.
+    let mut seen = 0_usize;
     let mut rewrite = |text: &mut String| -> Result<(), ReferenceRepairError> {
+        let here = seen;
+        seen += 1;
+        if position.is_some_and(|position| position != here) {
+            return Ok(());
+        }
         let extracted =
             clep_vault::link::extract_property_refs("property", std::slice::from_ref(text));
         if extracted
