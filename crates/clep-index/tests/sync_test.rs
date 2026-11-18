@@ -353,3 +353,70 @@ fn process_events_still_fails_on_an_unreadable_file() {
 
     assert!(matches!(result, Err(clep_index::index::IndexError::Io(_))));
 }
+
+// ---------------------------------------------------------------------------
+// Case-only renames on a case-insensitive filesystem (macOS default)
+// ---------------------------------------------------------------------------
+
+/// Whether `vault`'s filesystem finds a file under a differently cased name.
+fn filesystem_ignores_case(vault: &Vault) -> bool {
+    fs::write(vault.root().join("case-probe.txt"), "").unwrap();
+    let ignores_case = vault.root().join("CASE-PROBE.txt").exists();
+    fs::remove_file(vault.root().join("case-probe.txt")).unwrap();
+    ignores_case
+}
+
+fn rebuilt_paths(vault: &Vault) -> Vec<String> {
+    let mut fresh = VaultIndex::open_in_memory().unwrap();
+    fresh.build(vault).unwrap();
+    indexed_paths(&fresh)
+}
+
+/// After `mv a.md A.md` both spellings exist for the watcher, so it reports
+/// an Upsert for each, in no particular order. The page belongs under the
+/// spelling the directory holds, whichever event comes last.
+#[test]
+fn case_only_rename_indexes_the_on_disk_spelling_in_either_event_order() {
+    for old_spelling_last in [true, false] {
+        let (_tmp, vault) = setup_vault(&[("a.md", &toml_page(1, "one"))]);
+        if !filesystem_ignores_case(&vault) {
+            return;
+        }
+        let mut index = VaultIndex::open_in_memory().unwrap();
+        index.build(&vault).unwrap();
+
+        fs::rename(vault.root().join("a.md"), vault.root().join("A.md")).unwrap();
+        let mut events = vec![
+            ChangeEvent::Upsert(VaultPath::new("A.md").unwrap()),
+            ChangeEvent::Upsert(VaultPath::new("a.md").unwrap()),
+        ];
+        if !old_spelling_last {
+            events.reverse();
+        }
+        SyncEngine::process_events(&events, &vault, &mut index).unwrap();
+
+        assert_eq!(rebuilt_paths(&vault), vec!["A.md".to_string()]);
+        assert_eq!(
+            indexed_paths(&index),
+            vec!["A.md".to_string()],
+            "old spelling last: {old_spelling_last}"
+        );
+    }
+}
+
+#[test]
+fn upsert_under_a_stale_folder_spelling_indexes_the_on_disk_path() {
+    let (_tmp, vault) = setup_vault(&[("notes/x.md", &toml_page(1, "one"))]);
+    if !filesystem_ignores_case(&vault) {
+        return;
+    }
+    let mut index = VaultIndex::open_in_memory().unwrap();
+    index.build(&vault).unwrap();
+
+    fs::rename(vault.root().join("notes"), vault.root().join("Notes")).unwrap();
+    let events = vec![ChangeEvent::Upsert(VaultPath::new("notes/x.md").unwrap())];
+    SyncEngine::process_events(&events, &vault, &mut index).unwrap();
+
+    assert_eq!(rebuilt_paths(&vault), vec!["Notes/x.md".to_string()]);
+    assert_eq!(indexed_paths(&index), vec!["Notes/x.md".to_string()]);
+}
