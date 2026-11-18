@@ -152,7 +152,7 @@ pub fn comparable_pair(original: &str, copy: &str) -> Result<(String, String), F
 }
 
 /// `Plan (conflict abc1234)` -> `Plan`; any other title is returned as is.
-fn strip_conflict_suffix(title: &str) -> &str {
+pub(crate) fn strip_conflict_suffix(title: &str) -> &str {
     let Some(rest) = title.strip_suffix(')') else {
         return title;
     };
