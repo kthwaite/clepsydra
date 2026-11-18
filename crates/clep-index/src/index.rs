@@ -863,90 +863,27 @@ impl VaultIndex {
         )
     }
 
-    /// Resolve unresolved links by matching `target_canonical` against the
-    /// `canonical_names` table.
+    /// Decide every link from the current index: `target_canonical` against
+    /// the `canonical_names` table, block refs against the `blocks` table.
     ///
     /// A link is resolved only when exactly one page matches the canonical
     /// name. Ambiguous matches (2+ pages) are left unresolved to avoid silent
     /// first-match behavior.
+    ///
+    /// Links that are already resolved are decided again too. `build` skips
+    /// pages whose bytes did not change, so a link in such a page can point
+    /// at a page that lost the name, shares it now, moved or is gone.
     pub fn resolve_links(&mut self) -> Result<(), IndexError> {
         let tx = self.conn.transaction()?;
 
-        // Collect unresolved links
-        let mut stmt = tx.prepare(
-            "SELECT source_id, span_start, target_canonical
-             FROM links
-             WHERE target_id IS NULL AND target_canonical IS NOT NULL",
+        let mut targets = LinkTargets::default();
+        collect_link_row_targets(
+            &tx,
+            "SELECT DISTINCT target_canonical, target_block_id FROM links",
+            [],
+            &mut targets,
         )?;
-
-        let unresolved: Vec<(String, i64, String)> = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(stmt);
-
-        for (source_id, span_start, target_canonical) in &unresolved {
-            if let Some((target_id, target_path)) = unique_link_target(&tx, target_canonical)? {
-                tx.execute(
-                    "UPDATE links SET target_id = ?1, target_path = ?2
-                     WHERE source_id = ?3 AND span_start = ?4",
-                    params![target_id, target_path, source_id, span_start],
-                )?;
-            }
-            // 0 or 2+ matches: leave unresolved
-        }
-
-        // Phase 2: Resolve block_ref links by matching target_block_id against blocks table
-        let mut block_ref_stmt = tx.prepare(
-            "SELECT source_id, span_start, target_block_id
-             FROM links
-             WHERE target_id IS NULL AND kind = 'block_ref' AND target_block_id IS NOT NULL",
-        )?;
-
-        let unresolved_block_refs: Vec<(String, i64, String)> = block_ref_stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(block_ref_stmt);
-
-        for (source_id, span_start, block_id) in &unresolved_block_refs {
-            let mut lookup = tx.prepare(
-                "SELECT b.page_id, p.path
-                 FROM blocks b
-                 JOIN pages p ON p.id = b.page_id
-                 WHERE b.block_id = ?1",
-            )?;
-
-            let matches: Vec<(String, String)> = lookup
-                .query_map(params![block_id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
-            drop(lookup);
-
-            if matches.len() == 1 {
-                let (target_id, target_path) = &matches[0];
-                tx.execute(
-                    "UPDATE links SET target_id = ?1, target_path = ?2
-                     WHERE source_id = ?3 AND span_start = ?4",
-                    params![target_id, target_path, source_id, span_start],
-                )?;
-            }
-            // 0 or 2+ matches: leave unresolved
-        }
+        reresolve_link_targets(&tx, &targets)?;
 
         tx.commit()?;
         Ok(())
@@ -2324,7 +2261,7 @@ fn collect_page_link_targets(
     collect_link_row_targets(
         conn,
         "SELECT DISTINCT target_canonical, target_block_id FROM links WHERE target_id = ?1",
-        page_id,
+        params![page_id],
         targets,
     )
 }
@@ -2339,7 +2276,7 @@ fn collect_outgoing_link_targets(
     collect_link_row_targets(
         conn,
         "SELECT DISTINCT target_canonical, target_block_id FROM links WHERE source_id = ?1",
-        page_id,
+        params![page_id],
         targets,
     )
 }
@@ -2347,11 +2284,11 @@ fn collect_outgoing_link_targets(
 fn collect_link_row_targets(
     conn: &Connection,
     sql: &str,
-    page_id: &str,
+    params: impl rusqlite::Params,
     targets: &mut LinkTargets,
 ) -> Result<(), IndexError> {
     let mut stmt = conn.prepare(sql)?;
-    let rows = stmt.query_map(params![page_id], |row| {
+    let rows = stmt.query_map(params, |row| {
         Ok((
             row.get::<_, Option<String>>(0)?,
             row.get::<_, Option<String>>(1)?,
