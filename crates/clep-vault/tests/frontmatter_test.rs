@@ -462,3 +462,61 @@ fn conflicted_missing_id_is_not_repaired_on_disk() {
         "id minting must stay in memory for conflicted files"
     );
 }
+
+// ---------------------------------------------------------------------------
+// String values holding a `+++` line
+// ---------------------------------------------------------------------------
+
+/// A string value with a line that starts with `+++` (a pasted TOML snippet,
+/// a diff) must not put that line at the start of a frontmatter line: every
+/// reader ends the frontmatter at the first such line.
+#[test]
+fn string_value_with_a_fence_line_round_trips() {
+    let value = "see the snippet:\n+++\ntitle = \"x\"\n+++\n";
+    let mut meta = PageMeta::new();
+    meta.id = "01900000-0000-7000-8000-000000000001".parse().unwrap();
+    meta.title = Some("Head\n+++ tail".into());
+    meta.tags = vec!["plain".into(), "+++\nleading".into()];
+    meta.extra
+        .insert("notes".into(), toml::Value::String(value.into()));
+    let mut nested = toml::Table::new();
+    nested.insert(
+        "quote".into(),
+        toml::Value::String("back\\slash \"q\"\n+++".into()),
+    );
+    meta.extra
+        .insert("nested".into(), toml::Value::Table(nested));
+
+    let written = write_page_content(&meta, "Body\n");
+
+    assert!(
+        written.contains("notes = \"see the snippet:\\n+++\\ntitle = \\\"x\\\"\\n+++\\n\"\n"),
+        "fence-line value is written on one line: {written}"
+    );
+    let (parsed, body) = parse_frontmatter(&written).expect("a written page must parse");
+    assert_eq!(body, "Body\n");
+    assert_eq!(parsed.title, meta.title);
+    assert_eq!(parsed.tags, meta.tags);
+    assert_eq!(parsed.extra, meta.extra);
+}
+
+/// Multi-line values without a fence line keep their `"""` spelling, so the
+/// bytes written for existing pages do not change.
+#[test]
+fn multi_line_value_without_a_fence_line_keeps_its_spelling() {
+    let mut meta = PageMeta::new();
+    meta.id = "01900000-0000-7000-8000-000000000001".parse().unwrap();
+    meta.created_at = None;
+    meta.updated_at = None;
+    meta.extra.insert(
+        "notes".into(),
+        toml::Value::String("one\n ++ +\n +++\ntwo".into()),
+    );
+
+    let written = write_page_content(&meta, "Body\n");
+
+    assert_eq!(
+        written,
+        "+++\nid = \"01900000-0000-7000-8000-000000000001\"\nnotes = \"\"\"\none\n ++ +\n +++\ntwo\"\"\"\n+++\nBody\n"
+    );
+}
