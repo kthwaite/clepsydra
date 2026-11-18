@@ -282,7 +282,7 @@ describe("MCP statistics", () => {
     ).toHaveTextContent("12.5 ms");
 
     const day = screen.getByLabelText("Inspect day (UTC)");
-    const agent = screen.getByRole("figure", { name: "Daily by agent" });
+    const agent = await screen.findByRole("figure", { name: "Daily by agent" });
     fireEvent.change(day, { target: { value: "2026-11-11" } });
     expect(agent).toHaveTextContent("0 ms");
     fireEvent.change(day, { target: { value: "2026-11-12" } });
@@ -295,6 +295,33 @@ describe("MCP statistics", () => {
     expect(screen.getByLabelText("Inspect day (UTC)")).toHaveValue(
       "2026-11-12",
     );
+  });
+
+  it("shows both agents' daily readings together without selecting a client", async () => {
+    payload = {
+      ...recorded,
+      agents: 2,
+      daily_agents: [
+        ...recorded.daily_agents,
+        {
+          date: "2026-11-13",
+          name: "Editor",
+          calls: 3,
+          average_duration_ms: 28,
+        },
+      ],
+    };
+    renderStats();
+    const user = await openMcp();
+    const chart = await screen.findByRole("figure", { name: "Daily by agent" });
+    expect(within(chart).queryByRole("combobox")).not.toBeInTheDocument();
+    expect(chart).toHaveTextContent("Research assistant");
+    expect(chart).toHaveTextContent("Editor");
+    expect(chart).toHaveTextContent("10 calls");
+    expect(chart).toHaveTextContent("3 calls");
+    await user.click(screen.getByRole("button", { name: "Average duration" }));
+    expect(chart).toHaveTextContent("15 ms");
+    expect(chart).toHaveTextContent("28 ms");
   });
 
   it("shows unused tools, client identity, daily counts and failed recent calls", async () => {

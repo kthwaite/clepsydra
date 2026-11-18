@@ -1,13 +1,14 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import type { McpStatsResponse } from "#/api/mcp";
+import type { AgentMetric as Metric } from "#/components/codex/mcpAgentSeries";
 import { Section } from "#/components/codex/Section";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
 import { FOCUS_RING_NATIVE } from "#/lib/focusRing";
 
-type Metric = "calls" | "average_duration_ms";
+const McpAgentChart = lazy(() => import("#/components/codex/McpAgentChart"));
 type Day = Pick<McpStatsResponse["daily"][number], "date" | Metric>;
-type Agent = { name: string; calls: number; totalMs: number; daily: Day[] };
+type Agent = { name: string; calls: number; totalMs: number };
 const labels = { calls: "Calls", average_duration_ms: "Average duration" };
 const metrics = ["calls", "average_duration_ms"] as const;
 const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
@@ -36,14 +37,13 @@ function groupAgents(rows: McpStatsResponse["daily_agents"]) {
   for (const row of rows) {
     let agent = agents.get(row.name);
     if (!agent) {
-      agent = { name: row.name, calls: 0, totalMs: 0, daily: [] };
+      agent = { name: row.name, calls: 0, totalMs: 0 };
       agents.set(row.name, agent);
     }
     agent.calls += row.calls;
     agent.totalMs += row.calls * row.average_duration_ms;
-    agent.daily.push(row);
   }
-  return [...agents.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return [...agents.values()];
 }
 
 // Position observed days on the UTC calendar without allocating empty slots
@@ -70,22 +70,18 @@ function dailyBars(rows: Day[], metric: Metric, first: number, last: number) {
   return { peak, bar, bars, zeros, slot };
 }
 
-function DailyPlot({
-  label,
+function OverallDailyPlot({
   rows,
   metric,
   first,
   last,
   inspect,
-  children,
 }: {
-  label: string;
   rows: Day[];
   metric: Metric;
   first: number;
   last: number;
   inspect: string;
-  children?: ReactNode;
 }) {
   const { peak, bar, bars, zeros, slot } = useMemo(
     () => dailyBars(rows, metric, first, last),
@@ -98,11 +94,8 @@ function DailyPlot({
       : display(day?.[metric] ?? 0, metric);
   const cursor = (dayIndex(inspect) - first + 0.5) * slot;
   return (
-    <figure aria-label={label} className={card}>
-      <figcaption className="flex flex-wrap items-center justify-between gap-2">
-        <span className={title}>{label}</span>
-        {children}
-      </figcaption>
+    <figure aria-label="Daily overall" className={card}>
+      <figcaption className={title}>Daily overall</figcaption>
       <p className="m-0 text-[13px] text-mute">
         {metric === "calls" ? "Calls" : "Average duration (ms)"} per UTC day
       </p>
@@ -141,7 +134,7 @@ function DailyPlot({
         </div>
       </div>
       <p aria-live="polite" className="m-0 text-[13px] text-ink-2">
-        <span className="sr-only">{label}: </span>
+        <span className="sr-only">Daily overall: </span>
         <time dateTime={inspect}>{inspect}</time> · <strong>{reading}</strong>
       </p>
     </figure>
@@ -153,7 +146,11 @@ function AgentRanking({ agents, metric }: { agents: Agent[]; metric: Metric }) {
   const [requestedPage, setPage] = useState(0);
   const ranked = useMemo(
     () =>
-      [...agents].sort((a, b) => agentValue(b, metric) - agentValue(a, metric)),
+      [...agents].sort(
+        (a, b) =>
+          agentValue(b, metric) - agentValue(a, metric) ||
+          a.name.localeCompare(b.name),
+      ),
     [agents, metric],
   );
   const pages = Math.ceil(ranked.length / rankPageSize);
@@ -161,13 +158,7 @@ function AgentRanking({ agents, metric }: { agents: Agent[]; metric: Metric }) {
   const offset = page * rankPageSize;
   const peak = agentValue(ranked[0], metric);
   return (
-    <figure
-      aria-label="Agent ranking"
-      className={cn(
-        card,
-        "lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start",
-      )}
-    >
+    <figure aria-label="Agent ranking" className={card}>
       <figcaption className={title}>Agent ranking</figcaption>
       <p className="m-0 text-[13px] text-mute">
         {metric === "calls" ? "Total calls" : "Mean duration per call"} across
@@ -228,14 +219,11 @@ function AgentRanking({ agents, metric }: { agents: Agent[]; metric: Metric }) {
 export function McpTrends({ data }: { data?: McpStatsResponse }) {
   const [metric, setMetric] = useState<Metric>("calls");
   const [requestedDay, setDay] = useState("");
-  const [agentName, setAgentName] = useState("");
   const agents = useMemo(
     () => (data ? groupAgents(data.daily_agents) : []),
     [data],
   );
-  const selected =
-    agents.find((agent) => agent.name === agentName) ?? agents[0];
-  if (!data || !selected) return null;
+  if (!data || !agents.length) return null;
   const last = dayIndex(data.through_date);
   // A rolling 7 × 24 hours can touch eight UTC dates. Keep both partial days.
   const first = data.days
@@ -289,9 +277,8 @@ export function McpTrends({ data }: { data?: McpStatsResponse }) {
               : "An empty day has no average. A mark at zero means calls averaged 0 ms."}
           </p>
         </div>
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-          <DailyPlot
-            label="Daily overall"
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <OverallDailyPlot
             rows={data.daily}
             metric={metric}
             first={first}
@@ -299,30 +286,22 @@ export function McpTrends({ data }: { data?: McpStatsResponse }) {
             inspect={inspect}
           />
           <AgentRanking key={metric} agents={agents} metric={metric} />
-          <DailyPlot
-            label="Daily by agent"
-            rows={selected.daily}
+        </div>
+        <Suspense
+          fallback={
+            <p role="status" className="text-mute">
+              Loading agent chart…
+            </p>
+          }
+        >
+          <McpAgentChart
+            rows={data.daily_agents}
             metric={metric}
             first={first}
             last={last}
             inspect={inspect}
-          >
-            <label className="flex min-w-0 max-w-full items-center gap-2 text-[13px] text-mute">
-              Agent
-              <select
-                className={control}
-                value={selected.name}
-                onChange={(event) => setAgentName(event.target.value)}
-              >
-                {agents.map((agent) => (
-                  <option key={agent.name} value={agent.name}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </DailyPlot>
-        </div>
+          />
+        </Suspense>
       </div>
     </Section>
   );
