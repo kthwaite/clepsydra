@@ -24,10 +24,17 @@ pub struct Projection {
 /// absence is the only empty state (`is_empty` relies on this).
 pub fn project(value: &toml::Value) -> Vec<Projection> {
     match value {
+        // Rows are numbered after empty elements are dropped, so the first
+        // present element is always `ord = 0` (what sort, group and the
+        // aggregates read as the array's value).
         toml::Value::Array(items) => items
             .iter()
+            .filter_map(|item| scalar_projection(item, 0))
             .enumerate()
-            .filter_map(|(i, item)| scalar_projection(item, i as i64))
+            .map(|(ord, row)| Projection {
+                ord: ord as i64,
+                ..row
+            })
             .collect(),
         _ => scalar_projection(value, 0).into_iter().collect(),
     }
@@ -199,6 +206,18 @@ mod tests {
         assert_eq!(rows[0].value_text.as_deref(), Some("memory"));
         assert_eq!(rows[1].ord, 1);
         assert_eq!(rows[1].value_text.as_deref(), Some("identity"));
+    }
+
+    #[test]
+    fn array_rows_are_numbered_after_dropping_empty_elements() {
+        // `ord = 0` is "the first element" for sort, group and aggregates, so
+        // an empty first element must not leave the array without one.
+        let rows = project(&parse_value("v = [\"\", \"sf\", [], \"horror\"]"));
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].ord, 0);
+        assert_eq!(rows[0].value_text.as_deref(), Some("sf"));
+        assert_eq!(rows[1].ord, 1);
+        assert_eq!(rows[1].value_text.as_deref(), Some("horror"));
     }
 
     #[test]
