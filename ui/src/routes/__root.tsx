@@ -1,6 +1,8 @@
 import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
 import { lazy, type ReactNode, Suspense, useEffect, useRef } from "react";
 import { CodexFrame } from "#/components/codex/CodexFrame";
+// Static on purpose: a lazy chunk makes the first ⌘K show a loading screen.
+import { CommandPalette } from "#/components/codex/CommandPalette";
 import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
 import { ReadingProgressProvider } from "#/components/codex/ReadingProgressContext";
 import { FeatureFlagsProvider } from "#/components/FeatureFlagsProvider";
@@ -15,11 +17,6 @@ import { useUiStore } from "#/store/ui";
 
 export { NotFoundPage };
 
-const CommandPalette = lazy(() =>
-  import("#/components/codex/CommandPalette").then((module) => ({
-    default: module.CommandPalette,
-  })),
-);
 const SettingsModal = lazy(() =>
   import("#/components/SettingsModal").then((module) => ({
     default: module.SettingsModal,
@@ -78,7 +75,6 @@ export function GlobalOverlays() {
   const booting = useUiStore((state) => state.isBooting);
   const savedQuireDialog = useUiStore((state) => state.savedQuireDialog);
   const closeSavedQuires = useUiStore((state) => state.closeSavedQuires);
-  const closeSearch = useUiStore((state) => state.closeSearch);
   const closeSettings = useUiStore((state) => state.closeSettings);
   const closeInscribe = useUiStore((state) => state.closeInscribe);
   const closeCaptureAside = useUiStore((state) => state.closeCaptureAside);
@@ -91,11 +87,7 @@ export function GlobalOverlays() {
 
   return (
     <>
-      {searchOpen && (
-        <OverlayBoundary onDismiss={closeSearch} label="Search">
-          <CommandPalette />
-        </OverlayBoundary>
-      )}
+      {searchOpen && <CommandPalette />}
       {settingsOpen && (
         <OverlayBoundary onDismiss={closeSettings} label="Settings">
           <SettingsModal />
