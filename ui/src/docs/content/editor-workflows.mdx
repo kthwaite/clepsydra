@@ -327,10 +327,10 @@ filter the menu, then choose a command with the pointer, `Enter`, or `Tab`.
 | **Code block** | Fenced code block |
 | **Divider** | Horizontal rule |
 
-Editable tables show circular controls while the table is hovered or focused.
-The **+** controls at the right and bottom edges add a trailing column or row.
-The **−** controls above each column and left of each row remove that column or
-row.
+Editable tables keep their controls hidden until the pointer asks for them.
+Hovering a cell shows a grip above its column and one left of its row; moving
+near the right or bottom edge shows a **+** bar that adds a trailing column or
+row. See [Work in tables](#work-in-tables).
 
 A slash command is offered only when the paragraph consists of the leading
 slash and its query and the cursor is at the end. Slash text inside existing
@@ -354,18 +354,48 @@ save. Cell text is edited in place and takes the usual inline marks, links,
 wikilinks, and math.
 
 `Tab` moves the caret to the next cell and `Shift+Tab` to the previous one,
-wrapping across row boundaries. From the table, `Tab` moves through its **Delete
-column N** and **Delete row N** controls, then **Add column** and **Add row**,
-before leaving the editor. A cell is a single line of inline content, so `Enter`
-inside one does nothing, and a delete at a cell boundary stops there rather
-than merging two cells.
+wrapping across row boundaries. From the table, `Tab` moves through each
+**Column N options** and **Row N options** grip, then **Add column** and **Add
+row**, before leaving the editor. A cell is a single line of inline content, so
+`Enter` inside one does nothing, and a delete at a cell boundary stops there
+rather than merging two cells.
 
 Choose **Table** from the slash menu to insert an empty three-column,
-three-row table. While an editable table is hovered or focused, use the
-circular **+** controls at its right and bottom edges to add a trailing column
-or row. Use the circular **−** controls above columns and left of rows to remove
-them. Removing the final column or row removes the table. Touch layouts keep
-all controls visible.
+three-row table.
+
+Table controls appear only where the pointer is:
+
+- **Append bars.** Move the pointer near the table's right edge for the **+**
+  bar that adds a trailing column, or near its bottom edge for the one that adds
+  a trailing row.
+- **Grips.** Hovering a cell shows one grip above that cell's column and one
+  left of its row. Click a grip for that column's or row's menu. Drag a grip to
+  reorder: a cobalt line shows where the column or row will land.
+- **Cell menu.** Right-click a cell for a menu that acts on that cell's row and
+  column. Adding and deleting sit at the top level; the rest is under **Row**
+  and **Column**. With text selected, right-click opens the browser's own menu
+  instead, so **Copy** stays reachable.
+
+| Menu | Actions |
+| --- | --- |
+| Column | Sort by column (A to Z, Z to A) · Add column before/after · Move column left/right · Align left/centre/right · Duplicate column · Delete column |
+| Row | Add row above/below · Move row up/down · Duplicate row · Delete row |
+
+Notes on behaviour:
+
+- The header row is the table's first row by position, so it is pinned: it
+  cannot be dragged or moved, and nothing can be added above it. Its grip still
+  opens the row menu.
+- Sorting reorders the body rows by the column's plain text. It compares
+  numbers as numbers (`2` before `10`), ignores case, and keeps empty cells
+  last in both directions.
+- Choosing a column's current alignment again clears it.
+- Deleting the final column or row removes the table.
+- With a grip focused, `Enter` or `Space` opens its menu, and `Alt+←`/`Alt+→`
+  (column) or `Alt+↑`/`Alt+↓` (row) moves it one step. Focus stays on the grip.
+- Every action is one undo step.
+
+Touch layouts keep the grips and append bars visible; tap a grip for its menu.
 
 ### Embed a Base
 
