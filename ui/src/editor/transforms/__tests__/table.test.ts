@@ -14,6 +14,16 @@ import {
   createTableGrid,
   deleteTableColumn,
   deleteTableRow,
+  dropBoundary,
+  duplicateTableColumn,
+  duplicateTableRow,
+  insertTableColumn,
+  insertTableRow,
+  moveTableColumn,
+  moveTableRow,
+  moveTarget,
+  setTableColumnAlign,
+  sortTableByColumn,
 } from "../table";
 
 function alignedTable(): TableElement {
@@ -355,5 +365,214 @@ describe("table transforms", () => {
     expect(editor.children).toEqual([
       { type: "paragraph", children: [{ text: "" }] },
     ]);
+  });
+});
+
+function editorWithGrid() {
+  const editor = withTables(withSchema(createEditor()));
+  editor.children = [threeByThreeTable()];
+  Editor.normalize(editor, { force: true });
+  return editor;
+}
+
+function grid(editor: Editor): string[][] {
+  return firstTable(editor).children.map((row) =>
+    row.children.map((cell) => Node.string(cell)),
+  );
+}
+
+function headerFlags(editor: Editor): boolean[][] {
+  return firstTable(editor).children.map((row) =>
+    row.children.map((cell) => cell.header === true),
+  );
+}
+
+describe("table transforms by index", () => {
+  it("inserts an unaligned column before an existing one", () => {
+    const editor = editorWithGrid();
+
+    expect(insertTableColumn(editor, [0], 1)).toEqual([0, 0, 1]);
+
+    expect(grid(editor)).toEqual([
+      ["A", "", "B", "C"],
+      ["1", "", "2", "3"],
+      ["4", "", "5", "6"],
+    ]);
+    expect(firstTable(editor).align).toEqual(["left", null, "center", "right"]);
+    expect(headerFlags(editor)[0]).toEqual([true, true, true, true]);
+    expect(firstTable(editor).children[1].children[2].align).toBe("center");
+  });
+
+  it("appends when the column index is past the end", () => {
+    const editor = editorWithGrid();
+    expect(insertTableColumn(editor, [0], 3)).toEqual([0, 0, 3]);
+    expect(grid(editor)[0]).toEqual(["A", "B", "C", ""]);
+  });
+
+  it("inserts an aligned body row and never displaces the header", () => {
+    const editor = editorWithGrid();
+
+    expect(insertTableRow(editor, [0], 0)).toEqual([0, 1, 0]);
+
+    expect(grid(editor)).toEqual([
+      ["A", "B", "C"],
+      ["", "", ""],
+      ["1", "2", "3"],
+      ["4", "5", "6"],
+    ]);
+    expect(
+      firstTable(editor).children[1].children.map((cell) => cell.align),
+    ).toEqual(["left", "center", "right"]);
+    expect(headerFlags(editor)[1]).toEqual([false, false, false]);
+  });
+
+  it("moves a column with its alignment", () => {
+    const editor = editorWithGrid();
+
+    expect(moveTableColumn(editor, [0], 0, 2)).toEqual([0, 0, 2]);
+
+    expect(grid(editor)).toEqual([
+      ["B", "C", "A"],
+      ["2", "3", "1"],
+      ["5", "6", "4"],
+    ]);
+    expect(firstTable(editor).align).toEqual(["center", "right", "left"]);
+    expect(firstTable(editor).children[2].children[2].align).toBe("left");
+  });
+
+  it("refuses a column move that is out of range or a no-op", () => {
+    const editor = editorWithGrid();
+    expect(moveTableColumn(editor, [0], 1, 1)).toBeNull();
+    expect(moveTableColumn(editor, [0], 0, 3)).toBeNull();
+    expect(moveTableColumn(editor, [0], -1, 0)).toBeNull();
+    expect(grid(editor)[0]).toEqual(["A", "B", "C"]);
+  });
+
+  it("moves a body row and keeps the header row pinned", () => {
+    const editor = editorWithGrid();
+
+    expect(moveTableRow(editor, [0], 2, 1)).toEqual([0, 1, 0]);
+    expect(grid(editor)).toEqual([
+      ["A", "B", "C"],
+      ["4", "5", "6"],
+      ["1", "2", "3"],
+    ]);
+
+    expect(moveTableRow(editor, [0], 0, 1)).toBeNull();
+    expect(moveTableRow(editor, [0], 1, 0)).toBeNull();
+    expect(grid(editor)[0]).toEqual(["A", "B", "C"]);
+  });
+
+  it("duplicates a column to its right, alignment included", () => {
+    const editor = editorWithGrid();
+
+    expect(duplicateTableColumn(editor, [0], 1)).toEqual([0, 0, 2]);
+
+    expect(grid(editor)).toEqual([
+      ["A", "B", "B", "C"],
+      ["1", "2", "2", "3"],
+      ["4", "5", "5", "6"],
+    ]);
+    expect(firstTable(editor).align).toEqual([
+      "left",
+      "center",
+      "center",
+      "right",
+    ]);
+  });
+
+  it("duplicates a body row below itself", () => {
+    const editor = editorWithGrid();
+    expect(duplicateTableRow(editor, [0], 1)).toEqual([0, 2, 0]);
+    expect(grid(editor)).toEqual([
+      ["A", "B", "C"],
+      ["1", "2", "3"],
+      ["1", "2", "3"],
+      ["4", "5", "6"],
+    ]);
+  });
+
+  it("duplicates the header row as a body row", () => {
+    const editor = editorWithGrid();
+    duplicateTableRow(editor, [0], 0);
+    expect(grid(editor).slice(0, 2)).toEqual([
+      ["A", "B", "C"],
+      ["A", "B", "C"],
+    ]);
+    expect(headerFlags(editor).slice(0, 2)).toEqual([
+      [true, true, true],
+      [false, false, false],
+    ]);
+  });
+
+  it("sets and clears a column's alignment on the table and its cells", () => {
+    const editor = editorWithGrid();
+
+    setTableColumnAlign(editor, [0], 0, "right");
+    expect(firstTable(editor).align).toEqual(["right", "center", "right"]);
+    expect(
+      firstTable(editor).children.map((row) => row.children[0].align),
+    ).toEqual(["right", "right", "right"]);
+
+    setTableColumnAlign(editor, [0], 0, null);
+    expect(firstTable(editor).align).toEqual([null, "center", "right"]);
+    expect(
+      firstTable(editor).children.map((row) => row.children[0].align),
+    ).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("sorts body rows numerically, keeps the header, and puts blanks last", () => {
+    const editor = withTables(withSchema(createEditor()));
+    const row = (...cells: string[]) =>
+      makeTableRow({
+        children: cells.map((text) => makeTableCell({ children: [{ text }] })),
+      });
+    editor.children = [
+      makeTable({
+        children: [
+          makeTableRow({
+            children: [
+              makeTableCell({ header: true, children: [{ text: "n" }] }),
+              makeTableCell({ header: true, children: [{ text: "id" }] }),
+            ],
+          }),
+          row("10", "a"),
+          row("", "b"),
+          row("2", "c"),
+          row("apple", "d"),
+          row("2", "e"),
+        ],
+      }),
+    ];
+    Editor.normalize(editor, { force: true });
+    const ids = () => grid(editor).map((cells) => cells[1]);
+
+    expect(sortTableByColumn(editor, [0], 0, "ascending")).toBe(true);
+    expect(ids()).toEqual(["id", "c", "e", "a", "d", "b"]);
+    expect(sortTableByColumn(editor, [0], 0, "ascending")).toBe(false);
+
+    expect(sortTableByColumn(editor, [0], 0, "descending")).toBe(true);
+    expect(ids()).toEqual(["id", "d", "a", "c", "e", "b"]);
+  });
+
+  it("finds the drop boundary from item midpoints", () => {
+    const extents = [
+      [0, 100],
+      [100, 300],
+      [300, 400],
+    ] as const;
+    expect(dropBoundary(extents, -5)).toBe(0);
+    expect(dropBoundary(extents, 49)).toBe(0);
+    expect(dropBoundary(extents, 50)).toBe(1);
+    expect(dropBoundary(extents, 199)).toBe(1);
+    expect(dropBoundary(extents, 201)).toBe(2);
+    expect(dropBoundary(extents, 999)).toBe(3);
+  });
+
+  it("maps a drop boundary to a move destination", () => {
+    expect(moveTarget(1, 0)).toBe(0);
+    expect(moveTarget(1, 1)).toBe(1);
+    expect(moveTarget(1, 2)).toBe(1);
+    expect(moveTarget(1, 3)).toBe(2);
   });
 });

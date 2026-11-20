@@ -25,6 +25,7 @@ import { Editable, ReactEditor, Slate, withReact } from "slate-react";
 import type { BlockResponse } from "#/api/blocks";
 import { useAssignBlockId } from "#/api/blocks";
 import { usePages } from "#/api/pages";
+import { tableDragGuards } from "#/editor/elements/tableControls";
 import {
   applyBlockConversion,
   type BlockConversion,
@@ -936,6 +937,7 @@ export function SlateEditor({
                 <TaskPropertyPopoverProvider value={taskProperties.opener}>
                   <Editable
                     {...fileDrop.handlers}
+                    {...tableDragGuards}
                     data-folio-heading-root
                     renderElement={renderElement}
                     renderLeaf={renderLeaf}

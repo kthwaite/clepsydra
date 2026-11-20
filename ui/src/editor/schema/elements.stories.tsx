@@ -19,6 +19,7 @@ import {
 import { makeDecorateCode } from "#/editor/decorate-code";
 import { renderElement } from "#/editor/elements/renderElement";
 import { renderLeaf } from "#/editor/elements/renderLeaf";
+import { tableDragGuards } from "#/editor/elements/tableControls";
 import { INLINE_SOURCE_ADAPTERS } from "#/editor/inlineSourceAdapters";
 import {
   InlineSourceEditingProvider,
@@ -87,6 +88,7 @@ function SchemaPreview({
       <BaseEmbedEditingProvider value={baseEmbedEditing}>
         <InlineSourceEditingProvider value={inlineSourceEditing}>
           <Editable
+            {...tableDragGuards}
             readOnly={!editable}
             renderElement={renderElement}
             renderLeaf={renderLeaf}
@@ -275,13 +277,17 @@ export const ListItemTask: Story = {
                     makeListItem({
                       checked: false,
                       children: [
-                        makeParagraph({ children: [{ text: "Nested open task" }] }),
+                        makeParagraph({
+                          children: [{ text: "Nested open task" }],
+                        }),
                       ],
                     }),
                     makeListItem({
                       checked: true,
                       children: [
-                        makeParagraph({ children: [{ text: "Nested done task" }] }),
+                        makeParagraph({
+                          children: [{ text: "Nested done task" }],
+                        }),
                       ],
                     }),
                   ],
@@ -289,7 +295,9 @@ export const ListItemTask: Story = {
               ],
             }),
             makeListItem({
-              children: [makeParagraph({ children: [{ text: "Regular item" }] })],
+              children: [
+                makeParagraph({ children: [{ text: "Regular item" }] }),
+              ],
             }),
           ],
         }),
@@ -297,10 +305,14 @@ export const ListItemTask: Story = {
           children: [
             makeListItem({
               checked: false,
-              children: [makeParagraph({ children: [{ text: "Numbered task" }] })],
+              children: [
+                makeParagraph({ children: [{ text: "Numbered task" }] }),
+              ],
             }),
             makeListItem({
-              children: [makeParagraph({ children: [{ text: "Regular step" }] })],
+              children: [
+                makeParagraph({ children: [{ text: "Regular step" }] }),
+              ],
             }),
           ],
         }),
@@ -326,50 +338,73 @@ export const ThematicBreak: Story = {
     ]),
 };
 
+function tableStoryValue(): Descendant[] {
+  return [
+    makeTable({
+      align: [null, "right", "center"],
+      children: [
+        makeTableRow({
+          children: [
+            makeTableCell({ header: true, children: [{ text: "Vessel" }] }),
+            makeTableCell({
+              header: true,
+              align: "right",
+              children: [{ text: "Depth" }],
+            }),
+            makeTableCell({
+              header: true,
+              align: "center",
+              children: [{ text: "State" }],
+            }),
+          ],
+        }),
+        makeTableRow({
+          children: [
+            makeTableCell({ children: [{ text: "Clepsydra" }] }),
+            makeTableCell({ align: "right", children: [{ text: "12" }] }),
+            makeTableCell({
+              align: "center",
+              children: [{ text: "sealed", italic: true }],
+            }),
+          ],
+        }),
+        makeTableRow({
+          children: [
+            makeTableCell({ children: [{ text: "Astrolabe" }] }),
+            makeTableCell({ align: "right", children: [{ text: "4" }] }),
+            makeTableCell({
+              align: "center",
+              children: [{ text: "open", bold: true }],
+            }),
+          ],
+        }),
+      ],
+    }),
+  ];
+}
+
 export const Table: Story = {
+  render: () => renderWithProviders(tableStoryValue()),
+};
+
+export const EditableTable: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Editable: hover a cell for its column and row grips (click for the menu, drag to reorder), move near the right or bottom edge for the append bars, right-click a cell for the cell menu.",
+      },
+    },
+  },
   render: () =>
-    renderWithProviders([
-      makeTable({
-        align: [null, "right", "center"],
-        children: [
-          makeTableRow({
-            children: [
-              makeTableCell({ header: true, children: [{ text: "Vessel" }] }),
-              makeTableCell({
-                header: true,
-                align: "right",
-                children: [{ text: "Depth" }],
-              }),
-              makeTableCell({
-                header: true,
-                align: "center",
-                children: [{ text: "State" }],
-              }),
-            ],
-          }),
-          makeTableRow({
-            children: [
-              makeTableCell({ children: [{ text: "Clepsydra" }] }),
-              makeTableCell({ align: "right", children: [{ text: "12" }] }),
-              makeTableCell({
-                align: "center",
-                children: [{ text: "sealed", italic: true }],
-              }),
-            ],
-          }),
-          makeTableRow({
-            children: [
-              makeTableCell({ children: [{ text: "Astrolabe" }] }),
-              makeTableCell({ align: "right", children: [{ text: "4" }] }),
-              makeTableCell({
-                align: "center",
-                children: [{ text: "open", bold: true }],
-              }),
-            ],
-          }),
-        ],
-      }),
-    ]),
+    renderWithProviders(
+      [
+        makeParagraph({ children: [{ text: "Above the table." }] }),
+        ...tableStoryValue(),
+        makeParagraph({ children: [{ text: "Below the table." }] }),
+      ],
+      true,
+    ),
 };
 
 export const FootnoteDef: Story = {

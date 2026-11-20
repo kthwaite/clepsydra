@@ -221,6 +221,20 @@ function tableEntries(editor: Editor): NodeEntry<TableElement>[] {
   ) as NodeEntry<TableElement>[];
 }
 
+type User = ReturnType<typeof userEvent.setup>;
+
+/** Open a column or row grip's menu and choose one of its items. */
+async function chooseFromGrip(user: User, grip: string, item: string) {
+  await user.click(screen.getByRole("button", { name: grip }));
+  await user.click(await screen.findByRole("menuitem", { name: item }));
+}
+
+function cellText(editor: Editor): string[][] {
+  return tableEntries(editor)[0][0].children.map((row) =>
+    row.children.map((cell) => Node.string(cell)),
+  );
+}
+
 function expectCaret(editor: Editor, path: number[]) {
   expect(editor.selection?.anchor).toEqual({ path, offset: 0 });
   expect(editor.selection?.focus).toEqual({ path, offset: 0 });
@@ -345,27 +359,67 @@ describe("SlateEditor table slash command and affordances", () => {
     expect(tableEntries(editor)[0][0].children).toHaveLength(2);
   });
 
-  it("renders keyboard-focusable delete controls with indexed accessible names", () => {
+  it("renders a keyboard-focusable grip for every column and row", () => {
     renderEditor([twoByTwoTable()]);
 
-    const deleteColumnOne = screen.getByRole("button", {
-      name: "Delete column 1",
-    });
-    const deleteColumnTwo = screen.getByRole("button", {
-      name: "Delete column 2",
-    });
-    const deleteRowOne = screen.getByRole("button", { name: "Delete row 1" });
-    const deleteRowTwo = screen.getByRole("button", { name: "Delete row 2" });
-
-    for (const control of [
-      deleteColumnOne,
-      deleteColumnTwo,
-      deleteRowOne,
-      deleteRowTwo,
+    for (const name of [
+      "Column 1 options",
+      "Column 2 options",
+      "Row 1 options",
+      "Row 2 options",
     ]) {
-      expect(control).toBeVisible();
-      expect(control.tabIndex).toBe(0);
+      const grip = screen.getByRole("button", { name });
+      expect(grip.tabIndex).toBe(0);
+      expect(grip).toHaveAttribute("aria-haspopup", "menu");
     }
+  });
+
+  it("reveals only the hovered cell's column and row grips", async () => {
+    const { user } = renderEditor([twoByTwoTable()]);
+    const hidden = (name: string) =>
+      screen.getByRole("button", { name }).className.includes("opacity-0");
+
+    expect(
+      [
+        "Column 1 options",
+        "Column 2 options",
+        "Row 1 options",
+        "Row 2 options",
+      ].map(hidden),
+    ).toEqual([true, true, true, true]);
+
+    await user.hover(screen.getByRole("cell", { name: "1" }));
+
+    expect(hidden("Column 2 options")).toBe(false);
+    expect(hidden("Row 2 options")).toBe(false);
+    expect(hidden("Column 1 options")).toBe(true);
+    expect(hidden("Row 1 options")).toBe(true);
+
+    await user.unhover(screen.getByRole("table"));
+    await user.hover(screen.getByRole("button", { name: "After editor" }));
+    expect(hidden("Column 2 options")).toBe(true);
+    expect(hidden("Row 2 options")).toBe(true);
+  });
+
+  it("keeps a grip shown and its column tinted while its menu is open", async () => {
+    const { user } = renderEditor([twoByTwoTable()]);
+    const grip = screen.getByRole("button", { name: "Column 2 options" });
+
+    await user.click(grip);
+    await screen.findByRole("menu", { name: "Column 2" });
+
+    expect(grip).toHaveAttribute("aria-expanded", "true");
+    expect(grip.className).not.toContain("opacity-0");
+    // The open menu hides the rest of the page from the accessibility tree.
+    expect(screen.getByText("Count").closest("th")?.className).toContain(
+      "bg-accent-tint",
+    );
+    expect(screen.getByText("Name").closest("th")?.className).not.toContain(
+      "bg-accent-tint",
+    );
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   });
 
   it("normalizes a wider body row and exposes a control for every column", async () => {
@@ -376,11 +430,11 @@ describe("SlateEditor table slash command and affordances", () => {
       expect(table.align).toEqual(["left", null, null]);
       expect(table.children.map((row) => row.children.length)).toEqual([3, 3]);
       expect(
-        screen.getByRole("button", { name: "Delete column 3" }),
+        screen.getByRole("button", { name: "Column 3 options" }),
       ).toBeVisible();
     });
 
-    await user.click(screen.getByRole("button", { name: "Delete column 3" }));
+    await chooseFromGrip(user, "Column 3 options", "Delete column");
 
     await waitFor(() => {
       const [table, tablePath] = tableEntries(editor)[0];
@@ -395,7 +449,7 @@ describe("SlateEditor table slash command and affordances", () => {
   it("deletes a column in one undo step and selects the nearest surviving cell", async () => {
     const { editor, user } = renderEditor([twoByTwoTable()]);
 
-    await user.click(screen.getByRole("button", { name: "Delete column 1" }));
+    await chooseFromGrip(user, "Column 1 options", "Delete column");
 
     await waitFor(() => {
       const [table, tablePath] = tableEntries(editor)[0];
@@ -419,7 +473,7 @@ describe("SlateEditor table slash command and affordances", () => {
   it("deletes a row in one undo step and selects the nearest surviving cell", async () => {
     const { editor, user } = renderEditor([twoByTwoTable()]);
 
-    await user.click(screen.getByRole("button", { name: "Delete row 1" }));
+    await chooseFromGrip(user, "Row 1 options", "Delete row");
 
     await waitFor(() => {
       const [table, tablePath] = tableEntries(editor)[0];
@@ -444,7 +498,7 @@ describe("SlateEditor table slash command and affordances", () => {
       { type: "paragraph", children: [{ text: "After" }] } as Descendant,
     ]);
 
-    await user.click(screen.getByRole("button", { name: "Delete column 1" }));
+    await chooseFromGrip(user, "Column 1 options", "Delete column");
 
     await waitFor(() => {
       expect(tableEntries(editor)).toHaveLength(0);
@@ -458,7 +512,7 @@ describe("SlateEditor table slash command and affordances", () => {
   it("replaces a sole table at its final column with a selected paragraph and undoes once", async () => {
     const { editor, user } = renderEditor([oneColumnTable()]);
 
-    await user.click(screen.getByRole("button", { name: "Delete column 1" }));
+    await chooseFromGrip(user, "Column 1 options", "Delete column");
 
     await waitFor(() => {
       expect(tableEntries(editor)).toHaveLength(0);
@@ -478,7 +532,7 @@ describe("SlateEditor table slash command and affordances", () => {
   it("replaces a sole table at its final row with a selected paragraph and undoes once", async () => {
     const { editor, user } = renderEditor([oneRowTable()]);
 
-    await user.click(screen.getByRole("button", { name: "Delete row 1" }));
+    await chooseFromGrip(user, "Row 1 options", "Delete row");
 
     await waitFor(() => {
       expect(tableEntries(editor)).toHaveLength(0);
@@ -494,17 +548,17 @@ describe("SlateEditor table slash command and affordances", () => {
       { type: "paragraph", children: [{ text: "" }] },
     ]);
   });
-  it("tabs from the table through every delete and append control", async () => {
+  it("tabs from the table through every grip and append control", async () => {
     const { editor, user } = renderEditor([twoByTwoTable()]);
     const editable = screen.getByRole("textbox");
     await user.click(editable);
     act(() => Transforms.select(editor, Editor.end(editor, [0, 1, 1])));
 
     for (const name of [
-      "Delete column 1",
-      "Delete row 1",
-      "Delete column 2",
-      "Delete row 2",
+      "Column 1 options",
+      "Row 1 options",
+      "Column 2 options",
+      "Row 2 options",
       "Add column",
       "Add row",
       "After editor",
@@ -521,12 +575,313 @@ describe("SlateEditor table slash command and affordances", () => {
     for (const name of [
       "Add column",
       "Add row",
-      "Delete column 1",
-      "Delete column 2",
-      "Delete row 1",
-      "Delete row 2",
+      "Column 1 options",
+      "Column 2 options",
+      "Row 1 options",
+      "Row 2 options",
     ]) {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     }
+  });
+});
+
+function threeByThreeTable(): TableElement {
+  const row = (header: boolean, ...cells: string[]) => ({
+    type: "table-row" as const,
+    children: cells.map((text) => ({
+      type: "table-cell" as const,
+      ...(header ? { header: true as const } : {}),
+      children: [{ text }],
+    })),
+  });
+  return {
+    type: "table",
+    align: [null, null, null],
+    children: [
+      row(true, "Name", "Count", "Note"),
+      row(false, "Beta", "10", "x"),
+      row(false, "Alpha", "2", "y"),
+    ],
+  };
+}
+
+describe("SlateEditor table menus", () => {
+  it("adds a column before the grip's column in one undo step", async () => {
+    const { editor, user } = renderEditor([threeByThreeTable()]);
+
+    await chooseFromGrip(user, "Column 2 options", "Add column before");
+
+    await waitFor(() => {
+      expect(cellText(editor)).toEqual([
+        ["Name", "", "Count", "Note"],
+        ["Beta", "", "10", "x"],
+        ["Alpha", "", "2", "y"],
+      ]);
+      expectCaret(editor, [0, 0, 1, 0]);
+    });
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    act(() => HistoryEditor.undo(editor));
+    expect(cellText(editor)[0]).toEqual(["Name", "Count", "Note"]);
+  });
+
+  it("adds a row below the grip's row", async () => {
+    const { editor, user } = renderEditor([threeByThreeTable()]);
+
+    await chooseFromGrip(user, "Row 2 options", "Add row below");
+
+    await waitFor(() => {
+      expect(cellText(editor).map((row) => row[0])).toEqual([
+        "Name",
+        "Beta",
+        "",
+        "Alpha",
+      ]);
+      expectCaret(editor, [0, 2, 0, 0]);
+    });
+  });
+
+  it("moves a column and a row from their menus", async () => {
+    const { editor, user } = renderEditor([threeByThreeTable()]);
+
+    await chooseFromGrip(user, "Column 1 options", "Move column right");
+    await waitFor(() =>
+      expect(cellText(editor)[0]).toEqual(["Count", "Name", "Note"]),
+    );
+
+    await chooseFromGrip(user, "Row 3 options", "Move row up");
+    await waitFor(() =>
+      expect(cellText(editor).map((row) => row[1])).toEqual([
+        "Name",
+        "Alpha",
+        "Beta",
+      ]),
+    );
+  });
+
+  it("re-homes the grips after a move, so each sits on the cell now at the edge", async () => {
+    const { editor, user } = renderEditor([threeByThreeTable()]);
+    const gripsIn = (cell: HTMLElement | null | undefined) =>
+      Array.from(cell?.querySelectorAll("[data-table-grip]") ?? [], (grip) =>
+        grip.getAttribute("aria-label"),
+      );
+
+    await chooseFromGrip(user, "Column 1 options", "Move column right");
+    await waitFor(() =>
+      expect(cellText(editor)[0]).toEqual(["Count", "Name", "Note"]),
+    );
+
+    // Slate does not re-render a cell whose node only moved; the grips must
+    // follow the layout anyway.
+    await waitFor(() => {
+      expect(gripsIn(screen.getByText("Count").closest("th"))).toEqual([
+        "Column 1 options",
+        "Row 1 options",
+      ]);
+      expect(gripsIn(screen.getByText("Name").closest("th"))).toEqual([
+        "Column 2 options",
+      ]);
+      expect(gripsIn(screen.getByText("10").closest("td"))).toEqual([
+        "Row 2 options",
+      ]);
+      expect(gripsIn(screen.getByText("Beta").closest("td"))).toEqual([]);
+    });
+  });
+
+  it("pins the header row and disables moves past either end", async () => {
+    const { user } = renderEditor([threeByThreeTable()]);
+    const disabled = (name: string) =>
+      screen.getByRole("menuitem", { name }).getAttribute("aria-disabled");
+
+    await user.click(screen.getByRole("button", { name: "Row 1 options" }));
+    await screen.findByRole("menu", { name: "Row 1" });
+    expect(disabled("Add row above")).toBe("true");
+    expect(disabled("Move row up")).toBe("true");
+    expect(disabled("Move row down")).toBe("true");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: "Row 2 options" }));
+    await screen.findByRole("menu", { name: "Row 2" });
+    expect(disabled("Move row up")).toBe("true");
+    expect(disabled("Move row down")).toBeNull();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: "Column 3 options" }));
+    await screen.findByRole("menu", { name: "Column 3" });
+    expect(disabled("Move column right")).toBe("true");
+    expect(disabled("Move column left")).toBeNull();
+  });
+
+  it("sorts the body rows by a column, numerically", async () => {
+    const { editor, user } = renderEditor([threeByThreeTable()]);
+
+    await chooseFromGrip(user, "Column 2 options", "Sort by column (A to Z)");
+    await waitFor(() =>
+      expect(cellText(editor).map((row) => row[1])).toEqual([
+        "Count",
+        "2",
+        "10",
+      ]),
+    );
+
+    act(() => HistoryEditor.undo(editor));
+    expect(cellText(editor).map((row) => row[1])).toEqual(["Count", "10", "2"]);
+  });
+
+  it("sets a column's alignment, shows it checked, and clears it on a second choice", async () => {
+    const { editor, user } = renderEditor([threeByThreeTable()]);
+    const grip = screen.getByRole("button", { name: "Column 2 options" });
+
+    await user.click(grip);
+    await user.click(
+      await screen.findByRole("menuitemradio", { name: "Align right" }),
+    );
+    await waitFor(() =>
+      expect(tableEntries(editor)[0][0].align).toEqual([null, "right", null]),
+    );
+    expect(screen.getByRole("cell", { name: "10" }).className).toContain(
+      "text-right",
+    );
+
+    await user.click(grip);
+    const checked = await screen.findByRole("menuitemradio", {
+      name: "Align right",
+    });
+    expect(checked).toHaveAttribute("aria-checked", "true");
+    await user.click(checked);
+    await waitFor(() =>
+      expect(tableEntries(editor)[0][0].align).toEqual([null, null, null]),
+    );
+  });
+
+  it("duplicates a column and a row", async () => {
+    const { editor, user } = renderEditor([threeByThreeTable()]);
+
+    await chooseFromGrip(user, "Column 1 options", "Duplicate column");
+    await waitFor(() =>
+      expect(cellText(editor)[1]).toEqual(["Beta", "Beta", "10", "x"]),
+    );
+
+    await chooseFromGrip(user, "Row 2 options", "Duplicate row");
+    await waitFor(() =>
+      expect(cellText(editor).map((row) => row[0])).toEqual([
+        "Name",
+        "Beta",
+        "Beta",
+        "Alpha",
+      ]),
+    );
+  });
+
+  it("opens a cell menu on right-click that acts on that cell's row and column", async () => {
+    const { editor, user } = renderEditor([threeByThreeTable()]);
+
+    fireEvent.contextMenu(screen.getByRole("cell", { name: "2" }), {
+      clientX: 40,
+      clientY: 40,
+    });
+    await screen.findByRole("menu", { name: "Table" });
+    await user.click(screen.getByRole("menuitem", { name: "Add row above" }));
+    await waitFor(() =>
+      expect(cellText(editor).map((row) => row[0])).toEqual([
+        "Name",
+        "Beta",
+        "",
+        "Alpha",
+      ]),
+    );
+
+    fireEvent.contextMenu(screen.getByRole("cell", { name: "10" }), {
+      clientX: 40,
+      clientY: 40,
+    });
+    await screen.findByRole("menu", { name: "Table" });
+    await user.click(screen.getByRole("menuitem", { name: "Delete column" }));
+    await waitFor(() => expect(cellText(editor)[0]).toEqual(["Name", "Note"]));
+  });
+
+  it("reaches the row and column submenus from the cell menu", async () => {
+    const { editor, user } = renderEditor([threeByThreeTable()]);
+
+    fireEvent.contextMenu(screen.getByRole("cell", { name: "Alpha" }), {
+      clientX: 40,
+      clientY: 40,
+    });
+    await screen.findByRole("menu", { name: "Table" });
+    await user.click(screen.getByRole("menuitem", { name: "Row" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Move row up" }),
+    );
+
+    await waitFor(() =>
+      expect(cellText(editor).map((row) => row[0])).toEqual([
+        "Name",
+        "Alpha",
+        "Beta",
+      ]),
+    );
+  });
+
+  it("leaves the browser's menu alone over selected text", () => {
+    const { editor } = renderEditor([threeByThreeTable()]);
+    act(() =>
+      Transforms.select(editor, {
+        anchor: { path: [0, 1, 0, 0], offset: 0 },
+        focus: { path: [0, 1, 0, 0], offset: 4 },
+      }),
+    );
+
+    const allowed = fireEvent.contextMenu(
+      screen.getByRole("cell", { name: "Beta" }),
+    );
+
+    expect(allowed).toBe(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("opens the grip's own menu when the grip is right-clicked", async () => {
+    renderEditor([threeByThreeTable()]);
+
+    fireEvent.contextMenu(
+      screen.getByRole("button", { name: "Row 2 options" }),
+    );
+
+    expect(await screen.findByRole("menu", { name: "Row 2" })).toBeVisible();
+  });
+
+  it("moves a column and a row with Alt+Arrow on the grip and keeps the grip focused", async () => {
+    const { editor, user } = renderEditor([threeByThreeTable()]);
+
+    const columnGrip = screen.getByRole("button", { name: "Column 1 options" });
+    act(() => columnGrip.focus());
+    await user.keyboard("{Alt>}{ArrowRight}{/Alt}");
+    await waitFor(() => {
+      expect(cellText(editor)[0]).toEqual(["Count", "Name", "Note"]);
+      expect(
+        screen.getByRole("button", { name: "Column 2 options" }),
+      ).toHaveFocus();
+    });
+
+    const rowGrip = screen.getByRole("button", { name: "Row 2 options" });
+    act(() => rowGrip.focus());
+    await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
+    await waitFor(() => {
+      expect(cellText(editor).map((row) => row[1])).toEqual([
+        "Name",
+        "Alpha",
+        "Beta",
+      ]);
+      expect(
+        screen.getByRole("button", { name: "Row 3 options" }),
+      ).toHaveFocus();
+    });
+
+    // The header row stays put.
+    const headerGrip = screen.getByRole("button", { name: "Row 1 options" });
+    act(() => headerGrip.focus());
+    await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
+    expect(cellText(editor).map((row) => row[1])[0]).toBe("Name");
   });
 });

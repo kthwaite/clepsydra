@@ -1,10 +1,27 @@
-import { Minus, Plus } from "lucide-react";
+import { combine } from "@atlaskit/pragmatic-drag-and-drop/combine";
+import {
+  dropTargetForElements,
+  monitorForElements,
+} from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import { Plus } from "lucide-react";
 import type { Table, TableCell, TableRow } from "mdast";
-import { useLayoutEffect } from "react";
+import {
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Editor,
+  Node,
   type NodeEntry,
   type Path,
+  Range,
   Element as SlateElement,
   Transforms,
 } from "slate";
@@ -15,11 +32,41 @@ import {
   useReadOnly,
   useSlateStatic,
 } from "slate-react";
+import { useStore } from "zustand";
+import { Popover } from "#/components/ui/popover";
+import {
+  createTableUiStore,
+  type DropIndicator,
+  isCellEngaged,
+  isTableDragData,
+  PRAGMATIC_DRAG_TYPE,
+  TABLE_CONTROL_ATTRIBUTE,
+  type TableController,
+  type TableDragData,
+  TableGrip,
+  TableLayoutContext,
+  TableMenu,
+  type TableMenuActions,
+  type TableUi,
+  TableUiContext,
+  tableControlClass,
+  useTableUi,
+} from "#/editor/elements/tableControls";
 import {
   appendTableColumn,
   appendTableRow,
   deleteTableColumn,
   deleteTableRow,
+  dropBoundary,
+  duplicateTableColumn,
+  duplicateTableRow,
+  insertTableColumn,
+  insertTableRow,
+  moveTableColumn,
+  moveTableRow,
+  moveTarget,
+  setTableColumnAlign,
+  sortTableByColumn,
 } from "#/editor/transforms/table";
 import { cn } from "#/lib/cn";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
@@ -32,6 +79,12 @@ import type {
 
 // ---------------------------------------------------------------------------
 // Rendering
+//
+// An editable table keeps its chrome out of sight until the pointer asks for
+// it: a grip for the hovered column and one for the hovered row (click for the
+// menu, drag to reorder), and an append bar along the right or bottom edge
+// once the pointer is near that edge. Right-clicking a cell opens the same
+// actions for that cell's row and column.
 // ---------------------------------------------------------------------------
 
 const ALIGN_CLASS: Record<TableAlign, string> = {
@@ -42,13 +95,20 @@ const ALIGN_CLASS: Record<TableAlign, string> = {
 
 type TableRendererProps = RenderElementProps & { element: TableElement };
 
-const APPEND_BUTTON_CLASS =
-  "pointer-events-none z-10 flex size-6 cursor-pointer items-center justify-center rounded-full bg-sink text-mute opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:text-accent focus:pointer-events-auto focus:opacity-100 outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:size-11 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:size-11 [@media(hover:none)]:opacity-100";
-
 const TOUCH_CONTROL_TRACK_CLASS =
   "max-md:h-11 max-md:min-w-11 [@media(hover:none)]:h-11 [@media(hover:none)]:min-w-11";
 
-function TableRenderer({ attributes, children, element }: TableRendererProps) {
+/** How close (px) the pointer must be to an edge to reveal its append bar. */
+const EDGE_REACH = 24;
+
+const TABLE_CLASS =
+  "w-full border-separate border-spacing-0 rounded-[14px] bg-raise text-[0.9em] leading-[1.5]";
+
+/**
+ * A table whose rows disagree on width (a pasted fragment, a hand-edited
+ * file) is squared up as soon as it renders, without a history entry.
+ */
+function useSquareShape(element: TableElement) {
   const editor = useSlateStatic();
   const readOnly = useReadOnly();
   const columnCount = Math.max(
@@ -71,59 +131,441 @@ function TableRenderer({ attributes, children, element }: TableRendererProps) {
     }
   }, [editor, readOnly, shapeNeedsNormalization]);
 
-  const appendColumn = () => {
+  return columnCount;
+}
+
+function TableRenderer(props: TableRendererProps) {
+  return useReadOnly() ? (
+    <ReadOnlyTable {...props} />
+  ) : (
+    <EditableTable {...props} />
+  );
+}
+
+function ReadOnlyTable({ attributes, children, element }: TableRendererProps) {
+  useSquareShape(element);
+  return (
+    <div {...attributes} className="my-4 max-w-full">
+      <div className="min-w-0 max-w-full overflow-x-auto">
+        {/* Separated by tone and space (spec decision 5): a raised panel,
+            the header row on sink, no cell borders. */}
+        <table className={TABLE_CLASS}>
+          <tbody>{children}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+interface DropMeasure {
+  boundary: number;
+  indicator: DropIndicator | null;
+}
+
+function sameIndicator(a: DropIndicator | null, b: DropIndicator | null) {
+  if (a === null || b === null) return a === b;
+  return (
+    a.left === b.left &&
+    a.top === b.top &&
+    a.width === b.width &&
+    a.height === b.height
+  );
+}
+
+function EditableTable({ attributes, children, element }: TableRendererProps) {
+  const editor = useSlateStatic();
+  const columnCount = useSquareShape(element);
+  const rowCount = element.children.length;
+
+  const [store] = useState(createTableUiStore);
+  const controller = useRef<TableController | null>(null);
+  const ui = useMemo<TableUi>(() => ({ store, controller }), [store]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const anchorRef = useRef<HTMLSpanElement>(null);
+
+  const menu = useStore(store, (state) => state.menu);
+  const indicator = useStore(store, (state) => state.drag?.indicator ?? null);
+  const nearRight = useStore(store, (state) => state.nearRight);
+  const nearBottom = useStore(store, (state) => state.nearBottom);
+
+  const layout = element.children
+    .map((row) =>
+      row.children.map((cell) => ReactEditor.findKey(editor, cell).id).join(),
+    )
+    .join(";");
+
+  const wrapper = () => scrollRef.current?.parentElement ?? null;
+
+  /**
+   * One undo step per action. `edit` returns the cell the caret should land
+   * in, or nothing to leave the selection where the edit carried it.
+   */
+  const run = (edit: (tablePath: Path) => Path | null | undefined) => {
     HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
       const tablePath = ReactEditor.findPath(editor, element);
-      const cellPath = appendTableColumn(editor, tablePath);
-      Transforms.select(editor, Editor.start(editor, cellPath));
+      const target = edit(tablePath);
+      if (target && Node.has(editor, target)) {
+        Transforms.select(editor, Editor.start(editor, target));
+      }
     });
+  };
+
+  // A menu hands focus back to whatever had it as it closes, a frame later;
+  // the caret's claim has to come after that.
+  const focusEditorSoon = () => {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        // Unless another menu has opened meanwhile: focus is its to keep.
+        if (store.getState().menu === null) ReactEditor.focus(editor);
+      }),
+    );
+  };
+
+  const act = (edit: (tablePath: Path) => Path | null | undefined) => {
+    run(edit);
+    focusEditorSoon();
+  };
+
+  const actions: TableMenuActions = {
+    sort: (column, direction) =>
+      act((tablePath) => {
+        sortTableByColumn(editor, tablePath, column, direction);
+        return null;
+      }),
+    insertColumn: (index) =>
+      act((tablePath) => insertTableColumn(editor, tablePath, index)),
+    moveColumn: (from, to) =>
+      act((tablePath) => moveTableColumn(editor, tablePath, from, to)),
+    alignColumn: (column, align) =>
+      act((tablePath) => {
+        setTableColumnAlign(editor, tablePath, column, align);
+        return null;
+      }),
+    duplicateColumn: (column) =>
+      act((tablePath) => duplicateTableColumn(editor, tablePath, column)),
+    deleteColumn: (column) =>
+      act((tablePath) => deleteTableColumn(editor, tablePath, column)),
+    insertRow: (index) =>
+      act((tablePath) => insertTableRow(editor, tablePath, index)),
+    moveRow: (from, to) =>
+      act((tablePath) => moveTableRow(editor, tablePath, from, to)),
+    duplicateRow: (row) =>
+      act((tablePath) => duplicateTableRow(editor, tablePath, row)),
+    deleteRow: (row) =>
+      act((tablePath) => deleteTableRow(editor, tablePath, row)),
+  };
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+
+  controller.current = {
+    openMenu: (target, point) => {
+      const rect = wrapper()?.getBoundingClientRect();
+      if (!rect) return;
+      store.setState({
+        menu: {
+          ...target,
+          x: point.clientX - rect.left,
+          y: point.clientY - rect.top,
+        },
+      });
+    },
+    nudge: (axis, index, delta) => {
+      const to = index + delta;
+      let moved = false;
+      run((tablePath) => {
+        const landed =
+          axis === "column"
+            ? moveTableColumn(editor, tablePath, index, to)
+            : moveTableRow(editor, tablePath, index, to);
+        moved = landed !== null;
+        return null;
+      });
+      if (!moved) return;
+      // The grip travels with its column or row; follow it.
+      requestAnimationFrame(() => {
+        wrapper()
+          ?.querySelector<HTMLElement>(
+            `[data-table-grip="${axis}"][data-index="${to}"]`,
+          )
+          ?.focus();
+      });
+    },
+  };
+
+  // The whole table is one drop target; where the drop lands is read off the
+  // header cells (columns) or the rows.
+  useEffect(() => {
+    const element = scrollRef.current?.parentElement;
+    if (!element) return;
+
+    const own = (data: Record<string, unknown>): TableDragData | null =>
+      isTableDragData(data) && data.store === store ? data : null;
+
+    const measure = (
+      data: TableDragData,
+      input: { clientX: number; clientY: number },
+    ): DropMeasure | null => {
+      const table = tableRef.current;
+      const scroll = scrollRef.current;
+      if (!table || !scroll || table.rows.length === 0) return null;
+      const origin = element.getBoundingClientRect();
+      const port = scroll.getBoundingClientRect();
+      const box = table.getBoundingClientRect();
+
+      if (data.axis === "column") {
+        const rects = Array.from(table.rows[0].cells, (cell) =>
+          cell.getBoundingClientRect(),
+        );
+        if (rects.length === 0) return null;
+        const boundary = dropBoundary(
+          rects.map((rect) => [rect.left, rect.right] as const),
+          input.clientX,
+        );
+        const x =
+          boundary < rects.length
+            ? rects[boundary].left
+            : rects[rects.length - 1].right;
+        const shown =
+          moveTarget(data.from, boundary) !== data.from &&
+          x >= port.left - 1 &&
+          x <= port.right + 1;
+        return {
+          boundary,
+          indicator: shown
+            ? {
+                left: Math.round(x - origin.left) - 1,
+                top: Math.round(box.top - origin.top),
+                width: 2,
+                height: Math.round(box.height),
+              }
+            : null,
+        };
+      }
+
+      const rects = Array.from(table.rows, (row) =>
+        row.getBoundingClientRect(),
+      );
+      // Nothing lands above the header row.
+      const boundary = Math.max(
+        1,
+        dropBoundary(
+          rects.map((rect) => [rect.top, rect.bottom] as const),
+          input.clientY,
+        ),
+      );
+      const y =
+        boundary < rects.length
+          ? rects[boundary].top
+          : rects[rects.length - 1].bottom;
+      const left = Math.max(box.left, port.left);
+      const right = Math.min(box.right, port.right);
+      return {
+        boundary,
+        indicator:
+          moveTarget(data.from, boundary) !== data.from
+            ? {
+                left: Math.round(left - origin.left),
+                top: Math.round(y - origin.top) - 1,
+                width: Math.round(right - left),
+                height: 2,
+              }
+            : null,
+      };
+    };
+
+    const track = ({
+      source,
+      location,
+    }: {
+      source: { data: Record<string, unknown> };
+      location: { current: { input: { clientX: number; clientY: number } } };
+    }) => {
+      const data = own(source.data);
+      const drag = store.getState().drag;
+      const measured = data && measure(data, location.current.input);
+      if (!drag || !measured) return;
+      if (
+        drag.boundary === measured.boundary &&
+        sameIndicator(drag.indicator, measured.indicator)
+      ) {
+        return;
+      }
+      store.setState({ drag: { ...drag, ...measured } });
+    };
+
+    // The table, not the grip, ends the drag: a grip that moved with its row
+    // is re-registered mid-drop and never hears about it.
+    const endDrag = monitorForElements({
+      canMonitor: ({ source }) => own(source.data) !== null,
+      onDrop: () => store.setState({ drag: null }),
+    });
+
+    const dropTarget = dropTargetForElements({
+      element,
+      canDrop: ({ source }) => own(source.data) !== null,
+      onDragEnter: track,
+      onDrag: track,
+      onDragLeave: () => {
+        const drag = store.getState().drag;
+        if (drag) {
+          store.setState({
+            drag: { ...drag, boundary: null, indicator: null },
+          });
+        }
+      },
+      // Measured again from the drop point rather than read from the store,
+      // so the move does not depend on which listener ran last.
+      onDrop: ({ source, location }) => {
+        const data = own(source.data);
+        const measured = data && measure(data, location.current.input);
+        if (!data || !measured) return;
+        const to = moveTarget(data.from, measured.boundary);
+        if (data.axis === "column") {
+          actionsRef.current.moveColumn(data.from, to);
+        } else {
+          actionsRef.current.moveRow(data.from, to);
+        }
+      },
+    });
+
+    return combine(endDrag, dropTarget);
+  }, [store]);
+
+  const cellUnder = (target: EventTarget): HTMLTableCellElement | null => {
+    if (!(target instanceof Element)) return null;
+    const cell = target.closest("td,th");
+    return cell instanceof HTMLTableCellElement &&
+      tableRef.current?.contains(cell)
+      ? cell
+      : null;
+  };
+
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") return;
+    const state = store.getState();
+    const scroll = scrollRef.current;
+    if (state.drag || !scroll) return;
+
+    let { hoverRow, hoverColumn } = state;
+    const onControl =
+      event.target instanceof Element &&
+      event.target.closest(`[${TABLE_CONTROL_ATTRIBUTE}]`) !== null;
+    const cell = onControl ? null : cellUnder(event.target);
+    if (cell) {
+      hoverRow = (cell.parentElement as HTMLTableRowElement).rowIndex;
+      hoverColumn = cell.cellIndex;
+    }
+    const port = scroll.getBoundingClientRect();
+    const nextNearRight = event.clientX >= port.right - EDGE_REACH;
+    const nextNearBottom = event.clientY >= port.bottom - EDGE_REACH;
+    if (
+      hoverRow !== state.hoverRow ||
+      hoverColumn !== state.hoverColumn ||
+      nextNearRight !== state.nearRight ||
+      nextNearBottom !== state.nearBottom
+    ) {
+      store.setState({
+        hoverRow,
+        hoverColumn,
+        nearRight: nextNearRight,
+        nearBottom: nextNearBottom,
+      });
+    }
+  };
+
+  const onPointerLeave = () => {
+    store.setState({
+      hoverRow: null,
+      hoverColumn: null,
+      nearRight: false,
+      nearBottom: false,
+    });
+  };
+
+  const onContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const cell = cellUnder(event.target);
+    if (!cell) return;
+    const grip =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>("[data-table-grip]")
+        : null;
+    // Selected text keeps the browser's menu, which is where Copy lives.
+    if (!grip && editor.selection && Range.isExpanded(editor.selection)) {
+      return;
+    }
+    event.preventDefault();
+    // A keyboard-summoned menu carries no pointer position.
+    const anchor = (grip ?? cell).getBoundingClientRect();
+    const point =
+      event.clientX !== 0 || event.clientY !== 0
+        ? { clientX: event.clientX, clientY: event.clientY }
+        : { clientX: anchor.left, clientY: anchor.bottom };
+    const row = (cell.parentElement as HTMLTableRowElement).rowIndex;
+    const scope =
+      (grip?.dataset.tableGrip as "column" | "row" | undefined) ?? "cell";
+    controller.current?.openMenu({ scope, row, column: cell.cellIndex }, point);
+  };
+
+  // Belt and braces for an `Editable` mounted without `tableDragGuards`:
+  // Slate would treat a grip dropped on a cell as dragged text.
+  const onDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (
+      store.getState().drag ||
+      event.dataTransfer.types.includes(PRAGMATIC_DRAG_TYPE)
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
+  const appendColumn = () => {
+    run((tablePath) => appendTableColumn(editor, tablePath));
     ReactEditor.focus(editor);
   };
 
   const appendRow = () => {
-    HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
-      const tablePath = ReactEditor.findPath(editor, element);
-      const cellPath = appendTableRow(editor, tablePath);
-      Transforms.select(editor, Editor.start(editor, cellPath));
-    });
+    run((tablePath) => appendTableRow(editor, tablePath));
     ReactEditor.focus(editor);
   };
 
+  const closeMenu = () => store.setState({ menu: null });
+  const menuInRange =
+    menu !== null && menu.row < rowCount && menu.column < columnCount;
+
   return (
-    <div
-      {...attributes}
-      className={cn(
-        "group my-4 max-w-full",
-        readOnly
-          ? null
-          : "grid grid-cols-[minmax(0,1fr)_1.5rem] grid-rows-[auto_1.5rem] max-md:grid-cols-[minmax(0,1fr)_2.75rem] max-md:grid-rows-[auto_2.75rem] [@media(hover:none)]:grid-cols-[minmax(0,1fr)_2.75rem] [@media(hover:none)]:grid-rows-[auto_2.75rem]",
-      )}
-    >
-      {/* The table keeps its own scroll port; controls occupy reserved gutters
-          outside it, clear of both the scrollbar and following content. */}
-      <div
-        className={cn(
-          "min-w-0 max-w-full overflow-x-auto",
-          readOnly
-            ? null
-            : "pl-6 pt-6 max-md:pl-11 max-md:pt-11 [@media(hover:none)]:pl-11 [@media(hover:none)]:pt-11",
-        )}
-      >
-        {/* Separated by tone and space (spec decision 5): a raised panel,
-            the header row on sink, no cell borders. */}
-        <table className="w-full border-separate border-spacing-0 rounded-[14px] bg-raise text-[0.9em] leading-[1.5]">
-          <tbody>{children}</tbody>
-        </table>
-      </div>
-      {readOnly ? null : (
-        <>
+    <TableUiContext.Provider value={ui}>
+      <TableLayoutContext.Provider value={layout}>
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: the wrapper only watches the pointer to decide which of its real controls (grips, append bars) to reveal, and forwards the context-menu gesture to the same menu those grips open. */}
+        <div
+          {...attributes}
+          className="relative my-4 grid max-w-full grid-cols-[minmax(0,1fr)_1.5rem] grid-rows-[auto_1.5rem] max-md:grid-cols-[minmax(0,1fr)_2.75rem] max-md:grid-rows-[auto_2.75rem] [@media(hover:none)]:grid-cols-[minmax(0,1fr)_2.75rem] [@media(hover:none)]:grid-rows-[auto_2.75rem]"
+          onPointerMove={onPointerMove}
+          onPointerLeave={onPointerLeave}
+          onContextMenu={onContextMenu}
+          onDrop={onDrop}
+        >
+          {/* The table keeps its own scroll port; controls occupy reserved gutters
+            outside it, clear of both the scrollbar and following content. */}
+          <div
+            ref={scrollRef}
+            className="min-w-0 max-w-full overflow-x-auto pl-6 pt-6 max-md:pl-11 max-md:pt-11 [@media(hover:none)]:pl-11 [@media(hover:none)]:pt-11"
+          >
+            {/* Separated by tone and space (spec decision 5): a raised panel,
+              the header row on sink, no cell borders. */}
+            <table ref={tableRef} className={TABLE_CLASS}>
+              <tbody>{children}</tbody>
+            </table>
+          </div>
           <button
             type="button"
             aria-label="Add column"
+            title="Add column after"
             contentEditable={false}
-            className={cn(
-              APPEND_BUTTON_CLASS,
-              "col-start-2 row-start-1 place-self-center",
+            {...{ [TABLE_CONTROL_ATTRIBUTE]: "" }}
+            className={tableControlClass(
+              nearRight,
+              "col-start-2 row-start-1 mt-6 ml-1 w-5 cursor-pointer self-stretch max-md:mt-11 max-md:w-10 [@media(hover:none)]:mt-11 [@media(hover:none)]:w-10",
             )}
             onMouseDown={(event) => event.preventDefault()}
             onClick={appendColumn}
@@ -133,19 +575,65 @@ function TableRenderer({ attributes, children, element }: TableRendererProps) {
           <button
             type="button"
             aria-label="Add row"
+            title="Add row after"
             contentEditable={false}
-            className={cn(
-              APPEND_BUTTON_CLASS,
-              "col-start-1 row-start-2 place-self-center",
+            {...{ [TABLE_CONTROL_ATTRIBUTE]: "" }}
+            className={tableControlClass(
+              nearBottom,
+              "col-start-1 row-start-2 mt-1 ml-6 h-5 cursor-pointer max-md:ml-11 max-md:h-10 [@media(hover:none)]:ml-11 [@media(hover:none)]:h-10",
             )}
             onMouseDown={(event) => event.preventDefault()}
             onClick={appendRow}
           >
             <Plus aria-hidden size={14} strokeWidth={1.75} />
           </button>
-        </>
-      )}
-    </div>
+          {indicator ? (
+            <div
+              aria-hidden
+              contentEditable={false}
+              data-table-drop-indicator
+              className="pointer-events-none absolute z-20 rounded-full bg-accent"
+              style={indicator}
+            />
+          ) : null}
+          {/* The menu is portalled, but its React events still bubble through
+            here to the editor; keys typed in the menu are not the editor's. */}
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: this only stops the portalled menu's key events from reaching the editor's key handling; the menu itself is the interactive element. */}
+          <div
+            contentEditable={false}
+            className="pointer-events-none absolute left-0 top-0 size-0"
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <span
+              ref={anchorRef}
+              aria-hidden
+              className="absolute size-0"
+              style={{ left: menu?.x ?? 0, top: menu?.y ?? 0 }}
+            />
+            <Popover
+              triggerRef={anchorRef}
+              isOpen={menuInRange}
+              onOpenChange={(open) => {
+                if (!open) closeMenu();
+              }}
+              placement="bottom start"
+              offset={0}
+            >
+              {menu && menuInRange ? (
+                <TableMenu
+                  menu={menu}
+                  rowCount={rowCount}
+                  columnCount={columnCount}
+                  align={element.align?.[menu.column] ?? null}
+                  actions={actions}
+                  onClose={closeMenu}
+                />
+              ) : null}
+            </Popover>
+          </div>
+        </div>
+      </TableLayoutContext.Provider>
+    </TableUiContext.Provider>
   );
 }
 
@@ -169,68 +657,21 @@ function TableCellRenderer({
 }: TableCellRendererProps) {
   const editor = useSlateStatic();
   const readOnly = useReadOnly();
+  useContext(TableLayoutContext);
   const cellPath = ReactEditor.findPath(editor, element);
   const { rowIndex, columnIndex } = tableCellCoordinates(cellPath);
-
-  const selectAfterDelete = (path: number[] | null) => {
-    if (path) Transforms.select(editor, Editor.start(editor, path));
-  };
-
-  const deleteColumn = () => {
-    HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
-      const currentCellPath = ReactEditor.findPath(editor, element);
-      const tablePath = currentCellPath.slice(0, -2);
-      const { columnIndex: currentColumnIndex } =
-        tableCellCoordinates(currentCellPath);
-      selectAfterDelete(
-        deleteTableColumn(editor, tablePath, currentColumnIndex),
-      );
-    });
-    ReactEditor.focus(editor);
-  };
-
-  const deleteRow = () => {
-    HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
-      const currentCellPath = ReactEditor.findPath(editor, element);
-      const tablePath = currentCellPath.slice(0, -2);
-      const { rowIndex: currentRowIndex } =
-        tableCellCoordinates(currentCellPath);
-      selectAfterDelete(deleteTableRow(editor, tablePath, currentRowIndex));
-    });
-    ReactEditor.focus(editor);
-  };
+  // Tinted while its column or row has a menu open or is being dragged.
+  const engaged = useTableUi((state) =>
+    isCellEngaged(state, rowIndex, columnIndex),
+  );
 
   const controls = readOnly ? null : (
     <>
       {rowIndex === 0 ? (
-        <button
-          type="button"
-          aria-label={`Delete column ${columnIndex + 1}`}
-          contentEditable={false}
-          className={cn(
-            APPEND_BUTTON_CLASS,
-            "absolute bottom-full left-1/2 -translate-x-1/2",
-          )}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={deleteColumn}
-        >
-          <Minus aria-hidden size={14} strokeWidth={1.75} />
-        </button>
+        <TableGrip axis="column" index={columnIndex} movable />
       ) : null}
       {columnIndex === 0 ? (
-        <button
-          type="button"
-          aria-label={`Delete row ${rowIndex + 1}`}
-          contentEditable={false}
-          className={cn(
-            APPEND_BUTTON_CLASS,
-            "absolute right-full top-1/2 -translate-y-1/2",
-          )}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={deleteRow}
-        >
-          <Minus aria-hidden size={14} strokeWidth={1.75} />
-        </button>
+        <TableGrip axis="row" index={rowIndex} movable={rowIndex > 0} />
       ) : null}
     </>
   );
@@ -243,6 +684,7 @@ function TableCellRenderer({
         "relative bg-sink px-4 py-2.5 align-bottom text-[13px] font-normal text-mute first:rounded-tl-[14px] last:rounded-tr-[14px]",
         readOnly ? null : TOUCH_CONTROL_TRACK_CLASS,
         element.align ? ALIGN_CLASS[element.align] : "text-left",
+        engaged && "bg-accent-tint",
       )}
     >
       {children}
@@ -255,6 +697,7 @@ function TableCellRenderer({
         "relative px-4 py-2.5 align-top text-ink-2",
         readOnly ? null : TOUCH_CONTROL_TRACK_CLASS,
         element.align && ALIGN_CLASS[element.align],
+        engaged && "bg-accent-tint",
       )}
     >
       {children}
